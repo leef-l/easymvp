@@ -3,8 +3,11 @@ package engine
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -50,7 +53,16 @@ type AiderResult struct {
 func (r *AiderRunner) Run(ctx context.Context, cfg *AiderConfig) *AiderResult {
 	start := time.Now()
 
-	args := r.buildArgs(cfg)
+	// 生成临时 model metadata 文件，让 Aider 知道模型的真实 token 限制
+	metadataFile, err := r.writeModelMetadata(cfg)
+	if err != nil {
+		g.Log().Warningf(ctx, "[AiderRunner] 生成 model metadata 失败: %v", err)
+	}
+	if metadataFile != "" {
+		defer os.Remove(metadataFile)
+	}
+
+	args := r.buildArgs(cfg, metadataFile)
 	env := r.buildEnv(cfg)
 
 	timeout := cfg.Timeout
@@ -72,7 +84,7 @@ func (r *AiderRunner) Run(ctx context.Context, cfg *AiderConfig) *AiderResult {
 	g.Log().Infof(ctx, "[AiderRunner] 启动: model=%s workdir=%s files=%v",
 		cfg.ModelCode, cfg.WorkDir, cfg.Files)
 
-	err := cmd.Run()
+	err = cmd.Run()
 
 	result := &AiderResult{
 		Output:   stdout.String() + stderr.String(),
@@ -94,7 +106,7 @@ func (r *AiderRunner) Run(ctx context.Context, cfg *AiderConfig) *AiderResult {
 }
 
 // buildArgs 构建 Aider 命令行参数
-func (r *AiderRunner) buildArgs(cfg *AiderConfig) []string {
+func (r *AiderRunner) buildArgs(cfg *AiderConfig, metadataFile string) []string {
 	args := []string{
 		"--model", r.formatModel(cfg),
 		"--no-auto-commits",
@@ -104,6 +116,11 @@ func (r *AiderRunner) buildArgs(cfg *AiderConfig) []string {
 		"--no-browser",
 		"--yes-always",
 		"--chat-language", "Chinese",
+	}
+
+	// 指定 model metadata 文件
+	if metadataFile != "" {
+		args = append(args, "--model-metadata-file", metadataFile)
 	}
 
 	// 自动提交
@@ -165,6 +182,50 @@ func (r *AiderRunner) buildEnv(cfg *AiderConfig) []string {
 	}
 
 	return env
+}
+
+// writeModelMetadata 生成临时 model metadata JSON 文件
+// 告诉 Aider 模型的真实 context window 大小，避免使用默认值误判 token limits
+func (r *AiderRunner) writeModelMetadata(cfg *AiderConfig) (string, error) {
+	modelName := r.formatModel(cfg)
+	maxOutput := cfg.MaxTokens
+	if maxOutput == 0 {
+		maxOutput = 4096
+	}
+
+	// 从数据库查询模型的 context_window
+	contextWindow := 0
+	model, err := g.DB().Model("ai_model").
+		Fields("context_window").
+		Where("model_code", cfg.ModelCode).
+		Where("deleted_at IS NULL").
+		One()
+	if err == nil && !model.IsEmpty() {
+		contextWindow = model["context_window"].Int()
+	}
+	if contextWindow == 0 {
+		contextWindow = 128000 // 兜底默认值
+	}
+
+	metadata := map[string]map[string]int{
+		modelName: {
+			"max_tokens":        maxOutput,
+			"max_input_tokens":  contextWindow,
+			"max_output_tokens": maxOutput,
+		},
+	}
+
+	data, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return "", err
+	}
+
+	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("aider-metadata-%d.json", time.Now().UnixNano()))
+	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+		return "", err
+	}
+
+	return tmpFile, nil
 }
 
 // formatModel 格式化模型名称（Aider 需要 provider/model 格式）
