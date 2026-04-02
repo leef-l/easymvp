@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { ChatMessage } from '#/api/mvp/chat';
 
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 
+import { FileTextOutlined } from '@ant-design/icons-vue';
 import { Avatar } from 'ant-design-vue';
 
 /** 组件属性 */
@@ -23,6 +24,29 @@ const displayContent = computed(() => {
   }
   return props.message.content;
 });
+
+/** 文件内容分隔标记 */
+const FILE_CONTENT_SEPARATOR = '\n\n---\n以下是读取的文件内容：\n';
+
+/** 用户消息正文（不含文件内容部分） */
+const userMainContent = computed(() => {
+  const content = displayContent.value || '';
+  const idx = content.indexOf(FILE_CONTENT_SEPARATOR);
+  return idx >= 0 ? content.substring(0, idx) : content;
+});
+
+/** 用户消息中的文件内容（折叠部分） */
+const userFileContent = computed(() => {
+  const content = displayContent.value || '';
+  const idx = content.indexOf(FILE_CONTENT_SEPARATOR);
+  return idx >= 0 ? content.substring(idx + FILE_CONTENT_SEPARATOR.length) : '';
+});
+
+/** 是否有文件内容 */
+const hasFileContent = computed(() => userFileContent.value.length > 0);
+
+/** 是否展开文件内容 */
+const fileExpanded = ref(false);
 
 /** 格式化时间（从 ISO 字符串提取时分） */
 function formatTime(dateStr: string): string {
@@ -160,7 +184,15 @@ function renderMarkdown(text: string): string {
       <div class="message-content-wrapper align-right">
         <!-- 气泡 -->
         <div class="message-bubble bubble-user">
-          <div class="user-text">{{ displayContent }}</div>
+          <div class="user-text">{{ userMainContent }}</div>
+          <!-- 文件内容折叠区 -->
+          <div v-if="hasFileContent" class="file-content-toggle" @click.stop="fileExpanded = !fileExpanded">
+            <FileTextOutlined style="margin-right: 4px" />
+            {{ fileExpanded ? '收起文件内容' : '查看读取的文件内容' }}
+          </div>
+          <div v-if="hasFileContent && fileExpanded" class="file-content-area">
+            <div class="markdown-body" v-html="renderMarkdown(userFileContent)" />
+          </div>
         </div>
         <!-- 底部元信息 -->
         <div class="message-meta justify-end">
@@ -256,6 +288,41 @@ function renderMarkdown(text: string): string {
 /* 用户消息文本（保留换行） */
 .user-text {
   white-space: pre-wrap;
+}
+
+/* 文件内容折叠切换按钮 */
+.file-content-toggle {
+  margin-top: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  user-select: none;
+  transition: background 0.2s;
+}
+
+.file-content-toggle:hover {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+/* 文件内容展开区域 */
+.file-content-area {
+  margin-top: 8px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+  color: #f0f0f0;
+}
+
+.file-content-area .markdown-body :deep(.code-block) {
+  margin: 6px 0;
 }
 
 /* 底部元信息 */

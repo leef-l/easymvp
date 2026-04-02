@@ -55,13 +55,16 @@ func (e *ChatEngine) SendMessage(ctx context.Context, conversationID int64, cont
 		return 0, 0, err
 	}
 
-	// 3. 保存用户消息
+	// 3. 展开消息中的 "读取：路径" 指令
+	expandedContent := ExpandFileReads(content)
+
+	// 4. 保存用户消息
 	msgID = int64(snowflake.Generate())
 	_, err = g.DB().Model("mvp_message").Insert(g.Map{
 		"id":              msgID,
 		"conversation_id": conversationID,
 		"role":            "user",
-		"content":         content,
+		"content":         expandedContent,
 		"status":          "completed",
 		"created_by":      userID,
 		"dept_id":         deptID,
@@ -72,7 +75,7 @@ func (e *ChatEngine) SendMessage(ctx context.Context, conversationID int64, cont
 		return 0, 0, fmt.Errorf("保存用户消息失败: %w", err)
 	}
 
-	// 4. 创建 AI 回复消息（status=streaming）
+	// 5. 创建 AI 回复消息（status=streaming）
 	replyID = int64(snowflake.Generate())
 	_, err = g.DB().Model("mvp_message").Insert(g.Map{
 		"id":              replyID,
@@ -90,7 +93,7 @@ func (e *ChatEngine) SendMessage(ctx context.Context, conversationID int64, cont
 		return 0, 0, fmt.Errorf("创建AI回复消息失败: %w", err)
 	}
 
-	// 5. 启动 goroutine 异步调用 AI（不依赖当前 HTTP 请求的 context）
+	// 6. 启动 goroutine 异步调用 AI（不依赖当前 HTTP 请求的 context）
 	go e.runAICall(conversationID, replyID, modelInfo)
 
 	return msgID, replyID, nil
