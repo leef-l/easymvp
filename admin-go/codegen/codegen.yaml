@@ -1,0 +1,49 @@
+# 数据库连接
+database:
+  host: 127.0.0.1
+  port: 3306
+  user: easymvp
+  password: "JKcHFJYXnkrB6BXE"
+  dbname: easymvp
+
+# 后端输出配置
+backend:
+  output: ../app/   # 输出根目录（应用目录由表名前缀决定）
+
+# 前端输出配置
+frontend:
+  output: ../../vue-vben-admin/apps/web-antd/src/  # 输出根目录
+
+# 跳过生成的公共字段（这些字段在表单中隐藏，不生成前端组件）
+skip_fields:
+  - created_at
+  - updated_at
+  - deleted_at
+  - created_by
+  - dept_id
+
+# 菜单应用目录配置（新增应用时在此添加，无需修改生成器源码）
+menu_apps:
+  system:
+    title: 系统管理
+    icon: SettingOutlined
+    sort: 10
+  ai:
+    title: AI模型管理
+    icon: RobotOutlined
+    sort: 20
+  mvp:
+    title: MVP项目管理
+    icon: ProjectOutlined
+    sort: 30
+
+# 模块级菜单配置（可选，key 格式: 应用名/模块名）
+# menu_modules:
+#   play/order:
+#     sort: 10
+#     is_show: 1
+#   play/review:
+#     sort: 20
+
+# 操作日志开关（生成的 CRUD 方法是否自动记录操作日志）
+operation_log: false

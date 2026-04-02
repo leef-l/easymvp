@@ -1,0 +1,22 @@
+# https://goframe.org/docs/web/server-config-file-template
+server:
+  address:     ":9002"
+  openapiPath: "/api.json"
+  swaggerPath: "/swagger"
+
+# https://goframe.org/docs/core/glog-config
+logger:
+  level : "all"
+  stdout: true
+
+# https://goframe.org/docs/core/gdb-config-file
+database:
+  default:
+    link: "mysql:easymvp:JKcHFJYXnkrB6BXE@tcp(127.0.0.1:3306)/easymvp"
+    debug: true
+    charset: "utf8mb4"
+
+# JWT 配置
+jwt:
+  secret: "easymvp-secret-key-2026"
+  expire: 24  # Token 过期时间（小时）

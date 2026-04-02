@@ -1,0 +1,113 @@
+# ═════════════════════════════════════════════════════════════
+# EasyMVP Docker Compose（使用本机 MySQL）
+# ═════════════════════════════════════════════════════════════
+
+services:
+  # ─────────────────────────────────────────────
+  # Redis 7 - 缓存 / JWT Token 黑名单
+  # ─────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: easymvp_redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - easymvp_net
+
+  # ─────────────────────────────────────────────
+  # system - GoFrame 权限服务（后端）
+  # ─────────────────────────────────────────────
+  system:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.system
+    container_name: easymvp_system
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - GF_GCFG_FILE=config.yaml
+      - DB_HOST=${DB_HOST:-host.docker.internal}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_USER=${MYSQL_USER:-easymvp}
+      - DB_PASS=${MYSQL_PASSWORD}
+      - DB_NAME=${MYSQL_DATABASE:-easymvp}
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASS=${REDIS_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - GF_SERVER_ADDRESS=:8000
+      - TZ=Asia/Shanghai
+    ports:
+      - "${SYSTEM_PORT:-8000}:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - easymvp_net
+
+  # ─────────────────────────────────────────────
+  # frontend - Vben Admin（开发模式）
+  # ─────────────────────────────────────────────
+  frontend:
+    image: node:22-alpine
+    container_name: easymvp_frontend
+    restart: unless-stopped
+    working_dir: /app
+    command: sh -c "apk add --no-cache git && npm install -g pnpm --registry=https://registry.npmmirror.com && pnpm install && pnpm dev:antd --host 0.0.0.0"
+    volumes:
+      - ../vue-vben-admin:/app
+      - frontend_node_modules:/app/node_modules
+    ports:
+      - "${FRONTEND_PORT:-5555}:5555"
+    environment:
+      - VITE_GLOB_API_URL=${VITE_GLOB_API_URL:-http://localhost:8000}
+      - NODE_OPTIONS=--max-old-space-size=4096
+    networks:
+      - easymvp_net
+
+  # ─────────────────────────────────────────────
+  # gotools - Go 工具容器（按需运行）
+  # ─────────────────────────────────────────────
+  gotools:
+    image: golang:1.23-alpine
+    container_name: easymvp_gotools
+    profiles:
+      - tools
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - go_pkg_cache:/root/go/pkg
+    environment:
+      - GOPROXY=https://goproxy.cn,direct
+      - GOPATH=/root/go
+      - CGO_ENABLED=0
+    networks:
+      - easymvp_net
+    command: sh -c "apk add --no-cache git curl && tail -f /dev/null"
+
+# ─────────────────────────────────────────────
+# 数据卷
+# ─────────────────────────────────────────────
+volumes:
+  redis_data:
+    driver: local
+  frontend_node_modules:
+    driver: local
+  go_pkg_cache:
+    driver: local
+
+# ─────────────────────────────────────────────
+# 网络
+# ─────────────────────────────────────────────
+networks:
+  easymvp_net:
+    driver: bridge

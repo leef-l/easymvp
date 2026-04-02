@@ -1,0 +1,393 @@
+package engine
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
+
+	"easymvp/utility/provider"
+	"easymvp/utility/snowflake"
+)
+
+// Executor 任务执行器，为每个任务启动 goroutine 调用 AI
+type Executor struct {
+	scheduler *Scheduler
+}
+
+// NewExecutor 创建执行器
+func NewExecutor(scheduler *Scheduler) *Executor {
+	return &Executor{scheduler: scheduler}
+}
+
+// Execute 执行单个任务
+func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
+	// 1. 查询任务信息
+	task, err := g.DB().Model("mvp_task").Where("id", taskID).One()
+	if err != nil || task.IsEmpty() {
+		e.scheduler.OnTaskFailed(projectID, taskID, "任务不存在")
+		return
+	}
+
+	roleType := task["role_type"].String()
+	modelID := task["model_id"].Int64()
+
+	// 2. 获取模型信息
+	modelInfo, err := e.resolveTaskModel(ctx, projectID, taskID, roleType, modelID)
+	if err != nil {
+		e.failTask(ctx, projectID, taskID, err.Error())
+		return
+	}
+
+	// 3. 查找或创建任务对话
+	conversationID, err := e.ensureConversation(ctx, projectID, taskID, roleType)
+	if err != nil {
+		e.failTask(ctx, projectID, taskID, err.Error())
+		return
+	}
+
+	// 3.1 回写 conversation_id 到 task，方便前端和 watchdog 检测
+	g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+		"conversation_id": conversationID,
+	})
+
+	// 4. 构建任务指令消息
+	taskPrompt := e.buildTaskPrompt(task)
+
+	// 5. 保存指令消息
+	userMsgID := int64(snowflake.Generate())
+	g.DB().Model("mvp_message").Insert(g.Map{
+		"id":              userMsgID,
+		"conversation_id": conversationID,
+		"role":            "user",
+		"content":         taskPrompt,
+		"status":          "completed",
+		"created_by":      0,
+		"dept_id":         0,
+		"created_at":      gtime.Now(),
+		"updated_at":      gtime.Now(),
+	})
+
+	// 6. 创建 AI 回复消息
+	replyID := int64(snowflake.Generate())
+	g.DB().Model("mvp_message").Insert(g.Map{
+		"id":              replyID,
+		"conversation_id": conversationID,
+		"role":            "assistant",
+		"content":         "",
+		"model_id":        modelInfo.ModelID,
+		"status":          "streaming",
+		"created_by":      0,
+		"dept_id":         0,
+		"created_at":      gtime.Now(),
+		"updated_at":      gtime.Now(),
+	})
+
+	// 7. 调用 AI
+	p, err := provider.GetProvider(provider.Config{
+		ProviderType: modelInfo.ProviderType,
+		BaseURL:      modelInfo.BaseURL,
+		APIKey:       modelInfo.APIKey,
+		APISecret:    modelInfo.APISecret,
+	})
+	if err != nil {
+		e.failTask(ctx, projectID, taskID, err.Error())
+		return
+	}
+
+	// 加载对话历史
+	history, _ := e.loadConversationHistory(ctx, conversationID, replyID)
+
+	// 构建包含上下文摘要的 system prompt
+	enrichedPrompt := BuildTaskSystemPrompt(ctx, projectID, taskID, roleType, task["role_level"].String(), modelInfo.SystemPrompt)
+
+	req := &provider.ChatRequest{
+		Model:        modelInfo.ModelCode,
+		Messages:     history,
+		MaxTokens:    modelInfo.MaxTokens,
+		Temperature:  0.7,
+		Stream:       true,
+		SystemPrompt: enrichedPrompt,
+	}
+
+	var fullContent strings.Builder
+	chunkIndex := 0
+	hub := GetHub()
+
+	err = p.ChatStream(ctx, req, func(chunk *provider.StreamChunk) error {
+		if chunk.Content != "" {
+			fullContent.WriteString(chunk.Content)
+			chunkIndex++
+
+			g.DB().Model("mvp_message_chunk").Insert(g.Map{
+				"message_id":  replyID,
+				"chunk_index": chunkIndex,
+				"content":     chunk.Content,
+			})
+
+			chunkJSON, _ := json.Marshal(map[string]interface{}{
+				"content": chunk.Content,
+				"index":   chunkIndex,
+			})
+			hub.Publish(replyID, string(chunkJSON))
+		}
+
+		if chunk.FinishReason != "" && chunk.Usage != nil {
+			usageJSON, _ := json.Marshal(chunk.Usage)
+			g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
+				"token_usage": string(usageJSON),
+			})
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		// AI 调用失败
+		g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
+			"content":    "AI调用失败: " + err.Error(),
+			"status":     "failed",
+			"updated_at": gtime.Now(),
+		})
+		e.failTask(ctx, projectID, taskID, err.Error())
+		return
+	}
+
+	// 8. 完成消息
+	g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
+		"content":    fullContent.String(),
+		"status":     "completed",
+		"updated_at": gtime.Now(),
+	})
+
+	hub.Publish(replyID, `{"done":true}`)
+	hub.Done(replyID)
+
+	// 9. 保存任务结果
+	result := fullContent.String()
+	g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+		"result":       result,
+		"status":       "completed",
+		"completed_at": gtime.Now(),
+		"updated_at":   gtime.Now(),
+	})
+
+	// 10. 压缩任务上下文为摘要
+	go GetCompressor().CompressTaskContext(context.Background(), projectID, taskID)
+
+	// 11. 如果是实施员任务，完成后需要创建对应的审计任务（如果还没有）
+	if roleType == "implementer" {
+		go e.createAuditTask(ctx, projectID, taskID, task)
+	}
+
+	// 12. 通知调度器
+	e.scheduler.OnTaskCompleted(projectID, taskID)
+}
+
+// resolveTaskModel 解析任务使用的 AI 模型
+func (e *Executor) resolveTaskModel(ctx context.Context, projectID int64, taskID int64, roleType string, modelID int64) (*ModelInfo, error) {
+	// 如果任务自身指定了 model_id，优先使用
+	if modelID > 0 {
+		return e.getModelInfo(ctx, modelID, "")
+	}
+
+	// 否则从项目角色配置中查找
+	task, _ := g.DB().Model("mvp_task").Where("id", taskID).Fields("role_level").One()
+	roleLevel := ""
+	if !task.IsEmpty() {
+		roleLevel = task["role_level"].String()
+	}
+
+	// 查找角色配置（匹配 role_type + role_level）
+	roleQuery := g.DB().Model("mvp_project_role").
+		Where("project_id", projectID).
+		Where("role_type", roleType).
+		Where("status", 1).
+		Where("deleted_at IS NULL")
+	if roleLevel != "" {
+		roleQuery = roleQuery.Where("role_level", roleLevel)
+	}
+
+	role, err := roleQuery.One()
+	if err != nil || role.IsEmpty() {
+		// 没有匹配等级的，用该角色类型的任意一个
+		role, err = g.DB().Model("mvp_project_role").
+			Where("project_id", projectID).
+			Where("role_type", roleType).
+			Where("status", 1).
+			Where("deleted_at IS NULL").
+			One()
+		if err != nil || role.IsEmpty() {
+			return nil, fmt.Errorf("项目未配置 %s 角色模型", roleType)
+		}
+	}
+
+	return e.getModelInfo(ctx, role["model_id"].Int64(), role["system_prompt"].String())
+}
+
+// getModelInfo 查询模型详情
+func (e *Executor) getModelInfo(ctx context.Context, modelID int64, systemPrompt string) (*ModelInfo, error) {
+	model, err := g.DB().Model("ai_model m").
+		LeftJoin("ai_plan p", "p.id = m.plan_id").
+		LeftJoin("ai_provider pv", "pv.id = m.provider_id").
+		Fields("m.model_code, m.max_tokens, pv.provider_type, pv.base_url, p.api_key, p.api_secret, m.role_prompt").
+		Where("m.id", modelID).
+		Where("m.deleted_at IS NULL").
+		One()
+	if err != nil || model.IsEmpty() {
+		return nil, fmt.Errorf("AI模型 %d 不存在", modelID)
+	}
+
+	prompt := systemPrompt
+	if prompt == "" {
+		prompt = model["role_prompt"].String()
+	}
+
+	return &ModelInfo{
+		ModelID:      modelID,
+		ModelCode:    model["model_code"].String(),
+		ProviderType: model["provider_type"].String(),
+		BaseURL:      model["base_url"].String(),
+		APIKey:       model["api_key"].String(),
+		APISecret:    model["api_secret"].String(),
+		SystemPrompt: prompt,
+		MaxTokens:    model["max_tokens"].Int(),
+	}, nil
+}
+
+// ensureConversation 确保任务有对应的对话
+func (e *Executor) ensureConversation(ctx context.Context, projectID int64, taskID int64, roleType string) (int64, error) {
+	// 查找已有的任务对话
+	conv, err := g.DB().Model("mvp_conversation").
+		Where("project_id", projectID).
+		Where("task_id", taskID).
+		Where("deleted_at IS NULL").
+		One()
+	if err != nil {
+		return 0, err
+	}
+	if !conv.IsEmpty() {
+		return conv["id"].Int64(), nil
+	}
+
+	// 创建新对话
+	convID := int64(snowflake.Generate())
+	_, err = g.DB().Model("mvp_conversation").Insert(g.Map{
+		"id":         convID,
+		"project_id": projectID,
+		"task_id":    taskID,
+		"title":      "任务对话",
+		"role_type":  roleType,
+		"status":     "active",
+		"created_by": 0,
+		"dept_id":    0,
+		"created_at": gtime.Now(),
+		"updated_at": gtime.Now(),
+	})
+	if err != nil {
+		return 0, err
+	}
+	return convID, nil
+}
+
+// loadConversationHistory 加载对话历史
+func (e *Executor) loadConversationHistory(ctx context.Context, conversationID int64, excludeID int64) ([]provider.Message, error) {
+	records, err := g.DB().Model("mvp_message").
+		Where("conversation_id", conversationID).
+		Where("deleted_at IS NULL").
+		Where("status", "completed").
+		Where("id != ?", excludeID).
+		Order("created_at ASC").
+		All()
+	if err != nil {
+		return nil, err
+	}
+
+	messages := make([]provider.Message, 0, len(records))
+	for _, r := range records {
+		messages = append(messages, provider.Message{
+			Role:    provider.Role(r["role"].String()),
+			Content: r["content"].String(),
+		})
+	}
+	return messages, nil
+}
+
+// buildTaskPrompt 构建任务指令
+func (e *Executor) buildTaskPrompt(task gdb.Record) string {
+	name := task["name"].String()
+	desc := task["description"].String()
+
+	prompt := fmt.Sprintf("## 任务\n%s\n\n## 任务描述\n%s", name, desc)
+
+	// 如果有依赖任务的结果，附加上下文
+	taskID := task["id"].Int64()
+	deps, _ := g.DB().Model("mvp_task_dependency d").
+		LeftJoin("mvp_task t", "t.id = d.depends_on_id").
+		Fields("t.name, t.result").
+		Where("d.task_id", taskID).
+		Where("t.status", "completed").
+		All()
+
+	if len(deps) > 0 {
+		prompt += "\n\n## 前置任务结果（供参考）"
+		for _, dep := range deps {
+			depName := dep["name"].String()
+			depResult := dep["result"].String()
+			if len(depResult) > 2000 {
+				depResult = depResult[:2000] + "...(截断)"
+			}
+			prompt += fmt.Sprintf("\n\n### %s\n%s", depName, depResult)
+		}
+	}
+
+	return prompt
+}
+
+// createAuditTask 为实施员任务创建对应的审计任务
+func (e *Executor) createAuditTask(ctx context.Context, projectID int64, implTaskID int64, implTask gdb.Record) {
+	// 检查是否已有审计任务（通过依赖关系）
+	count, _ := g.DB().Model("mvp_task_dependency").
+		Where("depends_on_id", implTaskID).
+		Count()
+	if count > 0 {
+		return
+	}
+
+	auditTaskID := int64(snowflake.Generate())
+	g.DB().Model("mvp_task").Insert(g.Map{
+		"id":          auditTaskID,
+		"project_id":  projectID,
+		"parent_id":   implTask["parent_id"].Int64(),
+		"name":        fmt.Sprintf("审计: %s", implTask["name"].String()),
+		"description": fmt.Sprintf("审计实施员任务「%s」的结果，检查是否正确完成，是否有 bug。", implTask["name"].String()),
+		"role_type":   "auditor",
+		"role_level":  implTask["role_level"].String(),
+		"status":      "pending",
+		"batch_no":    implTask["batch_no"].Int() + 1,
+		"created_by":  0,
+		"dept_id":     0,
+		"created_at":  gtime.Now(),
+		"updated_at":  gtime.Now(),
+	})
+
+	// 添加依赖关系
+	g.DB().Model("mvp_task_dependency").Insert(g.Map{
+		"task_id":       auditTaskID,
+		"depends_on_id": implTaskID,
+	})
+}
+
+// failTask 标记任务失败
+func (e *Executor) failTask(ctx context.Context, projectID int64, taskID int64, errMsg string) {
+	g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+		"status":        "failed",
+		"error_message": errMsg,
+		"updated_at":    gtime.Now(),
+	})
+	e.scheduler.OnTaskFailed(projectID, taskID, errMsg)
+}

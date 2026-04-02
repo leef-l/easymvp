@@ -1,0 +1,26 @@
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+admin-go/system
+admin-go/ai
+admin-go/mvp
+*.exe
+*.test
+
+# Node
+node_modules/
+
+# Env
+.env.local
+*.local
+
+# Claude Code
+.claude/
