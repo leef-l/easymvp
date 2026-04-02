@@ -3,7 +3,7 @@
 # https://goframe.org/docs/cli
 gfcli:
   run:
-    path: "main.go"
+    path: "."
     extra: ""
     watchPaths:
       - "internal"
