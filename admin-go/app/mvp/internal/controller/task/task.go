@@ -155,7 +155,11 @@ func (c *cTask) Tree(ctx context.Context, req *v1.TaskTreeReq) (res *v1.TaskTree
 	res.List, err = service.Task().Tree(ctx, &model.TaskTreeInput{
 		StartTime: req.StartTime,
 		EndTime:   req.EndTime,
-		Name: req.Name,
+		Name:      req.Name,
+		ProjectID: req.ProjectID,
+		Status:    req.Status,
+		BatchNo:   req.BatchNo,
+		RoleType:  req.RoleType,
 	})
 	return
 }
