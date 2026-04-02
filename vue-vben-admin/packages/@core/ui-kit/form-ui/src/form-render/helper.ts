@@ -16,7 +16,7 @@ import { isObject, isString } from '@vben-core/shared/utils';
 export function getBaseRules<
   ChildType extends AnyZodObject | ZodTypeAny = ZodTypeAny,
 >(schema: ChildType | ZodEffects<ChildType>): ChildType | null {
-  if (!schema || isString(schema)) return null;
+  if (!schema || isString(schema) || Array.isArray(schema)) return null;
   if ('innerType' in schema._def)
     return getBaseRules(schema._def.innerType as ChildType);
 
@@ -30,7 +30,7 @@ export function getBaseRules<
  * Search for a "ZodDefault" in the Zod stack and return its value.
  */
 export function getDefaultValueInZodStack(schema: ZodTypeAny): any {
-  if (!schema || isString(schema)) {
+  if (!schema || isString(schema) || Array.isArray(schema)) {
     return;
   }
   const typedSchema = schema as unknown as ZodDefault<ZodNumber | ZodString>;

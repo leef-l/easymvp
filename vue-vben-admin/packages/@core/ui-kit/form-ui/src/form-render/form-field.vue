@@ -125,6 +125,11 @@ const shouldRequired = computed(() => {
     return ['required', 'selectRequired'].includes(currentRules.value);
   }
 
+  // 数组格式 rules（Ant Design 风格），检查是否包含 required: true
+  if (Array.isArray(currentRules.value)) {
+    return currentRules.value.some((rule: any) => rule?.required);
+  }
+
   let isOptional = currentRules?.value?.isOptional?.();
 
   // 如果有设置默认值，则不是必填，需要特殊处理
