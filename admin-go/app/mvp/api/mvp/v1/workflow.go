@@ -84,6 +84,20 @@ type WorkflowProjectStatusRes struct {
 	StatusCounts map[string]int    `json:"statusCounts"` // 各状态任务数量
 }
 
+// WorkflowParseTasksReq 手动解析架构师回复中的任务清单
+type WorkflowParseTasksReq struct {
+	g.Meta    `path:"/workflow/parse-tasks" method:"post" tags:"项目流程" summary:"手动解析任务"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	DryRun    bool                `json:"dryRun" dc:"仅检查不创建"`
+}
+
+// WorkflowParseTasksRes 手动解析任务响应
+type WorkflowParseTasksRes struct {
+	g.Meta    `mime:"application/json"`
+	HasTasks  bool `json:"hasTasks"`  // AI回复中是否包含任务清单
+	TaskCount int  `json:"taskCount"` // 解析出的任务数量
+}
+
 // WorkflowRolePresetsReq 获取角色预设列表请求
 type WorkflowRolePresetsReq struct {
 	g.Meta `path:"/workflow/role-presets" method:"get" tags:"项目流程" summary:"获取角色预设列表"`

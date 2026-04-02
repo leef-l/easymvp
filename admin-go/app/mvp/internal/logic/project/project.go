@@ -38,6 +38,7 @@ func (s *sProject) Create(ctx context.Context, in *model.ProjectCreateInput) err
 		dao.MvpProject.Columns().PauseReason: in.PauseReason,
 		dao.MvpProject.Columns().GlobalContext: in.GlobalContext,
 		dao.MvpProject.Columns().ArchitectModelId: in.ArchitectModelID,
+		dao.MvpProject.Columns().WorkDir: in.WorkDir,
 		dao.MvpProject.Columns().CreatedBy: middleware.GetUserID(ctx),
 		dao.MvpProject.Columns().DeptId: middleware.GetDeptID(ctx),
 		dao.MvpProject.Columns().CreatedAt: gtime.Now(),
@@ -55,6 +56,7 @@ func (s *sProject) Update(ctx context.Context, in *model.ProjectUpdateInput) err
 		dao.MvpProject.Columns().PauseReason: in.PauseReason,
 		dao.MvpProject.Columns().GlobalContext: in.GlobalContext,
 		dao.MvpProject.Columns().ArchitectModelId: in.ArchitectModelID,
+		dao.MvpProject.Columns().WorkDir: in.WorkDir,
 		dao.MvpProject.Columns().UpdatedAt: gtime.Now(),
 	}
 	_, err := dao.MvpProject.Ctx(ctx).Where(dao.MvpProject.Columns().Id, in.ID).Data(data).Update()

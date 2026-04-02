@@ -20,6 +20,14 @@ export function confirmPlan(projectID: string) {
   return requestClient.post(`${PREFIX}/confirm-plan`, { projectID });
 }
 
+/** 手动解析架构师回复中的任务清单（托底机制） */
+export function parseTasks(projectID: string) {
+  return requestClient.post<{ hasTasks: boolean; taskCount: number }>(
+    `${PREFIX}/parse-tasks`,
+    { projectID },
+  );
+}
+
 /** 暂停项目 */
 export function pauseProject(data: {
   projectID: string;

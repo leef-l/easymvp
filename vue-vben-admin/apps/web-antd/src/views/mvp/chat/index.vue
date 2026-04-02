@@ -13,13 +13,14 @@ import {
   ExclamationCircleOutlined,
   LoadingOutlined,
   RobotOutlined,
+  SearchOutlined,
   SyncOutlined,
 } from '@ant-design/icons-vue';
 import { Page } from '@vben/common-ui';
-import { Avatar, Badge, Button, message, Spin, Tag, Tooltip } from 'ant-design-vue';
+import { Avatar, Badge, Button, message, Modal, Spin, Tag, Tooltip } from 'ant-design-vue';
 
 import { getChatHistory, sendMessage } from '#/api/mvp/chat';
-import { confirmPlan, getProjectStatus } from '#/api/mvp/workflow';
+import { confirmPlan, getProjectStatus, parseTasks } from '#/api/mvp/workflow';
 import { getProjectDetail } from '#/api/mvp/project';
 import { getConversationList } from '#/api/mvp/conversation';
 
@@ -51,6 +52,8 @@ const projectStatus = ref<string>('');
 const draftTaskCount = ref(0);
 /** 是否正在确认方案 */
 const confirmingPlan = ref(false);
+/** 是否正在检查拆分 */
+const parsingTasks = ref(false);
 
 /** 项目状态配置 */
 const STATUS_CONFIG: Record<
@@ -293,6 +296,34 @@ async function handleSend(content: string) {
 }
 
 // ======================== 确认方案 ========================
+
+/** 检查拆分按钮点击：手动解析架构师回复中的任务 */
+async function handleParseTasks() {
+  if (!projectId.value) return;
+  parsingTasks.value = true;
+  try {
+    const res = await parseTasks(projectId.value);
+    if (res.hasTasks) {
+      Modal.confirm({
+        title: '检测到任务清单',
+        content: `架构师回复中解析出 ${res.taskCount} 个任务，是否创建为草案任务？`,
+        okText: '确定创建',
+        cancelText: '取消',
+        async onOk() {
+          // 任务已在 parseTasks 调用中创建，刷新状态即可
+          await loadProjectStatus();
+          message.success(`已创建 ${res.taskCount} 个草案任务`);
+        },
+      });
+    } else {
+      message.info('架构师回复中未检测到任务清单，请先让AI完成任务拆分');
+    }
+  } catch (err: any) {
+    message.error(err?.message || '检查拆分失败');
+  } finally {
+    parsingTasks.value = false;
+  }
+}
 
 /** 确认方案按钮点击 */
 async function handleConfirmPlan() {

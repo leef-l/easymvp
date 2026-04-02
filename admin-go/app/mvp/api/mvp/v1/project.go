@@ -22,6 +22,7 @@ type ProjectCreateReq struct {
 	PauseReason string `json:"pauseReason" v:"max-length:65535" dc:"暂停原因"`
 	GlobalContext string `json:"globalContext" v:"max-length:65535" dc:"项目全局上下文（架构师需求分析+方案设计的压缩摘要）"`
 	ArchitectModelID snowflake.JsonInt64 `json:"architectModelID"  dc:"架构师使用的AI模型ID"`
+	WorkDir string `json:"workDir" v:"max-length:500" dc:"项目代码工作目录（Aider执行路径）"`
 }
 
 // ProjectCreateRes 创建MVP项目表响应
@@ -39,6 +40,7 @@ type ProjectUpdateReq struct {
 	PauseReason string `json:"pauseReason" dc:"暂停原因"`
 	GlobalContext string `json:"globalContext" dc:"项目全局上下文（架构师需求分析+方案设计的压缩摘要）"`
 	ArchitectModelID snowflake.JsonInt64 `json:"architectModelID" dc:"架构师使用的AI模型ID"`
+	WorkDir string `json:"workDir" dc:"项目代码工作目录（Aider执行路径）"`
 }
 
 // ProjectUpdateRes 更新MVP项目表响应

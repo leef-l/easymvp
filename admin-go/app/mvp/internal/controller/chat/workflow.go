@@ -68,6 +68,44 @@ func (c *cWorkflow) RetryTask(ctx context.Context, req *v1.WorkflowRetryTaskReq)
 	return &v1.WorkflowRetryTaskRes{}, nil
 }
 
+// ParseTasks 手动解析架构师回复中的任务清单（托底机制）
+func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksReq) (res *v1.WorkflowParseTasksRes, err error) {
+	projectID := int64(req.ProjectID)
+
+	// 查找该项目的架构师对话
+	conv, err := g.DB().Model("mvp_conversation").
+		Where("project_id", projectID).
+		Where("role_type", "architect").
+		Where("task_id IS NULL OR task_id = 0").
+		Where("deleted_at IS NULL").
+		One()
+	if err != nil || conv.IsEmpty() {
+		return &v1.WorkflowParseTasksRes{HasTasks: false, TaskCount: 0}, nil
+	}
+
+	// 查找最新的 assistant 消息
+	msg, err := g.DB().Model("mvp_message").
+		Where("conversation_id", conv["id"].Int64()).
+		Where("role", "assistant").
+		Where("deleted_at IS NULL").
+		OrderDesc("created_at").
+		One()
+	if err != nil || msg.IsEmpty() {
+		return &v1.WorkflowParseTasksRes{HasTasks: false, TaskCount: 0}, nil
+	}
+
+	aiReply := msg["content"].String()
+	count, err := engine.GetParser().ParseAndCreateTasks(ctx, projectID, aiReply)
+	if err != nil {
+		return nil, err
+	}
+
+	return &v1.WorkflowParseTasksRes{
+		HasTasks:  count > 0,
+		TaskCount: count,
+	}, nil
+}
+
 // RolePresets 获取角色预设列表（前端创建项目时读取默认模型）
 func (c *cWorkflow) RolePresets(ctx context.Context, req *v1.WorkflowRolePresetsReq) (res *v1.WorkflowRolePresetsRes, err error) {
 	presets, err := g.DB().Model("mvp_role_preset AS p").

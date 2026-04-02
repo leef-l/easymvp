@@ -9,6 +9,7 @@ export interface ProjectItem {
   pauseReason?: string;
   globalContext?: string;
   architectModelID?: string;
+  workDir?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -43,4 +44,5 @@ export interface ProjectUpdateParams {
   pauseReason?: string;
   globalContext?: string;
   architectModelID?: string;
+  workDir?: string;
 }

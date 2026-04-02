@@ -16,6 +16,7 @@ type ProjectCreateInput struct {
 	PauseReason string `json:"pauseReason"`
 	GlobalContext string `json:"globalContext"`
 	ArchitectModelID snowflake.JsonInt64 `json:"architectModelID"`
+	WorkDir string `json:"workDir"`
 }
 
 // ProjectUpdateInput 更新MVP项目表输入
@@ -27,6 +28,7 @@ type ProjectUpdateInput struct {
 	PauseReason string `json:"pauseReason"`
 	GlobalContext string `json:"globalContext"`
 	ArchitectModelID snowflake.JsonInt64 `json:"architectModelID"`
+	WorkDir string `json:"workDir"`
 }
 
 // ProjectDetailOutput MVP项目表详情输出
@@ -39,6 +41,7 @@ type ProjectDetailOutput struct {
 	GlobalContext string `json:"globalContext"`
 	ArchitectModelID snowflake.JsonInt64 `json:"architectModelID"`
 	ArchitectModelName string `json:"architectModelName"`
+	WorkDir string `json:"workDir"`
 	CreatedAt *gtime.Time `json:"createdAt"`
 	UpdatedAt *gtime.Time `json:"updatedAt"`
 }
@@ -53,6 +56,7 @@ type ProjectListOutput struct {
 	GlobalContext string `json:"globalContext"`
 	ArchitectModelID snowflake.JsonInt64 `json:"architectModelID"`
 	ArchitectModelName string `json:"architectModelName"`
+	WorkDir string `json:"workDir"`
 	CreatedAt *gtime.Time `json:"createdAt"`
 	UpdatedAt *gtime.Time `json:"updatedAt"`
 }

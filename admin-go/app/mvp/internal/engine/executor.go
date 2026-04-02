@@ -25,6 +25,7 @@ func NewExecutor(scheduler *Scheduler) *Executor {
 }
 
 // Execute 执行单个任务
+// implementer 角色使用 Aider 进行真实代码编辑，其他角色使用 ChatStream 对话
 func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 	// 1. 查询任务信息
 	task, err := g.DB().Model("mvp_task").Where("id", taskID).One()
@@ -43,14 +44,21 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 		return
 	}
 
-	// 3. 查找或创建任务对话
+	// 3. implementer 角色 → Aider 代码编辑模式
+	if roleType == "implementer" {
+		e.executeWithAider(ctx, projectID, taskID, task, modelInfo)
+		return
+	}
+
+	// 4. 其他角色 → ChatStream 对话模式
+	// 查找或创建任务对话
 	conversationID, err := e.ensureConversation(ctx, projectID, taskID, roleType)
 	if err != nil {
 		e.failTask(ctx, projectID, taskID, err.Error())
 		return
 	}
 
-	// 3.1 回写 conversation_id 到 task，方便前端和 watchdog 检测
+	// 回写 conversation_id 到 task，方便前端和 watchdog 检测
 	g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
 		"conversation_id": conversationID,
 	})
@@ -380,6 +388,95 @@ func (e *Executor) createAuditTask(ctx context.Context, projectID int64, implTas
 		"task_id":       auditTaskID,
 		"depends_on_id": implTaskID,
 	})
+}
+
+// executeWithAider 使用 Aider 执行实施类任务（真实代码编辑）
+func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID int64, task gdb.Record, modelInfo *ModelInfo) {
+	// 1. 查询项目获取工作目录
+	project, err := g.DB().Model("mvp_project").Where("id", projectID).One()
+	if err != nil || project.IsEmpty() {
+		e.failTask(ctx, projectID, taskID, "项目不存在")
+		return
+	}
+
+	// 工作目录：优先项目配置的 work_dir，兜底用默认
+	workDir := project["work_dir"].String()
+	if workDir == "" {
+		workDir = "/www/wwwroot/project/easymvp"
+	}
+
+	// 2. 构建任务 prompt
+	taskPrompt := e.buildTaskPrompt(task)
+
+	// 3. 解析 affected_resources 作为需要编辑的文件
+	resources := parseResources(task["affected_resources"].String())
+
+	// 4. 创建对话记录（用于前端展示 Aider 过程）
+	conversationID, _ := e.ensureConversation(ctx, projectID, taskID, "implementer")
+	g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+		"conversation_id": conversationID,
+	})
+
+	// 保存指令消息
+	userMsgID := int64(snowflake.Generate())
+	g.DB().Model("mvp_message").Insert(g.Map{
+		"id":              userMsgID,
+		"conversation_id": conversationID,
+		"role":            "user",
+		"content":         taskPrompt,
+		"status":          "completed",
+		"created_by":      0,
+		"dept_id":         0,
+		"created_at":      gtime.Now(),
+		"updated_at":      gtime.Now(),
+	})
+
+	// 5. 调用 Aider
+	g.Log().Infof(ctx, "[Executor] 任务 %d 使用 Aider 执行: model=%s files=%v", taskID, modelInfo.ModelCode, resources)
+
+	result := GetAiderRunner().RunTask(ctx, projectID, taskID, modelInfo, taskPrompt, workDir, resources, nil)
+
+	// 6. 保存 Aider 输出为 AI 回复消息
+	replyID := int64(snowflake.Generate())
+	replyStatus := "completed"
+	if result.Error != nil {
+		replyStatus = "failed"
+	}
+	g.DB().Model("mvp_message").Insert(g.Map{
+		"id":              replyID,
+		"conversation_id": conversationID,
+		"role":            "assistant",
+		"content":         result.Output,
+		"model_id":        modelInfo.ModelID,
+		"status":          replyStatus,
+		"created_by":      0,
+		"dept_id":         0,
+		"created_at":      gtime.Now(),
+		"updated_at":      gtime.Now(),
+	})
+
+	// 7. 判断结果
+	if result.Error != nil {
+		e.failTask(ctx, projectID, taskID, fmt.Sprintf("Aider执行失败(code=%d): %v", result.ExitCode, result.Error))
+		return
+	}
+
+	// 8. 更新任务为完成
+	g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+		"result":       result.Output,
+		"status":       "completed",
+		"completed_at": gtime.Now(),
+		"updated_at":   gtime.Now(),
+	})
+
+	// 9. 压缩上下文
+	go GetCompressor().CompressTaskContext(context.Background(), projectID, taskID)
+
+	// 10. 创建审计任务
+	go e.createAuditTask(ctx, projectID, taskID, task)
+
+	// 11. 通知调度器
+	e.scheduler.OnTaskCompleted(projectID, taskID)
 }
 
 // failTask 标记任务失败

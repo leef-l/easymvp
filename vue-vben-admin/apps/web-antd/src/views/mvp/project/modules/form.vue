@@ -75,6 +75,12 @@ const editSchema = [
     componentProps: { placeholder: '请输入项目简介', rows: 4, maxlength: 65535 },
   },
   {
+    component: 'Input',
+    fieldName: 'workDir',
+    label: tooltipLabel('代码工作目录', 'Aider 执行代码编辑时的项目根目录，确认方案前必须填写'),
+    componentProps: { placeholder: '如：/www/wwwroot/project/my-app', maxlength: 500 },
+  },
+  {
     component: 'Textarea',
     fieldName: 'pauseReason',
     label: '暂停原因',

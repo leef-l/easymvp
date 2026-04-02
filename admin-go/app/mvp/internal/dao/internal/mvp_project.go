@@ -28,6 +28,7 @@ type MvpProjectColumns struct {
 	PauseReason      string // 暂停原因
 	GlobalContext    string // 项目全局上下文（架构师需求分析+方案设计的压缩摘要）
 	ArchitectModelId string // 架构师使用的AI模型ID
+	WorkDir          string // 项目代码工作目录（Aider执行路径）
 	CreatedBy        string // 创建人ID
 	DeptId           string // 所属部门ID
 	CreatedAt        string // 创建时间
@@ -44,6 +45,7 @@ var mvpProjectColumns = MvpProjectColumns{
 	PauseReason:      "pause_reason",
 	GlobalContext:    "global_context",
 	ArchitectModelId: "architect_model_id",
+	WorkDir:          "work_dir",
 	CreatedBy:        "created_by",
 	DeptId:           "dept_id",
 	CreatedAt:        "created_at",
