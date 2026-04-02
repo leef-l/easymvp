@@ -11,6 +11,8 @@ const supportsStreamMap: Record<number, string> = {
   1: '是',
 };
 
+import { roleTypeMap as capabilityMap } from '#/views/mvp/consts';
+
 /** 状态映射 */
 const statusMap: Record<number, string> = {
   0: '禁用',
@@ -48,7 +50,12 @@ const [Modal, modalApi] = useVbenModal({
       <DescriptionsItem label="供应商ID">{{ detail.providerName || '-' }}</DescriptionsItem>
       <DescriptionsItem label="模型显示名称">{{ detail.name || '-' }}</DescriptionsItem>
       <DescriptionsItem label="模型代码">{{ detail.modelCode || '-' }}</DescriptionsItem>
-      <DescriptionsItem label="能力">{{ detail.capability || '-' }}</DescriptionsItem>
+      <DescriptionsItem label="项目角色">
+        <Tag v-if="capabilityMap[detail.capability]" :color="capabilityMap[detail.capability].color">
+          {{ capabilityMap[detail.capability].label }}
+        </Tag>
+        <span v-else>{{ detail.capability || '-' }}</span>
+      </DescriptionsItem>
       <DescriptionsItem label="最大输出token">{{ detail.maxTokens || '-' }}</DescriptionsItem>
       <DescriptionsItem label="上下文窗口大小">{{ detail.contextWindow || '-' }}</DescriptionsItem>
       <DescriptionsItem label="是否支持流式输出">

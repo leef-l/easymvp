@@ -4,6 +4,7 @@ import { useVbenModal } from '@vben/common-ui';
 import { Descriptions, DescriptionsItem, Tag } from 'ant-design-vue';
 import { getProjectRoleDetail } from '#/api/mvp/project_role';
 import type { ProjectRoleItem } from '#/api/mvp/project_role/types';
+import { roleTypeMap, roleLevelMap } from '../../consts';
 
 /** 状态映射 */
 const statusMap: Record<number, string> = {
@@ -38,10 +39,20 @@ const [Modal, modalApi] = useVbenModal({
   <Modal class="w-[600px]">
     <Descriptions v-if="detail" bordered :column="1" size="small">
       <DescriptionsItem label="ID">{{ detail.id }}</DescriptionsItem>
-      <DescriptionsItem label="项目ID">{{ detail.projectName || '-' }}</DescriptionsItem>
-      <DescriptionsItem label="角色类型">{{ detail.roleType || '-' }}</DescriptionsItem>
-      <DescriptionsItem label="角色等级">{{ detail.roleLevel || '-' }}</DescriptionsItem>
-      <DescriptionsItem label="AI模型ID">{{ detail.modelID || '-' }}</DescriptionsItem>
+      <DescriptionsItem label="所属项目">{{ detail.projectName || '-' }}</DescriptionsItem>
+      <DescriptionsItem label="角色类型">
+        <Tag v-if="roleTypeMap[detail.roleType]" :color="roleTypeMap[detail.roleType].color">
+          {{ roleTypeMap[detail.roleType].label }}
+        </Tag>
+        <span v-else>{{ detail.roleType || '-' }}</span>
+      </DescriptionsItem>
+      <DescriptionsItem label="角色等级">
+        <Tag v-if="roleLevelMap[detail.roleLevel]" :color="roleLevelMap[detail.roleLevel].color">
+          {{ roleLevelMap[detail.roleLevel].label }}
+        </Tag>
+        <span v-else>{{ detail.roleLevel || '-' }}</span>
+      </DescriptionsItem>
+      <DescriptionsItem label="AI模型">{{ detail.modelName || '-' }}</DescriptionsItem>
       <DescriptionsItem label="系统提示词">{{ detail.systemPrompt || '-' }}</DescriptionsItem>
       <DescriptionsItem label="状态">
         <Tag>{{ statusMap[detail.status] || detail.status }}</Tag>

@@ -3,13 +3,15 @@ import type { VbenFormProps } from '#/adapter/form';
 import type { VxeGridProps } from '#/adapter/vxe-table';
 
 import { Page, useVbenModal } from '@vben/common-ui';
-import { Button, message, Modal, Switch } from 'ant-design-vue';
+import { Button, message, Modal, Switch, Tag } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getModelList, deleteModel, batchDeleteModel, updateModel } from '#/api/ai/model';
 import type { ModelItem } from '#/api/ai/model/types';
 import FormModal from './modules/form.vue';
 import DetailDrawer from './modules/detail-drawer.vue';
+
+import { roleTypeMap as capabilityMap } from '#/views/mvp/consts';
 
 /** 状态选项 */
 const statusOptions = [
@@ -74,6 +76,7 @@ const gridOptions: VxeGridProps<ModelItem> = {
     { title: '序号', type: 'seq', width: 50 },
     { field: 'name', title: '模型名称', minWidth: 120 },
     { field: 'modelCode', title: '模型代码', minWidth: 160, showOverflow: 'tooltip' },
+    { field: 'capability', title: '项目角色', width: 100, slots: { default: 'capability_cell' } },
     { field: 'planName', title: '所属套餐', minWidth: 120 },
     { field: 'providerName', title: '所属供应商', minWidth: 120 },
     { field: 'maxTokens', title: '最大 Tokens', width: 120 },
@@ -206,6 +209,12 @@ async function handleStatusChange(row: ModelItem, checked: boolean) {
       <template #toolbar-actions>
         <Button v-auth="['ai:model:create']" type="primary" @click="handleCreate">新建模型</Button>
         <Button v-auth="['ai:model:batch-delete']" danger class="ml-2" @click="handleBatchDelete">批量删除</Button>
+      </template>
+      <template #capability_cell="{ row }">
+        <Tag v-if="capabilityMap[row.capability]" :color="capabilityMap[row.capability].color">
+          {{ capabilityMap[row.capability].label }}
+        </Tag>
+        <span v-else>{{ row.capability || '-' }}</span>
       </template>
       <template #status_cell="{ row }">
         <Switch

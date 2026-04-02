@@ -10,8 +10,11 @@ import {
   updateProjectRole,
 } from '#/api/mvp/project_role';
 import { getProjectList } from '#/api/mvp/project';
+import { getModelList } from '#/api/ai/model';
+import { roleTypeOptions, roleLevelOptions } from '../../consts';
 
 const projectIDOptions = ref<{ label: string; value: string }[]>([]);
+const modelIDOptions = ref<{ label: string; value: string }[]>([]);
 /** 渲染带 Tooltip 的表单 label */
 function tooltipLabel(label: string, tip: string) {
   return () => h('span', {}, [
@@ -38,24 +41,24 @@ const [Form, formApi] = useVbenForm({
       componentProps: { options: projectIDOptions, placeholder: '请选择项目ID', allowClear: true, class: 'w-full' },
     },
     {
-      component: 'Input',
+      component: 'Select',
       fieldName: 'roleType',
       label: '角色类型',
-      rules: 'required',
-      componentProps: { placeholder: '请输入角色类型', maxlength: 20 },
+      rules: 'selectRequired',
+      componentProps: { options: roleTypeOptions, placeholder: '请选择角色类型', allowClear: true, class: 'w-full' },
     },
     {
-      component: 'Input',
+      component: 'Select',
       fieldName: 'roleLevel',
       label: '角色等级',
-      componentProps: { placeholder: '请输入角色等级', maxlength: 10 },
+      componentProps: { options: roleLevelOptions, placeholder: '请选择角色等级', allowClear: true, class: 'w-full' },
     },
     {
-      component: 'Input',
+      component: 'Select',
       fieldName: 'modelID',
-      label: 'AI模型ID',
-      rules: 'required',
-      componentProps: { placeholder: '请输入AI模型ID' },
+      label: 'AI模型',
+      rules: 'selectRequired',
+      componentProps: { options: modelIDOptions, placeholder: '请选择AI模型', allowClear: true, showSearch: true, optionFilterProp: 'label', class: 'w-full' },
     },
     {
       component: 'Textarea',
@@ -105,6 +108,16 @@ const [Modal, modalApi] = useVbenModal({
         const projectRes = await getProjectList({ pageNum: 1, pageSize: 1000 });
         projectIDOptions.value = (projectRes?.list ?? []).map((item: any) => ({
           label: item.name || item.id,
+          value: item.id,
+        }));
+      } catch {
+        // ignore
+      }
+      // 加载AI模型选项
+      try {
+        const modelRes = await getModelList({ pageNum: 1, pageSize: 1000 });
+        modelIDOptions.value = (modelRes?.list ?? []).map((item: any) => ({
+          label: `${item.name} (${item.modelCode})`,
           value: item.id,
         }));
       } catch {

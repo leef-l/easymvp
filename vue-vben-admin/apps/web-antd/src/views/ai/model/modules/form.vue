@@ -11,6 +11,7 @@ import {
 } from '#/api/ai/model';
 import { getPlanList } from '#/api/ai/plan';
 import { getProviderList } from '#/api/ai/provider';
+import { roleTypeOptions as capabilityOptions } from '#/views/mvp/consts';
 
 /** 是否支持流式输出选项 */
 const supportsStreamOptions = [
@@ -67,10 +68,11 @@ const [Form, formApi] = useVbenForm({
       componentProps: { placeholder: '请输入模型代码（API调用用）', maxlength: 100 },
     },
     {
-      component: 'Input',
+      component: 'Select',
       fieldName: 'capability',
-      label: '能力',
-      componentProps: { placeholder: '请输入能力', maxlength: 20 },
+      label: '项目角色',
+      rules: 'selectRequired',
+      componentProps: { options: capabilityOptions, placeholder: '请选择项目角色', allowClear: true, class: 'w-full' },
     },
     {
       component: 'Input',

@@ -46,7 +46,7 @@ const [Form, formApi] = useVbenForm({
       fieldName: 'status',
       label: '状态',
       componentProps: { checkedValue: 1, unCheckedValue: 0 },
-      defaultValue: designing,
+      defaultValue: 'designing',
     },
     {
       component: 'Textarea',

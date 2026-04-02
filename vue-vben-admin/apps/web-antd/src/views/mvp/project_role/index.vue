@@ -12,6 +12,7 @@ import { getProjectRoleList, deleteProjectRole, batchDeleteProjectRole, exportPr
 import type { ProjectRoleItem } from '#/api/mvp/project_role/types';
 import FormModal from './modules/form.vue';
 import DetailDrawer from './modules/detail-drawer.vue';
+import { roleTypeMap, roleLevelMap } from '../consts';
 
 /** 标签颜色池 */
 const TAG_COLORS = ['green', 'red', 'blue', 'orange', 'cyan', 'purple', 'geekblue', 'magenta'];
@@ -94,11 +95,11 @@ const gridOptions: VxeGridProps<ProjectRoleItem> = {
   columns: [
     { type: 'checkbox', width: 50 },
     { title: '序号', type: 'seq', width: 50 },
-    { field: 'projectName', title: '项目ID' },
-    { field: 'roleType', title: '角色类型' },
-    { field: 'roleLevel', title: '角色等级' },
-    { field: 'modelID', title: 'AI模型ID' },
-    { field: 'systemPrompt', title: '系统提示词', slots: { header: tooltipHeader('系统提示词', '角色设定') } },
+    { field: 'projectName', title: '所属项目', minWidth: 120 },
+    { field: 'roleType', title: '角色类型', width: 100, slots: { default: 'roleType_cell' } },
+    { field: 'roleLevel', title: '角色等级', width: 100, slots: { default: 'roleLevel_cell' } },
+    { field: 'modelName', title: 'AI模型', minWidth: 160 },
+    { field: 'systemPrompt', title: '系统提示词', minWidth: 200, showOverflow: 'tooltip', slots: { header: tooltipHeader('系统提示词', '角色设定') } },
     { field: 'status', title: '状态', width: 120, slots: { default: 'status_cell' } },
     { field: 'createdAt', title: '创建时间', width: 180, formatter: 'formatDateTime', sortable: true },
     { title: '操作', width: 240, fixed: 'right', slots: { default: 'action' } },
@@ -284,6 +285,18 @@ function handleBatchUpdateStatus() {
         <Button v-auth="['mvp:project_role:import']" class="ml-2" @click="handleImport">导入</Button>
         <Button class="ml-2" @click="handleDownloadTemplate">模板下载</Button>
         <Button v-auth="['mvp:project_role:batch-update']" class="ml-2" @click="handleBatchUpdateStatus">批量修改状态</Button>
+      </template>
+      <template #roleType_cell="{ row }">
+        <Tag v-if="roleTypeMap[row.roleType]" :color="roleTypeMap[row.roleType].color">
+          {{ roleTypeMap[row.roleType].label }}
+        </Tag>
+        <span v-else>{{ row.roleType || '-' }}</span>
+      </template>
+      <template #roleLevel_cell="{ row }">
+        <Tag v-if="roleLevelMap[row.roleLevel]" :color="roleLevelMap[row.roleLevel].color">
+          {{ roleLevelMap[row.roleLevel].label }}
+        </Tag>
+        <span v-else>{{ row.roleLevel || '-' }}</span>
       </template>
       <template #status_cell="{ row }">
         <Tag :color="getStatusColor(row.status)">
