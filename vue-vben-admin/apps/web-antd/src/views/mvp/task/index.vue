@@ -105,6 +105,9 @@ let statusTimer: ReturnType<typeof setInterval> | null = null;
 
 onMounted(() => {
   loadProjectStatus();
+  if (projectId.value) {
+    gridApi.reload();
+  }
   statusTimer = setInterval(loadProjectStatus, 5000);
 });
 
@@ -198,9 +201,10 @@ const gridOptions: VxeGridProps<TaskItem> = {
     expandAll: true,
   },
   proxyConfig: {
+    autoLoad: false, // 手动触发首次加载（等 projectId 就绪）
     ajax: {
       query: async () => {
-        if (!projectId.value) return [];
+        if (!projectId.value) return { items: [], total: 0 };
         const params: Record<string, any> = {
           projectID: projectId.value,
         };
@@ -210,7 +214,8 @@ const gridOptions: VxeGridProps<TaskItem> = {
           params.batchNo = searchBatchNo.value;
         }
         if (searchRole.value) params.roleType = searchRole.value;
-        return (await getTaskTree(params as any)) ?? [];
+        const list = (await getTaskTree(params as any)) ?? [];
+        return { items: list, total: list.length };
       },
     },
   },
