@@ -101,13 +101,20 @@ func (r *AiderRunner) buildArgs(cfg *AiderConfig) []string {
 		"--no-show-model-warnings",
 		"--no-pretty",
 		"--no-stream",
+		"--no-browser",
 		"--yes-always",
 		"--chat-language", "Chinese",
 	}
 
 	// 自动提交
 	if cfg.AutoCommit {
-		args[2] = "--auto-commits" // 替换 --no-auto-commits
+		// 替换 --no-auto-commits（索引2）为 --auto-commits
+		for i, a := range args {
+			if a == "--no-auto-commits" {
+				args[i] = "--auto-commits"
+				break
+			}
+		}
 	}
 
 	// 系统提示词（通过 --message-file 或 inline）
