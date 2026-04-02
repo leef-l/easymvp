@@ -91,6 +91,13 @@ func (s *sProjectRole) Detail(ctx context.Context, id snowflake.JsonInt64) (out 
 			out.ProjectName = val.String()
 		}
 	}
+	// 查询AI模型关联显示
+	if out.ModelID != 0 {
+		val, err := g.DB().Ctx(ctx).Model("ai_model").Where("id", out.ModelID).Where("deleted_at", nil).Value("name")
+		if err == nil {
+			out.ModelName = val.String()
+		}
+	}
 	return
 }
 
@@ -113,6 +120,7 @@ func (s *sProjectRole) applyListFilter(ctx context.Context, in *model.ProjectRol
 
 // fillRefFields 批量填充关联显示字段（避免 N+1 查询）
 func (s *sProjectRole) fillRefFields(ctx context.Context, list []*model.ProjectRoleListOutput) {
+	// 填充项目名称
 	{
 		idSet := make(map[int64]struct{})
 		for _, item := range list {
@@ -138,6 +146,37 @@ func (s *sProjectRole) fillRefFields(ctx context.Context, list []*model.ProjectR
 				for _, item := range list {
 					if val, ok := refMap[int64(item.ProjectID)]; ok {
 						item.ProjectName = val
+					}
+				}
+			}
+		}
+	}
+	// 填充AI模型名称
+	{
+		idSet := make(map[int64]struct{})
+		for _, item := range list {
+			if item.ModelID != 0 {
+				idSet[int64(item.ModelID)] = struct{}{}
+			}
+		}
+		if len(idSet) > 0 {
+			ids := make([]int64, 0, len(idSet))
+			for id := range idSet {
+				ids = append(ids, id)
+			}
+			rows, err := g.DB().Ctx(ctx).Model("ai_model").
+				Fields("id", "name").
+				Where("deleted_at", nil).
+				WhereIn("id", ids).
+				All()
+			if err == nil {
+				refMap := make(map[int64]string, len(rows))
+				for _, row := range rows {
+					refMap[row["id"].Int64()] = row["name"].String()
+				}
+				for _, item := range list {
+					if val, ok := refMap[int64(item.ModelID)]; ok {
+						item.ModelName = val
 					}
 				}
 			}
