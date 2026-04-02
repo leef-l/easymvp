@@ -105,9 +105,6 @@ let statusTimer: ReturnType<typeof setInterval> | null = null;
 
 onMounted(() => {
   loadProjectStatus();
-  if (projectId.value) {
-    gridApi.reload();
-  }
   statusTimer = setInterval(loadProjectStatus, 5000);
 });
 
@@ -201,13 +198,10 @@ const gridOptions: VxeGridProps<TaskItem> = {
     expandAll: true,
   },
   proxyConfig: {
-    autoLoad: false, // 手动触发首次加载（等 projectId 就绪）
     ajax: {
       query: async () => {
-        if (!projectId.value) return { items: [], total: 0 };
-        const params: Record<string, any> = {
-          projectID: projectId.value,
-        };
+        const params: Record<string, any> = {};
+        if (projectId.value) params.projectID = projectId.value;
         if (searchName.value) params.name = searchName.value;
         if (searchStatus.value) params.status = searchStatus.value;
         if (searchBatchNo.value !== undefined && searchBatchNo.value !== null) {
@@ -277,9 +271,10 @@ const batchOptions = ref<number[]>([]);
 
 // 监听表格数据变化，收集批次号
 async function refreshBatchOptions() {
-  if (!projectId.value) return;
   try {
-    const list = await getTaskTree({ projectID: projectId.value } as any);
+    const params: Record<string, any> = {};
+    if (projectId.value) params.projectID = projectId.value;
+    const list = await getTaskTree(params as any);
     const batchSet = new Set<number>();
     function collectBatch(items: TaskItem[]) {
       for (const item of items) {
