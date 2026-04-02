@@ -118,7 +118,7 @@ const gridOptions: VxeGridProps<ProjectItem> = {
     },
     {
       title: '操作',
-      width: 220,
+      width: 280,
       fixed: 'right',
       slots: { default: 'action' },
     },
@@ -154,6 +154,11 @@ const [Grid, gridApi] = useVbenVxeGrid({ formOptions, gridOptions });
 /** 新建项目 */
 function handleCreate() {
   formModalApi.setData(null).open();
+}
+
+/** 编辑项目 */
+function handleEdit(row: ProjectItem) {
+  formModalApi.setData({ id: row.id }).open();
 }
 
 /** 进入对话（与AI架构师对话） */
@@ -216,7 +221,7 @@ function handleDelete(row: ProjectItem) {
 <template>
   <Page auto-content-height>
     <!-- 弹窗组件挂载 -->
-    <FormModalComp />
+    <FormModalComp @success="() => gridApi.reload()" />
     <PauseModalComp @success="() => gridApi.reload()" />
     <StatusPanelComp @refresh="() => gridApi.reload()" />
 
@@ -284,6 +289,9 @@ function handleDelete(row: ProjectItem) {
         <template v-else-if="row.status === 'completed'">
           <Button type="link" size="small" @click="handleViewStatus(row)">查看详情</Button>
         </template>
+
+        <!-- 编辑按钮（任何状态都可以编辑） -->
+        <Button type="link" size="small" @click="handleEdit(row)">编辑</Button>
 
         <!-- 删除按钮（任何状态都可以删除） -->
         <Button

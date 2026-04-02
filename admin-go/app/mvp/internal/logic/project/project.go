@@ -52,7 +52,6 @@ func (s *sProject) Update(ctx context.Context, in *model.ProjectUpdateInput) err
 	data := g.Map{
 		dao.MvpProject.Columns().Name: in.Name,
 		dao.MvpProject.Columns().Description: in.Description,
-		dao.MvpProject.Columns().Status: in.Status,
 		dao.MvpProject.Columns().PauseReason: in.PauseReason,
 		dao.MvpProject.Columns().GlobalContext: in.GlobalContext,
 		dao.MvpProject.Columns().ArchitectModelId: in.ArchitectModelID,

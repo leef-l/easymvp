@@ -34,10 +34,10 @@ func (c *cProject) Update(ctx context.Context, req *v1.ProjectUpdateReq) (res *v
 		ID: req.ID,
 		Name: req.Name,
 		Description: req.Description,
-		Status: req.Status,
 		PauseReason: req.PauseReason,
 		GlobalContext: req.GlobalContext,
 		ArchitectModelID: req.ArchitectModelID,
+		WorkDir: req.WorkDir,
 	})
 	return
 }

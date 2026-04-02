@@ -30,13 +30,12 @@ type ProjectCreateRes struct {
 	g.Meta `mime:"application/json"`
 }
 
-// ProjectUpdateReq 更新MVP项目表请求
+// ProjectUpdateReq 更新MVP项目表请求（不包含 status，状态由工作流管理）
 type ProjectUpdateReq struct {
 	g.Meta `path:"/project/update" method:"put" tags:"MVP项目表" summary:"更新MVP项目表"`
 	ID     snowflake.JsonInt64 `json:"id" v:"required#ID不能为空" dc:"MVP项目表ID"`
 	Name string `json:"name" dc:"项目名称"`
 	Description string `json:"description" dc:"项目简介"`
-	Status string `json:"status" dc:"状态"`
 	PauseReason string `json:"pauseReason" dc:"暂停原因"`
 	GlobalContext string `json:"globalContext" dc:"项目全局上下文（架构师需求分析+方案设计的压缩摘要）"`
 	ArchitectModelID snowflake.JsonInt64 `json:"architectModelID" dc:"架构师使用的AI模型ID"`

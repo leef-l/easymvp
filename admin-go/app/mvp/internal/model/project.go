@@ -19,12 +19,11 @@ type ProjectCreateInput struct {
 	WorkDir string `json:"workDir"`
 }
 
-// ProjectUpdateInput 更新MVP项目表输入
+// ProjectUpdateInput 更新MVP项目表输入（不包含 status，状态由工作流管理）
 type ProjectUpdateInput struct {
 	ID snowflake.JsonInt64 `json:"id"`
 	Name string `json:"name"`
 	Description string `json:"description"`
-	Status string `json:"status"`
 	PauseReason string `json:"pauseReason"`
 	GlobalContext string `json:"globalContext"`
 	ArchitectModelID snowflake.JsonInt64 `json:"architectModelID"`

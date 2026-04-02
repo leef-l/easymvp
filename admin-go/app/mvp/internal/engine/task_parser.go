@@ -54,16 +54,43 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 		return 0, nil // 回复中没有任务清单，正常情况（还在讨论需求）
 	}
 
-	// 2. 清理该项目已有的 draft 任务（架构师可能多次输出方案，以最新为准）
+	// 2. 清理该项目所有已有任务、任务日志和依赖关系（重新拆分以最新方案为准）
+	// 2a. 获取所有任务ID，用于清理日志和依赖
+	oldTaskIDs, err := g.DB().Model("mvp_task").
+		Where("project_id", projectID).
+		Where("deleted_at IS NULL").
+		Fields("id").
+		Array()
+	if err != nil {
+		return 0, fmt.Errorf("查询旧任务失败: %w", err)
+	}
+	if len(oldTaskIDs) > 0 {
+		// 2b. 软删除任务日志
+		_, _ = g.DB().Model("mvp_task_log").
+			WhereIn("task_id", oldTaskIDs).
+			Where("deleted_at IS NULL").
+			Update(g.Map{
+				"deleted_at": gtime.Now(),
+				"updated_at": gtime.Now(),
+			})
+		// 2c. 删除任务依赖关系
+		_, _ = g.DB().Model("mvp_task_dependency").
+			WhereIn("task_id", oldTaskIDs).
+			Delete()
+		_, _ = g.DB().Model("mvp_task_dependency").
+			WhereIn("depends_on_id", oldTaskIDs).
+			Delete()
+	}
+	// 2d. 软删除所有任务
 	_, err = g.DB().Model("mvp_task").
 		Where("project_id", projectID).
-		Where("status", "draft").
+		Where("deleted_at IS NULL").
 		Update(g.Map{
 			"deleted_at": gtime.Now(),
 			"updated_at": gtime.Now(),
 		})
 	if err != nil {
-		return 0, fmt.Errorf("清理旧草稿失败: %w", err)
+		return 0, fmt.Errorf("清理旧任务失败: %w", err)
 	}
 
 	// 3. 第一遍：创建所有任务，建立 name→id 映射
