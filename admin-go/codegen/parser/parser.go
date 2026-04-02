@@ -326,8 +326,9 @@ func buildFieldMeta(col columnInfo) FieldMeta {
 	name := col.ColumnName
 	isID := name == "id"
 	// 外键判断：_id 后缀 + 排除特殊字段 + 必须是整数类型（varchar/char 类型的 _id 字段视为业务关联ID，非真正外键）
+	// parent_id 由 IsParentID 单独处理，不能再作为普通外键参与模板分支，否则会生成重复的树形依赖。
 	isIntType := col.DataType == "bigint" || col.DataType == "int" || col.DataType == "smallint" || col.DataType == "tinyint" || col.DataType == "mediumint"
-	isForeignKey := strings.HasSuffix(name, "_id") && name != "id" && name != "dept_id" && isIntType
+	isForeignKey := strings.HasSuffix(name, "_id") && name != "id" && name != "dept_id" && name != "parent_id" && isIntType
 	isMultiFK := strings.HasSuffix(name, "_ids")
 	isParentID := name == "parent_id"
 	isPassword := name == "password" || strings.HasSuffix(name, "_password") || strings.HasSuffix(name, "_pwd")

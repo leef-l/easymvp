@@ -14,11 +14,9 @@ import type { TaskItem } from '#/api/mvp/task/types';
 
 const treeData = ref<TaskItem[]>([]);
 import { getProjectList } from '#/api/mvp/project';
-import { getTaskTree } from '#/api/mvp/task';
 import { getConversationList } from '#/api/mvp/conversation';
 
 const projectIDOptions = ref<{ label: string; value: string }[]>([]);
-const parentIDOptions = ref<{ label: string; value: string }[]>([]);
 const conversationIDOptions = ref<{ label: string; value: string }[]>([]);
 /** 渲染带 Tooltip 的表单 label */
 function tooltipLabel(label: string, tip: string) {
@@ -209,19 +207,6 @@ const [Modal, modalApi] = useVbenModal({
           label: item.name || item.id,
           value: item.id,
         }));
-      } catch {
-        // ignore
-      }
-      // 加载父任务ID，0=顶级树形数据
-      try {
-        const taskRes = await getTaskTree();
-        parentIDOptions.value = taskRes ?? [];
-        formApi.updateSchema([
-          {
-            fieldName: 'parentID',
-            componentProps: { treeData: parentIDOptions.value },
-          },
-        ]);
       } catch {
         // ignore
       }
