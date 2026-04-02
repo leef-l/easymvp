@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
 
-import { uploadFile } from '#/api/upload/uploader';
+import { uploadFile } from '#/api/upload';
 
 // TinyMCE v8 core (theme is built-in, no separate themes/silver)
 import 'tinymce';
