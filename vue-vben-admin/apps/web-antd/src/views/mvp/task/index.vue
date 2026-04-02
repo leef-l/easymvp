@@ -2,6 +2,7 @@
 import { h, ref, computed, onMounted, onUnmounted } from 'vue';
 import type { VxeGridProps } from '#/adapter/vxe-table';
 import { useRoute, useRouter } from 'vue-router';
+import dayjs from 'dayjs';
 
 import { useVbenModal } from '@vben/common-ui';
 import {
@@ -177,13 +178,17 @@ const gridOptions: VxeGridProps<TaskItem> = {
       field: 'startedAt',
       title: '开始时间',
       width: 160,
-      formatter: 'formatDateTime',
+      formatter({ cellValue }) {
+        return cellValue ? dayjs(cellValue).format('YYYY-MM-DD HH:mm:ss') : '-';
+      },
     },
     {
       field: 'completedAt',
       title: '完成时间',
       width: 160,
-      formatter: 'formatDateTime',
+      formatter({ cellValue }) {
+        return cellValue ? dayjs(cellValue).format('YYYY-MM-DD HH:mm:ss') : '-';
+      },
     },
     {
       title: '操作',
