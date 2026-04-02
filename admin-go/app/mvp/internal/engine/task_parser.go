@@ -54,7 +54,18 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 		return 0, nil // 回复中没有任务清单，正常情况（还在讨论需求）
 	}
 
-	// 2. 清理该项目所有已有任务、任务日志和依赖关系（重新拆分以最新方案为准）
+	// 2. 查询项目的创建人和部门（任务继承项目的 created_by 和 dept_id）
+	projectInfo, err := g.DB().Model("mvp_project").
+		Where("id", projectID).
+		Fields("created_by, dept_id").
+		One()
+	if err != nil {
+		return 0, fmt.Errorf("查询项目信息失败: %w", err)
+	}
+	createdBy := projectInfo["created_by"].Int64()
+	deptID := projectInfo["dept_id"].Int64()
+
+	// 3. 清理该项目所有已有任务、任务日志和依赖关系（重新拆分以最新方案为准）
 	// 2a. 获取所有任务ID，用于清理日志和依赖
 	oldTaskIDs, err := g.DB().Model("mvp_task").
 		Where("project_id", projectID).
@@ -139,6 +150,8 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 			"sort":              sort,
 			"affected_resources": resourcesJSON,
 			"depends_on":        dependsJSON,
+			"created_by":        createdBy,
+			"dept_id":           deptID,
 			"created_at":        gtime.Now(),
 			"updated_at":        gtime.Now(),
 		})
