@@ -139,6 +139,12 @@ func (r *AiderRunner) buildArgs(cfg *AiderConfig) []string {
 func (r *AiderRunner) buildEnv(cfg *AiderConfig) []string {
 	var env []string
 
+	// 强制 UTF-8 编码，避免 Windows GBK 环境下 Rich 库输出 Unicode 字符崩溃
+	env = append(env,
+		"PYTHONIOENCODING=utf-8",
+		"PYTHONLEGACYWINDOWSSTDIO=0",
+	)
+
 	switch cfg.ProviderType {
 	case "anthropic":
 		env = append(env,
