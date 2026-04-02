@@ -14,7 +14,6 @@ import type { TaskItem } from '#/api/mvp/task/types';
 
 const treeData = ref<TaskItem[]>([]);
 import { getProjectList } from '#/api/mvp/project';
-import { getTaskTree } from '#/api/mvp/task';
 
 const projectIDOptions = ref<{ label: string; value: string }[]>([]);
 const parentIDOptions = ref<{ label: string; value: string }[]>([]);
