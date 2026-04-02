@@ -6,10 +6,19 @@ export default defineConfig(async () => {
     vite: {
       server: {
         proxy: {
-          '/api': {
+          '/api/system': {
             changeOrigin: true,
-            // 后端 GoFrame 服务地址，不 rewrite，直接转发
-            target: 'https://pw.easytestdev.online',
+            target: 'http://localhost:9000',
+            ws: true,
+          },
+          '/api/ai': {
+            changeOrigin: true,
+            target: 'http://localhost:9001',
+            ws: true,
+          },
+          '/api/mvp': {
+            changeOrigin: true,
+            target: 'http://localhost:9002',
             ws: true,
           },
         },
