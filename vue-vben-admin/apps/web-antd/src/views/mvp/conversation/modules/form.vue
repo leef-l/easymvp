@@ -52,9 +52,7 @@ const [Form, formApi] = useVbenForm({
       component: 'Input',
       fieldName: 'roleType',
       label: '对话角色类型',
-      rules: [
-        { required: true, message: '对话角色类型不能为空' },
-      ],
+      rules: 'required',
       componentProps: { placeholder: '请输入对话角色类型', maxlength: 20 },
     },
     {

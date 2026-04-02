@@ -9,16 +9,10 @@ import {
   updateProvider,
 } from '#/api/ai/provider';
 
+
 const emit = defineEmits<{ success: [] }>();
 const isEdit = ref(false);
 const editId = ref('');
-
-/** 供应商类型选项 */
-const providerTypeOptions = [
-  { label: 'OpenAI 兼容', value: 'openai_compatible' },
-  { label: 'Anthropic', value: 'anthropic' },
-  { label: 'Google', value: 'google' },
-];
 
 /** 表单配置 */
 const [Form, formApi] = useVbenForm({
@@ -28,54 +22,48 @@ const [Form, formApi] = useVbenForm({
       component: 'Input',
       fieldName: 'name',
       label: '供应商名称',
-      rules: [
-        { required: true, message: '供应商名称不能为空' },
-      ],
-      componentProps: { placeholder: '请输入供应商名称，如：OpenAI', maxlength: 100 },
+      rules: 'required',
+      componentProps: { placeholder: '请输入供应商名称', maxlength: 100 },
     },
     {
       component: 'Input',
       fieldName: 'code',
       label: '供应商代码',
-      rules: [
-        { required: true, message: '供应商代码不能为空' },
-      ],
-      componentProps: { placeholder: '请输入唯一标识代码，如：openai', maxlength: 50 },
+      rules: 'required',
+      componentProps: { placeholder: '请输入供应商代码', maxlength: 50 },
     },
     {
-      component: 'Select',
+      component: 'Input',
       fieldName: 'providerType',
-      label: '供应商类型',
-      rules: 'selectRequired',
-      componentProps: {
-        options: providerTypeOptions,
-        placeholder: '请选择供应商类型',
-        allowClear: true,
-        class: 'w-full',
-      },
+      label: 'Provider类型',
+      rules: 'required',
+      componentProps: { placeholder: '请输入Provider类型', maxlength: 20 },
     },
     {
       component: 'Input',
       fieldName: 'baseURL',
-      label: 'Base URL',
-      rules: [
-        { required: true, message: 'Base URL 不能为空' },
-      ],
-      componentProps: { placeholder: '请输入 API 基础地址，如：https://api.openai.com/v1', maxlength: 500 },
+      label: 'API基础地址',
+      rules: 'required',
+      componentProps: { placeholder: '请输入URL地址', maxlength: 500, addonBefore: 'https://' },
+    },
+    {
+      component: 'IconPicker',
+      fieldName: 'icon',
+      label: '图标URL',
+      componentProps: { placeholder: '请选择图标' },
     },
     {
       component: 'Switch',
       fieldName: 'status',
       label: '状态',
-      componentProps: { checkedValue: 1, unCheckedValue: 0, checkedChildren: '启用', unCheckedChildren: '禁用' },
+      componentProps: { checkedValue: 1, unCheckedValue: 0 },
       defaultValue: 1,
     },
     {
       component: 'InputNumber',
       fieldName: 'sort',
       label: '排序',
-      componentProps: { placeholder: '数字越小越靠前', class: 'w-full', min: 0 },
-      defaultValue: 0,
+      componentProps: { placeholder: '请输入排序', class: 'w-full' },
     },
   ],
 });
@@ -110,7 +98,7 @@ const [Modal, modalApi] = useVbenModal({
       if (data?.id) {
         isEdit.value = true;
         editId.value = data.id;
-        modalApi.setState({ title: '编辑供应商' });
+        modalApi.setState({ title: '编辑AI供应商表' });
         try {
           const detail = await getProviderDetail(data.id);
           if (detail) {
@@ -122,7 +110,7 @@ const [Modal, modalApi] = useVbenModal({
       } else {
         isEdit.value = false;
         editId.value = '';
-        modalApi.setState({ title: '新建供应商' });
+        modalApi.setState({ title: '新建AI供应商表' });
         formApi.resetForm();
       }
     }

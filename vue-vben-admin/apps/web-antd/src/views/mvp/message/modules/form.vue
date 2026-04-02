@@ -31,9 +31,7 @@ const [Form, formApi] = useVbenForm({
       component: 'Input',
       fieldName: 'role',
       label: '消息角色',
-      rules: [
-        { required: true, message: '消息角色不能为空' },
-      ],
+      rules: 'required',
       componentProps: { placeholder: '请输入消息角色', maxlength: 20 },
     },
     {

@@ -38,9 +38,7 @@ const [Form, formApi] = useVbenForm({
       component: 'Input',
       fieldName: 'action',
       label: '动作',
-      rules: [
-        { required: true, message: '动作不能为空' },
-      ],
+      rules: 'required',
       componentProps: { placeholder: '请输入动作', maxlength: 50 },
     },
     {

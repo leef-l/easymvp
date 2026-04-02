@@ -14,9 +14,12 @@ import type { TaskItem } from '#/api/mvp/task/types';
 
 const treeData = ref<TaskItem[]>([]);
 import { getProjectList } from '#/api/mvp/project';
+import { getTaskTree } from '#/api/mvp/task';
+import { getConversationList } from '#/api/mvp/conversation';
 
 const projectIDOptions = ref<{ label: string; value: string }[]>([]);
 const parentIDOptions = ref<{ label: string; value: string }[]>([]);
+const conversationIDOptions = ref<{ label: string; value: string }[]>([]);
 /** 渲染带 Tooltip 的表单 label */
 function tooltipLabel(label: string, tip: string) {
   return () => h('span', {}, [
@@ -59,9 +62,7 @@ const [Form, formApi] = useVbenForm({
       component: 'Input',
       fieldName: 'name',
       label: '任务名称',
-      rules: [
-        { required: true, message: '任务名称不能为空' },
-      ],
+      rules: 'required',
       componentProps: { placeholder: '请输入任务名称', maxlength: 500 },
     },
     {
@@ -74,9 +75,7 @@ const [Form, formApi] = useVbenForm({
       component: 'Input',
       fieldName: 'roleType',
       label: '角色类型',
-      rules: [
-        { required: true, message: '角色类型不能为空' },
-      ],
+      rules: 'required',
       componentProps: { placeholder: '请输入角色类型', maxlength: 20 },
     },
     {
@@ -90,6 +89,12 @@ const [Form, formApi] = useVbenForm({
       fieldName: 'modelID',
       label: '使用的AI模型ID',
       componentProps: { placeholder: '请输入使用的AI模型ID' },
+    },
+    {
+      component: 'Select',
+      fieldName: 'conversationID',
+      label: '任务对话ID，用于检测任务状态',
+      componentProps: { options: conversationIDOptions, placeholder: '请选择任务对话ID，用于检测任务状态', allowClear: true, class: 'w-full' },
     },
     {
       component: 'Switch',
@@ -217,6 +222,16 @@ const [Modal, modalApi] = useVbenModal({
             componentProps: { treeData: parentIDOptions.value },
           },
         ]);
+      } catch {
+        // ignore
+      }
+      // 加载任务对话ID，用于检测任务状态选项
+      try {
+        const conversationRes = await getConversationList({ pageNum: 1, pageSize: 1000 });
+        conversationIDOptions.value = (conversationRes?.list ?? []).map((item: any) => ({
+          label: item.title || item.id,
+          value: item.id,
+        }));
       } catch {
         // ignore
       }
