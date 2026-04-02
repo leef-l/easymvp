@@ -235,9 +235,10 @@ function handleView(row: TaskItem) {
 
 /** 重试失败任务 */
 async function handleRetry(row: TaskItem) {
-  if (!projectId.value) return;
+  const pid = projectId.value || row.projectID;
+  if (!pid) return;
   try {
-    await retryTask({ projectID: projectId.value, taskID: row.id });
+    await retryTask({ projectID: pid, taskID: row.id });
     message.success('已提交重试请求');
     gridApi.reload();
     loadProjectStatus();
@@ -319,66 +320,68 @@ onMounted(() => {
       <Button :icon="h(ReloadOutlined)" @click="handleRefresh">刷新</Button>
     </div>
 
-    <!-- 统计卡片 -->
-    <Row :gutter="16" class="mb-4">
-      <Col :span="6">
-        <Card size="small" class="stat-card">
-          <Statistic
-            title="总任务"
-            :value="projectStatus.totalTasks"
-            :prefix="h(UnorderedListOutlined, { style: { color: '#8c8c8c' } })"
-          />
-        </Card>
-      </Col>
-      <Col :span="6">
-        <Card size="small" class="stat-card">
-          <Statistic
-            title="执行中"
-            :value="projectStatus.statusCounts?.running || 0"
-            :value-style="{ color: '#1677ff' }"
-            :prefix="h(LoadingOutlined, { style: { color: '#1677ff' } })"
-          />
-        </Card>
-      </Col>
-      <Col :span="6">
-        <Card size="small" class="stat-card">
-          <Statistic
-            title="已完成"
-            :value="projectStatus.statusCounts?.completed || 0"
-            :value-style="{ color: '#52c41a' }"
-            :prefix="h(CheckCircleOutlined, { style: { color: '#52c41a' } })"
-          />
-        </Card>
-      </Col>
-      <Col :span="6">
-        <Card size="small" class="stat-card">
-          <Statistic
-            title="失败"
-            :value="(projectStatus.statusCounts?.failed || 0) + (projectStatus.statusCounts?.submit_error || 0)"
-            :value-style="{ color: '#ff4d4f' }"
-            :prefix="h(CloseCircleOutlined, { style: { color: '#ff4d4f' } })"
-          />
-        </Card>
-      </Col>
-    </Row>
+    <!-- 统计卡片（仅项目维度时显示） -->
+    <template v-if="projectId">
+      <Row :gutter="16" class="mb-4">
+        <Col :span="6">
+          <Card size="small" class="stat-card">
+            <Statistic
+              title="总任务"
+              :value="projectStatus.totalTasks"
+              :prefix="h(UnorderedListOutlined, { style: { color: '#8c8c8c' } })"
+            />
+          </Card>
+        </Col>
+        <Col :span="6">
+          <Card size="small" class="stat-card">
+            <Statistic
+              title="执行中"
+              :value="projectStatus.statusCounts?.running || 0"
+              :value-style="{ color: '#1677ff' }"
+              :prefix="h(LoadingOutlined, { style: { color: '#1677ff' } })"
+            />
+          </Card>
+        </Col>
+        <Col :span="6">
+          <Card size="small" class="stat-card">
+            <Statistic
+              title="已完成"
+              :value="projectStatus.statusCounts?.completed || 0"
+              :value-style="{ color: '#52c41a' }"
+              :prefix="h(CheckCircleOutlined, { style: { color: '#52c41a' } })"
+            />
+          </Card>
+        </Col>
+        <Col :span="6">
+          <Card size="small" class="stat-card">
+            <Statistic
+              title="失败"
+              :value="(projectStatus.statusCounts?.failed || 0) + (projectStatus.statusCounts?.submit_error || 0)"
+              :value-style="{ color: '#ff4d4f' }"
+              :prefix="h(CloseCircleOutlined, { style: { color: '#ff4d4f' } })"
+            />
+          </Card>
+        </Col>
+      </Row>
 
-    <!-- 进度条 -->
-    <Card size="small" class="mb-4">
-      <div class="flex items-center gap-3">
-        <span class="text-gray-600 text-sm whitespace-nowrap">执行进度</span>
-        <Progress
-          :percent="progressPercent"
-          :stroke-color="{ '0%': '#108ee9', '100%': '#87d068' }"
-          class="flex-1"
-        />
-        <span class="text-gray-500 text-sm whitespace-nowrap">
-          {{ projectStatus.statusCounts?.completed || 0 }} / {{ projectStatus.totalTasks }}
-        </span>
-      </div>
-      <div v-if="projectStatus.pauseReason" class="mt-2 text-orange-500 text-sm">
-        暂停原因：{{ projectStatus.pauseReason }}
-      </div>
-    </Card>
+      <!-- 进度条 -->
+      <Card size="small" class="mb-4">
+        <div class="flex items-center gap-3">
+          <span class="text-gray-600 text-sm whitespace-nowrap">执行进度</span>
+          <Progress
+            :percent="progressPercent"
+            :stroke-color="{ '0%': '#108ee9', '100%': '#87d068' }"
+            class="flex-1"
+          />
+          <span class="text-gray-500 text-sm whitespace-nowrap">
+            {{ projectStatus.statusCounts?.completed || 0 }} / {{ projectStatus.totalTasks }}
+          </span>
+        </div>
+        <div v-if="projectStatus.pauseReason" class="mt-2 text-orange-500 text-sm">
+          暂停原因：{{ projectStatus.pauseReason }}
+        </div>
+      </Card>
+    </template>
 
     <!-- 搜索筛选栏 -->
     <Card size="small" class="mb-3">

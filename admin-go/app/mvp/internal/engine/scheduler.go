@@ -300,7 +300,7 @@ func (s *Scheduler) checkProjectDone(projectID int64) {
 
 // RetryTask 重新执行失败的任务
 func (s *Scheduler) RetryTask(projectID int64, taskID int64) error {
-	_, err := g.DB().Model("mvp_task").Where("id", taskID).Where("status", "failed").Update(g.Map{
+	_, err := g.DB().Model("mvp_task").Where("id", taskID).WhereIn("status", g.Slice{"failed", "submit_error"}).Update(g.Map{
 		"status":        "pending",
 		"error_message": nil,
 		"updated_at":    gtime.Now(),
