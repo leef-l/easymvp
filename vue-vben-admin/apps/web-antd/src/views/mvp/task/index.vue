@@ -230,7 +230,7 @@ const [Grid, gridApi] = useVbenVxeGrid({ gridOptions });
 
 /** 查看详情 */
 function handleView(row: TaskItem) {
-  detailDrawerApi.setData({ id: row.id }).open();
+  detailDrawerApi.setData({ id: row.id, projectId: row.projectID }).open();
 }
 
 /** 重试失败任务 */
