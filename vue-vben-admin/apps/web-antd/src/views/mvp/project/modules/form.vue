@@ -9,11 +9,17 @@ import {
   getProjectDetail,
   updateProject,
 } from '#/api/mvp/project';
-import { createProject as workflowCreateProject } from '#/api/mvp/workflow';
+import { createProject as workflowCreateProject, getRolePresets } from '#/api/mvp/workflow';
 import { getModelList } from '#/api/ai/model';
 
 const router = useRouter();
-const modelIDOptions = ref<{ label: string; value: string }[]>([]);
+
+/** 架构师模型选项（仅 capability=architect） */
+const architectModelOptions = ref<{ label: string; value: string }[]>([]);
+/** 所有模型选项（编辑时用） */
+const allModelOptions = ref<{ label: string; value: string }[]>([]);
+/** 预设中的架构师默认模型ID */
+const presetArchitectModelID = ref<string>('');
 
 /** 渲染带 Tooltip 的表单 label */
 function tooltipLabel(label: string, tip: string) {
@@ -47,9 +53,9 @@ const createSchema = [
   {
     component: 'Select',
     fieldName: 'architectModelID',
-    label: '架构师AI模型',
+    label: tooltipLabel('架构师AI模型', '默认值来自角色预设模板，可修改。仅显示角色为「架构师」的模型'),
     rules: 'selectRequired',
-    componentProps: { options: modelIDOptions, placeholder: '请选择架构师使用的AI模型', allowClear: true, showSearch: true, optionFilterProp: 'label', class: 'w-full' },
+    componentProps: { options: architectModelOptions, placeholder: '请选择架构师使用的AI模型', allowClear: true, showSearch: true, optionFilterProp: 'label', class: 'w-full' },
   },
 ];
 
@@ -84,7 +90,7 @@ const editSchema = [
     component: 'Select',
     fieldName: 'architectModelID',
     label: '架构师AI模型',
-    componentProps: { options: modelIDOptions, placeholder: '请选择架构师使用的AI模型', allowClear: true, showSearch: true, optionFilterProp: 'label', class: 'w-full' },
+    componentProps: { options: allModelOptions, placeholder: '请选择架构师使用的AI模型', allowClear: true, showSearch: true, optionFilterProp: 'label', class: 'w-full' },
   },
 ];
 
@@ -111,7 +117,7 @@ const [Modal, modalApi] = useVbenModal({
         emit('success');
         modalApi.close();
       } else {
-        // 调用工作流 API 创建项目（会自动初始化架构师角色和对话）
+        // 调用工作流 API 创建项目（会自动根据预设创建全部角色配置）
         const res = await workflowCreateProject({
           name: values.name,
           description: values.description || '',
@@ -135,22 +141,20 @@ const [Modal, modalApi] = useVbenModal({
   },
   async onOpenChange(isOpen: boolean) {
     if (isOpen) {
-      // 加载AI模型选项
-      try {
-        const modelRes = await getModelList({ pageNum: 1, pageSize: 1000 });
-        modelIDOptions.value = (modelRes?.list ?? []).map((item: any) => ({
-          label: `${item.name} (${item.modelCode})`,
-          value: item.id,
-        }));
-      } catch {
-        // ignore
-      }
       const data = modalApi.getData<{ id?: string } | null>();
       if (data?.id) {
+        // 编辑模式：加载所有模型
         isEdit.value = true;
         editId.value = data.id;
         modalApi.setState({ title: '编辑项目' });
         formApi.setState({ schema: editSchema });
+        try {
+          const modelRes = await getModelList({ pageNum: 1, pageSize: 1000 });
+          allModelOptions.value = (modelRes?.list ?? []).map((item: any) => ({
+            label: `${item.name} (${item.modelCode})`,
+            value: item.id,
+          }));
+        } catch { /* ignore */ }
         try {
           const detail = await getProjectDetail(data.id);
           if (detail) {
@@ -160,11 +164,32 @@ const [Modal, modalApi] = useVbenModal({
           message.error('获取详情失败');
         }
       } else {
+        // 新建模式：只加载架构师模型 + 读取预设默认值
         isEdit.value = false;
         editId.value = '';
         modalApi.setState({ title: '新建项目' });
         formApi.setState({ schema: createSchema });
         formApi.resetForm();
+        try {
+          // 并行加载架构师模型列表和预设
+          const [modelRes, presetRes] = await Promise.all([
+            getModelList({ pageNum: 1, pageSize: 1000, capability: 'architect' }),
+            getRolePresets(),
+          ]);
+          // 架构师模型下拉选项
+          architectModelOptions.value = (modelRes?.list ?? []).map((item: any) => ({
+            label: `${item.name} (${item.modelCode})`,
+            value: item.id,
+          }));
+          // 读取预设中架构师的默认模型
+          const architectPreset = (presetRes?.list ?? []).find(
+            (p) => p.roleType === 'architect',
+          );
+          if (architectPreset?.modelID) {
+            presetArchitectModelID.value = architectPreset.modelID;
+            formApi.setValues({ architectModelID: architectPreset.modelID });
+          }
+        } catch { /* ignore */ }
       }
     }
   },

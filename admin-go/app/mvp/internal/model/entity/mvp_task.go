@@ -18,6 +18,7 @@ type MvpTask struct {
 	RoleType          string      `orm:"role_type"          description:"角色类型：architect/implementer/auditor/coordinator"`                                     // 角色类型：architect/implementer/auditor/coordinator
 	RoleLevel         string      `orm:"role_level"         description:"角色等级：lite/pro/max"`                                                                  // 角色等级：lite/pro/max
 	ModelId           uint64      `orm:"model_id"           description:"使用的AI模型ID"`                                                                          // 使用的AI模型ID
+	ConversationId    int64       `orm:"conversation_id"    description:"任务对话ID，用于检测任务状态"`                                                                    // 任务对话ID，用于检测任务状态
 	Status            string      `orm:"status"             description:"状态：pending/running/auditing/completed/bug_found/bug_dispatched/submit_error/failed"` // 状态：pending/running/auditing/completed/bug_found/bug_dispatched/submit_error/failed
 	Sort              int         `orm:"sort"               description:"排序"`                                                                                 // 排序
 	BatchNo           int         `orm:"batch_no"           description:"执行批次号，同批次内可并行，批次间串行"`                                                                // 执行批次号，同批次内可并行，批次间串行

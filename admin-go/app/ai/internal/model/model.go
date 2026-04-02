@@ -90,6 +90,7 @@ type ModelListInput struct {
 	SupportsStream *int `json:"supportsStream"`
 	Status *int `json:"status"`
 	Name string `json:"name"`
+	Capability string `json:"capability"`
 }
 
 

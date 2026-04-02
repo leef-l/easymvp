@@ -83,3 +83,23 @@ type WorkflowProjectStatusRes struct {
 	TotalTasks   int               `json:"totalTasks"`
 	StatusCounts map[string]int    `json:"statusCounts"` // 各状态任务数量
 }
+
+// WorkflowRolePresetsReq 获取角色预设列表请求
+type WorkflowRolePresetsReq struct {
+	g.Meta `path:"/workflow/role-presets" method:"get" tags:"项目流程" summary:"获取角色预设列表"`
+}
+
+// WorkflowRolePresetsRes 获取角色预设列表响应
+type WorkflowRolePresetsRes struct {
+	g.Meta  `mime:"application/json"`
+	List    []RolePresetItem `json:"list"`
+}
+
+// RolePresetItem 角色预设项
+type RolePresetItem struct {
+	RoleType     string             `json:"roleType"`
+	RoleLevel    string             `json:"roleLevel"`
+	ModelID      snowflake.JsonInt64 `json:"modelID"`
+	ModelName    string             `json:"modelName"`
+	SystemPrompt string             `json:"systemPrompt"`
+}

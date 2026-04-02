@@ -11,6 +11,7 @@ import (
 	"easymvp/app/mvp/internal/controller/message"
 	"easymvp/app/mvp/internal/controller/project"
 	"easymvp/app/mvp/internal/controller/project_role"
+	"easymvp/app/mvp/internal/controller/role_preset"
 	"easymvp/app/mvp/internal/controller/task"
 	"easymvp/app/mvp/internal/controller/task_log"
 
@@ -34,6 +35,7 @@ var (
 						message.Message,
 						project.Project,
 						projectrole.ProjectRole,
+						rolepreset.RolePreset,
 						task.Task,
 						tasklog.TaskLog,
 					)

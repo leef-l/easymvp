@@ -87,11 +87,32 @@ func (s *Scheduler) Resume(ctx context.Context, projectID int64) error {
 }
 
 // CreateProject 创建项目并初始化架构师对话
+// architectModelID 为前端传入的架构师模型，若为 0 则从预设读取
 func CreateProject(ctx context.Context, name, description string, architectModelID int64, userID int64, deptID int64) (int64, int64, error) {
 	projectID := int64(snowflake.Generate())
 
-	// 1. 创建项目
-	_, err := g.DB().Model("mvp_project").Insert(g.Map{
+	// 1. 读取角色预设模板
+	presets, err := g.DB().Model("mvp_role_preset").
+		Where("status", 1).
+		Where("deleted_at IS NULL").
+		OrderAsc("sort").
+		All()
+	if err != nil {
+		return 0, 0, fmt.Errorf("读取角色预设失败: %w", err)
+	}
+
+	// 找到预设中的架构师模型作为兜底
+	if architectModelID == 0 {
+		for _, p := range presets {
+			if p["role_type"].String() == "architect" && p["model_id"].Int64() > 0 {
+				architectModelID = p["model_id"].Int64()
+				break
+			}
+		}
+	}
+
+	// 2. 创建项目
+	_, err = g.DB().Model("mvp_project").Insert(g.Map{
 		"id":                 projectID,
 		"name":               name,
 		"description":        description,
@@ -106,14 +127,75 @@ func CreateProject(ctx context.Context, name, description string, architectModel
 		return 0, 0, fmt.Errorf("创建项目失败: %w", err)
 	}
 
-	// 2. 创建架构师角色配置
+	// 3. 批量查询预设关联的模型，获取 role_prompt
+	modelIDs := make([]int64, 0, len(presets))
+	for _, p := range presets {
+		if mid := p["model_id"].Int64(); mid > 0 {
+			modelIDs = append(modelIDs, mid)
+		}
+	}
 	if architectModelID > 0 {
+		modelIDs = append(modelIDs, architectModelID)
+	}
+	modelPromptMap := make(map[int64]string)
+	if len(modelIDs) > 0 {
+		models, _ := g.DB().Model("ai_model").
+			Fields("id, role_prompt").
+			WhereIn("id", modelIDs).
+			Where("deleted_at IS NULL").
+			All()
+		for _, m := range models {
+			modelPromptMap[m["id"].Int64()] = m["role_prompt"].String()
+		}
+	}
+
+	// 4. 根据预设模板创建项目角色配置
+	for _, p := range presets {
+		roleType := p["role_type"].String()
+		modelID := p["model_id"].Int64()
+
+		// 架构师角色：优先用前端传入的模型
+		if roleType == "architect" {
+			modelID = architectModelID
+		}
+
+		// 系统提示词优先级：模型 role_prompt > 预设 system_prompt
+		// 架构师特殊处理：动态拼接项目信息
+		systemPrompt := ""
+		if roleType == "architect" {
+			systemPrompt = buildArchitectPrompt(name, description, modelPromptMap[modelID])
+		} else if rp, ok := modelPromptMap[modelID]; ok && rp != "" {
+			systemPrompt = rp
+		} else {
+			systemPrompt = p["system_prompt"].String()
+		}
+
+		_, err = g.DB().Model("mvp_project_role").Insert(g.Map{
+			"id":            int64(snowflake.Generate()),
+			"project_id":    projectID,
+			"role_type":     roleType,
+			"role_level":    p["role_level"].String(),
+			"model_id":      modelID,
+			"system_prompt": systemPrompt,
+			"status":        1,
+			"created_by":    userID,
+			"dept_id":       deptID,
+			"created_at":    gtime.Now(),
+			"updated_at":    gtime.Now(),
+		})
+		if err != nil {
+			return 0, 0, fmt.Errorf("创建角色配置(%s)失败: %w", roleType, err)
+		}
+	}
+
+	// 如果预设为空，至少创建架构师角色（兼容无预设场景）
+	if len(presets) == 0 && architectModelID > 0 {
 		_, err = g.DB().Model("mvp_project_role").Insert(g.Map{
 			"id":            int64(snowflake.Generate()),
 			"project_id":    projectID,
 			"role_type":     "architect",
 			"model_id":      architectModelID,
-			"system_prompt": buildArchitectPrompt(name, description),
+			"system_prompt": buildArchitectPrompt(name, description, modelPromptMap[architectModelID]),
 			"status":        1,
 			"created_by":    userID,
 			"dept_id":       deptID,
@@ -125,7 +207,7 @@ func CreateProject(ctx context.Context, name, description string, architectModel
 		}
 	}
 
-	// 3. 创建架构师对话（项目级对话）
+	// 4. 创建架构师对话（项目级对话）
 	convID := int64(snowflake.Generate())
 	_, err = g.DB().Model("mvp_conversation").Insert(g.Map{
 		"id":         convID,
@@ -146,7 +228,15 @@ func CreateProject(ctx context.Context, name, description string, architectModel
 }
 
 // buildArchitectPrompt 构建架构师系统提示词
-func buildArchitectPrompt(projectName, projectDesc string) string {
+// 优先使用模型自带的 role_prompt，拼接项目上下文信息
+func buildArchitectPrompt(projectName, projectDesc string, modelRolePrompt string) string {
+	projectContext := fmt.Sprintf("\n\n===== 当前项目 =====\n项目名称：%s\n项目简介：%s", projectName, projectDesc)
+
+	if modelRolePrompt != "" {
+		return modelRolePrompt + projectContext
+	}
+
+	// 兜底：模型没有配 role_prompt 时使用默认提示词
 	return fmt.Sprintf(`你是一个资深软件架构师，负责项目「%s」的需求分析和方案设计。
 
 项目简介：

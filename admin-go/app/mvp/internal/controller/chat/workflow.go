@@ -68,6 +68,33 @@ func (c *cWorkflow) RetryTask(ctx context.Context, req *v1.WorkflowRetryTaskReq)
 	return &v1.WorkflowRetryTaskRes{}, nil
 }
 
+// RolePresets 获取角色预设列表（前端创建项目时读取默认模型）
+func (c *cWorkflow) RolePresets(ctx context.Context, req *v1.WorkflowRolePresetsReq) (res *v1.WorkflowRolePresetsRes, err error) {
+	presets, err := g.DB().Model("mvp_role_preset AS p").
+		LeftJoin("ai_model AS m", "m.id = p.model_id").
+		Fields("p.role_type, p.role_level, p.model_id, m.name AS model_name, p.system_prompt").
+		Where("p.status", 1).
+		Where("p.deleted_at IS NULL").
+		OrderAsc("p.sort").
+		All()
+	if err != nil {
+		return nil, err
+	}
+
+	list := make([]v1.RolePresetItem, 0, len(presets))
+	for _, p := range presets {
+		list = append(list, v1.RolePresetItem{
+			RoleType:     p["role_type"].String(),
+			RoleLevel:    p["role_level"].String(),
+			ModelID:      snowflake.JsonInt64(p["model_id"].Int64()),
+			ModelName:    p["model_name"].String(),
+			SystemPrompt: p["system_prompt"].String(),
+		})
+	}
+
+	return &v1.WorkflowRolePresetsRes{List: list}, nil
+}
+
 // ProjectStatus 获取项目状态
 func (c *cWorkflow) ProjectStatus(ctx context.Context, req *v1.WorkflowProjectStatusReq) (res *v1.WorkflowProjectStatusRes, err error) {
 	projectID := int64(req.ProjectID)

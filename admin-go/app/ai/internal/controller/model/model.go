@@ -93,6 +93,7 @@ func (c *cModel) List(ctx context.Context, req *v1.ModelListReq) (res *v1.ModelL
 		SupportsStream: req.SupportsStream,
 		Status: req.Status,
 		Name: req.Name,
+		Capability: req.Capability,
 	})
 	return
 }

@@ -123,6 +123,9 @@ func (s *sModel) applyListFilter(ctx context.Context, in *model.ModelListInput) 
 	if in.Name != "" {
 		m = m.WhereLike(dao.AiModel.Columns().Name, "%"+in.Name+"%")
 	}
+	if in.Capability != "" {
+		m = m.Where(dao.AiModel.Columns().Capability, in.Capability)
+	}
 	if in.StartTime != "" {
 		m = m.WhereGTE(dao.AiModel.Columns().CreatedAt, in.StartTime)
 	}

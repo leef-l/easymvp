@@ -38,6 +38,22 @@ export function retryTask(data: { projectID: string; taskID: string }) {
   return requestClient.post(`${PREFIX}/retry-task`, data);
 }
 
+/** 角色预设项 */
+export interface RolePresetItem {
+  roleType: string;
+  roleLevel: string;
+  modelID: string;
+  modelName: string;
+  systemPrompt: string;
+}
+
+/** 获取角色预设列表 */
+export function getRolePresets() {
+  return requestClient.get<{ list: RolePresetItem[] }>(
+    `${PREFIX}/role-presets`,
+  );
+}
+
 /** 获取项目当前状态及任务统计 */
 export function getProjectStatus(projectID: string) {
   return requestClient.get<{

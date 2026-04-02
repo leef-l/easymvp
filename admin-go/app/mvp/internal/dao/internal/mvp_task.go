@@ -29,6 +29,7 @@ type MvpTaskColumns struct {
 	RoleType          string // 角色类型：architect/implementer/auditor/coordinator
 	RoleLevel         string // 角色等级：lite/pro/max
 	ModelId           string // 使用的AI模型ID
+	ConversationId    string // 任务对话ID，用于检测任务状态
 	Status            string // 状态：pending/running/auditing/completed/bug_found/bug_dispatched/submit_error/failed
 	Sort              string // 排序
 	BatchNo           string // 执行批次号，同批次内可并行，批次间串行
@@ -56,6 +57,7 @@ var mvpTaskColumns = MvpTaskColumns{
 	RoleType:          "role_type",
 	RoleLevel:         "role_level",
 	ModelId:           "model_id",
+	ConversationId:    "conversation_id",
 	Status:            "status",
 	Sort:              "sort",
 	BatchNo:           "batch_no",

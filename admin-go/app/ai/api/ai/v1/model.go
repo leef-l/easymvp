@@ -114,6 +114,7 @@ type ModelListReq struct {
 	SupportsStream *int `json:"supportsStream" dc:"是否支持流式输出"`
 	Status *int `json:"status" dc:"状态"`
 	Name string `json:"name" dc:"模型显示名称"`
+	Capability string `json:"capability" dc:"能力/角色类型"`
 }
 
 // ModelListRes 获取AI模型表列表响应

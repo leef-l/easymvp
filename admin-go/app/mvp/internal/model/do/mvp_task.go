@@ -20,6 +20,7 @@ type MvpTask struct {
 	RoleType          any         // 角色类型：architect/implementer/auditor/coordinator
 	RoleLevel         any         // 角色等级：lite/pro/max
 	ModelId           any         // 使用的AI模型ID
+	ConversationId    any         // 任务对话ID，用于检测任务状态
 	Status            any         // 状态：pending/running/auditing/completed/bug_found/bug_dispatched/submit_error/failed
 	Sort              any         // 排序
 	BatchNo           any         // 执行批次号，同批次内可并行，批次间串行
