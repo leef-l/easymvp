@@ -90,10 +90,15 @@ const [Modal, modalApi] = useVbenModal({
 
 /** 重试 */
 async function handleRetry() {
-  if (!detail.value || !currentProjectId.value) return;
+  if (!detail.value) return;
+  const pid = currentProjectId.value || detail.value.projectID;
+  if (!pid) {
+    message.error('缺少项目ID，无法重试');
+    return;
+  }
   retrying.value = true;
   try {
-    await retryTask({ projectID: currentProjectId.value, taskID: detail.value.id });
+    await retryTask({ projectID: pid, taskID: detail.value.id });
     message.success('已提交重试请求');
     modalApi.close();
   } catch {
