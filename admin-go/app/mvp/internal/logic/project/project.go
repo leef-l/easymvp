@@ -84,6 +84,13 @@ func (s *sProject) Detail(ctx context.Context, id snowflake.JsonInt64) (out *mod
 	if err != nil {
 		return nil, err
 	}
+	// 查询架构师AI模型关联显示
+	if out.ArchitectModelID != 0 {
+		val, err := g.DB().Ctx(ctx).Model("ai_model").Where("id", out.ArchitectModelID).Where("deleted_at", nil).Value("name")
+		if err == nil {
+			out.ArchitectModelName = val.String()
+		}
+	}
 	return
 }
 
@@ -125,6 +132,7 @@ func (s *sProject) List(ctx context.Context, in *model.ProjectListInput) (list [
 	if err != nil {
 		return
 	}
+	s.fillRefFields(ctx, list)
 	return
 }
 // Export 导出MVP项目表（不分页）
@@ -134,7 +142,40 @@ func (s *sProject) Export(ctx context.Context, in *model.ProjectListInput) (list
 	if err != nil {
 		return
 	}
+	s.fillRefFields(ctx, list)
 	return
+}
+
+// fillRefFields 批量填充关联显示字段
+func (s *sProject) fillRefFields(ctx context.Context, list []*model.ProjectListOutput) {
+	idSet := make(map[int64]struct{})
+	for _, item := range list {
+		if item.ArchitectModelID != 0 {
+			idSet[int64(item.ArchitectModelID)] = struct{}{}
+		}
+	}
+	if len(idSet) > 0 {
+		ids := make([]int64, 0, len(idSet))
+		for id := range idSet {
+			ids = append(ids, id)
+		}
+		rows, err := g.DB().Ctx(ctx).Model("ai_model").
+			Fields("id", "name").
+			Where("deleted_at", nil).
+			WhereIn("id", ids).
+			All()
+		if err == nil {
+			refMap := make(map[int64]string, len(rows))
+			for _, row := range rows {
+				refMap[row["id"].Int64()] = row["name"].String()
+			}
+			for _, item := range list {
+				if val, ok := refMap[int64(item.ArchitectModelID)]; ok {
+					item.ArchitectModelName = val
+				}
+			}
+		}
+	}
 }
 
 

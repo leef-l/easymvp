@@ -116,7 +116,7 @@ const [Form, formApi] = useVbenForm({
       fieldName: '{{.NameLower}}',
       label: {{if .TooltipText}}tooltipLabel('{{.ShortLabel}}', '{{.TooltipText}}'){{else}}'{{.Label}}'{{end}},
       componentProps: { checkedValue: 1, unCheckedValue: 0 },
-      defaultValue: {{if .DefaultValue}}{{.DefaultValue}}{{else}}0{{end}},
+      defaultValue: 1,
     },
 {{- else if eq .Component "Radio"}}
     {

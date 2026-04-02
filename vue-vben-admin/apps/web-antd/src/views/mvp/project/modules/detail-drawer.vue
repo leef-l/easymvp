@@ -37,7 +37,7 @@ const [Modal, modalApi] = useVbenModal({
       <DescriptionsItem label="状态">{{ detail.status || '-' }}</DescriptionsItem>
       <DescriptionsItem label="暂停原因">{{ detail.pauseReason || '-' }}</DescriptionsItem>
       <DescriptionsItem label="项目全局上下文">{{ detail.globalContext || '-' }}</DescriptionsItem>
-      <DescriptionsItem label="架构师使用的AI模型ID">{{ detail.architectModelID || '-' }}</DescriptionsItem>
+      <DescriptionsItem label="架构师AI模型">{{ detail.architectModelName || detail.architectModelID || '-' }}</DescriptionsItem>
       <DescriptionsItem label="创建时间">{{ detail.createdAt || '-' }}</DescriptionsItem>
       <DescriptionsItem label="更新时间">{{ detail.updatedAt || '-' }}</DescriptionsItem>
     </Descriptions>

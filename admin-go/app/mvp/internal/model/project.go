@@ -38,6 +38,7 @@ type ProjectDetailOutput struct {
 	PauseReason string `json:"pauseReason"`
 	GlobalContext string `json:"globalContext"`
 	ArchitectModelID snowflake.JsonInt64 `json:"architectModelID"`
+	ArchitectModelName string `json:"architectModelName"`
 	CreatedAt *gtime.Time `json:"createdAt"`
 	UpdatedAt *gtime.Time `json:"updatedAt"`
 }
@@ -51,6 +52,7 @@ type ProjectListOutput struct {
 	PauseReason string `json:"pauseReason"`
 	GlobalContext string `json:"globalContext"`
 	ArchitectModelID snowflake.JsonInt64 `json:"architectModelID"`
+	ArchitectModelName string `json:"architectModelName"`
 	CreatedAt *gtime.Time `json:"createdAt"`
 	UpdatedAt *gtime.Time `json:"updatedAt"`
 }
