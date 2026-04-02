@@ -297,27 +297,30 @@ async function handleSend(content: string) {
 
 // ======================== 确认方案 ========================
 
-/** 检查拆分按钮点击：手动解析架构师回复中的任务 */
+/** 检查拆分按钮点击：先 dryRun 检查，再弹窗确认创建 */
 async function handleParseTasks() {
   if (!projectId.value) return;
   parsingTasks.value = true;
   try {
-    const res = await parseTasks(projectId.value);
-    if (res.hasTasks) {
-      Modal.confirm({
-        title: '检测到任务清单',
-        content: `架构师回复中解析出 ${res.taskCount} 个任务，是否创建为草案任务？`,
-        okText: '确定创建',
-        cancelText: '取消',
-        async onOk() {
-          // 任务已在 parseTasks 调用中创建，刷新状态即可
-          await loadProjectStatus();
-          message.success(`已创建 ${res.taskCount} 个草案任务`);
-        },
-      });
-    } else {
+    // 第一步：dryRun 仅检查
+    const check = await parseTasks(projectId.value, true);
+    if (!check.hasTasks) {
       message.info('架构师回复中未检测到任务清单，请先让AI完成任务拆分');
+      return;
     }
+    // 第二步：弹窗确认
+    Modal.confirm({
+      title: '检测到任务清单',
+      content: `架构师回复中解析出 ${check.taskCount} 个任务，是否创建为草案任务？`,
+      okText: '确定创建',
+      cancelText: '取消',
+      async onOk() {
+        // 第三步：实际创建
+        const res = await parseTasks(projectId.value, false);
+        await loadProjectStatus();
+        message.success(`已创建 ${res.taskCount} 个草案任务`);
+      },
+    });
   } catch (err: any) {
     message.error(err?.message || '检查拆分失败');
   } finally {
@@ -465,6 +468,18 @@ onUnmounted(() => {
 
       <!-- 右侧：操作按钮 -->
       <div class="header-right">
+        <!-- 检查拆分按钮：设计中/暂停状态 且无草稿任务时显示 -->
+        <Button
+          v-if="(projectStatus === 'designing' || projectStatus === 'paused') && draftTaskCount === 0"
+          :loading="parsingTasks"
+          class="parse-btn"
+          @click="handleParseTasks"
+        >
+          <template #icon>
+            <SearchOutlined />
+          </template>
+          检查拆分
+        </Button>
         <!-- 设计中/暂停状态 且有草稿任务时显示确认方案按钮 -->
         <Badge :count="draftTaskCount" :offset="[-6, 0]">
           <Button
@@ -608,6 +623,10 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.parse-btn {
+  border-radius: 8px;
 }
 
 .confirm-btn {

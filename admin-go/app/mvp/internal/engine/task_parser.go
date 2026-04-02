@@ -159,6 +159,15 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 	return len(taskIDs), nil
 }
 
+// DryParseTaskCount 仅解析AI回复，返回任务数量（不写入数据库）
+func (p *TaskParser) DryParseTaskCount(aiReply string) int {
+	plan, err := p.extractTaskPlan(aiReply)
+	if err != nil || len(plan.Tasks) == 0 {
+		return 0
+	}
+	return len(plan.Tasks)
+}
+
 // ConfirmDraftTasks 确认草稿任务：draft → pending
 func (p *TaskParser) ConfirmDraftTasks(ctx context.Context, projectID int64) (int, error) {
 	result, err := g.DB().Model("mvp_task").

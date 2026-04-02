@@ -69,6 +69,7 @@ func (c *cWorkflow) RetryTask(ctx context.Context, req *v1.WorkflowRetryTaskReq)
 }
 
 // ParseTasks 手动解析架构师回复中的任务清单（托底机制）
+// dryRun=true 时仅检查不创建，dryRun=false 时实际创建草案任务
 func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksReq) (res *v1.WorkflowParseTasksRes, err error) {
 	projectID := int64(req.ProjectID)
 
@@ -95,6 +96,17 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 	}
 
 	aiReply := msg["content"].String()
+
+	if req.DryRun {
+		// 仅检查，不创建
+		count := engine.GetParser().DryParseTaskCount(aiReply)
+		return &v1.WorkflowParseTasksRes{
+			HasTasks:  count > 0,
+			TaskCount: count,
+		}, nil
+	}
+
+	// 实际创建草案任务
 	count, err := engine.GetParser().ParseAndCreateTasks(ctx, projectID, aiReply)
 	if err != nil {
 		return nil, err
