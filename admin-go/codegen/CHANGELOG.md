@@ -1,5 +1,20 @@
 # Codegen 更新日志
 
+## v1.7.0 — 2026-04-02
+
+### BUG 修复
+
+- **修复 `parent_id` 同时触发外键和树形分支** — `parent_id` 被 `IsForeignKey` 和 `IsParentID` 同时匹配，导致模板生成重复的树形依赖代码。现在 `parent_id` 从外键判断中排除（`parser.go buildFieldMeta`）
+- **修复 Switch 组件 defaultValue 引用未定义变量** — `form.tpl` 中 Switch 的 `defaultValue: {{.DefaultValue}}` 当数据库无默认值时生成裸变量名（如 `designing`），导致前端 `ReferenceError`。改为固定 `defaultValue: 1`
+- **修复表单 rules 数组格式与 Vben Form 不兼容** — Vben Form 的 `rules` 不支持原生数组格式（`[{ required: true }]`），改用字符串格式（`'required'`），消除 `typeName undefined` 报错
+
+### 文档更新
+
+- **README 新增 EasyMVP 专属表名示例** — 补充 `ai_*`、`mvp_*` 前缀表的应用映射说明
+- **README 更新 codegen.yaml 示例** — 与 EasyMVP 项目实际配置一致（数据库、菜单应用配置）
+
+---
+
 ## v1.6.1 — 2026-04-01
 
 ### BUG 修复

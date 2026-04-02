@@ -212,8 +212,9 @@ func (p *TaskParser) extractTaskPlan(text string) (*ArchitectTaskPlan, error) {
 	// 策略3：查找独立的 JSON 数组 [{ ... }]（直接就是 tasks 数组）
 	arrayRe := regexp.MustCompile(`(?s)\[\s*\{[\s\S]*\}\s*\]`)
 	if m := arrayRe.FindString(text); m != "" {
+		cleaned := p.cleanJSON(m)
 		var tasks []ArchitectTask
-		if err := json.Unmarshal([]byte(m), &tasks); err == nil && len(tasks) > 0 {
+		if err := json.Unmarshal([]byte(cleaned), &tasks); err == nil && len(tasks) > 0 {
 			return &ArchitectTaskPlan{Tasks: tasks}, nil
 		}
 	}
@@ -224,12 +225,58 @@ func (p *TaskParser) extractTaskPlan(text string) (*ArchitectTaskPlan, error) {
 
 // tryParseJSON 尝试解析 JSON 为 ArchitectTaskPlan
 func (p *TaskParser) tryParseJSON(jsonStr string) (*ArchitectTaskPlan, error) {
-	// 清理可能的注释和尾随逗号
-	jsonStr = strings.TrimSpace(jsonStr)
+	jsonStr = p.cleanJSON(jsonStr)
 
 	var plan ArchitectTaskPlan
 	if err := json.Unmarshal([]byte(jsonStr), &plan); err != nil {
 		return nil, err
 	}
 	return &plan, nil
+}
+
+// cleanJSON 清理 AI 输出的非标准 JSON（注释、尾随逗号等）
+func (p *TaskParser) cleanJSON(s string) string {
+	s = strings.TrimSpace(s)
+
+	// 移除单行注释 // ... （但不破坏字符串内的 URL 如 https://）
+	// 策略：逐行处理，只移除不在引号内的 // 注释
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = removeLineComment(line)
+	}
+	s = strings.Join(lines, "\n")
+
+	// 移除多行注释 /* ... */
+	multiCommentRe := regexp.MustCompile(`(?s)/\*.*?\*/`)
+	s = multiCommentRe.ReplaceAllString(s, "")
+
+	// 移除尾随逗号（数组或对象最后一个元素后的逗号）
+	trailingCommaRe := regexp.MustCompile(`,\s*([\]\}])`)
+	s = trailingCommaRe.ReplaceAllString(s, "$1")
+
+	return s
+}
+
+// removeLineComment 移除一行中不在引号内的 // 注释
+func removeLineComment(line string) string {
+	inString := false
+	escape := false
+	for i, ch := range line {
+		if escape {
+			escape = false
+			continue
+		}
+		if ch == '\\' && inString {
+			escape = true
+			continue
+		}
+		if ch == '"' {
+			inString = !inString
+			continue
+		}
+		if !inString && ch == '/' && i+1 < len(line) && line[i+1] == '/' {
+			return line[:i]
+		}
+	}
+	return line
 }

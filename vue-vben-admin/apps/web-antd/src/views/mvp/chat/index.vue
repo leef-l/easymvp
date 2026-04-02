@@ -15,6 +15,7 @@ import {
   RobotOutlined,
   SyncOutlined,
 } from '@ant-design/icons-vue';
+import { Page } from '@vben/common-ui';
 import { Avatar, Badge, Button, message, Spin, Tag, Tooltip } from 'ant-design-vue';
 
 import { getChatHistory, sendMessage } from '#/api/mvp/chat';
@@ -385,6 +386,7 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <Page auto-content-height :content-class="'h-full'">
   <div class="chat-page">
     <!-- ===== 顶部栏 ===== -->
     <div class="chat-header">
@@ -510,6 +512,7 @@ onUnmounted(() => {
       />
     </div>
   </div>
+  </Page>
 </template>
 
 <style scoped>
@@ -517,7 +520,7 @@ onUnmounted(() => {
 .chat-page {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
   background: #fff;
   overflow: hidden;
 }

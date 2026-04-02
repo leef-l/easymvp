@@ -14,11 +14,16 @@
 | `system_role_menu` | system | role_menu |
 | `system_role_dept` | system | role_dept |
 | `system_user_dept` | system | user_dept |
-| `upload_dir` | upload | dir |
-| `upload_file` | upload | file |
-| `upload_config` | upload | config |
-| `upload_dir_rule` | upload | dir_rule |
-| `demo_demo` | demo | demo |
+| `ai_provider` | ai | provider |
+| `ai_plan` | ai | plan |
+| `ai_model` | ai | model |
+| `mvp_project` | mvp | project |
+| `mvp_project_role` | mvp | project_role |
+| `mvp_conversation` | mvp | conversation |
+| `mvp_message` | mvp | message |
+| `mvp_task` | mvp | task |
+| `mvp_task_log` | mvp | task_log |
+| `mvp_role_preset` | mvp | role_preset |
 
 代码生成器根据第一个 `_` 拆分表名，前半部分为应用名，后半部分为模块名。
 
@@ -100,9 +105,9 @@ go run . --table system_dept --menu
 database:
   host: 127.0.0.1
   port: 3306
-  user: root
-  password: "gbaseadmin123"   # 支持环境变量：password: "${DB_PASSWORD}"
-  dbname: gbaseadmin
+  user: easymvp
+  password: "JKcHFJYXnkrB6BXE"   # 支持环境变量：password: "${DB_PASSWORD}"
+  dbname: easymvp
 
 backend:
   output: ../app/             # 后端输出根目录
@@ -121,12 +126,15 @@ menu_apps:                    # 菜单应用目录配置（新增应用在此添
   system:
     title: 系统管理
     icon: SettingOutlined
-  upload:
-    title: 上传管理
-    icon: CloudUploadOutlined
-  play:
-    title: 陪玩管理
-    icon: "game-icons:joystick"
+    sort: 10
+  ai:
+    title: AI模型管理
+    icon: RobotOutlined
+    sort: 20
+  mvp:
+    title: MVP项目管理
+    icon: ProjectOutlined
+    sort: 30
 ```
 
 ### 环境变量支持
@@ -378,6 +386,39 @@ const UserStatusEnabled = 1  // 启用
 | 按钮权限 | 按钮 | 包含 新增、修改、删除、查看、导出 五个操作按钮 |
 
 菜单写入前会检查是否已存在，避免重复插入。
+
+## 手写代码与 codegen 共存
+
+codegen 生成的文件会被 `--force` 覆盖。如果需要在生成的模块上添加自定义逻辑，**必须放到独立文件中**，避免被 codegen 覆盖。
+
+### 约定
+
+| 文件类型 | codegen 生成（会被覆盖） | 手写扩展（不会被覆盖） |
+|---------|----------------------|---------------------|
+| API 定义 | `api/v1/{module}.go` | `api/v1/workflow.go` 等独立文件 |
+| Controller | `controller/{module}/{module}.go` | `controller/chat/workflow.go` 等独立文件 |
+| Logic | `logic/{module}/{module}.go` | 在 logic 函数末尾调用 `fillRefFields` 等手写方法 |
+| 路由注册 | `cmd/cmd.go`（Bind 列表） | `cmd/cmd_custom.go`（registerCustomRoutes） |
+
+### 示例：MVP 项目的手写路由
+
+```go
+// cmd_custom.go — 不会被 codegen 覆盖
+func registerCustomRoutes(group *ghttp.RouterGroup) {
+    group.Bind(
+        chat.Chat,       // 对话引擎 API
+        chat.Workflow,   // 项目工作流 API
+    )
+}
+```
+
+### 生成后常见的手动优化
+
+codegen 生成的是基础 CRUD，以下场景需要手动优化（修改生成的文件或新建独立文件）：
+
+1. **列表页字段改为下拉选择** — codegen 对 `role_type`、`model_id` 等字段默认生成 Input，需手动改为 Select + 关联数据加载
+2. **关联字段显示名称** — logic 层添加 `fillRefFields` 方法，join 查询关联表填充 `modelName`、`providerName` 等显示字段
+3. **表单字段联动** — 如创建项目时按 capability 过滤模型列表、从预设读取默认值等
 
 ## 命名转换规则
 
