@@ -52,7 +52,20 @@ func (s *sTask) Execute(ctx context.Context, in *model.TaskExecuteInput) (out *m
 	if err = ensureDirAvailable(repoPath, "仓库路径"); err != nil {
 		return nil, err
 	}
-	if err = ensureDirAvailable(worktreePath, "工作目录"); err != nil {
+
+	worktreeCreated := false
+	if worktreePath == repoPath {
+		if err = ensureDirAvailable(worktreePath, "工作目录"); err != nil {
+			return nil, err
+		}
+	} else {
+		worktreeCreated, err = ensureDirReady(worktreePath, "工作目录", true)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if err != nil {
 		return nil, err
 	}
 	snapshotBytes, _ := json.Marshal(engineDetail)
@@ -81,6 +94,9 @@ func (s *sTask) Execute(ctx context.Context, in *model.TaskExecuteInput) (out *m
 		return nil, err
 	}
 
+	if worktreeCreated {
+		_ = s.appendTaskLog(ctx, int64(taskID), "system", fmt.Sprintf("工作目录不存在，已自动创建：%s", worktreePath))
+	}
 	_ = s.appendTaskLog(ctx, int64(taskID), "system", fmt.Sprintf("任务已创建，等待执行。引擎=%s，工作目录=%s", in.EngineCode, worktreePath))
 	s.dispatchTask(int64(taskID))
 

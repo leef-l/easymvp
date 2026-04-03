@@ -89,7 +89,8 @@ func (s *Scheduler) Resume(ctx context.Context, projectID int64) error {
 // CreateProject 创建项目并初始化架构师对话
 // architectModelID 为前端传入的架构师模型，若为 0 则从预设读取
 func CreateProject(ctx context.Context, name, description, workDir string, architectModelID int64, userID int64, deptID int64) (int64, int64, error) {
-	if err := ValidateWorkDir(workDir); err != nil {
+	workDir, _, err := EnsureWorkDir(workDir)
+	if err != nil {
 		return 0, 0, err
 	}
 

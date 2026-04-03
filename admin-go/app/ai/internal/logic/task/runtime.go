@@ -1087,18 +1087,34 @@ func extractResponseSummary(respText string) string {
 }
 
 func ensureDirExists(path string) error {
-	return ensureDirAvailable(path, "工作目录")
+	_, err := ensureDirReady(path, "工作目录", false)
+	return err
 }
 
 func ensureDirAvailable(path string, label string) error {
+	_, err := ensureDirReady(path, label, false)
+	return err
+}
+
+func ensureDirReady(path string, label string, autoCreate bool) (bool, error) {
+	path = strings.TrimSpace(path)
 	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("%s不可用: %s", label, path)
+	if err == nil {
+		if !info.IsDir() {
+			return false, fmt.Errorf("%s不是目录: %s", label, path)
+		}
+		return false, nil
 	}
-	if !info.IsDir() {
-		return fmt.Errorf("%s不是目录: %s", label, path)
+	if !os.IsNotExist(err) {
+		return false, fmt.Errorf("%s不可用: %s", label, path)
 	}
-	return nil
+	if !autoCreate {
+		return false, fmt.Errorf("%s不存在: %s", label, path)
+	}
+	if err = os.MkdirAll(path, 0o755); err != nil {
+		return false, fmt.Errorf("%s创建失败: %s", label, path)
+	}
+	return true, nil
 }
 
 func psQuote(value string) string {

@@ -30,12 +30,13 @@ type sProject struct{}
 
 // Create 创建MVP项目表
 func (s *sProject) Create(ctx context.Context, in *model.ProjectCreateInput) error {
-	if err := engine.ValidateWorkDir(in.WorkDir); err != nil {
+	workDir, _, err := engine.EnsureWorkDir(in.WorkDir)
+	if err != nil {
 		return err
 	}
 
 	id := snowflake.Generate()
-	_, err := dao.MvpProject.Ctx(ctx).Data(g.Map{
+	_, err = dao.MvpProject.Ctx(ctx).Data(g.Map{
 		dao.MvpProject.Columns().Id:               id,
 		dao.MvpProject.Columns().Name:             in.Name,
 		dao.MvpProject.Columns().Description:      in.Description,
@@ -43,7 +44,7 @@ func (s *sProject) Create(ctx context.Context, in *model.ProjectCreateInput) err
 		dao.MvpProject.Columns().PauseReason:      in.PauseReason,
 		dao.MvpProject.Columns().GlobalContext:    in.GlobalContext,
 		dao.MvpProject.Columns().ArchitectModelId: in.ArchitectModelID,
-		dao.MvpProject.Columns().WorkDir:          in.WorkDir,
+		dao.MvpProject.Columns().WorkDir:          workDir,
 		dao.MvpProject.Columns().CreatedBy:        middleware.GetUserID(ctx),
 		dao.MvpProject.Columns().DeptId:           middleware.GetDeptID(ctx),
 		dao.MvpProject.Columns().CreatedAt:        gtime.Now(),
@@ -57,7 +58,9 @@ func (s *sProject) Update(ctx context.Context, in *model.ProjectUpdateInput) err
 	if err := middleware.CheckOwnership(ctx, dao.MvpProject.Ctx(ctx).Where(dao.MvpProject.Columns().DeletedAt, nil), in.ID, dao.MvpProject.Columns().Id, dao.MvpProject.Columns().CreatedBy); err != nil {
 		return err
 	}
-	if err := engine.ValidateWorkDir(in.WorkDir); err != nil {
+
+	workDir, _, err := engine.EnsureWorkDir(in.WorkDir)
+	if err != nil {
 		return err
 	}
 	data := g.Map{
@@ -66,10 +69,10 @@ func (s *sProject) Update(ctx context.Context, in *model.ProjectUpdateInput) err
 		dao.MvpProject.Columns().PauseReason:      in.PauseReason,
 		dao.MvpProject.Columns().GlobalContext:    in.GlobalContext,
 		dao.MvpProject.Columns().ArchitectModelId: in.ArchitectModelID,
-		dao.MvpProject.Columns().WorkDir:          in.WorkDir,
+		dao.MvpProject.Columns().WorkDir:          workDir,
 		dao.MvpProject.Columns().UpdatedAt:        gtime.Now(),
 	}
-	_, err := dao.MvpProject.Ctx(ctx).Where(dao.MvpProject.Columns().Id, in.ID).Data(data).Update()
+	_, err = dao.MvpProject.Ctx(ctx).Where(dao.MvpProject.Columns().Id, in.ID).Data(data).Update()
 	return err
 }
 
