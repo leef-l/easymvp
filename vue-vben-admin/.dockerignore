@@ -1,7 +1,10 @@
 node_modules
+**/node_modules
+.pnpm-store
 .git
 .gitignore
 *.md
 dist
+**/dist
 .turbo
 dist.zip

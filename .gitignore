@@ -21,6 +21,8 @@ node_modules/
 # Env
 .env.local
 *.local
+admin-go/.env
+admin-go/.runtime-config/
 
 # Claude Code
 .claude/

@@ -8,7 +8,7 @@
 
 ## AI 执行引擎开发必读
 
-- **开始 OpenHands / Aider 接入相关开发前，必须先阅读** `EasyMVP对接OpenHands与Aider引擎设计实现文档.md`
+- **开始 OpenHands / Aider 接入相关开发前，必须先阅读** `docs/EasyMVP对接OpenHands与Aider引擎设计实现文档.md`
 - 该文档是当前 AI 执行引擎接入的设计基线，涉及数据库、角色授权、AI 配置、执行任务、前后端页面与安全边界
 - 如果实现与文档不一致，优先更新文档后再继续开发
 

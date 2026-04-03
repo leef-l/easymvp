@@ -1,6 +1,6 @@
-FROM golang:1.25-bookworm
+FROM docker.1ms.run/golang:1.25-bookworm
 
-ARG GO_PROXY=https://proxy.golang.org,direct
+ARG GO_PROXY=https://goproxy.cn,direct
 ARG PIP_INDEX_URL=https://pypi.org/simple
 ARG APT_MIRROR=
 ARG APT_SECURITY_MIRROR=
@@ -8,7 +8,13 @@ ARG APT_SECURITY_MIRROR=
 ENV CGO_ENABLED=0 \
     GOPROXY=${GO_PROXY} \
     GOSUMDB=sum.golang.org \
-    PIP_INDEX_URL=${PIP_INDEX_URL}
+    GOMODCACHE=/go/pkg/mod \
+    GOCACHE=/root/.cache/go-build \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
+    UV_DEFAULT_INDEX=${PIP_INDEX_URL} \
+    UV_INDEX_URL=${PIP_INDEX_URL} \
+    UV_LOCK_TIMEOUT=600 \
+    PATH=/root/.local/bin:${PATH}
 
 WORKDIR /workspace/admin-go
 
@@ -20,10 +26,10 @@ RUN if [ -n "${APT_MIRROR}" ] && [ -f /etc/apt/sources.list.d/debian.sources ]; 
     fi
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash ca-certificates git \
+    && apt-get install -y --no-install-recommends bash ca-certificates git python3 python3-pip \
+    && python3 -m pip install -q --default-timeout 120 --retries 10 \
+        -i "${PIP_INDEX_URL}" uv \
     && rm -rf /var/lib/apt/lists/*
-
-RUN go install github.com/gogf/cli/v2/cmd/gf@v2.10.0
 
 COPY go.mod go.sum ./
 RUN go mod download

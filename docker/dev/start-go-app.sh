@@ -46,4 +46,4 @@ EOF
 export GF_GCFG_FILE="${CONFIG_FILE}"
 
 cd "/workspace/admin-go/app/${APP_NAME}"
-exec /go/bin/gf run main.go
+exec go run main.go
