@@ -49,6 +49,9 @@ func (s *sProject) Create(ctx context.Context, in *model.ProjectCreateInput) err
 
 // Update 更新MVP项目表
 func (s *sProject) Update(ctx context.Context, in *model.ProjectUpdateInput) error {
+	if err := middleware.CheckOwnership(ctx, dao.MvpProject.Ctx(ctx).Where(dao.MvpProject.Columns().DeletedAt, nil), in.ID, dao.MvpProject.Columns().Id, dao.MvpProject.Columns().CreatedBy); err != nil {
+		return err
+	}
 	data := g.Map{
 		dao.MvpProject.Columns().Name: in.Name,
 		dao.MvpProject.Columns().Description: in.Description,
@@ -64,6 +67,9 @@ func (s *sProject) Update(ctx context.Context, in *model.ProjectUpdateInput) err
 
 // Delete 软删除MVP项目表
 func (s *sProject) Delete(ctx context.Context, id snowflake.JsonInt64) error {
+	if err := middleware.CheckOwnership(ctx, dao.MvpProject.Ctx(ctx).Where(dao.MvpProject.Columns().DeletedAt, nil), id, dao.MvpProject.Columns().Id, dao.MvpProject.Columns().CreatedBy); err != nil {
+		return err
+	}
 	_, err := dao.MvpProject.Ctx(ctx).Where(dao.MvpProject.Columns().Id, id).Data(g.Map{
 		dao.MvpProject.Columns().DeletedAt: gtime.Now(),
 	}).Update()
@@ -72,7 +78,9 @@ func (s *sProject) Delete(ctx context.Context, id snowflake.JsonInt64) error {
 
 // BatchDelete 批量软删除MVP项目表
 func (s *sProject) BatchDelete(ctx context.Context, ids []snowflake.JsonInt64) error {
-	_, err := dao.MvpProject.Ctx(ctx).WhereIn(dao.MvpProject.Columns().Id, ids).Data(g.Map{
+	m := dao.MvpProject.Ctx(ctx).Where(dao.MvpProject.Columns().DeletedAt, nil).WhereIn(dao.MvpProject.Columns().Id, ids)
+	m = middleware.ApplyDataScope(ctx, m, dao.MvpProject.Columns().CreatedBy, dao.MvpProject.Columns().DeptId)
+	_, err := m.Data(g.Map{
 		dao.MvpProject.Columns().DeletedAt: gtime.Now(),
 	}).Update()
 	return err
@@ -84,6 +92,9 @@ func (s *sProject) Detail(ctx context.Context, id snowflake.JsonInt64) (out *mod
 	err = dao.MvpProject.Ctx(ctx).Where(dao.MvpProject.Columns().Id, id).Where(dao.MvpProject.Columns().DeletedAt, nil).Scan(out)
 	if err != nil {
 		return nil, err
+	}
+	if out.ID == 0 {
+		return nil, fmt.Errorf("记录不存在")
 	}
 	// 查询架构师AI模型关联显示
 	if out.ArchitectModelID != 0 {
@@ -121,10 +132,13 @@ func (s *sProject) List(ctx context.Context, in *model.ProjectListInput) (list [
 	}
 	// 动态排序
 	if in.OrderBy != "" {
-		if in.OrderDir == "desc" {
-			m = m.OrderDesc(in.OrderBy)
-		} else {
-			m = m.OrderAsc(in.OrderBy)
+		safeOrderBy := middleware.ValidateOrderBy(in.OrderBy, []string{"id", "name", "status", "created_at", "updated_at"})
+		if safeOrderBy != "" {
+			if in.OrderDir == "desc" {
+				m = m.OrderDesc(safeOrderBy)
+			} else {
+				m = m.OrderAsc(safeOrderBy)
+			}
 		}
 	} else {
 		m = m.OrderAsc(dao.MvpProject.Columns().Id)
@@ -189,7 +203,9 @@ func (s *sProject) BatchUpdate(ctx context.Context, in *model.ProjectBatchUpdate
 	if in.Status != nil {
 		data[dao.MvpProject.Columns().Status] = *in.Status
 	}
-	_, err := dao.MvpProject.Ctx(ctx).WhereIn(dao.MvpProject.Columns().Id, in.IDs).Data(data).Update()
+	m := dao.MvpProject.Ctx(ctx).Where(dao.MvpProject.Columns().DeletedAt, nil).WhereIn(dao.MvpProject.Columns().Id, in.IDs)
+	m = middleware.ApplyDataScope(ctx, m, dao.MvpProject.Columns().CreatedBy, dao.MvpProject.Columns().DeptId)
+	_, err := m.Data(data).Update()
 	return err
 }
 
@@ -222,6 +238,8 @@ func (s *sProject) Import(ctx context.Context, file *ghttp.UploadFile) (success 
 			dao.MvpProject.Columns().Id:        id,
 			dao.MvpProject.Columns().CreatedAt: gtime.Now(),
 			dao.MvpProject.Columns().UpdatedAt: gtime.Now(),
+			dao.MvpProject.Columns().CreatedBy: middleware.GetUserID(ctx),
+			dao.MvpProject.Columns().DeptId:    middleware.GetDeptID(ctx),
 		}
 		idx := 0
 		if idx < len(record) {

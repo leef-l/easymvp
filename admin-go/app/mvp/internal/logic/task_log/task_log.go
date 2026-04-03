@@ -81,6 +81,9 @@ func (s *sTaskLog) Detail(ctx context.Context, id snowflake.JsonInt64) (out *mod
 	if err != nil {
 		return nil, err
 	}
+	if out.ID == 0 {
+		return nil, fmt.Errorf("记录不存在")
+	}
 	// 查询任务ID关联显示
 	if out.TaskID != 0 {
 		val, err := g.DB().Ctx(ctx).Model("mvp_task").Where("id", out.TaskID).Where("deleted_at", nil).Value("name")
@@ -144,8 +147,9 @@ func (s *sTaskLog) List(ctx context.Context, in *model.TaskLogListInput) (list [
 	if err != nil {
 		return
 	}
-	// 动态排序
-	if in.OrderBy != "" {
+	// 动态排序（白名单防 SQL 注入）
+	allowedOrderBy := map[string]bool{"id": true, "action": true, "created_at": true, "updated_at": true}
+	if in.OrderBy != "" && allowedOrderBy[in.OrderBy] {
 		if in.OrderDir == "desc" {
 			m = m.OrderDesc(in.OrderBy)
 		} else {

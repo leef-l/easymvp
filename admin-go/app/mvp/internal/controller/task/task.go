@@ -2,6 +2,8 @@ package task
 
 import (
 	"context"
+	"encoding/csv"
+	"fmt"
 
 	"github.com/gogf/gf/v2/frame/g"
 
@@ -120,31 +122,34 @@ func (c *cTask) Export(ctx context.Context, req *v1.TaskExportReq) (res *v1.Task
 	r.Response.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	r.Response.Header().Set("Content-Disposition", `attachment; filename="task.csv"`)
 	r.Response.Write("\xEF\xBB\xBF") // UTF-8 BOM
+	// 使用 encoding/csv 正确转义，防止 CSV 注入和格式损坏
+	w := csv.NewWriter(r.Response.Writer)
 	// 表头
-	r.Response.Writeln("项目ID,父任务ID，0=顶级,任务名称,任务描述,角色类型,角色等级,使用的AI模型ID,状态,排序,执行批次号，同批次内可并行，批次间串行,涉及的资源范围,依赖的任务ID列表,任务执行结果,任务完成后的上下文压缩摘要，供后续AI读取,错误信息,开始时间,完成时间,创建时间")
+	_ = w.Write([]string{"项目名称", "父任务名称(0=顶级)", "任务名称", "任务描述", "角色类型", "角色等级", "使用的AI模型ID", "状态", "排序", "执行批次号", "涉及的资源范围", "依赖的任务ID列表", "任务执行结果", "上下文压缩摘要", "错误信息", "开始时间", "完成时间", "创建时间"})
 	// 数据行
 	for _, item := range list {
-		r.Response.Writefln("%v,%v,%v,%v,%v,%v,%v,%v,%v,%v,%v,%v,%v,%v,%v,%v,%v,%v",
-			item.ProjectName,
-			 item.TaskName,
-			 item.Name,
-			 item.Description,
-			 item.RoleType,
-			 item.RoleLevel,
-			 item.ModelID,
-			 item.Status,
-			 item.Sort,
-			 item.BatchNo,
-			 item.AffectedResources,
-			 item.DependsOn,
-			 item.Result,
-			 item.ContextSummary,
-			 item.ErrorMessage,
-			 item.StartedAt,
-			 item.CompletedAt,
-			item.CreatedAt,
-		)
+		_ = w.Write([]string{
+			fmt.Sprintf("%v", item.ProjectName),
+			fmt.Sprintf("%v", item.TaskName),
+			fmt.Sprintf("%v", item.Name),
+			fmt.Sprintf("%v", item.Description),
+			fmt.Sprintf("%v", item.RoleType),
+			fmt.Sprintf("%v", item.RoleLevel),
+			fmt.Sprintf("%v", item.ModelID),
+			fmt.Sprintf("%v", item.Status),
+			fmt.Sprintf("%v", item.Sort),
+			fmt.Sprintf("%v", item.BatchNo),
+			fmt.Sprintf("%v", item.AffectedResources),
+			fmt.Sprintf("%v", item.DependsOn),
+			fmt.Sprintf("%v", item.Result),
+			fmt.Sprintf("%v", item.ContextSummary),
+			fmt.Sprintf("%v", item.ErrorMessage),
+			fmt.Sprintf("%v", item.StartedAt),
+			fmt.Sprintf("%v", item.CompletedAt),
+			fmt.Sprintf("%v", item.CreatedAt),
+		})
 	}
+	w.Flush()
 	return
 }
 

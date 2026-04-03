@@ -2,6 +2,7 @@ package projectrole
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -99,20 +100,23 @@ func (c *cProjectRole) Export(ctx context.Context, req *v1.ProjectRoleExportReq)
 	r.Response.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	r.Response.Header().Set("Content-Disposition", `attachment; filename="project_role.csv"`)
 	r.Response.Write("\xEF\xBB\xBF") // UTF-8 BOM
+	// 使用 encoding/csv 正确转义，防止 CSV 注入和格式损坏
+	w := csv.NewWriter(r.Response.Writer)
 	// 表头
-	r.Response.Writeln("项目ID,角色类型,角色等级,AI模型ID,系统提示词,状态,创建时间")
+	_ = w.Write([]string{"项目名称", "角色类型", "角色等级", "AI模型ID", "系统提示词", "状态", "创建时间"})
 	// 数据行
 	for _, item := range list {
-		r.Response.Writefln("%v,%v,%v,%v,%v,%v,%v",
-			item.ProjectName,
-			 item.RoleType,
-			 item.RoleLevel,
-			 item.ModelID,
-			 item.SystemPrompt,
-			 item.Status,
-			item.CreatedAt,
-		)
+		_ = w.Write([]string{
+			fmt.Sprintf("%v", item.ProjectName),
+			fmt.Sprintf("%v", item.RoleType),
+			fmt.Sprintf("%v", item.RoleLevel),
+			fmt.Sprintf("%v", item.ModelID),
+			fmt.Sprintf("%v", item.SystemPrompt),
+			fmt.Sprintf("%v", item.Status),
+			fmt.Sprintf("%v", item.CreatedAt),
+		})
 	}
+	w.Flush()
 	return
 }
 

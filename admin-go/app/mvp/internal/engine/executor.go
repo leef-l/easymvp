@@ -59,16 +59,18 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 	}
 
 	// 回写 conversation_id 到 task，方便前端和 watchdog 检测
-	g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+	if _, err := g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
 		"conversation_id": conversationID,
-	})
+	}); err != nil {
+		g.Log().Errorf(ctx, "[Executor] 回写 conversation_id 失败: task=%d, err=%v", taskID, err)
+	}
 
 	// 4. 构建任务指令消息
 	taskPrompt := e.buildTaskPrompt(task)
 
 	// 5. 保存指令消息
 	userMsgID := int64(snowflake.Generate())
-	g.DB().Model("mvp_message").Insert(g.Map{
+	if _, err := g.DB().Model("mvp_message").Insert(g.Map{
 		"id":              userMsgID,
 		"conversation_id": conversationID,
 		"role":            "user",
@@ -78,11 +80,13 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 		"dept_id":         0,
 		"created_at":      gtime.Now(),
 		"updated_at":      gtime.Now(),
-	})
+	}); err != nil {
+		g.Log().Errorf(ctx, "[Executor] 保存用户消息失败: task=%d, err=%v", taskID, err)
+	}
 
 	// 6. 创建 AI 回复消息
 	replyID := int64(snowflake.Generate())
-	g.DB().Model("mvp_message").Insert(g.Map{
+	if _, err := g.DB().Model("mvp_message").Insert(g.Map{
 		"id":              replyID,
 		"conversation_id": conversationID,
 		"role":            "assistant",
@@ -93,7 +97,9 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 		"dept_id":         0,
 		"created_at":      gtime.Now(),
 		"updated_at":      gtime.Now(),
-	})
+	}); err != nil {
+		g.Log().Errorf(ctx, "[Executor] 创建AI回复消息失败: task=%d, err=%v", taskID, err)
+	}
 
 	// 7. 调用 AI
 	p, err := provider.GetProvider(provider.Config{
@@ -131,11 +137,13 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 			fullContent.WriteString(chunk.Content)
 			chunkIndex++
 
-			g.DB().Model("mvp_message_chunk").Insert(g.Map{
+			if _, insertErr := g.DB().Model("mvp_message_chunk").Insert(g.Map{
 				"message_id":  replyID,
 				"chunk_index": chunkIndex,
 				"content":     chunk.Content,
-			})
+			}); insertErr != nil {
+				g.Log().Errorf(ctx, "[Executor] 写入 chunk 失败: msg=%d, err=%v", replyID, insertErr)
+			}
 
 			chunkJSON, _ := json.Marshal(map[string]interface{}{
 				"content": chunk.Content,
@@ -146,9 +154,11 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 
 		if chunk.FinishReason != "" && chunk.Usage != nil {
 			usageJSON, _ := json.Marshal(chunk.Usage)
-			g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
+			if _, err := g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
 				"token_usage": string(usageJSON),
-			})
+			}); err != nil {
+				g.Log().Errorf(ctx, "[Executor] 更新 token_usage 失败: msg=%d, err=%v", replyID, err)
+			}
 		}
 
 		return nil
@@ -156,33 +166,39 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 
 	if err != nil {
 		// AI 调用失败
-		g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
+		if _, dbErr := g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
 			"content":    "AI调用失败: " + err.Error(),
 			"status":     "failed",
 			"updated_at": gtime.Now(),
-		})
+		}); dbErr != nil {
+			g.Log().Errorf(ctx, "[Executor] 更新失败消息状态失败: msg=%d, err=%v", replyID, dbErr)
+		}
 		e.failTask(ctx, projectID, taskID, err.Error())
 		return
 	}
 
 	// 8. 完成消息
-	g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
+	if _, err := g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
 		"content":    fullContent.String(),
 		"status":     "completed",
 		"updated_at": gtime.Now(),
-	})
+	}); err != nil {
+		g.Log().Errorf(ctx, "[Executor] 更新完成消息失败: msg=%d, err=%v", replyID, err)
+	}
 
 	hub.Publish(replyID, `{"done":true}`)
 	hub.Done(replyID)
 
 	// 9. 保存任务结果
 	result := fullContent.String()
-	g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+	if _, err := g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
 		"result":       result,
 		"status":       "completed",
 		"completed_at": gtime.Now(),
 		"updated_at":   gtime.Now(),
-	})
+	}); err != nil {
+		g.Log().Errorf(ctx, "[Executor] 保存任务结果失败: task=%d, err=%v", taskID, err)
+	}
 
 	// 10. 压缩任务上下文为摘要
 	go GetCompressor().CompressTaskContext(context.Background(), projectID, taskID)
@@ -204,7 +220,10 @@ func (e *Executor) resolveTaskModel(ctx context.Context, projectID int64, taskID
 	}
 
 	// 否则从项目角色配置中查找
-	task, _ := g.DB().Model("mvp_task").Where("id", taskID).Fields("role_level").One()
+	task, err := g.DB().Model("mvp_task").Where("id", taskID).Fields("role_level").One()
+	if err != nil {
+		g.Log().Warningf(ctx, "[Executor] 查询 task role_level 失败: task=%d, err=%v", taskID, err)
+	}
 	roleLevel := ""
 	if !task.IsEmpty() {
 		roleLevel = task["role_level"].String()

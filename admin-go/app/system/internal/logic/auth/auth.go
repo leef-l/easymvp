@@ -61,7 +61,7 @@ func (s *sAuth) Login(ctx context.Context, in *model.AuthLoginInput) (out *model
 	// 校验密码
 	hashedInput := gsha256.Encrypt(in.Password)
 	if user.Password != hashedInput {
-		g.Log().Errorf(ctx, "密码验证失败 - 输入: %s, 数据库: %s", hashedInput, user.Password)
+		g.Log().Warningf(ctx, "密码验证失败 - 用户: %s", in.Username)
 		return nil, gerror.New("用户名或密码错误")
 	}
 

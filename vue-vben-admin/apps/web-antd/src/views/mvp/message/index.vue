@@ -222,7 +222,7 @@ function handleBatchUpdateStatus() {
     title: '批量修改状态',
     content: `确定要将选中的 ${rows.length} 条数据的状态切换吗？`,
     async onOk() {
-      const newStatus = rows[0]?.status === 1 ? 0 : 1;
+      const newStatus = String(rows[0]?.status) === '1' ? '0' : '1';
       await batchUpdateMessage({ ids: rows.map((r: MessageItem) => r.id), status: newStatus });
       message.success('批量修改成功');
       gridApi.reload();

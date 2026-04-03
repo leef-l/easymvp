@@ -94,7 +94,7 @@ type TaskBatchDeleteRes struct {
 type TaskBatchUpdateReq struct {
 	g.Meta `path:"/task/batch-update" method:"put" tags:"MVP任务表" summary:"批量编辑MVP任务表"`
 	IDs    []snowflake.JsonInt64 `json:"ids" v:"required#ID列表不能为空" dc:"MVP任务表ID列表"`
-	Status *int                  `json:"status" dc:"状态"`
+	Status *string               `json:"status" dc:"状态"`
 }
 
 // TaskBatchUpdateRes 批量编辑MVP任务表响应

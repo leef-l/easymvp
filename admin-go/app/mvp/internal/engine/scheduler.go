@@ -59,14 +59,13 @@ func (s *Scheduler) StartProject(projectID int64) {
 // PauseProject 暂停项目调度
 func (s *Scheduler) PauseProject(projectID int64) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if cancel, ok := s.projectCtx[projectID]; ok {
 		cancel()
 		delete(s.projectCtx, projectID)
 	}
+	s.mu.Unlock()
 
-	// 更新所有 running 状态的任务为 pending
+	// DB 操作移到锁外，避免持锁期间阻塞
 	g.DB().Model("mvp_task").
 		Where("project_id", projectID).
 		Where("status", "running").
@@ -254,12 +253,12 @@ func (s *Scheduler) checkBatchDone(projectID int64, taskID int64) {
 	}
 	batchNo := task["batch_no"].Int()
 
-	// 统计该批次未完成的任务数
+	// 统计该批次未完成的任务数（draft 任务尚未规划，不应阻止批次完成）
 	count, err := g.DB().Model("mvp_task").
 		Where("project_id", projectID).
 		Where("batch_no", batchNo).
 		Where("deleted_at IS NULL").
-		WhereNotIn("status", []string{"completed"}).
+		WhereNotIn("status", []string{"completed", "draft"}).
 		Count()
 	if err != nil || count > 0 {
 		return
@@ -271,11 +270,11 @@ func (s *Scheduler) checkBatchDone(projectID int64, taskID int64) {
 
 // checkProjectDone 检查项目所有任务是否全部完成
 func (s *Scheduler) checkProjectDone(projectID int64) {
-	// 统计未完成的任务数
+	// 统计未完成的任务数（draft 任务尚未规划，不应阻止项目完成）
 	count, err := g.DB().Model("mvp_task").
 		Where("project_id", projectID).
 		Where("deleted_at IS NULL").
-		WhereNotIn("status", []string{"completed"}).
+		WhereNotIn("status", []string{"completed", "draft"}).
 		Count()
 	if err != nil {
 		return
@@ -324,7 +323,10 @@ func parseResources(jsonStr string) []string {
 		return nil
 	}
 	var resources []string
-	json.Unmarshal([]byte(jsonStr), &resources)
+	if err := json.Unmarshal([]byte(jsonStr), &resources); err != nil {
+		g.Log().Warningf(context.Background(), "[Scheduler] parseResources 解析失败，跳过资源锁定，原始值: %s, 错误: %v", jsonStr, err)
+		return nil
+	}
 	return resources
 }
 

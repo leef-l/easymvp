@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
@@ -56,6 +57,9 @@ func (s *sTask) Create(ctx context.Context, in *model.TaskCreateInput) error {
 
 // Update 更新MVP任务表
 func (s *sTask) Update(ctx context.Context, in *model.TaskUpdateInput) error {
+	if err := middleware.CheckOwnership(ctx, dao.MvpTask.Ctx(ctx).Where(dao.MvpTask.Columns().DeletedAt, nil), in.ID, dao.MvpTask.Columns().Id, dao.MvpTask.Columns().CreatedBy); err != nil {
+		return err
+	}
 	data := g.Map{
 		dao.MvpTask.Columns().ProjectId: in.ProjectID,
 		dao.MvpTask.Columns().ParentId: in.ParentID,
@@ -82,6 +86,9 @@ func (s *sTask) Update(ctx context.Context, in *model.TaskUpdateInput) error {
 
 // Delete 软删除MVP任务表
 func (s *sTask) Delete(ctx context.Context, id snowflake.JsonInt64) error {
+	if err := middleware.CheckOwnership(ctx, dao.MvpTask.Ctx(ctx).Where(dao.MvpTask.Columns().DeletedAt, nil), id, dao.MvpTask.Columns().Id, dao.MvpTask.Columns().CreatedBy); err != nil {
+		return err
+	}
 	_, err := dao.MvpTask.Ctx(ctx).Where(dao.MvpTask.Columns().Id, id).Data(g.Map{
 		dao.MvpTask.Columns().DeletedAt: gtime.Now(),
 	}).Update()
@@ -90,7 +97,8 @@ func (s *sTask) Delete(ctx context.Context, id snowflake.JsonInt64) error {
 
 // BatchDelete 批量软删除MVP任务表
 func (s *sTask) BatchDelete(ctx context.Context, ids []snowflake.JsonInt64) error {
-	_, err := dao.MvpTask.Ctx(ctx).WhereIn(dao.MvpTask.Columns().Id, ids).Data(g.Map{
+	m := middleware.ApplyDataScope(ctx, dao.MvpTask.Ctx(ctx).Where(dao.MvpTask.Columns().DeletedAt, nil).WhereIn(dao.MvpTask.Columns().Id, ids), dao.MvpTask.Columns().CreatedBy, dao.MvpTask.Columns().DeptId)
+	_, err := m.Data(g.Map{
 		dao.MvpTask.Columns().DeletedAt: gtime.Now(),
 	}).Update()
 	return err
@@ -102,6 +110,9 @@ func (s *sTask) Detail(ctx context.Context, id snowflake.JsonInt64) (out *model.
 	err = dao.MvpTask.Ctx(ctx).Where(dao.MvpTask.Columns().Id, id).Where(dao.MvpTask.Columns().DeletedAt, nil).Scan(out)
 	if err != nil {
 		return nil, err
+	}
+	if out.ID == 0 {
+		return nil, fmt.Errorf("记录不存在")
 	}
 	// 查询项目ID关联显示
 	if out.ProjectID != 0 {
@@ -210,10 +221,13 @@ func (s *sTask) List(ctx context.Context, in *model.TaskListInput) (list []*mode
 	}
 	// 动态排序
 	if in.OrderBy != "" {
-		if in.OrderDir == "desc" {
-			m = m.OrderDesc(in.OrderBy)
-		} else {
-			m = m.OrderAsc(in.OrderBy)
+		safeOrderBy := middleware.ValidateOrderBy(in.OrderBy, []string{"id", "name", "status", "batch_no", "role_type", "sort", "created_at", "updated_at"})
+		if safeOrderBy != "" {
+			if in.OrderDir == "desc" {
+				m = m.OrderDesc(safeOrderBy)
+			} else {
+				m = m.OrderAsc(safeOrderBy)
+			}
 		}
 	} else {
 		m = m.OrderAsc(dao.MvpTask.Columns().Id)
@@ -241,6 +255,7 @@ func (s *sTask) Export(ctx context.Context, in *model.TaskListInput) (list []*mo
 func (s *sTask) Tree(ctx context.Context, in *model.TaskTreeInput) (tree []*model.TaskTreeOutput, err error) {
 	var list []*model.TaskTreeOutput
 	m := dao.MvpTask.Ctx(ctx).Where(dao.MvpTask.Columns().DeletedAt, nil)
+	m = middleware.ApplyDataScope(ctx, m, dao.MvpTask.Columns().CreatedBy, dao.MvpTask.Columns().DeptId)
 	if in.ProjectID > 0 {
 		m = m.Where(dao.MvpTask.Columns().ProjectId, in.ProjectID)
 	}
@@ -294,7 +309,8 @@ func (s *sTask) BatchUpdate(ctx context.Context, in *model.TaskBatchUpdateInput)
 	if in.Status != nil {
 		data[dao.MvpTask.Columns().Status] = *in.Status
 	}
-	_, err := dao.MvpTask.Ctx(ctx).WhereIn(dao.MvpTask.Columns().Id, in.IDs).Data(data).Update()
+	m := middleware.ApplyDataScope(ctx, dao.MvpTask.Ctx(ctx).Where(dao.MvpTask.Columns().DeletedAt, nil).WhereIn(dao.MvpTask.Columns().Id, in.IDs), dao.MvpTask.Columns().CreatedBy, dao.MvpTask.Columns().DeptId)
+	_, err := m.Data(data).Update()
 	return err
 }
 

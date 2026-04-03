@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -44,7 +45,8 @@ func GetDeptID(ctx context.Context) int64 {
 func ApplyDataScope(ctx context.Context, m *gdb.Model, columns ...string) *gdb.Model {
 	claims := GetClaims(ctx)
 	if claims == nil {
-		return m
+		// 未认证请求禁止查询任何数据
+		return m.Where("1 = 0")
 	}
 	// 超级管理员（UserID=1）不限制数据范围
 	if claims.UserID == 1 {
@@ -57,4 +59,35 @@ func ApplyDataScope(ctx context.Context, m *gdb.Model, columns ...string) *gdb.M
 		}
 	}
 	return m
+}
+
+// CheckOwnership 校验单条记录的数据归属（用于 Detail/Update/Delete）
+// 返回 nil 表示有权限，非 nil 表示无权限
+func CheckOwnership(ctx context.Context, m *gdb.Model, id interface{}, idColumn string, createdByColumn string) error {
+	claims := GetClaims(ctx)
+	if claims == nil {
+		return fmt.Errorf("未登录")
+	}
+	// 超级管理员不限制
+	if claims.UserID == 1 {
+		return nil
+	}
+	count, err := m.Where(idColumn, id).Where(createdByColumn, claims.UserID).Count()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return fmt.Errorf("无权操作该数据")
+	}
+	return nil
+}
+
+// ValidateOrderBy 校验排序字段是否在白名单中
+func ValidateOrderBy(orderBy string, allowedColumns []string) string {
+	for _, col := range allowedColumns {
+		if orderBy == col {
+			return orderBy
+		}
+	}
+	return ""
 }

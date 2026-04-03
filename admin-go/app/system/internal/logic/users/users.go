@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/gogf/gf/v2/crypto/gsha256"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -26,35 +27,37 @@ type sUsers struct{}
 
 // Create 创建用户表
 func (s *sUsers) Create(ctx context.Context, in *model.UsersCreateInput) error {
-	id := snowflake.Generate()
-	hashedPassword := gsha256.Encrypt(in.Password)
-	_, err := dao.Users.Ctx(ctx).Data(g.Map{
-		dao.Users.Columns().Id:        id,
-		dao.Users.Columns().Username: in.Username,
-		dao.Users.Columns().Password: hashedPassword,
-		dao.Users.Columns().Nickname: in.Nickname,
-		dao.Users.Columns().Email: in.Email,
-		dao.Users.Columns().Avatar: in.Avatar,
-		dao.Users.Columns().Status: in.Status,
-		dao.Users.Columns().DeptId: in.DeptID,
-		dao.Users.Columns().CreatedAt: gtime.Now(),
-		dao.Users.Columns().UpdatedAt: gtime.Now(),
-	}).Insert()
-	if err != nil {
-		return err
-	}
-	// 写入用户角色关联
-	if len(in.RoleIDs) > 0 {
-		data := make([]g.Map, 0, len(in.RoleIDs))
-		for _, roleID := range in.RoleIDs {
-			data = append(data, g.Map{
-				dao.UserRole.Columns().UserId: id,
-				dao.UserRole.Columns().RoleId: roleID,
-			})
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		id := snowflake.Generate()
+		hashedPassword := gsha256.Encrypt(in.Password)
+		_, err := dao.Users.Ctx(ctx).Data(g.Map{
+			dao.Users.Columns().Id:        id,
+			dao.Users.Columns().Username: in.Username,
+			dao.Users.Columns().Password: hashedPassword,
+			dao.Users.Columns().Nickname: in.Nickname,
+			dao.Users.Columns().Email: in.Email,
+			dao.Users.Columns().Avatar: in.Avatar,
+			dao.Users.Columns().Status: in.Status,
+			dao.Users.Columns().DeptId: in.DeptID,
+			dao.Users.Columns().CreatedAt: gtime.Now(),
+			dao.Users.Columns().UpdatedAt: gtime.Now(),
+		}).Insert()
+		if err != nil {
+			return err
 		}
-		_, err = dao.UserRole.Ctx(ctx).Data(data).Insert()
-	}
-	return err
+		// 写入用户角色关联
+		if len(in.RoleIDs) > 0 {
+			data := make([]g.Map, 0, len(in.RoleIDs))
+			for _, roleID := range in.RoleIDs {
+				data = append(data, g.Map{
+					dao.UserRole.Columns().UserId: id,
+					dao.UserRole.Columns().RoleId: roleID,
+				})
+			}
+			_, err = dao.UserRole.Ctx(ctx).Data(data).Insert()
+		}
+		return err
+	})
 }
 
 // Update 更新用户表
@@ -69,38 +72,40 @@ func (s *sUsers) Update(ctx context.Context, in *model.UsersUpdateInput) error {
 			return gerror.New("内置管理员账号不能禁用")
 		}
 	}
-	data := g.Map{
-		dao.Users.Columns().Username: in.Username,
-		dao.Users.Columns().Nickname: in.Nickname,
-		dao.Users.Columns().Email: in.Email,
-		dao.Users.Columns().Avatar: in.Avatar,
-		dao.Users.Columns().Status: in.Status,
-		dao.Users.Columns().DeptId: in.DeptID,
-		dao.Users.Columns().UpdatedAt: gtime.Now(),
-	}
-	if in.Password != "" {
-		data[dao.Users.Columns().Password] = gsha256.Encrypt(in.Password)
-	}
-	_, err := dao.Users.Ctx(ctx).Where(dao.Users.Columns().Id, in.ID).Data(data).Update()
-	if err != nil {
-		return err
-	}
-	// 更新用户角色关联（先删后插）
-	_, err = dao.UserRole.Ctx(ctx).Where(dao.UserRole.Columns().UserId, in.ID).Delete()
-	if err != nil {
-		return err
-	}
-	if len(in.RoleIDs) > 0 {
-		roleData := make([]g.Map, 0, len(in.RoleIDs))
-		for _, roleID := range in.RoleIDs {
-			roleData = append(roleData, g.Map{
-				dao.UserRole.Columns().UserId: in.ID,
-				dao.UserRole.Columns().RoleId: roleID,
-			})
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		data := g.Map{
+			dao.Users.Columns().Username: in.Username,
+			dao.Users.Columns().Nickname: in.Nickname,
+			dao.Users.Columns().Email: in.Email,
+			dao.Users.Columns().Avatar: in.Avatar,
+			dao.Users.Columns().Status: in.Status,
+			dao.Users.Columns().DeptId: in.DeptID,
+			dao.Users.Columns().UpdatedAt: gtime.Now(),
 		}
-		_, err = dao.UserRole.Ctx(ctx).Data(roleData).Insert()
-	}
-	return err
+		if in.Password != "" {
+			data[dao.Users.Columns().Password] = gsha256.Encrypt(in.Password)
+		}
+		_, err := dao.Users.Ctx(ctx).Where(dao.Users.Columns().Id, in.ID).Data(data).Update()
+		if err != nil {
+			return err
+		}
+		// 更新用户角色关联（先删后插，事务保护）
+		_, err = dao.UserRole.Ctx(ctx).Where(dao.UserRole.Columns().UserId, in.ID).Delete()
+		if err != nil {
+			return err
+		}
+		if len(in.RoleIDs) > 0 {
+			roleData := make([]g.Map, 0, len(in.RoleIDs))
+			for _, roleID := range in.RoleIDs {
+				roleData = append(roleData, g.Map{
+					dao.UserRole.Columns().UserId: in.ID,
+					dao.UserRole.Columns().RoleId: roleID,
+				})
+			}
+			_, err = dao.UserRole.Ctx(ctx).Data(roleData).Insert()
+		}
+		return err
+	})
 }
 
 // isBuiltinAdmin 检查用户是否为内置管理员

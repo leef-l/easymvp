@@ -3,6 +3,8 @@ package role
 import (
 	"context"
 
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
@@ -24,6 +26,8 @@ type sRole struct{}
 
 // Create 创建角色表
 func (s *sRole) Create(ctx context.Context, in *model.RoleCreateInput) error {
+	// 禁止通过 API 创建超级管理员角色
+	in.IsAdmin = 0
 	id := snowflake.Generate()
 	_, err := dao.Role.Ctx(ctx).Data(g.Map{
 		dao.Role.Columns().Id:        id,
@@ -32,7 +36,7 @@ func (s *sRole) Create(ctx context.Context, in *model.RoleCreateInput) error {
 		dao.Role.Columns().DataScope: in.DataScope,
 		dao.Role.Columns().Sort: in.Sort,
 		dao.Role.Columns().Status: in.Status,
-		dao.Role.Columns().IsAdmin:   in.IsAdmin,
+		dao.Role.Columns().IsAdmin:   0,
 		dao.Role.Columns().CreatedAt: gtime.Now(),
 		dao.Role.Columns().UpdatedAt: gtime.Now(),
 	}).Insert()
@@ -41,13 +45,13 @@ func (s *sRole) Create(ctx context.Context, in *model.RoleCreateInput) error {
 
 // Update 更新角色表
 func (s *sRole) Update(ctx context.Context, in *model.RoleUpdateInput) error {
+	// 禁止通过 API 修改 IsAdmin 字段
 	data := g.Map{
 		dao.Role.Columns().ParentId: in.ParentID,
 		dao.Role.Columns().Title: in.Title,
 		dao.Role.Columns().DataScope: in.DataScope,
 		dao.Role.Columns().Sort: in.Sort,
 		dao.Role.Columns().Status: in.Status,
-		dao.Role.Columns().IsAdmin:   in.IsAdmin,
 		dao.Role.Columns().UpdatedAt: gtime.Now(),
 	}
 	_, err := dao.Role.Ctx(ctx).Where(dao.Role.Columns().Id, in.ID).Data(data).Update()
@@ -56,7 +60,15 @@ func (s *sRole) Update(ctx context.Context, in *model.RoleUpdateInput) error {
 
 // Delete 软删除角色表
 func (s *sRole) Delete(ctx context.Context, id snowflake.JsonInt64) error {
-	_, err := dao.Role.Ctx(ctx).Where(dao.Role.Columns().Id, id).Data(g.Map{
+	// 检查是否有用户仍关联此角色
+	count, err := dao.UserRole.Ctx(ctx).Where(dao.UserRole.Columns().RoleId, id).Count()
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return gerror.Newf("该角色下还有 %d 个用户，请先解除关联", count)
+	}
+	_, err = dao.Role.Ctx(ctx).Where(dao.Role.Columns().Id, id).Data(g.Map{
 		dao.Role.Columns().DeletedAt: gtime.Now(),
 	}).Update()
 	return err
@@ -130,25 +142,27 @@ func (s *sRole) Tree(ctx context.Context) (tree []*model.RoleTreeOutput, err err
 	return
 }
 
-// GrantMenu 角色授权菜单（先删后插）
+// GrantMenu 角色授权菜单（先删后插，事务保护）
 func (s *sRole) GrantMenu(ctx context.Context, in *model.RoleGrantMenuInput) error {
-	// 删除旧的关联
-	_, err := dao.RoleMenu.Ctx(ctx).Where(dao.RoleMenu.Columns().RoleId, in.ID).Delete()
-	if err != nil {
-		return err
-	}
-	// 批量插入新关联
-	if len(in.MenuIDs) > 0 {
-		data := make([]g.Map, 0, len(in.MenuIDs))
-		for _, menuID := range in.MenuIDs {
-			data = append(data, g.Map{
-				dao.RoleMenu.Columns().RoleId: in.ID,
-				dao.RoleMenu.Columns().MenuId: menuID,
-			})
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		// 删除旧的关联
+		_, err := dao.RoleMenu.Ctx(ctx).Where(dao.RoleMenu.Columns().RoleId, in.ID).Delete()
+		if err != nil {
+			return err
 		}
-		_, err = dao.RoleMenu.Ctx(ctx).Data(data).Insert()
-	}
-	return err
+		// 批量插入新关联
+		if len(in.MenuIDs) > 0 {
+			data := make([]g.Map, 0, len(in.MenuIDs))
+			for _, menuID := range in.MenuIDs {
+				data = append(data, g.Map{
+					dao.RoleMenu.Columns().RoleId: in.ID,
+					dao.RoleMenu.Columns().MenuId: menuID,
+				})
+			}
+			_, err = dao.RoleMenu.Ctx(ctx).Data(data).Insert()
+		}
+		return err
+	})
 }
 
 // GetMenuIDs 获取角色已授权的菜单ID列表
@@ -167,32 +181,34 @@ func (s *sRole) GetMenuIDs(ctx context.Context, roleID snowflake.JsonInt64) ([]s
 	return ids, nil
 }
 
-// GrantDept 角色授权数据权限
+// GrantDept 角色授权数据权限（事务保护）
 func (s *sRole) GrantDept(ctx context.Context, in *model.RoleGrantDeptInput) error {
-	// 更新角色的 data_scope
-	_, err := dao.Role.Ctx(ctx).Where(dao.Role.Columns().Id, in.ID).Data(g.Map{
-		dao.Role.Columns().DataScope: in.DataScope,
-	}).Update()
-	if err != nil {
-		return err
-	}
-	// 删除旧的部门关联
-	_, err = dao.RoleDept.Ctx(ctx).Where(dao.RoleDept.Columns().RoleId, in.ID).Delete()
-	if err != nil {
-		return err
-	}
-	// 自定义数据权限时，插入部门关联
-	if in.DataScope == 5 && len(in.DeptIDs) > 0 {
-		data := make([]g.Map, 0, len(in.DeptIDs))
-		for _, deptID := range in.DeptIDs {
-			data = append(data, g.Map{
-				dao.RoleDept.Columns().RoleId: in.ID,
-				dao.RoleDept.Columns().DeptId: deptID,
-			})
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		// 更新角色的 data_scope
+		_, err := dao.Role.Ctx(ctx).Where(dao.Role.Columns().Id, in.ID).Data(g.Map{
+			dao.Role.Columns().DataScope: in.DataScope,
+		}).Update()
+		if err != nil {
+			return err
 		}
-		_, err = dao.RoleDept.Ctx(ctx).Data(data).Insert()
-	}
-	return err
+		// 删除旧的部门关联
+		_, err = dao.RoleDept.Ctx(ctx).Where(dao.RoleDept.Columns().RoleId, in.ID).Delete()
+		if err != nil {
+			return err
+		}
+		// 自定义数据权限时，插入部门关联
+		if in.DataScope == 5 && len(in.DeptIDs) > 0 {
+			data := make([]g.Map, 0, len(in.DeptIDs))
+			for _, deptID := range in.DeptIDs {
+				data = append(data, g.Map{
+					dao.RoleDept.Columns().RoleId: in.ID,
+					dao.RoleDept.Columns().DeptId: deptID,
+				})
+			}
+			_, err = dao.RoleDept.Ctx(ctx).Data(data).Insert()
+		}
+		return err
+	})
 }
 
 // GetDeptIDs 获取角色已授权的部门ID列表

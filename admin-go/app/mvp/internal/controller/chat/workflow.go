@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/gogf/gf/v2/frame/g"
 
@@ -14,6 +15,22 @@ import (
 var Workflow = cWorkflow{}
 
 type cWorkflow struct{}
+
+// checkProjectOwnership 校验项目归属
+func checkProjectOwnership(ctx context.Context, projectID int64) error {
+	userID := middleware.GetUserID(ctx)
+	if userID == 1 {
+		return nil
+	}
+	project, err := g.DB().Model("mvp_project").Where("id", projectID).Where("deleted_at IS NULL").One()
+	if err != nil || project.IsEmpty() {
+		return fmt.Errorf("项目不存在")
+	}
+	if project["created_by"].Int64() != userID {
+		return fmt.Errorf("无权操作该项目")
+	}
+	return nil
+}
 
 // CreateProject 创建项目
 func (c *cWorkflow) CreateProject(ctx context.Context, req *v1.WorkflowCreateProjectReq) (res *v1.WorkflowCreateProjectRes, err error) {
@@ -33,6 +50,9 @@ func (c *cWorkflow) CreateProject(ctx context.Context, req *v1.WorkflowCreatePro
 
 // ConfirmPlan 确认实施方案
 func (c *cWorkflow) ConfirmPlan(ctx context.Context, req *v1.WorkflowConfirmPlanReq) (res *v1.WorkflowConfirmPlanRes, err error) {
+	if err := checkProjectOwnership(ctx, int64(req.ProjectID)); err != nil {
+		return nil, err
+	}
 	err = engine.GetScheduler().ConfirmPlan(ctx, int64(req.ProjectID))
 	if err != nil {
 		return nil, err
@@ -42,6 +62,9 @@ func (c *cWorkflow) ConfirmPlan(ctx context.Context, req *v1.WorkflowConfirmPlan
 
 // Pause 暂停项目
 func (c *cWorkflow) Pause(ctx context.Context, req *v1.WorkflowPauseReq) (res *v1.WorkflowPauseRes, err error) {
+	if err := checkProjectOwnership(ctx, int64(req.ProjectID)); err != nil {
+		return nil, err
+	}
 	err = engine.GetScheduler().Pause(ctx, int64(req.ProjectID), req.PauseReason)
 	if err != nil {
 		return nil, err
@@ -51,6 +74,9 @@ func (c *cWorkflow) Pause(ctx context.Context, req *v1.WorkflowPauseReq) (res *v
 
 // Resume 恢复项目
 func (c *cWorkflow) Resume(ctx context.Context, req *v1.WorkflowResumeReq) (res *v1.WorkflowResumeRes, err error) {
+	if err := checkProjectOwnership(ctx, int64(req.ProjectID)); err != nil {
+		return nil, err
+	}
 	err = engine.GetScheduler().Resume(ctx, int64(req.ProjectID))
 	if err != nil {
 		return nil, err
@@ -60,6 +86,9 @@ func (c *cWorkflow) Resume(ctx context.Context, req *v1.WorkflowResumeReq) (res 
 
 // RetryTask 重新执行失败任务
 func (c *cWorkflow) RetryTask(ctx context.Context, req *v1.WorkflowRetryTaskReq) (res *v1.WorkflowRetryTaskRes, err error) {
+	if err := checkProjectOwnership(ctx, int64(req.ProjectID)); err != nil {
+		return nil, err
+	}
 	engine.GetWatchdog().ResetRetryCount(int64(req.TaskID))
 	err = engine.GetScheduler().RetryTask(int64(req.ProjectID), int64(req.TaskID))
 	if err != nil {
@@ -71,6 +100,9 @@ func (c *cWorkflow) RetryTask(ctx context.Context, req *v1.WorkflowRetryTaskReq)
 // ParseTasks 手动解析架构师回复中的任务清单（托底机制）
 // dryRun=true 时仅检查不创建，dryRun=false 时实际创建草案任务
 func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksReq) (res *v1.WorkflowParseTasksRes, err error) {
+	if err := checkProjectOwnership(ctx, int64(req.ProjectID)); err != nil {
+		return nil, err
+	}
 	projectID := int64(req.ProjectID)
 
 	// 查找该项目的架构师对话
@@ -147,12 +179,18 @@ func (c *cWorkflow) RolePresets(ctx context.Context, req *v1.WorkflowRolePresets
 
 // ProjectStatus 获取项目状态
 func (c *cWorkflow) ProjectStatus(ctx context.Context, req *v1.WorkflowProjectStatusReq) (res *v1.WorkflowProjectStatusRes, err error) {
+	if err := checkProjectOwnership(ctx, int64(req.ProjectID)); err != nil {
+		return nil, err
+	}
 	projectID := int64(req.ProjectID)
 
 	// 查项目状态
 	project, err := g.DB().Model("mvp_project").Where("id", projectID).Where("deleted_at IS NULL").One()
-	if err != nil || project.IsEmpty() {
+	if err != nil {
 		return nil, err
+	}
+	if project.IsEmpty() {
+		return nil, fmt.Errorf("项目不存在")
 	}
 
 	// 统计各状态任务数
@@ -161,12 +199,14 @@ func (c *cWorkflow) ProjectStatus(ctx context.Context, req *v1.WorkflowProjectSt
 		Count  int    `json:"count"`
 	}
 	var counts []StatusCount
-	g.DB().Model("mvp_task").
+	if err := g.DB().Model("mvp_task").
 		Where("project_id", projectID).
 		Where("deleted_at IS NULL").
 		Fields("status, COUNT(*) as count").
 		Group("status").
-		Scan(&counts)
+		Scan(&counts); err != nil {
+		return nil, err
+	}
 
 	statusCounts := make(map[string]int)
 	total := 0

@@ -39,23 +39,19 @@ func ParseComment(comment string) (label string, shortLabel string, tooltipText 
 	}
 
 	// 查找冒号分隔符（支持中文冒号和英文冒号）
-	sepIdx := -1
-	for i, ch := range comment {
-		if ch == ':' || ch == '：' {
-			sepIdx = i
-			break
-		}
-	}
+	// 统一将中文冒号替换为英文冒号后再分割，避免 UTF-8 多字节截取错误
+	normalized := strings.Replace(comment, "：", ":", 1)
+	parts := strings.SplitN(normalized, ":", 2)
 
 	// 没有冒号，整个备注就是 label
-	if sepIdx < 0 {
+	if len(parts) == 1 {
 		label = comment
 		shortLabel, tooltipText = extractParentheses(label)
 		return label, shortLabel, tooltipText, nil
 	}
 
-	label = strings.TrimSpace(comment[:sepIdx])
-	enumPart := strings.TrimSpace(comment[sepIdx+1:])
+	label = strings.TrimSpace(parts[0])
+	enumPart := strings.TrimSpace(parts[1])
 	if len(label) == 0 {
 		label = comment
 		shortLabel, tooltipText = extractParentheses(label)

@@ -156,6 +156,6 @@ type TaskTreeOutput struct {
 // TaskBatchUpdateInput 批量编辑MVP任务表输入
 type TaskBatchUpdateInput struct {
 	IDs    []snowflake.JsonInt64 `json:"ids"`
-	Status *int                  `json:"status"`
+	Status *string               `json:"status"`
 }
 

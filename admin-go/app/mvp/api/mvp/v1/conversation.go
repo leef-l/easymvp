@@ -70,7 +70,7 @@ type ConversationBatchDeleteRes struct {
 type ConversationBatchUpdateReq struct {
 	g.Meta `path:"/conversation/batch-update" method:"put" tags:"MVP对话表" summary:"批量编辑MVP对话表"`
 	IDs    []snowflake.JsonInt64 `json:"ids" v:"required#ID列表不能为空" dc:"MVP对话表ID列表"`
-	Status *int                  `json:"status" dc:"状态"`
+	Status *string               `json:"status" dc:"状态"`
 }
 
 // ConversationBatchUpdateRes 批量编辑MVP对话表响应

@@ -65,21 +65,38 @@ function formatTime(dateStr: string): string {
  * 简单的 Markdown 渲染函数
  * 处理常见格式：代码块、行内代码、粗体、斜体、链接、换行
  */
+/** 转义 HTML 特殊字符，防止 XSS */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** 校验 URL 协议白名单，防止 javascript: 注入 */
+function sanitizeUrl(url: string): string {
+  const trimmed = url.trim();
+  if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith('/') || trimmed.startsWith('#')) {
+    return trimmed;
+  }
+  return '';
+}
+
 function renderMarkdown(text: string): string {
   if (!text) return '';
 
-  let html = text;
+  // 先对全文做 HTML 转义，再还原 Markdown 语法生成的标签
+  let html = escapeHtml(text);
 
   // 代码块（带语言标记）：```lang\ncode\n```
   html = html.replace(
     /```(\w*)\n?([\s\S]*?)```/g,
     (_, lang, code) => {
-      const langClass = lang ? ` class="language-${lang}"` : '';
-      const escapedCode = code
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-      return `<pre class="code-block"><div class="code-lang">${lang || 'code'}</div><code${langClass}>${escapedCode}</code></pre>`;
+      const safeLang = lang ? escapeHtml(lang) : 'code';
+      const langClass = lang ? ` class="language-${escapeHtml(lang)}"` : '';
+      return `<pre class="code-block"><div class="code-lang">${safeLang}</div><code${langClass}>${code}</code></pre>`;
     },
   );
 
@@ -109,10 +126,14 @@ function renderMarkdown(text: string): string {
   // 有序列表：1. item
   html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
 
-  // 链接：[text](url)
+  // 链接：[text](url) — 协议白名单校验
   html = html.replace(
     /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
+    (_, linkText, url) => {
+      const safeUrl = sanitizeUrl(url);
+      if (!safeUrl) return linkText;
+      return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${linkText}</a>`;
+    },
   );
 
   // 段落换行（两个换行转 <p>，单个换行转 <br>）

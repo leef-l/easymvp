@@ -71,6 +71,6 @@ type MessageListInput struct {
 // MessageBatchUpdateInput 批量编辑MVP消息表输入
 type MessageBatchUpdateInput struct {
 	IDs    []snowflake.JsonInt64 `json:"ids"`
-	Status *int                  `json:"status"`
+	Status *string               `json:"status"`
 }
 
