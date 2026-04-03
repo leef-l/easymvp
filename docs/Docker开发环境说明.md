@@ -62,6 +62,8 @@ admin-go/.env
 .\docker\dev\compose.ps1
 ```
 
+这条命令默认只启动核心服务：`mysql`、`system`、`ai`、`mvp`。
+
 默认等价于：
 
 ```powershell
@@ -86,6 +88,12 @@ docker build -f docker/build/Dockerfile.web.dev vue-vben-admin -t easymvp-web-de
 
 ```powershell
 .\docker\dev\compose.ps1 --profile frontend up -d
+```
+
+如果需要一次启动全部开发服务（核心服务 + `web` + `openhands-runtime`）：
+
+```powershell
+.\docker\dev\compose.ps1 --profile frontend --profile ai-runtime up -d
 ```
 
 如果需要重建镜像：
@@ -196,6 +204,12 @@ docker compose --project-name easymvp --env-file docker/dev/.env -f docker/dev/d
 ```
 
 否则只会启动后端和数据库，不会启动前端容器。
+
+如果你想启动全部服务，直接执行：
+
+```powershell
+.\docker\dev\compose.ps1 --profile frontend --profile ai-runtime up -d
+```
 
 ### 2. 修改了 `docker/dev/.env`，但后端没生效
 

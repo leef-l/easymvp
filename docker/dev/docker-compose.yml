@@ -4,6 +4,7 @@ x-admin-go-build: &admin-go-build
   context: ../../admin-go
   dockerfile: ../docker/build/Dockerfile.admin-go.dev
   args:
+    GO_BASE_IMAGE: ${GO_BASE_IMAGE:-golang:1.25-bookworm}
     GO_PROXY: ${GO_PROXY:-https://goproxy.cn,direct}
     PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     APT_MIRROR: ${APT_MIRROR:-}
@@ -126,6 +127,7 @@ services:
       context: ../../vue-vben-admin
       dockerfile: ../docker/build/Dockerfile.web.dev
       args:
+        WEB_BASE_IMAGE: ${WEB_BASE_IMAGE:-node:22-bookworm}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
     profiles: ["frontend"]
     container_name: easymvp-web

@@ -1,13 +1,14 @@
 # ─────────────────────────────────────────────────────────────
 # GBaseAdmin - GoFrame 后端服务 Dockerfile（国内版）
 # 多阶段构建：builder(golang:1.22-alpine) → runner(alpine)
-# 使用 docker.1ms.run 镜像加速代理
+# 默认使用官方镜像，需要时可通过构建参数覆盖为镜像代理
 # ─────────────────────────────────────────────────────────────
 
 # ─────────────────────────────────────────────
 # Stage 1: 编译阶段
 # ─────────────────────────────────────────────
-FROM docker.1ms.run/golang:1.23-alpine AS builder
+ARG BUILDER_BASE_IMAGE=golang:1.23-alpine
+FROM ${BUILDER_BASE_IMAGE} AS builder
 
 RUN apk add --no-cache git ca-certificates tzdata
 
@@ -28,7 +29,8 @@ RUN go build -ldflags "-s -w" -o /build/system ./app/system/main.go
 # ─────────────────────────────────────────────
 # Stage 2: 运行阶段
 # ─────────────────────────────────────────────
-FROM docker.1ms.run/alpine:3.19
+ARG RUNTIME_BASE_IMAGE=alpine:3.19
+FROM ${RUNTIME_BASE_IMAGE}
 
 RUN apk add --no-cache \
     ca-certificates \

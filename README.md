@@ -8,6 +8,14 @@
 .\docker\dev\compose.ps1
 ```
 
+默认只启动核心服务：`mysql`、`system`、`ai`、`mvp`。
+
+如果要启动全部开发服务（包含 `web` 和 `openhands-runtime`），执行：
+
+```powershell
+.\docker\dev\compose.ps1 --profile frontend --profile ai-runtime up -d
+```
+
 如需先预打包开发镜像，执行：
 
 ```powershell
@@ -20,6 +28,8 @@
 docker build -f docker/build/Dockerfile.admin-go.dev admin-go -t easymvp-admin-go-dev:latest
 docker compose --project-name easymvp --env-file docker/dev/.env -f docker/dev/docker-compose.cn.yml up -d
 ```
+
+因为 `web` 服务在 `frontend` profile 下、`openhands-runtime` 在 `ai-runtime` profile 下，所以默认命令不会启动它们。
 
 默认本地端口：
 

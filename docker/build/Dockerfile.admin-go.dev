@@ -1,4 +1,5 @@
-FROM docker.1ms.run/golang:1.25-bookworm
+ARG GO_BASE_IMAGE=golang:1.25-bookworm
+FROM ${GO_BASE_IMAGE}
 
 ARG GO_PROXY=https://goproxy.cn,direct
 ARG PIP_INDEX_URL=https://pypi.org/simple

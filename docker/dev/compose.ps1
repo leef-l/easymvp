@@ -61,6 +61,13 @@ function Test-ProfileEnabled {
     return $false
 }
 
+function Write-StartupGuide {
+    Write-Host 'Docker dev services started.' -ForegroundColor Green
+    Write-Host 'Default command starts core services: mysql, system, ai, mvp.' -ForegroundColor Yellow
+    Write-Host 'Start frontend too: .\docker\dev\compose.ps1 --profile frontend up -d' -ForegroundColor Yellow
+    Write-Host 'Start all services: .\docker\dev\compose.ps1 --profile frontend --profile ai-runtime up -d' -ForegroundColor Yellow
+}
+
 function Invoke-DevBuild {
     param(
         [hashtable]$EnvMap,
@@ -73,6 +80,7 @@ function Invoke-DevBuild {
         '-f', (Join-Path $repoRoot 'docker\build\Dockerfile.admin-go.dev'),
         (Join-Path $repoRoot 'admin-go'),
         '-t', 'easymvp-admin-go-dev:latest',
+        '--build-arg', "GO_BASE_IMAGE=$(Get-EnvValue -EnvMap $EnvMap -Name 'GO_BASE_IMAGE' -Default 'golang:1.25-bookworm')",
         '--build-arg', "GO_PROXY=$(Get-EnvValue -EnvMap $EnvMap -Name 'GO_PROXY' -Default 'https://goproxy.cn,direct')",
         '--build-arg', "PIP_INDEX_URL=$(Get-EnvValue -EnvMap $EnvMap -Name 'PIP_INDEX_URL' -Default 'https://pypi.org/simple')",
         '--build-arg', "APT_MIRROR=$(Get-EnvValue -EnvMap $EnvMap -Name 'APT_MIRROR' -Default '')",
@@ -89,6 +97,7 @@ function Invoke-DevBuild {
             '-f', (Join-Path $repoRoot 'docker\build\Dockerfile.web.dev'),
             (Join-Path $repoRoot 'vue-vben-admin'),
             '-t', 'easymvp-web-dev:latest',
+            '--build-arg', "WEB_BASE_IMAGE=$(Get-EnvValue -EnvMap $EnvMap -Name 'WEB_BASE_IMAGE' -Default 'node:22-bookworm')",
             '--build-arg', "NPM_REGISTRY=$(Get-EnvValue -EnvMap $EnvMap -Name 'NPM_REGISTRY' -Default 'https://registry.npmmirror.com')"
         )
         & docker @frontendArgs
@@ -125,9 +134,15 @@ try {
     if ($ComposeArgs.Count -eq 0) {
         Invoke-DevBuild -EnvMap $envMap
         & docker @dockerArgs 'up' '-d'
+        if ($LASTEXITCODE -eq 0) {
+            Write-StartupGuide
+        }
     } elseif ($ComposeArgs -contains 'up') {
         Invoke-DevBuild -EnvMap $envMap -BuildFrontend:(Test-ProfileEnabled -Args $ComposeArgs -ProfileName 'frontend') -BuildAiRuntime:(Test-ProfileEnabled -Args $ComposeArgs -ProfileName 'ai-runtime')
         & docker @dockerArgs @ComposeArgs
+        if ($LASTEXITCODE -eq 0) {
+            Write-StartupGuide
+        }
     } else {
         & docker @dockerArgs @ComposeArgs
     }
