@@ -15,6 +15,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	"easymvp/app/mvp/internal/activity"
+	"easymvp/utility/worktreeguard"
 )
 
 // AiderRunner 封装 Aider CLI 调用
@@ -56,6 +57,7 @@ type AiderResult struct {
 	Error       error         // 错误
 	Duration    time.Duration // 耗时
 	FailureHint string        // 归纳后的失败说明
+	Category    taskFailureCategory
 }
 
 type aiderActivityWriter struct {
@@ -201,6 +203,7 @@ func (r *AiderRunner) buildArgs(cfg *AiderConfig, metadataFile string, messageFi
 
 	args := []string{
 		"--model", r.formatModel(cfg),
+		"--encoding", "utf-8",
 		"--no-auto-commits",
 		"--no-show-model-warnings",
 		"--no-pretty",
@@ -393,10 +396,34 @@ func (r *AiderRunner) RunTask(ctx context.Context, projectID int64, taskID int64
 
 	// 如果有 system prompt，拼到 message 前面
 	if cfg.SystemPrompt != "" {
-		cfg.Message = fmt.Sprintf("## 角色设定\n%s\n\n## 任务指令\n%s", cfg.SystemPrompt, taskPrompt)
+		cfg.Message = strings.TrimSpace(cfg.SystemPrompt) + "\n\n" + taskPrompt
 	}
 
-	return r.Run(ctx, cfg)
+	snapshot, err := worktreeguard.Capture(ctx, workDir)
+	if err != nil {
+		g.Log().Warningf(ctx, "[AiderRunner] 捕获 git 基线失败: %v", err)
+	}
+
+	result := r.Run(ctx, cfg)
+	if result.Error != nil || snapshot == nil {
+		return result
+	}
+
+	validation, err := snapshot.Validate(ctx, workDir, cfg.Files)
+	if err != nil {
+		g.Log().Warningf(ctx, "[AiderRunner] 校验 git 变更失败: %v", err)
+		return result
+	}
+	if validation.HasIssues() {
+		summary := validation.Summary()
+		if summary == "" {
+			summary = "检测到异常文件变更"
+		}
+		result.Output = strings.TrimSpace(result.Output + "\n\n[guard] " + summary)
+		result.Error = fmt.Errorf(summary)
+		result.Category = taskFailurePolicyGuard
+	}
+	return result
 }
 
 func (r *AiderRunner) buildCompactRetryConfig(cfg *AiderConfig) *AiderConfig {

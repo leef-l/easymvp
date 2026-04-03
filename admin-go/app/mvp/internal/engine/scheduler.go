@@ -9,6 +9,8 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+
+	"easymvp/utility/worktreeguard"
 )
 
 // Scheduler 任务调度器
@@ -21,12 +23,17 @@ import (
 //   - failed/bug_found 的任务会阻塞批次推进（看门狗自动重试，或人工 SkipTask 跳过）
 type Scheduler struct {
 	mu             sync.Mutex
-	running        map[int64]bool              // 正在执行的任务 ID
-	lockedRes      map[string]int64            // 已锁定的资源 -> 占用任务 ID
-	activeBatch    map[int64]int               // 项目 ID -> 当前活跃批次号（0 表示无活跃批次）
-	maxConcurrency int                         // 最大并发 goroutine 数
-	executor       *Executor                   // 任务执行器
+	running        map[int64]bool               // 正在执行的任务 ID
+	lockedRes      map[string]int64             // 已锁定的资源 -> 占用任务 ID
+	activeBatch    map[int64]int                // 项目 ID -> 当前活跃批次号（0 表示无活跃批次）
+	maxConcurrency int                          // 最大并发 goroutine 数
+	executor       *Executor                    // 任务执行器
 	projectCtx     map[int64]context.CancelFunc // 项目级 cancel 函数（暂停用）
+}
+
+type resourceParseResult struct {
+	Resources []string
+	Rejected  []string
 }
 
 // NewScheduler 创建调度器
@@ -133,6 +140,21 @@ func (s *Scheduler) OnTaskFailed(projectID int64, taskID int64, errMsg string) {
 	logTaskAction(taskID, "failed", "running", "failed", errMsg, "system")
 
 	// 释放资源后触发调度，让同批次其他 pending 任务有机会执行
+	go s.scheduleOnce(context.Background(), projectID)
+}
+
+// OnTaskEscalated 任务升级给架构师后的回调
+func (s *Scheduler) OnTaskEscalated(projectID int64, taskID int64, message string) {
+	s.mu.Lock()
+	delete(s.running, taskID)
+	for res, tid := range s.lockedRes {
+		if tid == taskID {
+			delete(s.lockedRes, res)
+		}
+	}
+	s.mu.Unlock()
+
+	logTaskAction(taskID, "escalate_to_architect", "running", "escalated", message, "system")
 	go s.scheduleOnce(context.Background(), projectID)
 }
 
@@ -453,15 +475,26 @@ func (s *Scheduler) GetActiveBatch(projectID int64) int {
 
 // parseResources 解析 JSON 资源列表
 func parseResources(jsonStr string) []string {
+	return parseResourcesDetail(jsonStr).Resources
+}
+
+func parseResourcesDetail(jsonStr string) resourceParseResult {
+	result := resourceParseResult{}
 	if jsonStr == "" || jsonStr == "null" {
-		return nil
+		return result
 	}
 	var resources []string
 	if err := json.Unmarshal([]byte(jsonStr), &resources); err != nil {
 		g.Log().Warningf(context.Background(), "[Scheduler] parseResources 解析失败，跳过资源锁定，原始值: %s, 错误: %v", jsonStr, err)
-		return nil
+		return result
 	}
-	return resources
+	normalized, dropped := worktreeguard.NormalizeRelativePaths(resources)
+	if len(dropped) > 0 {
+		g.Log().Warningf(context.Background(), "[Scheduler] parseResources 丢弃可疑资源: %v", dropped)
+	}
+	result.Resources = normalized
+	result.Rejected = dropped
+	return result
 }
 
 // logTaskAction 记录任务日志

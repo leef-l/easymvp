@@ -21,6 +21,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"easymvp/utility/snowflake"
+	"easymvp/utility/worktreeguard"
 )
 
 var runningTaskCancels sync.Map
@@ -73,7 +74,7 @@ type taskExecutionResult struct {
 }
 
 type aiderExecutionConfig struct {
-	TaskID                int64
+	TaskID               int64
 	Model                *runtimeModelInfo
 	WorkDir              string
 	Message              string
@@ -409,14 +410,26 @@ func (s *sTask) executeWithAider(ctx context.Context, taskInfo *runtimeTask, eng
 		TaskID:               taskInfo.ID,
 		Model:                modelInfo,
 		WorkDir:              taskInfo.WorktreePath,
-		Message:              taskInfo.Instruction,
+		Message:              buildSafeAgentInstruction(taskInfo.Instruction, nil),
 		Timeout:              time.Duration(engineCfg.TimeoutSeconds) * time.Second,
 		MapTokens:            512,
 		MaxChatHistoryTokens: 2048,
 	}
 
 	_ = s.appendTaskLog(context.Background(), taskInfo.ID, "system", "Aider 将优先使用本机安装或 uv 执行，缺失时再回退到 Docker。")
+	snapshot, snapErr := worktreeguard.Capture(ctx, taskInfo.WorktreePath)
+	if snapErr != nil {
+		g.Log().Warningf(ctx, "[ai-task] 捕获 git 基线失败: taskID=%d err=%v", taskInfo.ID, snapErr)
+	}
 	result := s.runAider(ctx, cfg)
+	if result.Error == nil {
+		if validationErr := s.validateTaskWorkspaceChanges(ctx, snapshot, taskInfo, nil, &result.Output); validationErr != nil {
+			result.Error = validationErr
+			if result.FailureHint == "" {
+				result.FailureHint = validationErr.Error()
+			}
+		}
+	}
 	if result.Error != nil {
 		errMsg := result.FailureHint
 		if errMsg == "" {
@@ -476,6 +489,10 @@ func (s *sTask) executeWithOpenHandsCLI(ctx context.Context, taskInfo *runtimeTa
 	}
 
 	_ = s.appendTaskLog(context.Background(), taskInfo.ID, "system", "OpenHands 将通过官方 CLI/uv 路径执行。")
+	snapshot, snapErr := worktreeguard.Capture(ctx, taskInfo.WorktreePath)
+	if snapErr != nil {
+		g.Log().Warningf(ctx, "[ai-task] 捕获 OpenHands git 基线失败: taskID=%d err=%v", taskInfo.ID, snapErr)
+	}
 
 	var (
 		stdout = newActivityBufferWriter(taskInfo.ID)
@@ -498,6 +515,12 @@ func (s *sTask) executeWithOpenHandsCLI(ctx context.Context, taskInfo *runtimeTa
 
 	if output == "" {
 		output = "OpenHands CLI 已执行完成。"
+	}
+	if validationErr := s.validateTaskWorkspaceChanges(ctx, snapshot, taskInfo, nil, &output); validationErr != nil {
+		return &taskExecutionResult{
+			Summary: shortenText(output, 1200),
+			Output:  output,
+		}, validationErr, true
 	}
 
 	return &taskExecutionResult{
@@ -577,7 +600,7 @@ func (s *sTask) executeWithOpenHandsHTTP(ctx context.Context, taskInfo *runtimeT
 	payload := map[string]interface{}{
 		"taskId":       taskInfo.ID,
 		"title":        taskInfo.Title,
-		"instruction":  taskInfo.Instruction,
+		"instruction":  buildSafeAgentInstruction(taskInfo.Instruction, nil),
 		"repoPath":     taskInfo.RepoPath,
 		"worktreePath": taskInfo.WorktreePath,
 		"branchName":   taskInfo.BranchName,
@@ -616,6 +639,10 @@ func (s *sTask) executeWithOpenHandsHTTP(ctx context.Context, taskInfo *runtimeT
 	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
+	snapshot, snapErr := worktreeguard.Capture(ctx, taskInfo.WorktreePath)
+	if snapErr != nil {
+		g.Log().Warningf(ctx, "[ai-task] 捕获 OpenHands HTTP git 基线失败: taskID=%d err=%v", taskInfo.ID, snapErr)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -639,10 +666,14 @@ func (s *sTask) executeWithOpenHandsHTTP(ctx context.Context, taskInfo *runtimeT
 		summary = fmt.Sprintf("OpenHands 请求完成，HTTP %d", resp.StatusCode)
 	}
 
-	return &taskExecutionResult{
+	result := &taskExecutionResult{
 		Summary: summary,
 		Output:  respText,
-	}, nil
+	}
+	if validationErr := s.validateTaskWorkspaceChanges(ctx, snapshot, taskInfo, nil, &result.Output); validationErr != nil {
+		return result, validationErr
+	}
+	return result, nil
 }
 
 func (s *sTask) runAider(ctx context.Context, cfg *aiderExecutionConfig) *aiderExecutionResult {
@@ -804,6 +835,7 @@ func buildAiderArgs(cfg *aiderExecutionConfig, metadataFile, messageFile, chatHi
 
 	args := []string{
 		"--model", formatAiderModel(cfg.Model),
+		"--encoding", "utf-8",
 		"--no-auto-commits",
 		"--no-gitignore",
 		"--no-check-update",
@@ -988,7 +1020,7 @@ func buildOpenHandsCLICommand(ctx context.Context, taskInfo *runtimeTask, modelI
 		"--override-with-envs",
 		"--always-approve",
 		"--exit-without-confirmation",
-		"-t", taskInfo.Instruction,
+		"-t", buildSafeAgentInstruction(taskInfo.Instruction, nil),
 	}
 	if _, err := exec.LookPath("openhands"); err == nil {
 		cmd := exec.CommandContext(ctx, "openhands", args...)
@@ -1013,6 +1045,7 @@ func buildOpenHandsCLIEnv(taskInfo *runtimeTask, modelInfo *runtimeModelInfo) []
 		"LLM_MODEL=" + formatOpenHandsModel(modelInfo),
 		"LLM_BASE_URL=" + strings.TrimRight(modelInfo.BaseURL, "/"),
 		"SANDBOX_VOLUMES=" + taskInfo.WorktreePath + ":/workspace:rw",
+		"PYTHONIOENCODING=utf-8",
 		"UV_LOCK_TIMEOUT=600",
 	}
 	return env
@@ -1084,6 +1117,49 @@ func extractResponseSummary(respText string) string {
 		}
 	}
 	return shortenText(respText, 1200)
+}
+
+func buildSafeAgentInstruction(instruction string, allowPaths []string) string {
+	instruction = strings.TrimSpace(instruction)
+
+	var builder strings.Builder
+	builder.WriteString("执行约束：\n")
+	builder.WriteString("1. 不要输出“1. 标题（路径）”或其他 Markdown 章节标题来描述文件。\n")
+	builder.WriteString("2. 不要把说明标题、项目符号、编号、括号说明当成文件名。\n")
+	builder.WriteString("3. 如果需要提及文件，请直接使用相对路径，不要添加中文标题包装。\n")
+	builder.WriteString("4. 仅做最小必要改动，不要创建与任务无关的新文件。\n")
+	if normalized, _ := worktreeguard.NormalizeRelativePaths(allowPaths); len(normalized) > 0 {
+		builder.WriteString("5. 仅允许修改这些文件或目录：")
+		builder.WriteString(strings.Join(normalized, ", "))
+		builder.WriteString("\n")
+	}
+	builder.WriteString("\n任务内容：\n")
+	builder.WriteString(instruction)
+	return builder.String()
+}
+
+func (s *sTask) validateTaskWorkspaceChanges(ctx context.Context, snapshot *worktreeguard.Snapshot, taskInfo *runtimeTask, allowPaths []string, output *string) error {
+	if snapshot == nil {
+		return nil
+	}
+
+	validation, err := snapshot.Validate(ctx, taskInfo.WorktreePath, allowPaths)
+	if err != nil {
+		g.Log().Warningf(ctx, "[ai-task] 校验 git 变更失败: taskID=%d err=%v", taskInfo.ID, err)
+		return nil
+	}
+	if !validation.HasIssues() {
+		return nil
+	}
+
+	summary := validation.Summary()
+	if summary == "" {
+		summary = "检测到异常文件变更"
+	}
+	if output != nil {
+		*output = strings.TrimSpace(*output + "\n\n[guard] " + summary)
+	}
+	return fmt.Errorf(summary)
 }
 
 func ensureDirExists(path string) error {

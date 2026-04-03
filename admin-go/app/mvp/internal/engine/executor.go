@@ -42,7 +42,7 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 	// 2. 获取模型信息
 	modelInfo, err := e.resolveTaskModel(ctx, projectID, taskID, roleType, modelID)
 	if err != nil {
-		e.failTask(ctx, projectID, taskID, err.Error())
+		e.handleTaskFailure(ctx, projectID, taskID, roleType, classifyTaskConfigError(err), err.Error())
 		return
 	}
 
@@ -56,7 +56,7 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 	// 查找或创建任务对话
 	conversationID, err := e.ensureConversation(ctx, projectID, taskID, roleType)
 	if err != nil {
-		e.failTask(ctx, projectID, taskID, err.Error())
+		e.handleTaskFailure(ctx, projectID, taskID, roleType, taskFailureExecution, err.Error())
 		return
 	}
 
@@ -113,7 +113,7 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 		APISecret:    modelInfo.APISecret,
 	})
 	if err != nil {
-		e.failTask(ctx, projectID, taskID, err.Error())
+		e.handleTaskFailure(ctx, projectID, taskID, roleType, taskFailureExecution, err.Error())
 		return
 	}
 
@@ -182,7 +182,7 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 		}); dbErr != nil {
 			g.Log().Errorf(ctx, "[Executor] 更新失败消息状态失败: msg=%d, err=%v", replyID, dbErr)
 		}
-		e.failTask(ctx, projectID, taskID, err.Error())
+		e.handleTaskFailure(ctx, projectID, taskID, roleType, taskFailureExecution, err.Error())
 		return
 	}
 
@@ -215,6 +215,14 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 	// 11. 如果是实施员任务，完成后需要创建对应的审计任务（如果还没有）
 	if roleType == "implementer" {
 		go e.createAuditTask(ctx, projectID, taskID, task)
+	} else if roleType == "architect" {
+		name := task["name"].String()
+		switch {
+		case strings.HasPrefix(name, "Bug分析:"):
+			go e.scheduler.AutoDispatchBugFix(context.Background(), projectID, taskID)
+		case strings.HasPrefix(name, "失败分析:"):
+			go e.scheduler.AutoDispatchFailureFix(context.Background(), projectID, taskID)
+		}
 	}
 
 	// 12. 通知调度器
@@ -371,7 +379,7 @@ func (e *Executor) buildTaskPrompt(task gdb.Record) string {
 	name := task["name"].String()
 	desc := task["description"].String()
 
-	prompt := fmt.Sprintf("## 任务\n%s\n\n## 任务描述\n%s", name, desc)
+	prompt := fmt.Sprintf("任务名称：%s\n任务描述：%s", name, desc)
 
 	// 如果有依赖任务的结果，附加上下文
 	taskID := task["id"].Int64()
@@ -409,7 +417,7 @@ func (e *Executor) buildAiderTaskPrompt(task gdb.Record, resources []string) str
 		if len(limitedResources) > 12 {
 			limitedResources = limitedResources[:12]
 		}
-		prompt += "\n\n## 优先处理文件"
+		prompt += "\n\n允许修改的文件或目录："
 		for _, resource := range limitedResources {
 			if resource == "" {
 				continue
@@ -431,18 +439,18 @@ func (e *Executor) buildAiderTaskPrompt(task gdb.Record, resources []string) str
 		All()
 
 	if len(deps) > 0 {
-		prompt += "\n\n## 前置结果摘要"
+		prompt += "\n\n前置结果摘要："
 		for _, dep := range deps {
 			depName := dep["name"].String()
 			depResult := dep["result"].String()
 			if len(depResult) > 800 {
 				depResult = depResult[:800] + "...(截断)"
 			}
-			prompt += fmt.Sprintf("\n\n### %s\n%s", depName, depResult)
+			prompt += fmt.Sprintf("\n- %s：%s", depName, depResult)
 		}
 	}
 
-	prompt += "\n\n请优先做最小必要改动，避免大范围重写；如果任务过大，请先完成核心改动。"
+	prompt += "\n\n执行约束：只允许修改上面列出的文件或目录；不要输出“1. 标题（路径）”或其他 Markdown 章节标题来描述文件；不要把说明标题、编号、括号说明当成文件名；请直接完成最小必要改动。"
 	return prompt
 }
 
@@ -496,7 +504,12 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 	}
 
 	// 2. 解析 affected_resources 作为需要编辑的文件
-	resources := parseResources(task["affected_resources"].String())
+	resourceResult := parseResourcesDetail(task["affected_resources"].String())
+	if len(resourceResult.Rejected) > 0 {
+		e.escalateImplementerResourceIssue(ctx, projectID, taskID, task, resourceResult)
+		return
+	}
+	resources := resourceResult.Resources
 
 	// 3. 构建更紧凑的 Aider prompt，避免一次性塞入过多上下文
 	taskPrompt := e.buildAiderTaskPrompt(task, resources)
@@ -555,7 +568,11 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 		if errMsg == "" {
 			errMsg = result.Error.Error()
 		}
-		e.failTask(ctx, projectID, taskID, fmt.Sprintf("Aider执行失败(code=%d): %s", result.ExitCode, errMsg))
+		category := result.Category
+		if category == "" {
+			category = taskFailureExecution
+		}
+		e.handleTaskFailure(ctx, projectID, taskID, task["role_type"].String(), category, fmt.Sprintf("Aider执行失败(code=%d): %s", result.ExitCode, errMsg))
 		return
 	}
 
@@ -577,6 +594,41 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 	e.scheduler.OnTaskCompleted(projectID, taskID)
 }
 
+func (e *Executor) escalateImplementerResourceIssue(ctx context.Context, projectID int64, taskID int64, task gdb.Record, resourceResult resourceParseResult) {
+	errMsg := fmt.Sprintf(
+		"任务涉及的 affected_resources 存在歧义，无法安全继续执行。可修复资源=%v；无法解析资源=%v；原始值=%s。请架构师重新检查任务拆分和 affected_resources。",
+		resourceResult.Resources,
+		resourceResult.Rejected,
+		task["affected_resources"].String(),
+	)
+
+	conversationID, err := e.ensureConversation(ctx, projectID, taskID, "implementer")
+	if err == nil {
+		replyID := int64(snowflake.Generate())
+		_, _ = g.DB().Model("mvp_message").Insert(g.Map{
+			"id":              replyID,
+			"conversation_id": conversationID,
+			"role":            "assistant",
+			"message_type":    mvpmodel.MessageTypePoison,
+			"content":         errMsg,
+			"status":          "failed",
+			"created_by":      0,
+			"dept_id":         0,
+			"created_at":      gtime.Now(),
+			"updated_at":      gtime.Now(),
+		})
+	}
+
+	_, _ = g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+		"status":        "escalated",
+		"error_message": errMsg,
+		"updated_at":    gtime.Now(),
+	})
+
+	e.scheduler.OnTaskEscalated(projectID, taskID, errMsg)
+	go e.scheduler.EscalateFailedTask(context.Background(), projectID, taskID, task["role_type"].String(), errMsg)
+}
+
 // failTask 标记任务失败
 func (e *Executor) failTask(ctx context.Context, projectID int64, taskID int64, errMsg string) {
 	g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
@@ -585,4 +637,19 @@ func (e *Executor) failTask(ctx context.Context, projectID int64, taskID int64, 
 		"updated_at":    gtime.Now(),
 	})
 	e.scheduler.OnTaskFailed(projectID, taskID, errMsg)
+}
+
+func (e *Executor) handleTaskFailure(ctx context.Context, projectID int64, taskID int64, roleType string, category taskFailureCategory, errMsg string) {
+	switch category {
+	case taskFailurePlanning, taskFailurePolicyGuard:
+		g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+			"status":        "escalated",
+			"error_message": errMsg,
+			"updated_at":    gtime.Now(),
+		})
+		e.scheduler.OnTaskEscalated(projectID, taskID, errMsg)
+		go e.scheduler.EscalateFailedTask(context.Background(), projectID, taskID, roleType, errMsg)
+	default:
+		e.failTask(ctx, projectID, taskID, errMsg)
+	}
 }
