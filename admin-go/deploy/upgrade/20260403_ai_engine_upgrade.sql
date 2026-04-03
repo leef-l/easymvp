@@ -95,3 +95,11 @@ WHERE NOT EXISTS (SELECT 1 FROM `system_menu` WHERE `id` = 315020000000000001);
 INSERT INTO `system_menu` (`id`,`parent_id`,`title`,`type`,`path`,`component`,`permission`,`icon`,`sort`,`is_show`,`is_cache`,`link_url`,`status`,`created_by`,`dept_id`,`created_at`,`updated_at`,`deleted_at`)
 SELECT 315020000000000011,315012657751003136,'执行任务',2,'/ai/task','ai/task/index','ai:task:list','',2,1,0,NULL,1,0,0,'2026-04-03 11:02:30','2026-04-03 11:02:30',NULL
 WHERE NOT EXISTS (SELECT 1 FROM `system_menu` WHERE `id` = 315020000000000011);
+
+INSERT INTO `ai_engine_config` (`id`,`engine_code`,`base_url`,`api_key`,`default_model_id`,`timeout_seconds`,`max_steps`,`workspace_root`,`command_template`,`callback_url`,`callback_secret`,`extra_config`,`status`,`created_by`,`dept_id`,`created_at`,`updated_at`,`deleted_at`)
+SELECT 1000000000000001101,'aider',NULL,NULL,315100000000000001,600,20,NULL,NULL,NULL,NULL,NULL,1,1000000000000000003,1000000000000000001,'2026-04-03 00:00:00','2026-04-03 00:00:00',NULL
+WHERE NOT EXISTS (SELECT 1 FROM `ai_engine_config` WHERE `engine_code` = 'aider');
+
+INSERT INTO `ai_engine_config` (`id`,`engine_code`,`base_url`,`api_key`,`default_model_id`,`timeout_seconds`,`max_steps`,`workspace_root`,`command_template`,`callback_url`,`callback_secret`,`extra_config`,`status`,`created_by`,`dept_id`,`created_at`,`updated_at`,`deleted_at`)
+SELECT 1000000000000001102,'openhands',NULL,NULL,315100000000000001,600,20,NULL,'docker run --rm -v {{worktree_path}}:/workspace -w /workspace -e SANDBOX_VOLUMES=/workspace:/workspace:rw -e LLM_API_KEY={{model_api_key}} -e LLM_MODEL={{model_code_openhands}} -e LLM_BASE_URL={{model_base_url_root}} -e OPENHANDS_SUPPRESS_BANNER=1 easymvp-openhands-local:latest bash -lc "/root/.local/bin/openhands --headless --json --override-with-envs --always-approve --exit-without-confirmation -t {{instruction}}"',NULL,NULL,NULL,1,1000000000000000003,1000000000000000001,'2026-04-03 00:00:00','2026-04-03 00:00:00',NULL
+WHERE NOT EXISTS (SELECT 1 FROM `ai_engine_config` WHERE `engine_code` = 'openhands');

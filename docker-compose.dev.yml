@@ -1,4 +1,27 @@
 services:
+  mysql:
+    image: docker.1ms.run/mysql:8.0
+    container_name: easymvp-mysql-dev
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${DB_NAME:-easymvp}
+      MYSQL_USER: ${DB_USER:-easymvp}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-JKcHFJYXnkrB6BXE}
+    ports:
+      - "3306:3306"
+    command: ["mysqld","--default-authentication-plugin=mysql_native_password"]
+    volumes:
+      - .\admin-go\deploy\init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+      - easymvp-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
   system:
     build:
       context: ./admin-go
@@ -15,12 +38,15 @@ services:
       TZ: ${TZ:-Asia/Shanghai}
       APP_NAME: system
       APP_PORT: 8000
-      DB_HOST: ${DB_HOST}
+      DB_HOST: ${DB_HOST:-mysql}
       DB_PORT: ${DB_PORT:-3306}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER:-easymvp}
+      DB_PASSWORD: ${DB_PASSWORD:-JKcHFJYXnkrB6BXE}
+      DB_NAME: ${DB_NAME:-easymvp}
       JWT_SECRET: ${JWT_SECRET:-easymvp-secret-key}
+    depends_on:
+      mysql:
+        condition: service_healthy
     ports:
       - "9000:8000"
     volumes:
@@ -45,12 +71,15 @@ services:
       TZ: ${TZ:-Asia/Shanghai}
       APP_NAME: ai
       APP_PORT: 8000
-      DB_HOST: ${DB_HOST}
+      DB_HOST: ${DB_HOST:-mysql}
       DB_PORT: ${DB_PORT:-3306}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER:-easymvp}
+      DB_PASSWORD: ${DB_PASSWORD:-JKcHFJYXnkrB6BXE}
+      DB_NAME: ${DB_NAME:-easymvp}
       JWT_SECRET: ${JWT_SECRET:-easymvp-secret-key}
+    depends_on:
+      mysql:
+        condition: service_healthy
     ports:
       - "9001:8000"
     volumes:
@@ -75,12 +104,15 @@ services:
       TZ: ${TZ:-Asia/Shanghai}
       APP_NAME: mvp
       APP_PORT: 8000
-      DB_HOST: ${DB_HOST}
+      DB_HOST: ${DB_HOST:-mysql}
       DB_PORT: ${DB_PORT:-3306}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER:-easymvp}
+      DB_PASSWORD: ${DB_PASSWORD:-JKcHFJYXnkrB6BXE}
+      DB_NAME: ${DB_NAME:-easymvp}
       JWT_SECRET: ${JWT_SECRET:-easymvp-secret-key}
+    depends_on:
+      mysql:
+        condition: service_healthy
     ports:
       - "9002:8000"
     volumes:
@@ -88,6 +120,16 @@ services:
       - easymvp-go-cache:/go/pkg/mod
       - easymvp-go-build:/root/.cache/go-build
     restart: unless-stopped
+
+  openhands-runtime:
+    profiles: ["ai-runtime"]
+    build:
+      context: ./admin-go
+      dockerfile: docker/openhands/Dockerfile.runtime
+    image: easymvp-openhands-local:latest
+    container_name: easymvp-openhands-runtime
+    command: ["/bin/sh", "-lc", "sleep infinity"]
+    restart: "no"
 
   web:
     image: node:22-bookworm
@@ -111,6 +153,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  easymvp-mysql-data:
   easymvp-go-cache:
   easymvp-go-build:
   easymvp-pnpm-store:

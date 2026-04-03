@@ -1,4 +1,3 @@
-mysqldump: [Warning] Using a password on the command line interface can be insecure.
 -- MySQL dump 10.13  Distrib 8.0.45, for Linux (x86_64)
 --
 -- Host: 127.0.0.1    Database: easymvp
@@ -804,6 +803,18 @@ CREATE TABLE `ai_engine_config` (
   UNIQUE KEY `uk_ai_engine_config_engine_code` (`engine_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI执行引擎配置表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `ai_engine_config`
+--
+
+LOCK TABLES `ai_engine_config` WRITE;
+/*!40000 ALTER TABLE `ai_engine_config` DISABLE KEYS */;
+INSERT INTO `ai_engine_config` VALUES
+(1000000000000001101,'aider',NULL,NULL,315100000000000001,600,20,NULL,NULL,NULL,NULL,NULL,1,1000000000000000003,1000000000000000001,'2026-04-03 00:00:00','2026-04-03 00:00:00',NULL),
+(1000000000000001102,'openhands',NULL,NULL,315100000000000001,600,20,NULL,'docker run --rm -v {{worktree_path}}:/workspace -w /workspace -e SANDBOX_VOLUMES=/workspace:/workspace:rw -e LLM_API_KEY={{model_api_key}} -e LLM_MODEL={{model_code_openhands}} -e LLM_BASE_URL={{model_base_url_root}} -e OPENHANDS_SUPPRESS_BANNER=1 easymvp-openhands-local:latest bash -lc "/root/.local/bin/openhands --headless --json --override-with-envs --always-approve --exit-without-confirmation -t {{instruction}}"',NULL,NULL,NULL,1,1000000000000000003,1000000000000000001,'2026-04-03 00:00:00','2026-04-03 00:00:00',NULL);
+/*!40000 ALTER TABLE `ai_engine_config` ENABLE KEYS */;
+UNLOCK TABLES;
 
 --
 -- Table structure for table `ai_task`
