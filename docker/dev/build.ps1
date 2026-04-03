@@ -62,6 +62,7 @@ try {
         '-f', (Join-Path $repoRoot 'docker\build\Dockerfile.admin-go.dev'),
         (Join-Path $repoRoot 'admin-go'),
         '-t', 'easymvp-admin-go-dev:latest',
+        '--build-arg', "GO_BASE_IMAGE=$(Get-EnvValue -EnvMap $envMap -Name 'GO_BASE_IMAGE' -Default 'golang:1.25-bookworm')",
         '--build-arg', "GO_PROXY=$(Get-EnvValue -EnvMap $envMap -Name 'GO_PROXY' -Default 'https://goproxy.cn,direct')",
         '--build-arg', "PIP_INDEX_URL=$(Get-EnvValue -EnvMap $envMap -Name 'PIP_INDEX_URL' -Default 'https://pypi.org/simple')",
         '--build-arg', "APT_MIRROR=$(Get-EnvValue -EnvMap $envMap -Name 'APT_MIRROR' -Default '')",
@@ -78,6 +79,7 @@ try {
             '-f', (Join-Path $repoRoot 'docker\build\Dockerfile.web.dev'),
             (Join-Path $repoRoot 'vue-vben-admin'),
             '-t', 'easymvp-web-dev:latest',
+            '--build-arg', "WEB_BASE_IMAGE=$(Get-EnvValue -EnvMap $envMap -Name 'WEB_BASE_IMAGE' -Default 'node:22-bookworm')",
             '--build-arg', "NPM_REGISTRY=$(Get-EnvValue -EnvMap $envMap -Name 'NPM_REGISTRY' -Default 'https://registry.npmmirror.com')"
         )
         & docker @frontendArgs
@@ -91,7 +93,8 @@ try {
             'build',
             '-f', (Join-Path $repoRoot 'docker\build\Dockerfile.openhands.runtime'),
             (Join-Path $repoRoot 'admin-go'),
-            '-t', 'easymvp-openhands-local:latest'
+            '-t', 'easymvp-openhands-local:latest',
+            '--build-arg', "OPENHANDS_RUNTIME_BASE_IMAGE=$(Get-EnvValue -EnvMap $envMap -Name 'OPENHANDS_RUNTIME_BASE_IMAGE' -Default 'python:3.12-slim')"
         )
         & docker @aiRuntimeArgs
         if ($LASTEXITCODE -ne 0) {

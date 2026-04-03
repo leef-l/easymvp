@@ -111,7 +111,8 @@ function Invoke-DevBuild {
             'build',
             '-f', (Join-Path $repoRoot 'docker\build\Dockerfile.openhands.runtime'),
             (Join-Path $repoRoot 'admin-go'),
-            '-t', 'easymvp-openhands-local:latest'
+            '-t', 'easymvp-openhands-local:latest',
+            '--build-arg', "OPENHANDS_RUNTIME_BASE_IMAGE=$(Get-EnvValue -EnvMap $EnvMap -Name 'OPENHANDS_RUNTIME_BASE_IMAGE' -Default 'python:3.12-slim')"
         )
         & docker @aiRuntimeArgs
         if ($LASTEXITCODE -ne 0) {

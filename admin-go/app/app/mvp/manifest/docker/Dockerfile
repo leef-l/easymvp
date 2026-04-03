@@ -1,4 +1,5 @@
-FROM loads/alpine:3.8
+ARG APP_RUNTIME_BASE_IMAGE=alpine:3.19
+FROM ${APP_RUNTIME_BASE_IMAGE}
 
 ###############################################################################
 #                                INSTALLATION
