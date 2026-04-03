@@ -6,6 +6,15 @@ import { getMessageDetail } from '#/api/mvp/message';
 import type { MessageItem } from '#/api/mvp/message/types';
 
 const detail = ref<MessageItem | null>(null);
+const messageTypeMeta: Record<string, { color: string; text: string }> = {
+  chat_user: { color: 'blue', text: '普通对话-用户' },
+  chat_reply: { color: 'cyan', text: '普通对话-AI' },
+  task_prompt: { color: 'gold', text: '任务指令' },
+  task_reply: { color: 'green', text: '任务回复' },
+  system_notice: { color: 'purple', text: '系统通知' },
+  poison: { color: 'red', text: '毒药消息' },
+  general: { color: 'default', text: '通用' },
+};
 
 const [Modal, modalApi] = useVbenModal({
   fullscreenButton: false,
@@ -34,6 +43,11 @@ const [Modal, modalApi] = useVbenModal({
       <DescriptionsItem label="ID">{{ detail.id }}</DescriptionsItem>
       <DescriptionsItem label="对话ID">{{ detail.conversationTitle || '-' }}</DescriptionsItem>
       <DescriptionsItem label="消息角色">{{ detail.role || '-' }}</DescriptionsItem>
+      <DescriptionsItem label="消息类型">
+        <Tag :color="messageTypeMeta[detail.messageType || 'general']?.color || 'default'">
+          {{ messageTypeMeta[detail.messageType || 'general']?.text || detail.messageType || '-' }}
+        </Tag>
+      </DescriptionsItem>
       <DescriptionsItem label="消息内容">{{ detail.content || '-' }}</DescriptionsItem>
       <DescriptionsItem label="使用的AI模型ID">{{ detail.modelID || '-' }}</DescriptionsItem>
       <DescriptionsItem label="token消耗">{{ detail.tokenUsage || '-' }}</DescriptionsItem>

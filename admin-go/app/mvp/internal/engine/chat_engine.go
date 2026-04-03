@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	mvpmodel "easymvp/app/mvp/internal/model"
 	"easymvp/utility/provider"
 	"easymvp/utility/snowflake"
 )
@@ -69,6 +70,7 @@ func (e *ChatEngine) SendMessage(ctx context.Context, conversationID int64, cont
 		"id":              msgID,
 		"conversation_id": conversationID,
 		"role":            "user",
+		"message_type":    mvpmodel.MessageTypeChatUser,
 		"content":         expandedContent,
 		"status":          "completed",
 		"created_by":      userID,
@@ -86,6 +88,7 @@ func (e *ChatEngine) SendMessage(ctx context.Context, conversationID int64, cont
 		"id":              replyID,
 		"conversation_id": conversationID,
 		"role":            "assistant",
+		"message_type":    mvpmodel.MessageTypeChatReply,
 		"content":         "",
 		"model_id":        modelInfo.ModelID,
 		"status":          "streaming",
@@ -311,6 +314,7 @@ func (e *ChatEngine) loadHistory(ctx context.Context, conversationID int64, excl
 		Where("conversation_id", conversationID).
 		Where("deleted_at IS NULL").
 		Where("status", "completed").
+		Where("(message_type IS NULL OR message_type <> ?)", mvpmodel.MessageTypePoison).
 		Where("id != ?", excludeID).
 		Order("created_at ASC").
 		Scan(&records)
@@ -334,6 +338,7 @@ func (e *ChatEngine) failMessage(ctx context.Context, replyID int64, errMsg stri
 	g.Log().Errorf(ctx, "AI 调用失败 (messageID=%d): %s", replyID, errMsg)
 
 	g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
+		"message_type": mvpmodel.MessageTypePoison,
 		"status":     "failed",
 		"content":    "AI 调用失败: " + errMsg,
 		"updated_at": gtime.Now(),

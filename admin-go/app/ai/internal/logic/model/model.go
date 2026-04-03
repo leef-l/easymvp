@@ -103,12 +103,33 @@ func (s *sModel) Detail(ctx context.Context, id snowflake.JsonInt64) (out *model
 	}
 	// 查询供应商ID（冗余便于查询）关联显示
 	if out.ProviderID != 0 {
-		val, err := g.DB().Ctx(ctx).Model("ai_provider").Where("id", out.ProviderID).Where("deleted_at", nil).Value("name")
+		record, recordErr := g.DB().Ctx(ctx).Model("ai_provider").
+			Fields("name", "base_url").
+			Where("id", out.ProviderID).
+			Where("deleted_at", nil).
+			One()
+		if recordErr == nil && !record.IsEmpty() {
+			out.ProviderName = record["name"].String()
+			out.BaseURL = record["base_url"].String()
+		}
+	}
+	if out.PlanID != 0 {
+		val, err := g.DB().Ctx(ctx).Model("ai_plan").Where("id", out.PlanID).Where("deleted_at", nil).Value("api_key")
 		if err == nil {
-			out.ProviderName = val.String()
+			out.APIKeyMasked = maskSecret(val.String())
 		}
 	}
 	return
+}
+
+func maskSecret(secret string) string {
+	if secret == "" {
+		return ""
+	}
+	if len(secret) <= 8 {
+		return "****"
+	}
+	return secret[:4] + "****" + secret[len(secret)-4:]
 }
 
 // applyListFilter 应用列表通用过滤条件

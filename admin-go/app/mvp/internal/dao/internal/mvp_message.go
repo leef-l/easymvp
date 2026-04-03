@@ -24,6 +24,7 @@ type MvpMessageColumns struct {
 	Id             string // 雪花ID
 	ConversationId string // 对话ID
 	Role           string // 消息角色：user/assistant/system
+	MessageType    string // 消息类型
 	Content        string // 消息内容
 	ModelId        string // 使用的AI模型ID
 	TokenUsage     string // token消耗：{prompt_tokens, completion_tokens}
@@ -40,6 +41,7 @@ var mvpMessageColumns = MvpMessageColumns{
 	Id:             "id",
 	ConversationId: "conversation_id",
 	Role:           "role",
+	MessageType:    "message_type",
 	Content:        "content",
 	ModelId:        "model_id",
 	TokenUsage:     "token_usage",

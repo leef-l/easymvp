@@ -7,6 +7,8 @@ export interface ModelItem {
   planName?: string;
   providerID: string;
   providerName?: string;
+  baseURL?: string;
+  apiKeyMasked?: string;
   name: string;
   modelCode: string;
   capability?: string;

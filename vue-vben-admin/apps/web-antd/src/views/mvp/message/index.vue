@@ -14,6 +14,26 @@ import DetailDrawer from './modules/detail-drawer.vue';
 /** 标签颜色池 */
 const TAG_COLORS = ['green', 'red', 'blue', 'orange', 'cyan', 'purple', 'geekblue', 'magenta'];
 
+const messageTypeOptions = [
+  { label: '普通对话-用户', value: 'chat_user' },
+  { label: '普通对话-AI', value: 'chat_reply' },
+  { label: '任务指令', value: 'task_prompt' },
+  { label: '任务回复', value: 'task_reply' },
+  { label: '系统通知', value: 'system_notice' },
+  { label: '毒药消息', value: 'poison' },
+  { label: '通用', value: 'general' },
+];
+
+const messageTypeMeta: Record<string, { color: string; text: string }> = {
+  chat_user: { color: 'blue', text: '普通对话-用户' },
+  chat_reply: { color: 'cyan', text: '普通对话-AI' },
+  task_prompt: { color: 'gold', text: '任务指令' },
+  task_reply: { color: 'green', text: '任务回复' },
+  system_notice: { color: 'purple', text: '系统通知' },
+  poison: { color: 'red', text: '毒药消息' },
+  general: { color: 'default', text: '通用' },
+};
+
 
 /** 表单弹窗 */
 const [FormModalComp, formModalApi] = useVbenModal({
@@ -35,6 +55,17 @@ const formOptions: VbenFormProps = {
   submitOnEnter: true,
   schema: [
     {
+      component: 'Select',
+      fieldName: 'messageType',
+      label: '消息类型',
+      componentProps: {
+        options: messageTypeOptions,
+        allowClear: true,
+        placeholder: '请选择消息类型',
+        class: 'w-full',
+      },
+    },
+    {
       component: 'RangePicker',
       fieldName: 'timeRange',
       label: '创建时间',
@@ -55,6 +86,7 @@ const gridOptions: VxeGridProps<MessageItem> = {
     { title: '序号', type: 'seq', width: 50 },
     { field: 'conversationTitle', title: '对话ID' },
     { field: 'role', title: '消息角色' },
+    { field: 'messageType', title: '消息类型', slots: { default: 'messageType' }, width: 140 },
     { field: 'content', title: '消息内容' },
     { field: 'modelID', title: '使用的AI模型ID' },
     { field: 'tokenUsage', title: 'token消耗' },
@@ -238,11 +270,17 @@ function handleBatchUpdateStatus() {
     <Grid>
       <template #toolbar-actions>
         <Button v-auth="['mvp:message:create']" type="primary" @click="handleCreate">新建</Button>
+        <Button class="ml-2" danger @click="gridApi.formApi.setValues({ messageType: 'poison' }).then(() => gridApi.reload())">仅看毒药</Button>
         <Button v-auth="['mvp:message:batch-delete']" danger class="ml-2" @click="handleBatchDelete">批量删除</Button>
         <Button v-auth="['mvp:message:export']" class="ml-2" @click="handleExport">导出</Button>
         <Button v-auth="['mvp:message:import']" class="ml-2" @click="handleImport">导入</Button>
         <Button class="ml-2" @click="handleDownloadTemplate">模板下载</Button>
         <Button v-auth="['mvp:message:batch-update']" class="ml-2" @click="handleBatchUpdateStatus">批量修改状态</Button>
+      </template>
+      <template #messageType="{ row }">
+        <Tag :color="messageTypeMeta[row.messageType || 'general']?.color || 'default'">
+          {{ messageTypeMeta[row.messageType || 'general']?.text || row.messageType || '-' }}
+        </Tag>
       </template>
       <template #action="{ row }">
         <Button v-auth="['mvp:message:detail']" type="link" size="small" @click="handleView(row)">查看</Button>

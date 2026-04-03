@@ -21,6 +21,7 @@ func (c *cMessage) Create(ctx context.Context, req *v1.MessageCreateReq) (res *v
 	err = service.Message().Create(ctx, &model.MessageCreateInput{
 		ConversationID: req.ConversationID,
 		Role: req.Role,
+		MessageType: req.MessageType,
 		Content: req.Content,
 		ModelID: req.ModelID,
 		TokenUsage: req.TokenUsage,
@@ -35,6 +36,7 @@ func (c *cMessage) Update(ctx context.Context, req *v1.MessageUpdateReq) (res *v
 		ID: req.ID,
 		ConversationID: req.ConversationID,
 		Role: req.Role,
+		MessageType: req.MessageType,
 		Content: req.Content,
 		ModelID: req.ModelID,
 		TokenUsage: req.TokenUsage,
@@ -77,6 +79,7 @@ func (c *cMessage) List(ctx context.Context, req *v1.MessageListReq) (res *v1.Me
 	res.List, res.Total, err = service.Message().List(ctx, &model.MessageListInput{
 		PageNum:   req.PageNum,
 		PageSize:  req.PageSize,
+		MessageType: req.MessageType,
 		OrderBy:   req.OrderBy,
 		OrderDir:  req.OrderDir,
 		StartTime: req.StartTime,
@@ -89,6 +92,7 @@ func (c *cMessage) Export(ctx context.Context, req *v1.MessageExportReq) (res *v
 	list, err := service.Message().Export(ctx, &model.MessageListInput{
 		StartTime: req.StartTime,
 		EndTime:   req.EndTime,
+		MessageType: req.MessageType,
 	})
 	if err != nil {
 		return
@@ -101,12 +105,13 @@ func (c *cMessage) Export(ctx context.Context, req *v1.MessageExportReq) (res *v
 	// 使用 encoding/csv 正确转义，防止 CSV 注入和格式损坏
 	w := csv.NewWriter(r.Response.Writer)
 	// 表头
-	_ = w.Write([]string{"对话标题", "消息角色", "消息内容", "使用的AI模型ID", "token消耗", "状态", "创建时间"})
+	_ = w.Write([]string{"对话标题", "消息角色", "消息类型", "消息内容", "使用的AI模型ID", "token消耗", "状态", "创建时间"})
 	// 数据行
 	for _, item := range list {
 		_ = w.Write([]string{
 			fmt.Sprintf("%v", item.ConversationTitle),
 			fmt.Sprintf("%v", item.Role),
+			fmt.Sprintf("%v", item.MessageType),
 			fmt.Sprintf("%v", item.Content),
 			fmt.Sprintf("%v", item.ModelID),
 			fmt.Sprintf("%v", item.TokenUsage),
@@ -139,7 +144,7 @@ func (c *cMessage) ImportTemplate(ctx context.Context, req *v1.MessageImportTemp
 	r.Response.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	r.Response.Header().Set("Content-Disposition", `attachment; filename="message_template.csv"`)
 	r.Response.Write("\xEF\xBB\xBF") // UTF-8 BOM
-	r.Response.Writeln("对话ID,消息角色,消息内容,使用的AI模型ID,token消耗,状态")
+	r.Response.Writeln("对话ID,消息角色,消息类型,消息内容,使用的AI模型ID,token消耗,状态")
 	return
 }
 

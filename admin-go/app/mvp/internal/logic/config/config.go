@@ -31,16 +31,16 @@ type sConfig struct{}
 func (s *sConfig) Create(ctx context.Context, in *model.ConfigCreateInput) error {
 	id := snowflake.Generate()
 	_, err := dao.MvpConfig.Ctx(ctx).Data(g.Map{
-		dao.MvpConfig.Columns().Id:        id,
-		dao.MvpConfig.Columns().ConfigKey: in.ConfigKey,
+		dao.MvpConfig.Columns().Id:          id,
+		dao.MvpConfig.Columns().ConfigKey:   in.ConfigKey,
 		dao.MvpConfig.Columns().ConfigValue: in.ConfigValue,
-		dao.MvpConfig.Columns().ConfigType: in.ConfigType,
-		dao.MvpConfig.Columns().Category: in.Category,
+		dao.MvpConfig.Columns().ConfigType:  in.ConfigType,
+		dao.MvpConfig.Columns().Category:    in.Category,
 		dao.MvpConfig.Columns().Description: in.Description,
-		dao.MvpConfig.Columns().CreatedBy: middleware.GetUserID(ctx),
-		dao.MvpConfig.Columns().DeptId: middleware.GetDeptID(ctx),
-		dao.MvpConfig.Columns().CreatedAt: gtime.Now(),
-		dao.MvpConfig.Columns().UpdatedAt: gtime.Now(),
+		dao.MvpConfig.Columns().CreatedBy:   middleware.GetUserID(ctx),
+		dao.MvpConfig.Columns().DeptId:      middleware.GetDeptID(ctx),
+		dao.MvpConfig.Columns().CreatedAt:   gtime.Now(),
+		dao.MvpConfig.Columns().UpdatedAt:   gtime.Now(),
 	}).Insert()
 	return err
 }
@@ -48,12 +48,12 @@ func (s *sConfig) Create(ctx context.Context, in *model.ConfigCreateInput) error
 // Update 更新MVP配置表
 func (s *sConfig) Update(ctx context.Context, in *model.ConfigUpdateInput) error {
 	data := g.Map{
-		dao.MvpConfig.Columns().ConfigKey: in.ConfigKey,
+		dao.MvpConfig.Columns().ConfigKey:   in.ConfigKey,
 		dao.MvpConfig.Columns().ConfigValue: in.ConfigValue,
-		dao.MvpConfig.Columns().ConfigType: in.ConfigType,
-		dao.MvpConfig.Columns().Category: in.Category,
+		dao.MvpConfig.Columns().ConfigType:  in.ConfigType,
+		dao.MvpConfig.Columns().Category:    in.Category,
 		dao.MvpConfig.Columns().Description: in.Description,
-		dao.MvpConfig.Columns().UpdatedAt: gtime.Now(),
+		dao.MvpConfig.Columns().UpdatedAt:   gtime.Now(),
 	}
 	_, err := dao.MvpConfig.Ctx(ctx).Where(dao.MvpConfig.Columns().Id, in.ID).Data(data).Update()
 	return err
@@ -94,8 +94,6 @@ func (s *sConfig) applyListFilter(ctx context.Context, in *model.ConfigListInput
 	if in.EndTime != "" {
 		m = m.WhereLTE(dao.MvpConfig.Columns().CreatedAt, in.EndTime)
 	}
-	// 数据权限过滤
-	m = middleware.ApplyDataScope(ctx, m, dao.MvpConfig.Columns().CreatedBy, dao.MvpConfig.Columns().DeptId)
 	return m
 }
 
@@ -122,6 +120,7 @@ func (s *sConfig) List(ctx context.Context, in *model.ConfigListInput) (list []*
 	}
 	return
 }
+
 // Export 导出MVP配置表（不分页）
 func (s *sConfig) Export(ctx context.Context, in *model.ConfigListInput) (list []*model.ConfigListOutput, err error) {
 	m := s.applyListFilter(ctx, in)
@@ -131,9 +130,6 @@ func (s *sConfig) Export(ctx context.Context, in *model.ConfigListInput) (list [
 	}
 	return
 }
-
-
-
 
 // Import 导入MVP配置表
 func (s *sConfig) Import(ctx context.Context, file *ghttp.UploadFile) (success int, fail int, err error) {
@@ -193,4 +189,3 @@ func (s *sConfig) Import(ctx context.Context, file *ghttp.UploadFile) (success i
 	}
 	return
 }
-

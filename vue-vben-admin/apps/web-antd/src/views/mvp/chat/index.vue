@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ChatMessage } from '#/api/mvp/chat';
 
-import { nextTick, onMounted, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { useAppConfig } from '@vben/hooks';
@@ -41,6 +41,9 @@ const router = useRouter();
 const projectId = ref<string>((route.query.projectId as string) || '');
 /** 当前对话 ID */
 const conversationId = ref<string>((route.query.conversationId as string) || '');
+const needsTaskEntry = computed(
+  () => !projectId.value && !conversationId.value,
+);
 
 // ======================== 项目状态 ========================
 
@@ -234,6 +237,10 @@ const isSending = ref(false);
 /** 发送消息处理 */
 async function handleSend(content: string) {
   if (!content.trim() || isSending.value) return;
+  if (needsTaskEntry.value) {
+    message.warning('请从 MVP任务 页面进入任务对话');
+    return;
+  }
   if (!conversationId.value) {
     message.error('对话 ID 未设置');
     return;
@@ -391,6 +398,10 @@ function handleBack() {
 // ======================== 生命周期 ========================
 
 onMounted(async () => {
+  if (needsTaskEntry.value) {
+    projectName.value = 'MVP任务对话';
+    return;
+  }
   // 如果没有 conversationId 但有 projectId，查询架构师对话
   if (!conversationId.value && projectId.value) {
     try {
@@ -504,9 +515,27 @@ onUnmounted(() => {
 
     <!-- ===== 消息区域 ===== -->
     <div class="chat-body">
+      <div
+        v-if="needsTaskEntry"
+        class="entry-guide"
+      >
+        <div class="entry-guide-icon">
+          <RobotOutlined />
+        </div>
+        <div class="entry-guide-title">请从 MVP任务 进入任务对话</div>
+        <div class="entry-guide-desc">
+          当前页面需要任务上下文才能加载对应对话。请先进入具体项目的
+          <span class="entry-guide-highlight">MVP任务</span>
+          页面，再点击任务行中的“查看对话”。
+        </div>
+        <Button type="primary" class="entry-guide-btn" @click="router.push('/mvp/project')">
+          返回 MVP项目
+        </Button>
+      </div>
+
       <!-- 加载历史中的 Spin -->
       <Spin
-        v-if="loadingHistory"
+        v-else-if="loadingHistory"
         class="loading-spin"
         size="large"
         tip="加载对话历史..."
@@ -551,7 +580,7 @@ onUnmounted(() => {
     </div>
 
     <!-- ===== 输入区域 ===== -->
-    <div class="chat-footer">
+    <div v-if="!needsTaskEntry" class="chat-footer">
       <ChatInput
         :loading="isSending"
         @send="handleSend"
@@ -651,6 +680,55 @@ onUnmounted(() => {
   overflow: hidden;
   position: relative;
   background: #fafafa;
+}
+
+.entry-guide {
+  display: flex;
+  height: 100%;
+  min-height: 360px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  text-align: center;
+}
+
+.entry-guide-icon {
+  display: flex;
+  height: 88px;
+  width: 88px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  font-size: 38px;
+  box-shadow: 0 12px 32px rgb(102 126 234 / 28%);
+}
+
+.entry-guide-title {
+  margin-top: 20px;
+  font-size: 22px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.entry-guide-desc {
+  margin-top: 12px;
+  max-width: 520px;
+  line-height: 1.8;
+  color: #6b7280;
+}
+
+.entry-guide-highlight {
+  margin: 0 4px;
+  font-weight: 600;
+  color: #4f46e5;
+}
+
+.entry-guide-btn {
+  margin-top: 24px;
+  border-radius: 10px;
 }
 
 /* 加载 Spin */

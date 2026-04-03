@@ -39,8 +39,6 @@ type EngineDetailOutput struct {
 
 type EngineUpdateInput struct {
 	EngineCode      string
-	BaseURL         string
-	APIKey          string
 	DefaultModelID  snowflake.JsonInt64
 	TimeoutSeconds  int
 	MaxSteps        int

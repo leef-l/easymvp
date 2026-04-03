@@ -18,6 +18,7 @@ type MessageCreateReq struct {
 	g.Meta `path:"/message/create" method:"post" tags:"MVP消息表" summary:"创建MVP消息表"`
 	ConversationID snowflake.JsonInt64 `json:"conversationID" v:"required" dc:"对话ID"`
 	Role string `json:"role" v:"required|max-length:20" dc:"消息角色"`
+	MessageType string `json:"messageType" v:"max-length:30" dc:"消息类型"`
 	Content string `json:"content" v:"required|max-length:4294967295" dc:"消息内容"`
 	ModelID snowflake.JsonInt64 `json:"modelID"  dc:"使用的AI模型ID"`
 	TokenUsage string `json:"tokenUsage"  dc:"token消耗"`
@@ -35,6 +36,7 @@ type MessageUpdateReq struct {
 	ID     snowflake.JsonInt64 `json:"id" v:"required#ID不能为空" dc:"MVP消息表ID"`
 	ConversationID snowflake.JsonInt64 `json:"conversationID" dc:"对话ID"`
 	Role string `json:"role" dc:"消息角色"`
+	MessageType string `json:"messageType" dc:"消息类型"`
 	Content string `json:"content" dc:"消息内容"`
 	ModelID snowflake.JsonInt64 `json:"modelID" dc:"使用的AI模型ID"`
 	TokenUsage string `json:"tokenUsage" dc:"token消耗"`
@@ -97,6 +99,7 @@ type MessageListReq struct {
 	g.Meta    `path:"/message/list" method:"get" tags:"MVP消息表" summary:"获取MVP消息表列表"`
 	PageNum   int    `json:"pageNum" d:"1" dc:"页码"`
 	PageSize  int    `json:"pageSize" d:"10" dc:"每页数量"`
+	MessageType string `json:"messageType" dc:"消息类型"`
 	OrderBy   string `json:"orderBy" dc:"排序字段"`
 	OrderDir  string `json:"orderDir" d:"asc" dc:"排序方向:asc/desc"`
 	StartTime string `json:"startTime" dc:"开始时间"`
@@ -114,6 +117,7 @@ type MessageExportReq struct {
 	g.Meta    `path:"/message/export" method:"get" tags:"MVP消息表" summary:"导出MVP消息表"`
 	StartTime string `json:"startTime" dc:"开始时间"`
 	EndTime   string `json:"endTime" dc:"结束时间"`
+	MessageType string `json:"messageType" dc:"消息类型"`
 }
 
 // MessageExportRes 导出MVP消息表响应

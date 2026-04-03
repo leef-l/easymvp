@@ -34,6 +34,7 @@ func (s *sMessage) Create(ctx context.Context, in *model.MessageCreateInput) err
 		dao.MvpMessage.Columns().Id:        id,
 		dao.MvpMessage.Columns().ConversationId: in.ConversationID,
 		dao.MvpMessage.Columns().Role: in.Role,
+		dao.MvpMessage.Columns().MessageType: resolveMessageType(in.MessageType, in.Role, in.Status),
 		dao.MvpMessage.Columns().Content: in.Content,
 		dao.MvpMessage.Columns().ModelId: in.ModelID,
 		dao.MvpMessage.Columns().TokenUsage: in.TokenUsage,
@@ -54,6 +55,7 @@ func (s *sMessage) Update(ctx context.Context, in *model.MessageUpdateInput) err
 	data := g.Map{
 		dao.MvpMessage.Columns().ConversationId: in.ConversationID,
 		dao.MvpMessage.Columns().Role: in.Role,
+		dao.MvpMessage.Columns().MessageType: resolveMessageType(in.MessageType, in.Role, in.Status),
 		dao.MvpMessage.Columns().Content: in.Content,
 		dao.MvpMessage.Columns().ModelId: in.ModelID,
 		dao.MvpMessage.Columns().TokenUsage: in.TokenUsage,
@@ -113,6 +115,9 @@ func (s *sMessage) applyListFilter(ctx context.Context, in *model.MessageListInp
 	if in.EndTime != "" {
 		m = m.WhereLTE(dao.MvpMessage.Columns().CreatedAt, in.EndTime)
 	}
+	if in.MessageType != "" {
+		m = m.Where(dao.MvpMessage.Columns().MessageType, in.MessageType)
+	}
 	// 数据权限过滤
 	m = middleware.ApplyDataScope(ctx, m, dao.MvpMessage.Columns().CreatedBy, dao.MvpMessage.Columns().DeptId)
 	return m
@@ -161,7 +166,7 @@ func (s *sMessage) List(ctx context.Context, in *model.MessageListInput) (list [
 	}
 	// 动态排序（白名单防止 SQL 注入）
 	allowedOrderBy := map[string]bool{
-		"id": true, "role": true, "status": true, "created_at": true, "updated_at": true,
+		"id": true, "role": true, "message_type": true, "status": true, "created_at": true, "updated_at": true,
 	}
 	if in.OrderBy != "" && allowedOrderBy[in.OrderBy] {
 		if in.OrderDir == "desc" {
@@ -247,6 +252,10 @@ func (s *sMessage) Import(ctx context.Context, file *ghttp.UploadFile) (success 
 		}
 		idx++
 		if idx < len(record) {
+			data[dao.MvpMessage.Columns().MessageType] = resolveMessageType(record[idx], fmt.Sprint(data[dao.MvpMessage.Columns().Role]), fmt.Sprint(data[dao.MvpMessage.Columns().Status]))
+		}
+		idx++
+		if idx < len(record) {
 			data[dao.MvpMessage.Columns().Content] = record[idx]
 		}
 		idx++
@@ -269,5 +278,24 @@ func (s *sMessage) Import(ctx context.Context, file *ghttp.UploadFile) (success 
 		}
 	}
 	return
+}
+
+func resolveMessageType(messageType string, role string, status string) string {
+	if messageType != "" {
+		return messageType
+	}
+	if status == "failed" {
+		return model.MessageTypePoison
+	}
+	switch role {
+	case "user":
+		return model.MessageTypeChatUser
+	case "assistant":
+		return model.MessageTypeChatReply
+	case "system":
+		return model.MessageTypeSystemNotice
+	default:
+		return model.MessageTypeGeneral
+	}
 }
 

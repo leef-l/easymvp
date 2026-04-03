@@ -11,6 +11,15 @@ import {
 import { getConversationList } from '#/api/mvp/conversation';
 
 const conversationIDOptions = ref<{ label: string; value: string }[]>([]);
+const messageTypeOptions = [
+  { label: '普通对话-用户', value: 'chat_user' },
+  { label: '普通对话-AI', value: 'chat_reply' },
+  { label: '任务指令', value: 'task_prompt' },
+  { label: '任务回复', value: 'task_reply' },
+  { label: '系统通知', value: 'system_notice' },
+  { label: '毒药消息', value: 'poison' },
+  { label: '通用', value: 'general' },
+];
 
 const emit = defineEmits<{ success: [] }>();
 const isEdit = ref(false);
@@ -33,6 +42,12 @@ const [Form, formApi] = useVbenForm({
       label: '消息角色',
       rules: 'required',
       componentProps: { placeholder: '请输入消息角色', maxlength: 20 },
+    },
+    {
+      component: 'Select',
+      fieldName: 'messageType',
+      label: '消息类型',
+      componentProps: { options: messageTypeOptions, placeholder: '请选择消息类型', allowClear: true, class: 'w-full' },
     },
     {
       component: 'Textarea',

@@ -3,14 +3,30 @@ import { ref } from 'vue';
 
 import { useVbenForm } from '#/adapter/form';
 import { useVbenModal } from '@vben/common-ui';
-import { message } from 'ant-design-vue';
+import { Alert, message } from 'ant-design-vue';
 
 import { getEngineDetail, updateEngine } from '#/api/ai/engine';
-import { getModelList } from '#/api/ai/model';
+import { getModelDetail, getModelList } from '#/api/ai/model';
 
 const emit = defineEmits<{ success: [] }>();
 const engineCode = ref('');
 const modelOptions = ref<{ label: string; value: string }[]>([]);
+
+async function syncModelPreview(modelID?: string) {
+  const normalizedModelID = modelID ? String(modelID) : '';
+  if (!normalizedModelID) {
+    formApi.setValues({
+      baseURLPreview: '',
+      apiKeyPreview: '',
+    });
+    return;
+  }
+  const detail = await getModelDetail(normalizedModelID);
+  formApi.setValues({
+    baseURLPreview: detail.baseURL || '',
+    apiKeyPreview: detail.apiKeyMasked || '',
+  });
+}
 
 const [Form, formApi] = useVbenForm({
   showDefaultActions: false,
@@ -22,21 +38,9 @@ const [Form, formApi] = useVbenForm({
       componentProps: { disabled: true },
     },
     {
-      component: 'Input',
-      fieldName: 'baseURL',
-      label: 'Base URL',
-      componentProps: { placeholder: '请输入服务地址' },
-    },
-    {
-      component: 'InputPassword',
-      fieldName: 'apiKey',
-      label: 'API Key',
-      componentProps: { placeholder: '如需更新请输入新 API Key' },
-    },
-    {
       component: 'Select',
       fieldName: 'defaultModelID',
-      label: '默认模型',
+      label: '默认模型（执行任务）',
       rules: 'selectRequired',
       componentProps: {
         options: modelOptions,
@@ -45,39 +49,60 @@ const [Form, formApi] = useVbenForm({
         showSearch: true,
         optionFilterProp: 'label',
         class: 'w-full',
+        onChange: async (value: string) => {
+          await syncModelPreview(value);
+        },
+      },
+    },
+    {
+      component: 'Input',
+      fieldName: 'baseURLPreview',
+      label: 'Base URL',
+      componentProps: {
+        disabled: true,
+        placeholder: '随所选 AI 模型自动带出',
+      },
+    },
+    {
+      component: 'Input',
+      fieldName: 'apiKeyPreview',
+      label: 'API Key',
+      componentProps: {
+        disabled: true,
+        placeholder: '随所选 AI 模型自动带出',
       },
     },
     {
       component: 'InputNumber',
       fieldName: 'timeoutSeconds',
-      label: '超时秒数',
+      label: '超时秒数（仅执行任务）',
       componentProps: { class: 'w-full', min: 1 },
       defaultValue: 600,
     },
     {
       component: 'InputNumber',
       fieldName: 'maxSteps',
-      label: '最大步数',
+      label: '最大步数（仅执行任务）',
       componentProps: { class: 'w-full', min: 1 },
       defaultValue: 20,
     },
     {
       component: 'Input',
       fieldName: 'workspaceRoot',
-      label: '工作区根目录',
-      componentProps: { placeholder: '请输入工作区根目录' },
+      label: '工作区根目录（仅执行任务）',
+      componentProps: { placeholder: '仅 AI 执行任务生效' },
     },
     {
       component: 'Input',
       fieldName: 'commandTemplate',
-      label: '命令模板',
-      componentProps: { placeholder: 'Aider 可选命令模板' },
+      label: '命令模板（仅执行任务）',
+      componentProps: { placeholder: '仅 AI 执行任务生效' },
     },
     {
       component: 'Textarea',
       fieldName: 'extraConfigText',
-      label: '额外配置(JSON)',
-      componentProps: { rows: 5, placeholder: '{\n  "key": "value"\n}' },
+      label: '额外配置（仅执行任务 JSON）',
+      componentProps: { rows: 5, placeholder: '仅 AI 执行任务生效' },
     },
     {
       component: 'Switch',
@@ -110,8 +135,6 @@ const [Modal, modalApi] = useVbenModal({
     try {
       await updateEngine({
         engineCode: engineCode.value,
-        baseURL: values.baseURL,
-        apiKey: values.apiKey,
         defaultModelID: values.defaultModelID,
         timeoutSeconds: values.timeoutSeconds,
         maxSteps: values.maxSteps,
@@ -134,11 +157,11 @@ const [Modal, modalApi] = useVbenModal({
     modalApi.setState({ title: `编辑引擎 - ${data.name}` });
     formApi.resetForm();
     try {
-      const modelRes = await getModelList({ pageNum: 1, pageSize: 1000 });
-      modelOptions.value = (modelRes?.list ?? []).map((item: any) => ({
-        label: `${item.name} (${item.modelCode})`,
-        value: item.id,
-      }));
+        const modelRes = await getModelList({ pageNum: 1, pageSize: 1000 });
+        modelOptions.value = (modelRes?.list ?? []).map((item: any) => ({
+          label: `${item.name} (${item.modelCode})`,
+          value: String(item.id),
+        }));
     } catch {
       message.error('加载模型列表失败');
       return;
@@ -146,8 +169,9 @@ const [Modal, modalApi] = useVbenModal({
     const detail = await getEngineDetail(data.engineCode);
     formApi.setValues({
       engineCode: detail.engineCode,
-      baseURL: detail.baseURL,
-      defaultModelID: detail.defaultModelID,
+      defaultModelID: detail.defaultModelID ? String(detail.defaultModelID) : undefined,
+      baseURLPreview: detail.baseURL,
+      apiKeyPreview: detail.apiKeyMasked || '',
       timeoutSeconds: detail.timeoutSeconds,
       maxSteps: detail.maxSteps,
       workspaceRoot: detail.workspaceRoot,
@@ -155,12 +179,20 @@ const [Modal, modalApi] = useVbenModal({
       extraConfigText: detail.extraConfig || '',
       status: detail.configStatus || detail.status || 0,
     });
+    await syncModelPreview(detail.defaultModelID ? String(detail.defaultModelID) : undefined);
   },
 });
 </script>
 
 <template>
   <Modal class="w-[720px]">
+    <Alert
+      class="mb-4"
+      type="info"
+      show-icon
+      message="这里的超时、步数、工作区、命令模板仅对 AI 模块里的“执行任务”生效。"
+      description="MVP 项目任务请到“MVP 项目”的代码工作目录，以及“MVP -> 配置管理”里维护全局调度/看门狗配置。"
+    />
     <Form />
   </Modal>
 </template>

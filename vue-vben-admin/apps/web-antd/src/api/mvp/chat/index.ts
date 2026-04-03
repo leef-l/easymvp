@@ -7,6 +7,7 @@ const PREFIX = '/mvp/chat';
 export interface ChatMessage {
   id: string;
   role: 'assistant' | 'user';
+  messageType?: string;
   content: string;
   status: 'completed' | 'failed' | 'streaming';
   modelName?: string;

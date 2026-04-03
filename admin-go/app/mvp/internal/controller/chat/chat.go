@@ -23,7 +23,6 @@ func (c *cChat) Send(ctx context.Context, req *v1.ChatSendReq) (res *v1.ChatSend
 	userID := middleware.GetUserID(ctx)
 	deptID := middleware.GetDeptID(ctx)
 
-	// 校验对话归属
 	conv, convErr := g.DB().Model("mvp_conversation").Where("id", req.ConversationID).Where("deleted_at IS NULL").One()
 	if convErr != nil || conv.IsEmpty() {
 		return nil, fmt.Errorf("对话不存在")
@@ -133,7 +132,7 @@ func (c *cChat) History(ctx context.Context, req *v1.ChatHistoryReq) (res *v1.Ch
 
 	records, err := g.DB().Model("mvp_message m").
 		LeftJoin("ai_model am", "am.id = m.model_id").
-		Fields("m.id, m.role, m.content, m.status, m.created_at, am.name as model_name").
+		Fields("m.id, m.role, m.message_type, m.content, m.status, m.created_at, am.name as model_name").
 		Where("m.conversation_id", req.ConversationID).
 		Where("m.deleted_at IS NULL").
 		Order("m.created_at ASC").
@@ -145,12 +144,13 @@ func (c *cChat) History(ctx context.Context, req *v1.ChatHistoryReq) (res *v1.Ch
 	list := make([]*v1.ChatMessageOutput, 0, len(records))
 	for _, r := range records {
 		list = append(list, &v1.ChatMessageOutput{
-			ID:        snowflake.JsonInt64(r["id"].Int64()),
-			Role:      r["role"].String(),
-			Content:   r["content"].String(),
-			Status:    r["status"].String(),
-			ModelName: r["model_name"].String(),
-			CreatedAt: gtime.New(r["created_at"]).String(),
+			ID:          snowflake.JsonInt64(r["id"].Int64()),
+			Role:        r["role"].String(),
+			MessageType: r["message_type"].String(),
+			Content:     r["content"].String(),
+			Status:      r["status"].String(),
+			ModelName:   r["model_name"].String(),
+			CreatedAt:   gtime.New(r["created_at"]).String(),
 		})
 	}
 

@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"easymvp/app/mvp/internal/model/do"
 	"easymvp/utility/snowflake"
 )
 
@@ -50,7 +51,8 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 	if err != nil {
 		return 0, err
 	}
-	if len(plan.Tasks) == 0 {
+	tasks := p.normalizeTasks(ctx, plan.Tasks)
+	if len(tasks) == 0 {
 		return 0, nil // 回复中没有任务清单，正常情况（还在讨论需求）
 	}
 
@@ -80,10 +82,11 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 		_, _ = g.DB().Model("mvp_task_log").
 			WhereIn("task_id", oldTaskIDs).
 			Where("deleted_at IS NULL").
-			Update(g.Map{
-				"deleted_at": gtime.Now(),
-				"updated_at": gtime.Now(),
-			})
+			Data(do.MvpTaskLog{
+				DeletedAt: gtime.Now(),
+				UpdatedAt: gtime.Now(),
+			}).
+			Update()
 		// 2c. 删除任务依赖关系
 		_, _ = g.DB().Model("mvp_task_dependency").
 			WhereIn("task_id", oldTaskIDs).
@@ -96,22 +99,21 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 	_, err = g.DB().Model("mvp_task").
 		Where("project_id", projectID).
 		Where("deleted_at IS NULL").
-		Update(g.Map{
-			"deleted_at": gtime.Now(),
-			"updated_at": gtime.Now(),
-		})
+		Data(do.MvpTask{
+			DeletedAt: gtime.Now(),
+			UpdatedAt: gtime.Now(),
+		}).
+		Update()
 	if err != nil {
 		return 0, fmt.Errorf("清理旧任务失败: %w", err)
 	}
 
 	// 3. 第一遍：创建所有任务，建立 name→id 映射
-	nameToID := make(map[string]int64, len(plan.Tasks))
-	taskIDs := make([]int64, 0, len(plan.Tasks))
+	nameToID := make(map[string]int64, len(tasks))
+	createdTasks := make([]ArchitectTask, 0, len(tasks))
 
-	for i, t := range plan.Tasks {
+	for i, t := range tasks {
 		taskID := int64(snowflake.Generate())
-		nameToID[t.Name] = taskID
-		taskIDs = append(taskIDs, taskID)
 
 		roleType := t.RoleType
 		if roleType == "" {
@@ -142,32 +144,34 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 			dependsJSON = string(b)
 		}
 
-		_, err = g.DB().Model("mvp_task").Insert(g.Map{
-			"id":                 taskID,
-			"project_id":        projectID,
-			"parent_id":         0,
-			"name":              t.Name,
-			"description":       t.Description,
-			"role_type":         roleType,
-			"role_level":        t.RoleLevel,
-			"status":            "draft", // 草稿状态，确认后才变 pending
-			"batch_no":          t.BatchNo,
-			"sort":              sort,
-			"affected_resources": resourcesJSON,
-			"depends_on":        dependsJSON,
-			"created_by":        createdBy,
-			"dept_id":           deptID,
-			"created_at":        gtime.Now(),
-			"updated_at":        gtime.Now(),
-		})
+		_, err = g.DB().Model("mvp_task").Data(do.MvpTask{
+			Id:                taskID,
+			ProjectId:         projectID,
+			ParentId:          0,
+			Name:              t.Name,
+			Description:       t.Description,
+			RoleType:          roleType,
+			RoleLevel:         t.RoleLevel,
+			Status:            "draft",
+			BatchNo:           t.BatchNo,
+			Sort:              sort,
+			AffectedResources: resourcesJSON,
+			DependsOn:         dependsJSON,
+			CreatedBy:         createdBy,
+			DeptId:            deptID,
+			CreatedAt:         gtime.Now(),
+			UpdatedAt:         gtime.Now(),
+		}).Insert()
 		if err != nil {
 			g.Log().Errorf(ctx, "创建任务失败 [%s]: %v", t.Name, err)
 			continue
 		}
+		nameToID[t.Name] = taskID
+		createdTasks = append(createdTasks, t)
 	}
 
 	// 4. 第二遍：建立父子关系
-	for _, t := range plan.Tasks {
+	for _, t := range createdTasks {
 		if t.ParentName == "" {
 			continue
 		}
@@ -175,18 +179,24 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 		if !ok {
 			continue
 		}
-		taskID := nameToID[t.Name]
-		g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
-			"parent_id": parentID,
-		})
+		taskID, ok := nameToID[t.Name]
+		if !ok {
+			continue
+		}
+		_, _ = g.DB().Model("mvp_task").Where("id", taskID).Data(do.MvpTask{
+			ParentId: parentID,
+		}).Update()
 	}
 
 	// 5. 第三遍：建立依赖关系（mvp_task_dependency）
-	for _, t := range plan.Tasks {
+	for _, t := range createdTasks {
 		if len(t.DependsOn) == 0 {
 			continue
 		}
-		taskID := nameToID[t.Name]
+		taskID, ok := nameToID[t.Name]
+		if !ok {
+			continue
+		}
 		for _, depName := range t.DependsOn {
 			depID, ok := nameToID[depName]
 			if !ok {
@@ -200,8 +210,8 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 		}
 	}
 
-	g.Log().Infof(ctx, "[TaskParser] 项目 %d 解析创建 %d 个任务（draft）", projectID, len(taskIDs))
-	return len(taskIDs), nil
+	g.Log().Infof(ctx, "[TaskParser] 项目 %d 解析创建 %d 个任务（draft）", projectID, len(createdTasks))
+	return len(createdTasks), nil
 }
 
 // DryParseTaskCount 仅解析AI回复，返回任务数量（不写入数据库）
@@ -210,7 +220,34 @@ func (p *TaskParser) DryParseTaskCount(aiReply string) int {
 	if err != nil || len(plan.Tasks) == 0 {
 		return 0
 	}
-	return len(plan.Tasks)
+	return len(p.normalizeTasks(context.Background(), plan.Tasks))
+}
+
+func (p *TaskParser) normalizeTasks(ctx context.Context, tasks []ArchitectTask) []ArchitectTask {
+	normalized := make([]ArchitectTask, 0, len(tasks))
+	seenNames := make(map[string]struct{}, len(tasks))
+
+	for _, task := range tasks {
+		task.Name = strings.TrimSpace(task.Name)
+		task.Description = strings.TrimSpace(task.Description)
+		task.RoleType = strings.TrimSpace(task.RoleType)
+		task.RoleLevel = strings.TrimSpace(task.RoleLevel)
+		task.ParentName = strings.TrimSpace(task.ParentName)
+
+		if task.Name == "" {
+			g.Log().Warning(ctx, "[TaskParser] 跳过空任务名的任务项")
+			continue
+		}
+		if _, exists := seenNames[task.Name]; exists {
+			g.Log().Warningf(ctx, "[TaskParser] 跳过重复任务名: %s", task.Name)
+			continue
+		}
+
+		seenNames[task.Name] = struct{}{}
+		normalized = append(normalized, task)
+	}
+
+	return normalized
 }
 
 // ConfirmDraftTasks 确认草稿任务：draft → pending

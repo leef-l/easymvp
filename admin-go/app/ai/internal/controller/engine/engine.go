@@ -35,8 +35,6 @@ func (c *cEngine) Update(ctx context.Context, req *v1.EngineUpdateReq) (res *v1.
 
 	err = service.Engine().Update(ctx, &model.EngineUpdateInput{
 		EngineCode:      req.EngineCode,
-		BaseURL:         req.BaseURL,
-		APIKey:          req.APIKey,
 		DefaultModelID:  req.DefaultModelID,
 		TimeoutSeconds:  req.TimeoutSeconds,
 		MaxSteps:        req.MaxSteps,

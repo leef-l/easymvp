@@ -32,8 +32,6 @@ type EngineDetailRes struct {
 type EngineUpdateReq struct {
 	g.Meta          `path:"/engine/update" method:"post" tags:"AI执行引擎" summary:"更新AI执行引擎配置"`
 	EngineCode      string                 `json:"engineCode" v:"required#引擎编码不能为空"`
-	BaseURL         string                 `json:"baseURL"`
-	APIKey          string                 `json:"apiKey"`
 	DefaultModelID  snowflake.JsonInt64    `json:"defaultModelID"`
 	TimeoutSeconds  int                    `json:"timeoutSeconds"`
 	MaxSteps        int                    `json:"maxSteps"`

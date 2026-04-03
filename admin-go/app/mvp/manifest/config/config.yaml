@@ -23,6 +23,9 @@ jwt:
 
 # 引擎配置（数据库 mvp_config 表优先，未配置时使用此处值）
 engine:
+  runtime:
+    taskTimeoutSeconds: 600  # MVP 项目任务执行超时（秒）
+    maxSteps: 2              # 最大内部执行步数；当前 Aider 最多使用到精简重试
   watchdog:
     checkInterval: 120    # 心跳检测间隔（秒）
     maxStaleCount: 3      # 连续无进展次数阈值

@@ -6,6 +6,7 @@ export interface MessageItem {
   conversationID: string;
   conversationTitle?: string;
   role: string;
+  messageType?: string;
   content: string;
   modelID?: string;
   tokenUsage?: string;
@@ -18,6 +19,7 @@ export interface MessageItem {
 export interface MessageListParams {
   pageNum: number;
   pageSize: number;
+  messageType?: string;
   orderBy?: string;
   orderDir?: string;
   startTime?: string;
@@ -28,6 +30,7 @@ export interface MessageListParams {
 export interface MessageCreateParams {
   conversationID: string;
   role: string;
+  messageType?: string;
   content: string;
   modelID?: string;
   tokenUsage?: string;
@@ -39,6 +42,7 @@ export interface MessageUpdateParams {
   id: string;
   conversationID: string;
   role: string;
+  messageType?: string;
   content: string;
   modelID?: string;
   tokenUsage?: string;

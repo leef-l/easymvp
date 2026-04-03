@@ -244,7 +244,7 @@ func (s *sTask) loadEngineRuntimeConfig(ctx context.Context, engineCode string) 
 	if record.IsEmpty() {
 		return nil, fmt.Errorf("执行引擎不存在")
 	}
-	return &runtimeEngineConfig{
+	cfg := &runtimeEngineConfig{
 		EngineCode:      record["engine_code"].String(),
 		Name:            record["name"].String(),
 		BaseURL:         record["base_url"].String(),
@@ -259,7 +259,16 @@ func (s *sTask) loadEngineRuntimeConfig(ctx context.Context, engineCode string) 
 		ExtraConfig:     record["extra_config"].String(),
 		Status:          record["status"].Int(),
 		ConfigStatus:    record["config_status"].Int(),
-	}, nil
+	}
+	if cfg.DefaultModelID > 0 {
+		modelInfo, modelErr := s.loadModelRuntimeInfo(ctx, cfg.DefaultModelID)
+		if modelErr != nil {
+			return nil, modelErr
+		}
+		cfg.BaseURL = modelInfo.BaseURL
+		cfg.APIKey = modelInfo.APIKey
+	}
+	return cfg, nil
 }
 
 func (s *sTask) loadModelRuntimeInfo(ctx context.Context, modelID int64) (*runtimeModelInfo, error) {
@@ -1069,12 +1078,16 @@ func extractResponseSummary(respText string) string {
 }
 
 func ensureDirExists(path string) error {
+	return ensureDirAvailable(path, "工作目录")
+}
+
+func ensureDirAvailable(path string, label string) error {
 	info, err := os.Stat(path)
 	if err != nil {
-		return fmt.Errorf("工作目录不可用: %s", path)
+		return fmt.Errorf("%s不可用: %s", label, path)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("工作目录不是目录: %s", path)
+		return fmt.Errorf("%s不是目录: %s", label, path)
 	}
 	return nil
 }

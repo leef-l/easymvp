@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"easymvp/app/mvp/internal/dao"
+	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/middleware"
 	"easymvp/app/mvp/internal/model"
 	"easymvp/app/mvp/internal/service"
@@ -29,20 +30,24 @@ type sProject struct{}
 
 // Create 创建MVP项目表
 func (s *sProject) Create(ctx context.Context, in *model.ProjectCreateInput) error {
+	if err := engine.ValidateWorkDir(in.WorkDir); err != nil {
+		return err
+	}
+
 	id := snowflake.Generate()
 	_, err := dao.MvpProject.Ctx(ctx).Data(g.Map{
-		dao.MvpProject.Columns().Id:        id,
-		dao.MvpProject.Columns().Name: in.Name,
-		dao.MvpProject.Columns().Description: in.Description,
-		dao.MvpProject.Columns().Status: in.Status,
-		dao.MvpProject.Columns().PauseReason: in.PauseReason,
-		dao.MvpProject.Columns().GlobalContext: in.GlobalContext,
+		dao.MvpProject.Columns().Id:               id,
+		dao.MvpProject.Columns().Name:             in.Name,
+		dao.MvpProject.Columns().Description:      in.Description,
+		dao.MvpProject.Columns().Status:           in.Status,
+		dao.MvpProject.Columns().PauseReason:      in.PauseReason,
+		dao.MvpProject.Columns().GlobalContext:    in.GlobalContext,
 		dao.MvpProject.Columns().ArchitectModelId: in.ArchitectModelID,
-		dao.MvpProject.Columns().WorkDir: in.WorkDir,
-		dao.MvpProject.Columns().CreatedBy: middleware.GetUserID(ctx),
-		dao.MvpProject.Columns().DeptId: middleware.GetDeptID(ctx),
-		dao.MvpProject.Columns().CreatedAt: gtime.Now(),
-		dao.MvpProject.Columns().UpdatedAt: gtime.Now(),
+		dao.MvpProject.Columns().WorkDir:          in.WorkDir,
+		dao.MvpProject.Columns().CreatedBy:        middleware.GetUserID(ctx),
+		dao.MvpProject.Columns().DeptId:           middleware.GetDeptID(ctx),
+		dao.MvpProject.Columns().CreatedAt:        gtime.Now(),
+		dao.MvpProject.Columns().UpdatedAt:        gtime.Now(),
 	}).Insert()
 	return err
 }
@@ -52,14 +57,17 @@ func (s *sProject) Update(ctx context.Context, in *model.ProjectUpdateInput) err
 	if err := middleware.CheckOwnership(ctx, dao.MvpProject.Ctx(ctx).Where(dao.MvpProject.Columns().DeletedAt, nil), in.ID, dao.MvpProject.Columns().Id, dao.MvpProject.Columns().CreatedBy); err != nil {
 		return err
 	}
+	if err := engine.ValidateWorkDir(in.WorkDir); err != nil {
+		return err
+	}
 	data := g.Map{
-		dao.MvpProject.Columns().Name: in.Name,
-		dao.MvpProject.Columns().Description: in.Description,
-		dao.MvpProject.Columns().PauseReason: in.PauseReason,
-		dao.MvpProject.Columns().GlobalContext: in.GlobalContext,
+		dao.MvpProject.Columns().Name:             in.Name,
+		dao.MvpProject.Columns().Description:      in.Description,
+		dao.MvpProject.Columns().PauseReason:      in.PauseReason,
+		dao.MvpProject.Columns().GlobalContext:    in.GlobalContext,
 		dao.MvpProject.Columns().ArchitectModelId: in.ArchitectModelID,
-		dao.MvpProject.Columns().WorkDir: in.WorkDir,
-		dao.MvpProject.Columns().UpdatedAt: gtime.Now(),
+		dao.MvpProject.Columns().WorkDir:          in.WorkDir,
+		dao.MvpProject.Columns().UpdatedAt:        gtime.Now(),
 	}
 	_, err := dao.MvpProject.Ctx(ctx).Where(dao.MvpProject.Columns().Id, in.ID).Data(data).Update()
 	return err
@@ -150,6 +158,7 @@ func (s *sProject) List(ctx context.Context, in *model.ProjectListInput) (list [
 	s.fillRefFields(ctx, list)
 	return
 }
+
 // Export 导出MVP项目表（不分页）
 func (s *sProject) Export(ctx context.Context, in *model.ProjectListInput) (list []*model.ProjectListOutput, err error) {
 	m := s.applyListFilter(ctx, in)
@@ -193,8 +202,6 @@ func (s *sProject) fillRefFields(ctx context.Context, list []*model.ProjectListO
 	}
 }
 
-
-
 // BatchUpdate 批量编辑MVP项目表
 func (s *sProject) BatchUpdate(ctx context.Context, in *model.ProjectBatchUpdateInput) error {
 	data := g.Map{
@@ -208,7 +215,6 @@ func (s *sProject) BatchUpdate(ctx context.Context, in *model.ProjectBatchUpdate
 	_, err := m.Data(data).Update()
 	return err
 }
-
 
 // Import 导入MVP项目表
 func (s *sProject) Import(ctx context.Context, file *ghttp.UploadFile) (success int, fail int, err error) {
@@ -274,4 +280,3 @@ func (s *sProject) Import(ctx context.Context, file *ghttp.UploadFile) (success 
 	}
 	return
 }
-

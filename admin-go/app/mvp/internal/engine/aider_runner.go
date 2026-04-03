@@ -40,6 +40,7 @@ type AiderConfig struct {
 	MaxTokens            int           // 最大输出 token
 	AutoCommit           bool          // 是否自动提交 git
 	Timeout              time.Duration // 超时时间
+	MaxSteps             int           // 最大内部执行步数
 	MapTokens            int           // Repo map token 数
 	MaxChatHistoryTokens int           // chat history token 上限
 	CompactMode          bool          // 是否使用精简上下文模式
@@ -57,23 +58,31 @@ type AiderResult struct {
 // Run 执行 Aider 任务
 func (r *AiderRunner) Run(ctx context.Context, cfg *AiderConfig) *AiderResult {
 	start := time.Now()
+	maxSteps := cfg.MaxSteps
+	if maxSteps <= 0 {
+		maxSteps = 2
+	}
 
 	result := r.runOnce(ctx, cfg)
 
 	if result.Error != nil && r.isTokenLimitFailure(result.Output) && !cfg.CompactMode {
-		g.Log().Warningf(ctx, "[AiderRunner] 检测到 token limit，准备使用精简上下文重试")
-		compactCfg := r.buildCompactRetryConfig(cfg)
-		retryResult := r.runOnce(ctx, compactCfg)
-		retryResult.Output = strings.TrimSpace(result.Output) + "\n\n[AiderRunner] 检测到 token limit，已自动切换为精简上下文模式重试。\n\n" + strings.TrimSpace(retryResult.Output)
-		retryResult.Duration = time.Since(start)
-		if retryResult.Error == nil {
-			return retryResult
+		if maxSteps <= 1 {
+			g.Log().Warningf(ctx, "[AiderRunner] 检测到 token limit，但 maxSteps=%d，跳过精简重试", maxSteps)
+		} else {
+			g.Log().Warningf(ctx, "[AiderRunner] 检测到 token limit，准备使用精简上下文重试")
+			compactCfg := r.buildCompactRetryConfig(cfg)
+			retryResult := r.runOnce(ctx, compactCfg)
+			retryResult.Output = strings.TrimSpace(result.Output) + "\n\n[AiderRunner] 检测到 token limit，已自动切换为精简上下文模式重试。\n\n" + strings.TrimSpace(retryResult.Output)
+			retryResult.Duration = time.Since(start)
+			if retryResult.Error == nil {
+				return retryResult
+			}
+			result = retryResult
 		}
-		result = retryResult
 	}
 
 	result.Duration = time.Since(start)
-	result.FailureHint = r.buildFailureHint(result.Output, cfg)
+	result.FailureHint = r.buildFailureHint(result.Output, result.Error, cfg)
 
 	g.Log().Infof(ctx, "[AiderRunner] 完成: 耗时=%v output_len=%d",
 		result.Duration, len(result.Output))
@@ -109,7 +118,18 @@ func (r *AiderRunner) runOnce(ctx context.Context, cfg *AiderConfig) *AiderResul
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "aider", args...)
+	var cmd *exec.Cmd
+	if _, err := exec.LookPath("aider"); err == nil {
+		cmd = exec.CommandContext(cmdCtx, "aider", args...)
+	} else if _, err := exec.LookPath("uv"); err == nil {
+		uvArgs := []string{"tool", "run", "--python", "3.12", "--from", "aider-chat", "aider"}
+		uvArgs = append(uvArgs, args...)
+		cmd = exec.CommandContext(cmdCtx, "uv", uvArgs...)
+	} else {
+		return &AiderResult{
+			Error: fmt.Errorf("未找到 aider 可执行文件，且 uv 不可用"),
+		}
+	}
 	cmd.Dir = cfg.WorkDir
 	cmd.Env = append(cmd.Environ(), env...)
 
@@ -315,6 +335,9 @@ func (r *AiderRunner) BuildConfigFromModel(ctx context.Context, modelInfo *Model
 	baseURL = strings.TrimSuffix(baseURL, "/v1")
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
+	timeoutSeconds := GetConfigInt(ctx, "runtime.task_timeout_seconds", "engine.runtime.taskTimeoutSeconds", 600)
+	maxSteps := GetConfigInt(ctx, "runtime.max_steps", "engine.runtime.maxSteps", 2)
+
 	return &AiderConfig{
 		ModelCode:            modelInfo.ModelCode,
 		APIKey:               modelInfo.APIKey,
@@ -324,7 +347,8 @@ func (r *AiderRunner) BuildConfigFromModel(ctx context.Context, modelInfo *Model
 		WorkDir:              workDir,
 		MaxTokens:            modelInfo.MaxTokens,
 		AutoCommit:           false,
-		Timeout:              10 * time.Minute,
+		Timeout:              time.Duration(timeoutSeconds) * time.Second,
+		MaxSteps:             maxSteps,
 		MapTokens:            512,
 		MaxChatHistoryTokens: 2048,
 	}
@@ -349,6 +373,9 @@ func (r *AiderRunner) RunTask(ctx context.Context, projectID int64, taskID int64
 func (r *AiderRunner) buildCompactRetryConfig(cfg *AiderConfig) *AiderConfig {
 	compact := *cfg
 	compact.CompactMode = true
+	if compact.MaxSteps > 0 {
+		compact.MaxSteps--
+	}
 	compact.MapTokens = 0
 	compact.MaxChatHistoryTokens = 512
 	compact.ReadFiles = nil
@@ -383,8 +410,11 @@ func (r *AiderRunner) isTokenLimitFailure(output string) bool {
 	return false
 }
 
-func (r *AiderRunner) buildFailureHint(output string, cfg *AiderConfig) string {
+func (r *AiderRunner) buildFailureHint(output string, runErr error, cfg *AiderConfig) string {
 	if strings.TrimSpace(output) == "" {
+		if runErr != nil {
+			return "Aider 无输出即退出，底层错误: " + runErr.Error()
+		}
 		return "Aider 无输出即退出，请检查 aider 可执行文件、模型配置和工作目录。"
 	}
 

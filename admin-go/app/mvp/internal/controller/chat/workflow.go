@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 
 	"github.com/gogf/gf/v2/frame/g"
 
@@ -353,24 +354,49 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 		addItem("role_ai_engine", "角色引擎授权", "", "ok", fmt.Sprintf("已有 %d 条角色引擎授权", count))
 	}
 
-	// 10. Aider 安装
-	aiderPath, e := exec.LookPath("aider")
-	if e != nil {
-		addItem("aider_installed", "Aider 安装", "", "error", "服务器上未找到 aider 可执行文件，请先安装: pip install aider-chat")
+	// 10. Aider 执行环境
+	if aiderPath, err := exec.LookPath("aider"); err == nil {
+		addItem("aider_installed", "Aider 执行环境", "", "ok", "aider 已安装: "+aiderPath)
+	} else if uvPath, uvErr := exec.LookPath("uv"); uvErr == nil {
+		addItem("aider_installed", "Aider 执行环境", "", "ok", "本机未安装 aider，将通过 uv 自动安装/执行: "+uvPath)
+	} else if dockerPath, dockerErr := exec.LookPath("docker"); dockerErr == nil {
+		addItem("aider_installed", "Aider 执行环境", "", "warning", "本机未安装 aider/uv，将回退使用 Docker 执行: "+dockerPath)
 	} else {
-		addItem("aider_installed", "Aider 安装", "", "ok", "aider 已安装: "+aiderPath)
+		addItem("aider_installed", "Aider 执行环境", "", "error", "未找到 aider 可执行文件，且 uv/docker 都不可用")
 	}
 
-	// 11. Docker 安装（OpenHands 依赖）
-	dockerPath, e := exec.LookPath("docker")
-	if e != nil {
-		addItem("docker_installed", "Docker 安装", "", "warning", "服务器上未找到 docker，OpenHands 引擎需要 Docker 支持（仅使用 Aider 可忽略）")
+	// 11. OpenHands 执行环境
+	openHandsNeedsDocker := false
+	openHandsMessage := "OpenHands 当前可通过 HTTP 接口工作，未强制依赖 Docker。"
+	if !ohCfg.IsEmpty() {
+		commandTemplate := strings.TrimSpace(ohCfg["command_template"].String())
+		if commandTemplate != "" {
+			lowerCommand := strings.ToLower(commandTemplate)
+			if strings.Contains(lowerCommand, "docker run") || strings.Contains(lowerCommand, " docker ") {
+				openHandsNeedsDocker = true
+				openHandsMessage = "OpenHands 命令模板依赖 Docker 运行。"
+			} else {
+				openHandsMessage = "OpenHands 命令模板已配置，当前不依赖 Docker。"
+			}
+		}
+	}
+
+	if dockerPath, err := exec.LookPath("docker"); err == nil {
+		addItem("docker_installed", "OpenHands 执行环境", "", "ok", openHandsMessage+" docker 已安装: "+dockerPath)
+	} else if _, err := exec.LookPath("openhands"); err == nil {
+		addItem("docker_installed", "OpenHands 执行环境", "", "ok", "OpenHands CLI 可用，当前可不依赖 Docker。")
+	} else if uvPath, err := exec.LookPath("uv"); err == nil {
+		addItem("docker_installed", "OpenHands 执行环境", "", "ok", "OpenHands 将通过 uv 自动安装/执行: "+uvPath)
+	} else if openHandsNeedsDocker {
+		addItem("docker_installed", "OpenHands 执行环境", "", "warning", "服务器上未找到 docker，当前 OpenHands 命令模板依赖 Docker。")
 	} else {
-		addItem("docker_installed", "Docker 安装", "", "ok", "docker 已安装: "+dockerPath)
+		addItem("docker_installed", "OpenHands 执行环境", "", "warning", "未找到 openhands/uv/docker，OpenHands 相关能力暂不可用。")
 	}
 
 	// 12. 引擎核心配置
 	requiredKeys := []string{
+		"runtime.task_timeout_seconds",
+		"runtime.max_steps",
 		"watchdog.check_interval",
 		"watchdog.max_stale_count",
 		"watchdog.max_retries",

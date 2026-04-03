@@ -27,6 +27,12 @@ func New() *sEngine {
 
 type sEngine struct{}
 
+type engineModelConnection struct {
+	BaseURL  string
+	APIKey   string
+	APISecret string
+}
+
 func (s *sEngine) List(ctx context.Context) (list []*model.EngineListOutput, err error) {
 	err = g.DB().Ctx(ctx).Model("ai_engine e").
 		LeftJoin("ai_engine_config c", "c.engine_code = e.code AND c.deleted_at IS NULL").
@@ -55,7 +61,6 @@ func (s *sEngine) Detail(ctx context.Context, engineCode string) (out *model.Eng
 	out.EngineCode = record["engine_code"].String()
 	out.Name = record["name"].String()
 	out.Description = record["description"].String()
-	out.BaseURL = record["base_url"].String()
 	out.DefaultModelID = snowflake.JsonInt64(record["default_model_id"].Int64())
 	out.TimeoutSeconds = record["timeout_seconds"].Int()
 	out.MaxSteps = record["max_steps"].Int()
@@ -66,7 +71,16 @@ func (s *sEngine) Detail(ctx context.Context, engineCode string) (out *model.Eng
 	out.ExtraConfig = record["extra_config"].String()
 	out.Status = record["status"].Int()
 	out.ConfigStatus = record["config_status"].Int()
+	out.BaseURL = record["base_url"].String()
 	out.APIKeyMasked = maskSecret(record["api_key"].String())
+	if out.DefaultModelID > 0 {
+		modelConn, connErr := s.loadModelConnection(ctx, int64(out.DefaultModelID))
+		if connErr != nil {
+			return nil, connErr
+		}
+		out.BaseURL = modelConn.BaseURL
+		out.APIKeyMasked = maskSecret(modelConn.APIKey)
+	}
 	return
 }
 
@@ -80,10 +94,21 @@ func (s *sEngine) Update(ctx context.Context, in *model.EngineUpdateInput) error
 		return err
 	}
 
+	resolvedBaseURL := ""
+	resolvedAPIKey := ""
+	if in.DefaultModelID > 0 {
+		modelConn, connErr := s.loadModelConnection(ctx, int64(in.DefaultModelID))
+		if connErr != nil {
+			return connErr
+		}
+		resolvedBaseURL = modelConn.BaseURL
+		resolvedAPIKey = modelConn.APIKey
+	}
+
 	data := g.Map{
 		"engine_code":      in.EngineCode,
-		"base_url":         in.BaseURL,
-		"api_key":          in.APIKey,
+		"base_url":         resolvedBaseURL,
+		"api_key":          resolvedAPIKey,
 		"default_model_id": in.DefaultModelID,
 		"timeout_seconds":  in.TimeoutSeconds,
 		"max_steps":        in.MaxSteps,
@@ -95,6 +120,9 @@ func (s *sEngine) Update(ctx context.Context, in *model.EngineUpdateInput) error
 		"status":           in.Status,
 		"dept_id":          middleware.GetDeptID(ctx),
 		"updated_at":       now,
+	}
+	if strings.TrimSpace(in.ExtraConfig) == "" {
+		data["extra_config"] = nil
 	}
 
 	if count > 0 {
@@ -111,6 +139,27 @@ func (s *sEngine) Update(ctx context.Context, in *model.EngineUpdateInput) error
 	data["created_at"] = now
 	_, err = g.DB().Ctx(ctx).Model("ai_engine_config").Data(data).Insert()
 	return err
+}
+
+func (s *sEngine) loadModelConnection(ctx context.Context, modelID int64) (*engineModelConnection, error) {
+	record, err := g.DB().Ctx(ctx).Model("ai_model m").
+		LeftJoin("ai_plan p", "p.id = m.plan_id").
+		LeftJoin("ai_provider pv", "pv.id = m.provider_id").
+		Fields("pv.base_url, p.api_key, p.api_secret").
+		Where("m.id", modelID).
+		Where("m.deleted_at IS NULL").
+		One()
+	if err != nil {
+		return nil, err
+	}
+	if record.IsEmpty() {
+		return nil, fmt.Errorf("默认模型不存在")
+	}
+	return &engineModelConnection{
+		BaseURL:  record["base_url"].String(),
+		APIKey:   record["api_key"].String(),
+		APISecret: record["api_secret"].String(),
+	}, nil
 }
 
 func (s *sEngine) TestConnection(ctx context.Context, engineCode string) (*model.EngineTestOutput, error) {

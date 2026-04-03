@@ -25,8 +25,6 @@ export interface EngineDetailItem extends EngineItem {
 
 export interface EngineUpdateParams {
   engineCode: string;
-  baseURL?: string;
-  apiKey?: string;
   defaultModelID?: string;
   timeoutSeconds?: number;
   maxSteps?: number;

@@ -46,6 +46,8 @@ type ModelDetailOutput struct {
 	PlanName string `json:"planName"`
 	ProviderID snowflake.JsonInt64 `json:"providerID"`
 	ProviderName string `json:"providerName"`
+	BaseURL string `json:"baseURL"`
+	APIKeyMasked string `json:"apiKeyMasked"`
 	Name string `json:"name"`
 	ModelCode string `json:"modelCode"`
 	Capability string `json:"capability"`

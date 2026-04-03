@@ -49,6 +49,12 @@ func (s *sTask) Execute(ctx context.Context, in *model.TaskExecuteInput) (out *m
 	if err != nil {
 		return nil, err
 	}
+	if err = ensureDirAvailable(repoPath, "仓库路径"); err != nil {
+		return nil, err
+	}
+	if err = ensureDirAvailable(worktreePath, "工作目录"); err != nil {
+		return nil, err
+	}
 	snapshotBytes, _ := json.Marshal(engineDetail)
 	requestBytes, _ := json.Marshal(in)
 

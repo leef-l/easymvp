@@ -49,6 +49,7 @@ type ChatHistoryRes struct {
 type ChatMessageOutput struct {
 	ID        snowflake.JsonInt64 `json:"id"`
 	Role      string              `json:"role"`
+	MessageType string            `json:"messageType"`
 	Content   string              `json:"content"`
 	Status    string              `json:"status"`
 	ModelName string              `json:"modelName,omitempty"`

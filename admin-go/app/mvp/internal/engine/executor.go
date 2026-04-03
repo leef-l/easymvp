@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	mvpmodel "easymvp/app/mvp/internal/model"
 	"easymvp/utility/provider"
 	"easymvp/utility/snowflake"
 )
@@ -74,6 +75,7 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 		"id":              userMsgID,
 		"conversation_id": conversationID,
 		"role":            "user",
+		"message_type":    mvpmodel.MessageTypeTaskPrompt,
 		"content":         taskPrompt,
 		"status":          "completed",
 		"created_by":      0,
@@ -90,6 +92,7 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 		"id":              replyID,
 		"conversation_id": conversationID,
 		"role":            "assistant",
+		"message_type":    mvpmodel.MessageTypeTaskReply,
 		"content":         "",
 		"model_id":        modelInfo.ModelID,
 		"status":          "streaming",
@@ -167,9 +170,10 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 	if err != nil {
 		// AI 调用失败
 		if _, dbErr := g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
-			"content":    "AI调用失败: " + err.Error(),
-			"status":     "failed",
-			"updated_at": gtime.Now(),
+			"content":      "AI调用失败: " + err.Error(),
+			"message_type": mvpmodel.MessageTypePoison,
+			"status":       "failed",
+			"updated_at":   gtime.Now(),
 		}); dbErr != nil {
 			g.Log().Errorf(ctx, "[Executor] 更新失败消息状态失败: msg=%d, err=%v", replyID, dbErr)
 		}
@@ -302,6 +306,18 @@ func (e *Executor) ensureConversation(ctx context.Context, projectID int64, task
 	}
 
 	// 创建新对话
+	project, err := g.DB().Model("mvp_project").
+		Fields("created_by, dept_id").
+		Where("id", projectID).
+		Where("deleted_at IS NULL").
+		One()
+	if err != nil {
+		return 0, err
+	}
+	if project.IsEmpty() {
+		return 0, fmt.Errorf("项目不存在")
+	}
+
 	convID := int64(snowflake.Generate())
 	_, err = g.DB().Model("mvp_conversation").Insert(g.Map{
 		"id":         convID,
@@ -310,8 +326,8 @@ func (e *Executor) ensureConversation(ctx context.Context, projectID int64, task
 		"title":      "任务对话",
 		"role_type":  roleType,
 		"status":     "active",
-		"created_by": 0,
-		"dept_id":    0,
+		"created_by": project["created_by"].Int64(),
+		"dept_id":    project["dept_id"].Int64(),
 		"created_at": gtime.Now(),
 		"updated_at": gtime.Now(),
 	})
@@ -327,6 +343,7 @@ func (e *Executor) loadConversationHistory(ctx context.Context, conversationID i
 		Where("conversation_id", conversationID).
 		Where("deleted_at IS NULL").
 		Where("status", "completed").
+		Where("(message_type IS NULL OR message_type <> ?)", mvpmodel.MessageTypePoison).
 		Where("id != ?", excludeID).
 		Order("created_at ASC").
 		All()
@@ -491,6 +508,7 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 		"id":              userMsgID,
 		"conversation_id": conversationID,
 		"role":            "user",
+		"message_type":    mvpmodel.MessageTypeTaskPrompt,
 		"content":         taskPrompt,
 		"status":          "completed",
 		"created_by":      0,
@@ -514,6 +532,7 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 		"id":              replyID,
 		"conversation_id": conversationID,
 		"role":            "assistant",
+		"message_type":    map[bool]string{true: mvpmodel.MessageTypePoison, false: mvpmodel.MessageTypeTaskReply}[result.Error != nil],
 		"content":         result.Output,
 		"model_id":        modelInfo.ModelID,
 		"status":          replyStatus,
