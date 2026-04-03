@@ -134,8 +134,20 @@ func (s *sTask) Detail(ctx context.Context, id snowflake.JsonInt64) (out *model.
 // applyListFilter 应用列表通用过滤条件
 func (s *sTask) applyListFilter(ctx context.Context, in *model.TaskListInput) *gdb.Model {
 	m := dao.MvpTask.Ctx(ctx).Where(dao.MvpTask.Columns().DeletedAt, nil)
+	if in.ProjectID > 0 {
+		m = m.Where(dao.MvpTask.Columns().ProjectId, in.ProjectID)
+	}
 	if in.Name != "" {
 		m = m.WhereLike(dao.MvpTask.Columns().Name, "%"+in.Name+"%")
+	}
+	if in.Status != "" {
+		m = m.Where(dao.MvpTask.Columns().Status, in.Status)
+	}
+	if in.BatchNo != nil {
+		m = m.Where(dao.MvpTask.Columns().BatchNo, *in.BatchNo)
+	}
+	if in.RoleType != "" {
+		m = m.Where(dao.MvpTask.Columns().RoleType, in.RoleType)
 	}
 	if in.StartTime != "" {
 		m = m.WhereGTE(dao.MvpTask.Columns().CreatedAt, in.StartTime)

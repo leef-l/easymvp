@@ -103,7 +103,11 @@ func (c *cTask) List(ctx context.Context, req *v1.TaskListReq) (res *v1.TaskList
 		OrderDir:  req.OrderDir,
 		StartTime: req.StartTime,
 		EndTime:   req.EndTime,
-		Name: req.Name,
+		Name:      req.Name,
+		ProjectID: req.ProjectID,
+		Status:    req.Status,
+		BatchNo:   req.BatchNo,
+		RoleType:  req.RoleType,
 	})
 	return
 }
@@ -112,7 +116,11 @@ func (c *cTask) Export(ctx context.Context, req *v1.TaskExportReq) (res *v1.Task
 	list, err := service.Task().Export(ctx, &model.TaskListInput{
 		StartTime: req.StartTime,
 		EndTime:   req.EndTime,
-		Name: req.Name,
+		Name:      req.Name,
+		ProjectID: req.ProjectID,
+		Status:    req.Status,
+		BatchNo:   req.BatchNo,
+		RoleType:  req.RoleType,
 	})
 	if err != nil {
 		return

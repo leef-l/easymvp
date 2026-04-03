@@ -20,3 +20,13 @@ database:
 jwt:
   secret: "easymvp-secret-key-2026"
   expire: 24  # Token 过期时间（小时）
+
+# 引擎配置（数据库 mvp_config 表优先，未配置时使用此处值）
+engine:
+  watchdog:
+    checkInterval: 120    # 心跳检测间隔（秒）
+    maxStaleCount: 3      # 连续无进展次数阈值
+    maxRetries: 3         # 最大自动重试次数
+  scheduler:
+    maxConcurrent: 20     # 最大并发任务数
+    pollInterval: 2       # 调度轮询间隔（秒）

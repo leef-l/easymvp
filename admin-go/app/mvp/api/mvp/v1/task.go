@@ -117,13 +117,17 @@ type TaskDetailRes struct {
 // TaskListReq 获取MVP任务表列表请求
 type TaskListReq struct {
 	g.Meta    `path:"/task/list" method:"get" tags:"MVP任务表" summary:"获取MVP任务表列表"`
-	PageNum   int    `json:"pageNum" d:"1" dc:"页码"`
-	PageSize  int    `json:"pageSize" d:"10" dc:"每页数量"`
-	OrderBy   string `json:"orderBy" dc:"排序字段"`
-	OrderDir  string `json:"orderDir" d:"asc" dc:"排序方向:asc/desc"`
-	StartTime string `json:"startTime" dc:"开始时间"`
-	EndTime   string `json:"endTime" dc:"结束时间"`
-	Name string `json:"name" dc:"任务名称"`
+	PageNum   int                `json:"pageNum" d:"1" dc:"页码"`
+	PageSize  int                `json:"pageSize" d:"10" dc:"每页数量"`
+	OrderBy   string             `json:"orderBy" dc:"排序字段"`
+	OrderDir  string             `json:"orderDir" d:"asc" dc:"排序方向:asc/desc"`
+	StartTime string             `json:"startTime" dc:"开始时间"`
+	EndTime   string             `json:"endTime" dc:"结束时间"`
+	Name      string             `json:"name" dc:"任务名称"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" dc:"项目ID"`
+	Status    string             `json:"status" dc:"任务状态"`
+	BatchNo   *int               `json:"batchNo" dc:"批次号"`
+	RoleType  string             `json:"roleType" dc:"角色类型"`
 }
 
 // TaskListRes 获取MVP任务表列表响应
@@ -135,9 +139,13 @@ type TaskListRes struct {
 // TaskExportReq 导出MVP任务表请求
 type TaskExportReq struct {
 	g.Meta    `path:"/task/export" method:"get" tags:"MVP任务表" summary:"导出MVP任务表"`
-	StartTime string `json:"startTime" dc:"开始时间"`
-	EndTime   string `json:"endTime" dc:"结束时间"`
-	Name string `json:"name" dc:"任务名称"`
+	StartTime string             `json:"startTime" dc:"开始时间"`
+	EndTime   string             `json:"endTime" dc:"结束时间"`
+	Name      string             `json:"name" dc:"任务名称"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" dc:"项目ID"`
+	Status    string             `json:"status" dc:"任务状态"`
+	BatchNo   *int               `json:"batchNo" dc:"批次号"`
+	RoleType  string             `json:"roleType" dc:"角色类型"`
 }
 
 // TaskExportRes 导出MVP任务表响应

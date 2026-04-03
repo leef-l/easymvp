@@ -37,6 +37,10 @@ export interface TaskListParams {
   startTime?: string;
   endTime?: string;
   name?: string;
+  projectID?: string;
+  status?: string;
+  batchNo?: number;
+  roleType?: string;
 }
 /** MVP任务表树形查询参数 */
 export interface TaskTreeParams {

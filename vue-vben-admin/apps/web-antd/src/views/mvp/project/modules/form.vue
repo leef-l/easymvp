@@ -51,6 +51,13 @@ const createSchema = [
     componentProps: { placeholder: '请输入项目简介', rows: 4, maxlength: 65535 },
   },
   {
+    component: 'Input',
+    fieldName: 'workDir',
+    label: tooltipLabel('代码工作目录', 'Aider 执行代码编辑时的项目根目录，必须是服务器上真实存在的路径'),
+    rules: 'required',
+    componentProps: { placeholder: '如：/www/wwwroot/project/my-app', maxlength: 500 },
+  },
+  {
     component: 'Select',
     fieldName: 'architectModelID',
     label: tooltipLabel('架构师AI模型', '默认值来自角色预设模板，可修改。仅显示角色为「架构师」的模型'),
@@ -127,6 +134,7 @@ const [Modal, modalApi] = useVbenModal({
         const res = await workflowCreateProject({
           name: values.name,
           description: values.description || '',
+          workDir: values.workDir,
           architectModelID: values.architectModelID,
         });
         message.success('项目创建成功，正在跳转到对话页面...');

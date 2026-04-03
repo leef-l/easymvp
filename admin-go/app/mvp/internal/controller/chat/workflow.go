@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"os/exec"
 
 	"github.com/gogf/gf/v2/frame/g"
 
@@ -37,7 +38,7 @@ func (c *cWorkflow) CreateProject(ctx context.Context, req *v1.WorkflowCreatePro
 	userID := middleware.GetUserID(ctx)
 	deptID := middleware.GetDeptID(ctx)
 
-	projectID, convID, err := engine.CreateProject(ctx, req.Name, req.Description, int64(req.ArchitectModelID), userID, deptID)
+	projectID, convID, err := engine.CreateProject(ctx, req.Name, req.Description, req.WorkDir, int64(req.ArchitectModelID), userID, deptID)
 	if err != nil {
 		return nil, err
 	}
@@ -95,6 +96,18 @@ func (c *cWorkflow) RetryTask(ctx context.Context, req *v1.WorkflowRetryTaskReq)
 		return nil, err
 	}
 	return &v1.WorkflowRetryTaskRes{}, nil
+}
+
+// SkipTask 跳过失败任务（防止批次永久阻塞）
+func (c *cWorkflow) SkipTask(ctx context.Context, req *v1.WorkflowSkipTaskReq) (res *v1.WorkflowSkipTaskRes, err error) {
+	if err := checkProjectOwnership(ctx, int64(req.ProjectID)); err != nil {
+		return nil, err
+	}
+	err = engine.GetScheduler().SkipTask(ctx, int64(req.ProjectID), int64(req.TaskID), req.Reason)
+	if err != nil {
+		return nil, err
+	}
+	return &v1.WorkflowSkipTaskRes{}, nil
 }
 
 // ParseTasks 手动解析架构师回复中的任务清单（托底机制）
@@ -218,7 +231,163 @@ func (c *cWorkflow) ProjectStatus(ctx context.Context, req *v1.WorkflowProjectSt
 	return &v1.WorkflowProjectStatusRes{
 		Status:       project["status"].String(),
 		PauseReason:  project["pause_reason"].String(),
+		ActiveBatch:  engine.GetScheduler().GetActiveBatch(projectID),
 		TotalTasks:   total,
 		StatusCounts: statusCounts,
 	}, nil
+}
+
+// SystemCheck 系统配置检测
+func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (res *v1.SystemCheckRes, err error) {
+	items := make([]v1.SystemCheckItem, 0, 12)
+	allPass := true
+
+	addItem := func(key, name, link, status, message string) {
+		if status != "ok" {
+			allPass = false
+		}
+		items = append(items, v1.SystemCheckItem{
+			Key: key, Name: name, Status: status, Message: message, Link: link,
+		})
+	}
+
+	// 1. AI 供应商
+	count, e := g.DB().Model("ai_provider").
+		Where("status", 1).Where("base_url != ''").Where("deleted_at IS NULL").Count()
+	if e != nil {
+		addItem("ai_provider", "AI 供应商", "/ai/provider", "error", "查询失败: "+e.Error())
+	} else if count == 0 {
+		addItem("ai_provider", "AI 供应商", "/ai/provider", "error", "未配置启用的 AI 供应商（需要有 base_url）")
+	} else {
+		addItem("ai_provider", "AI 供应商", "/ai/provider", "ok", fmt.Sprintf("已有 %d 个启用供应商", count))
+	}
+
+	// 2. AI 套餐
+	count, e = g.DB().Model("ai_plan").
+		Where("status", 1).Where("api_key != ''").Where("deleted_at IS NULL").Count()
+	if e != nil {
+		addItem("ai_plan", "AI 套餐", "/ai/plan", "error", "查询失败: "+e.Error())
+	} else if count == 0 {
+		addItem("ai_plan", "AI 套餐", "/ai/plan", "error", "未配置启用的 AI 套餐（需要有 api_key）")
+	} else {
+		addItem("ai_plan", "AI 套餐", "/ai/plan", "ok", fmt.Sprintf("已有 %d 个启用套餐", count))
+	}
+
+	// 3. 架构师模型
+	count, e = g.DB().Model("ai_model").
+		Where("capability", "architect").Where("status", 1).Where("deleted_at IS NULL").Count()
+	if e != nil {
+		addItem("ai_model_architect", "AI 模型（架构师）", "/ai/model", "error", "查询失败: "+e.Error())
+	} else if count == 0 {
+		addItem("ai_model_architect", "AI 模型（架构师）", "/ai/model", "error", "未配置 capability=architect 且启用的 AI 模型")
+	} else {
+		addItem("ai_model_architect", "AI 模型（架构师）", "/ai/model", "ok", fmt.Sprintf("已有 %d 个架构师模型", count))
+	}
+
+	// 4. 实施员模型
+	count, e = g.DB().Model("ai_model").
+		WhereIn("capability", g.Slice{"implementer", "coding", "chat"}).
+		Where("status", 1).Where("deleted_at IS NULL").Count()
+	if e != nil {
+		addItem("ai_model_implementer", "AI 模型（实施员）", "/ai/model", "error", "查询失败: "+e.Error())
+	} else if count == 0 {
+		addItem("ai_model_implementer", "AI 模型（实施员）", "/ai/model", "error", "未配置 capability 为 implementer/coding/chat 且启用的 AI 模型")
+	} else {
+		addItem("ai_model_implementer", "AI 模型（实施员）", "/ai/model", "ok", fmt.Sprintf("已有 %d 个实施员模型", count))
+	}
+
+	// 5. 角色预设
+	architectCount, _ := g.DB().Model("mvp_role_preset").
+		Where("role_type", "architect").Where("status", 1).Where("deleted_at IS NULL").Count()
+	implementerCount, _ := g.DB().Model("mvp_role_preset").
+		Where("role_type", "implementer").Where("status", 1).Where("deleted_at IS NULL").Count()
+	if architectCount == 0 || implementerCount == 0 {
+		addItem("role_preset", "角色预设", "/mvp/role-preset", "error",
+			fmt.Sprintf("缺少角色预设：架构师=%d，实施员=%d（各需至少 1 条）", architectCount, implementerCount))
+	} else {
+		addItem("role_preset", "角色预设", "/mvp/role-preset", "ok",
+			fmt.Sprintf("架构师预设 %d 条，实施员预设 %d 条", architectCount, implementerCount))
+	}
+
+	// 6. AI 执行引擎
+	count, e = g.DB().Model("ai_engine").
+		Where("status", 1).Where("deleted_at IS NULL").Count()
+	if e != nil {
+		addItem("ai_engine", "AI 执行引擎", "/ai/engine", "error", "查询失败: "+e.Error())
+	} else if count == 0 {
+		addItem("ai_engine", "AI 执行引擎", "/ai/engine", "error", "未配置启用的 AI 执行引擎")
+	} else {
+		addItem("ai_engine", "AI 执行引擎", "/ai/engine", "ok", fmt.Sprintf("已有 %d 个启用引擎", count))
+	}
+
+	// 7. Aider 引擎配置
+	aiderCfg, e := g.DB().Model("ai_engine_config").
+		Where("engine_code", "aider").Where("deleted_at IS NULL").One()
+	if e != nil || aiderCfg.IsEmpty() {
+		addItem("ai_engine_config_aider", "Aider 引擎配置", "/ai/engine", "error", "未配置 Aider 引擎参数")
+	} else if aiderCfg["workspace_root"].String() == "" {
+		addItem("ai_engine_config_aider", "Aider 引擎配置", "/ai/engine", "warning", "Aider 引擎未配置 workspace_root（工作区根目录）")
+	} else {
+		addItem("ai_engine_config_aider", "Aider 引擎配置", "/ai/engine", "ok",
+			"工作区根目录: "+aiderCfg["workspace_root"].String())
+	}
+
+	// 8. OpenHands 引擎配置
+	ohCfg, e := g.DB().Model("ai_engine_config").
+		Where("engine_code", "openhands").Where("deleted_at IS NULL").One()
+	if e != nil || ohCfg.IsEmpty() {
+		addItem("ai_engine_config_openhands", "OpenHands 引擎配置", "/ai/engine", "warning", "未配置 OpenHands 引擎参数（非必须，仅使用 Aider 可忽略）")
+	} else if ohCfg["command_template"].String() == "" {
+		addItem("ai_engine_config_openhands", "OpenHands 引擎配置", "/ai/engine", "warning", "OpenHands 未配置 command_template（命令模板）")
+	} else {
+		addItem("ai_engine_config_openhands", "OpenHands 引擎配置", "/ai/engine", "ok", "命令模板已配置")
+	}
+
+	// 9. 角色引擎授权
+	count, e = g.DB().Model("system_role_ai_engine").Count()
+	if e != nil {
+		addItem("role_ai_engine", "角色引擎授权", "", "error", "查询失败: "+e.Error())
+	} else if count == 0 {
+		addItem("role_ai_engine", "角色引擎授权", "", "error", "没有角色被授权使用 AI 引擎，请在角色管理中配置")
+	} else {
+		addItem("role_ai_engine", "角色引擎授权", "", "ok", fmt.Sprintf("已有 %d 条角色引擎授权", count))
+	}
+
+	// 10. Aider 安装
+	aiderPath, e := exec.LookPath("aider")
+	if e != nil {
+		addItem("aider_installed", "Aider 安装", "", "error", "服务器上未找到 aider 可执行文件，请先安装: pip install aider-chat")
+	} else {
+		addItem("aider_installed", "Aider 安装", "", "ok", "aider 已安装: "+aiderPath)
+	}
+
+	// 11. Docker 安装（OpenHands 依赖）
+	dockerPath, e := exec.LookPath("docker")
+	if e != nil {
+		addItem("docker_installed", "Docker 安装", "", "warning", "服务器上未找到 docker，OpenHands 引擎需要 Docker 支持（仅使用 Aider 可忽略）")
+	} else {
+		addItem("docker_installed", "Docker 安装", "", "ok", "docker 已安装: "+dockerPath)
+	}
+
+	// 12. 引擎核心配置
+	requiredKeys := []string{
+		"watchdog.check_interval",
+		"watchdog.max_stale_count",
+		"watchdog.max_retries",
+		"scheduler.max_concurrent",
+		"scheduler.poll_interval",
+	}
+	count, e = g.DB().Model("mvp_config").
+		WhereIn("config_key", requiredKeys).Where("deleted_at IS NULL").Count()
+	if e != nil {
+		addItem("engine_config", "引擎核心配置", "/mvp/config", "error", "查询失败: "+e.Error())
+	} else if count < len(requiredKeys) {
+		addItem("engine_config", "引擎核心配置", "/mvp/config", "warning",
+			fmt.Sprintf("核心配置仅有 %d/%d 项，缺少的将使用默认值", count, len(requiredKeys)))
+	} else {
+		addItem("engine_config", "引擎核心配置", "/mvp/config", "ok",
+			fmt.Sprintf("全部 %d 项核心配置已就绪", len(requiredKeys)))
+	}
+
+	return &v1.SystemCheckRes{Items: items, AllPass: allPass}, nil
 }

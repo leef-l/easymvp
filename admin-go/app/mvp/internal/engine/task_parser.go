@@ -123,6 +123,11 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 			sort = i + 1 // 按输出顺序
 		}
 
+		// 校验 batch_no >= 1：batch_no=0 保留给系统紧急任务（Bug分析等）
+		if t.BatchNo < 1 {
+			t.BatchNo = 1
+		}
+
 		// affected_resources 转 JSON
 		resourcesJSON := "[]"
 		if len(t.AffectedResources) > 0 {

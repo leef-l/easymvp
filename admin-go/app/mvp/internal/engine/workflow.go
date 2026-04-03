@@ -88,7 +88,7 @@ func (s *Scheduler) Resume(ctx context.Context, projectID int64) error {
 
 // CreateProject 创建项目并初始化架构师对话
 // architectModelID 为前端传入的架构师模型，若为 0 则从预设读取
-func CreateProject(ctx context.Context, name, description string, architectModelID int64, userID int64, deptID int64) (int64, int64, error) {
+func CreateProject(ctx context.Context, name, description, workDir string, architectModelID int64, userID int64, deptID int64) (int64, int64, error) {
 	projectID := int64(snowflake.Generate())
 
 	// 1. 读取角色预设模板
@@ -117,6 +117,7 @@ func CreateProject(ctx context.Context, name, description string, architectModel
 		"name":               name,
 		"description":        description,
 		"status":             "designing",
+		"work_dir":           workDir,
 		"architect_model_id": architectModelID,
 		"created_by":         userID,
 		"dept_id":            deptID,

@@ -19,6 +19,7 @@ type MvpProject struct {
 	PauseReason      any         // 暂停原因
 	GlobalContext    any         // 项目全局上下文（架构师需求分析+方案设计的压缩摘要）
 	ArchitectModelId any         // 架构师使用的AI模型ID
+	WorkDir          any         // 项目代码工作目录（Aider执行路径）
 	CreatedBy        any         // 创建人ID
 	DeptId           any         // 所属部门ID
 	CreatedAt        *gtime.Time // 创建时间

@@ -37,11 +37,24 @@ func NewWatchdog(checkInterval time.Duration, maxStaleCount int, maxRetries int)
 	}
 }
 
-// 全局看门狗（每2分钟检测，连续3次无进展认为卡死，最多自动重试3次）
-var defaultWatchdog = NewWatchdog(2*time.Minute, 3, 3)
+// 全局看门狗（延迟初始化，等数据库就绪后读取配置）
+var defaultWatchdog *Watchdog
 
-// GetWatchdog 获取全局看门狗
+// GetWatchdog 获取全局看门狗（首次调用时从配置加载参数）
 func GetWatchdog() *Watchdog {
+	if defaultWatchdog == nil {
+		ctx := context.Background()
+		checkInterval := GetConfigInt(ctx, "watchdog.check_interval", "engine.watchdog.checkInterval", 120)
+		maxStaleCount := GetConfigInt(ctx, "watchdog.max_stale_count", "engine.watchdog.maxStaleCount", 3)
+		maxRetries := GetConfigInt(ctx, "watchdog.max_retries", "engine.watchdog.maxRetries", 3)
+		defaultWatchdog = NewWatchdog(
+			time.Duration(checkInterval)*time.Second,
+			maxStaleCount,
+			maxRetries,
+		)
+		g.Log().Infof(ctx, "[Watchdog] 配置加载: checkInterval=%ds, maxStaleCount=%d, maxRetries=%d",
+			checkInterval, maxStaleCount, maxRetries)
+	}
 	return defaultWatchdog
 }
 
@@ -249,7 +262,7 @@ func (w *Watchdog) checkFailedTasks(ctx context.Context) {
 		candidates = append(candidates, failedTaskInfo{
 			taskID:    task["id"].Int64(),
 			projectID: projectID,
-			taskType:  task["task_type"].String(),
+			taskType:  task["role_type"].String(),
 			errMsg:    task["error_message"].String(),
 		})
 	}
@@ -264,7 +277,7 @@ func (w *Watchdog) checkFailedTasks(ctx context.Context) {
 		taskID    int64
 		projectID int64
 		errMsg    string
-		isAuditor bool
+		taskType  string
 	}
 	var retryList []retryItem
 	var escalateList []escalateItem
@@ -277,7 +290,7 @@ func (w *Watchdog) checkFailedTasks(ctx context.Context) {
 				taskID:    info.taskID,
 				projectID: info.projectID,
 				errMsg:    info.errMsg,
-				isAuditor: info.taskType == "auditor",
+				taskType:  info.taskType,
 			})
 		} else {
 			w.retryCount[info.taskID] = retries + 1
@@ -290,17 +303,24 @@ func (w *Watchdog) checkFailedTasks(ctx context.Context) {
 
 	// 锁外执行实际操作
 	for _, item := range escalateList {
-		g.Log().Errorf(ctx, "[Watchdog] 任务 %d 重试超过最大次数，提交给架构师", item.taskID)
-		logTaskAction(item.taskID, "escalate_to_architect", "failed", "bug_found",
+		g.Log().Errorf(ctx, "[Watchdog] 任务 %d（%s）重试超过最大次数，升级处理", item.taskID, item.taskType)
+
+		// 更新任务状态为 escalated，防止下轮重复扫描
+		g.DB().Model("mvp_task").Where("id", item.taskID).Update(g.Map{
+			"status":     "escalated",
+			"updated_at": gtime.Now(),
+		})
+
+		logTaskAction(item.taskID, "escalate_to_architect", "failed", "escalated",
 			"看门狗自动重启超过最大次数，升级给架构师处理", "system")
 
-		// 只有 auditor 类型任务才调用 ReportBug
-		if item.isAuditor {
+		if item.taskType == "auditor" {
+			// auditor 类型：通过 ReportBug 走 bug 闭环（关联实施员）
 			go scheduler.ReportBug(context.Background(), item.projectID, item.taskID,
-				"任务多次自动重启仍然失败，错误信息：\n"+item.errMsg)
+				"审计任务多次重试仍然失败，错误信息：\n"+item.errMsg)
 		} else {
-			g.Log().Warningf(ctx, "[Watchdog] 任务 %d 非 auditor 类型（跳过 ReportBug），项目 %d 需人工介入",
-				item.taskID, item.projectID)
+			// 非 auditor 类型：直接创建架构师分析任务
+			go scheduler.EscalateFailedTask(context.Background(), item.projectID, item.taskID, item.taskType, item.errMsg)
 		}
 	}
 
