@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
+
+	"easymvp/app/mvp/internal/activity"
 )
 
 // AiderRunner 封装 Aider CLI 调用
@@ -44,6 +46,7 @@ type AiderConfig struct {
 	MapTokens            int           // Repo map token 数
 	MaxChatHistoryTokens int           // chat history token 上限
 	CompactMode          bool          // 是否使用精简上下文模式
+	OnActivity           func()        // 输出增量时更新活跃时间
 }
 
 // AiderResult Aider 执行结果
@@ -53,6 +56,28 @@ type AiderResult struct {
 	Error       error         // 错误
 	Duration    time.Duration // 耗时
 	FailureHint string        // 归纳后的失败说明
+}
+
+type aiderActivityWriter struct {
+	buf        bytes.Buffer
+	lastTouch  time.Time
+	onActivity func()
+}
+
+func (w *aiderActivityWriter) Write(p []byte) (int, error) {
+	n, err := w.buf.Write(p)
+	if n > 0 && w.onActivity != nil {
+		now := time.Now()
+		if w.lastTouch.IsZero() || now.Sub(w.lastTouch) >= 2*time.Second {
+			w.lastTouch = now
+			w.onActivity()
+		}
+	}
+	return n, err
+}
+
+func (w *aiderActivityWriter) String() string {
+	return w.buf.String()
 }
 
 // Run 执行 Aider 任务
@@ -133,9 +158,10 @@ func (r *AiderRunner) runOnce(ctx context.Context, cfg *AiderConfig) *AiderResul
 	cmd.Dir = cfg.WorkDir
 	cmd.Env = append(cmd.Environ(), env...)
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := &aiderActivityWriter{onActivity: cfg.OnActivity}
+	stderr := &aiderActivityWriter{onActivity: cfg.OnActivity}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	g.Log().Infof(ctx, "[AiderRunner] 启动: model=%s workdir=%s files=%v",
 		cfg.ModelCode, cfg.WorkDir, cfg.Files)
@@ -361,6 +387,9 @@ func (r *AiderRunner) RunTask(ctx context.Context, projectID int64, taskID int64
 	cfg.Message = taskPrompt
 	cfg.Files = files
 	cfg.ReadFiles = readFiles
+	cfg.OnActivity = func() {
+		activity.TouchTaskActivity(context.Background(), taskID)
+	}
 
 	// 如果有 system prompt，拼到 message 前面
 	if cfg.SystemPrompt != "" {

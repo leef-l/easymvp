@@ -73,6 +73,7 @@ type taskExecutionResult struct {
 }
 
 type aiderExecutionConfig struct {
+	TaskID                int64
 	Model                *runtimeModelInfo
 	WorkDir              string
 	Message              string
@@ -381,6 +382,9 @@ func (s *sTask) appendTaskLog(ctx context.Context, taskID int64, logType string,
 		"content":    content,
 		"created_at": gtime.Now(),
 	}).Insert()
+	if err == nil {
+		touchAITaskActivity(context.Background(), taskID)
+	}
 	return err
 }
 
@@ -402,6 +406,7 @@ func (s *sTask) executeWithAider(ctx context.Context, taskInfo *runtimeTask, eng
 	}
 
 	cfg := &aiderExecutionConfig{
+		TaskID:               taskInfo.ID,
 		Model:                modelInfo,
 		WorkDir:              taskInfo.WorktreePath,
 		Message:              taskInfo.Instruction,
@@ -473,11 +478,11 @@ func (s *sTask) executeWithOpenHandsCLI(ctx context.Context, taskInfo *runtimeTa
 	_ = s.appendTaskLog(context.Background(), taskInfo.ID, "system", "OpenHands 将通过官方 CLI/uv 路径执行。")
 
 	var (
-		stdout bytes.Buffer
-		stderr bytes.Buffer
+		stdout = newActivityBufferWriter(taskInfo.ID)
+		stderr = newActivityBufferWriter(taskInfo.ID)
 	)
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	err = cmd.Run()
 	output := strings.TrimSpace(stdout.String() + stderr.String())
@@ -516,10 +521,12 @@ func (s *sTask) executeWithCommandTemplate(ctx context.Context, taskInfo *runtim
 	cmd.Dir = taskInfo.WorktreePath
 	cmd.Env = append(os.Environ(), buildCommandTemplateEnv(taskInfo, engineCfg, modelInfo)...)
 
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	var (
+		stdout = newActivityBufferWriter(taskInfo.ID)
+		stderr = newActivityBufferWriter(taskInfo.ID)
+	)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	err := cmd.Run()
 	output := strings.TrimSpace(stdout.String() + stderr.String())
@@ -696,10 +703,12 @@ func (s *sTask) runAiderOnce(ctx context.Context, cfg *aiderExecutionConfig) *ai
 		}
 	}
 
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	var (
+		stdout = newActivityBufferWriter(cfg.TaskID)
+		stderr = newActivityBufferWriter(cfg.TaskID)
+	)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	err = cmd.Run()
 	output = stdout.String() + stderr.String()

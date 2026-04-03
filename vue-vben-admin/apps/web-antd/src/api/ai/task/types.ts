@@ -12,6 +12,10 @@ export interface TaskItem {
   createdAt?: string;
   startedAt?: string;
   finishedAt?: string;
+  updatedAt?: string;
+  lastActiveAt?: string;
+  isActuallyWorking?: boolean;
+  stalled?: boolean;
 }
 
 export interface TaskListParams {

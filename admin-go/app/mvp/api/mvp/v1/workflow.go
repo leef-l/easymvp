@@ -2,6 +2,7 @@ package v1
 
 import (
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	"easymvp/utility/snowflake"
 )
@@ -97,6 +98,10 @@ type WorkflowProjectStatusRes struct {
 	ActiveBatch  int               `json:"activeBatch"`           // 当前活跃批次号
 	TotalTasks   int               `json:"totalTasks"`
 	StatusCounts map[string]int    `json:"statusCounts"` // 各状态任务数量
+	LastActiveAt *gtime.Time       `json:"lastActiveAt,omitempty"`
+	IsActuallyWorking bool         `json:"isActuallyWorking"`
+	ActiveRunningTasks int         `json:"activeRunningTasks"`
+	StalledTaskCount int           `json:"stalledTaskCount"`
 }
 
 // WorkflowParseTasksReq 手动解析架构师回复中的任务清单

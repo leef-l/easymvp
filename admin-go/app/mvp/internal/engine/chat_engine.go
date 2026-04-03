@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"easymvp/app/mvp/internal/activity"
 	mvpmodel "easymvp/app/mvp/internal/model"
 	"easymvp/utility/provider"
 	"easymvp/utility/snowflake"
@@ -212,10 +213,13 @@ func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *M
 				"message_id":  replyID,
 				"chunk_index": chunkIndex,
 				"content":     chunk.Content,
+				"created_at":  gtime.Now(),
 			})
 			if insertErr != nil {
 				g.Log().Errorf(ctx, "写入 chunk 失败: %v", insertErr)
 			}
+			activity.TouchMessageActivity(ctx, replyID)
+			activity.TouchConversationActivity(ctx, conversationID)
 
 			// 推送到 SSE Hub
 			chunkJSON, _ := json.Marshal(map[string]interface{}{

@@ -35,6 +35,10 @@ type TaskDetailOutput struct {
 	StartedAt       *gtime.Time         `json:"startedAt"`
 	FinishedAt      *gtime.Time         `json:"finishedAt"`
 	CreatedAt       *gtime.Time         `json:"createdAt"`
+	UpdatedAt       *gtime.Time         `json:"updatedAt"`
+	LastActiveAt    *gtime.Time         `json:"lastActiveAt"`
+	IsActuallyWorking bool              `json:"isActuallyWorking"`
+	Stalled         bool                `json:"stalled"`
 }
 
 type TaskListInput struct {
@@ -53,6 +57,10 @@ type TaskListOutput struct {
 	CreatedAt  *gtime.Time         `json:"createdAt"`
 	StartedAt  *gtime.Time         `json:"startedAt"`
 	FinishedAt *gtime.Time         `json:"finishedAt"`
+	UpdatedAt  *gtime.Time         `json:"updatedAt"`
+	LastActiveAt *gtime.Time       `json:"lastActiveAt"`
+	IsActuallyWorking bool         `json:"isActuallyWorking"`
+	Stalled    bool                `json:"stalled"`
 }
 
 type TaskLogOutput struct {

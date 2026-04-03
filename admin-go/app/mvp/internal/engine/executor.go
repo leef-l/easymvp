@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"easymvp/app/mvp/internal/activity"
 	mvpmodel "easymvp/app/mvp/internal/model"
 	"easymvp/utility/provider"
 	"easymvp/utility/snowflake"
@@ -144,9 +145,13 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 				"message_id":  replyID,
 				"chunk_index": chunkIndex,
 				"content":     chunk.Content,
+				"created_at":  gtime.Now(),
 			}); insertErr != nil {
 				g.Log().Errorf(ctx, "[Executor] 写入 chunk 失败: msg=%d, err=%v", replyID, insertErr)
 			}
+			activity.TouchMessageActivity(ctx, replyID)
+			activity.TouchConversationActivity(ctx, conversationID)
+			activity.TouchTaskActivity(ctx, taskID)
 
 			chunkJSON, _ := json.Marshal(map[string]interface{}{
 				"content": chunk.Content,
@@ -501,6 +506,8 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 	g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
 		"conversation_id": conversationID,
 	})
+	activity.TouchTaskActivity(ctx, taskID)
+	activity.TouchConversationActivity(ctx, conversationID)
 
 	// 保存指令消息
 	userMsgID := int64(snowflake.Generate())

@@ -25,6 +25,9 @@ export interface TaskItem {
   completedAt?: string;
   createdAt?: string;
   updatedAt?: string;
+  lastActiveAt?: string;
+  isActuallyWorking?: boolean;
+  stalled?: boolean;
   children?: TaskItem[];
 }
 

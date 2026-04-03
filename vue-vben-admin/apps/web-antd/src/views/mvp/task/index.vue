@@ -70,6 +70,10 @@ interface ProjectStatusData {
   activeBatch: number;
   totalTasks: number;
   statusCounts: Record<string, number>;
+  lastActiveAt?: string;
+  isActuallyWorking: boolean;
+  activeRunningTasks: number;
+  stalledTaskCount: number;
 }
 
 // ===== 项目列表（供筛选下拉框使用） =====
@@ -84,6 +88,9 @@ const projectStatus = ref<ProjectStatusData>({
   activeBatch: 0,
   totalTasks: 0,
   statusCounts: {},
+  isActuallyWorking: false,
+  activeRunningTasks: 0,
+  stalledTaskCount: 0,
 });
 const statusLoading = ref(false);
 
@@ -109,6 +116,10 @@ async function loadProjectStatus() {
   } finally {
     statusLoading.value = false;
   }
+}
+
+function formatDateTime(value?: string) {
+  return value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-';
 }
 
 // 自动刷新定时器
@@ -196,13 +207,31 @@ const gridOptions: VxeGridProps<TaskItem> = {
     {
       field: 'status',
       title: '状态',
-      width: 110,
+      width: 180,
       slots: {
         default: ({ row }: { row: TaskItem }) => {
           if (!row.status) return ['-'];
           const m = STATUS_MAP[row.status] ?? { color: 'default', text: row.status };
-          return [h(Tag, { color: m.color }, () => m.text)];
+          const nodes = [h(Tag, { color: m.color }, () => m.text)];
+          if (row.status === 'running') {
+            nodes.push(
+              h(
+                Tag,
+                { color: row.stalled ? 'error' : row.isActuallyWorking ? 'success' : 'warning' },
+                () => (row.stalled ? '疑似卡住' : row.isActuallyWorking ? '活跃中' : '待判定'),
+              ),
+            );
+          }
+          return nodes;
         },
+      },
+    },
+    {
+      field: 'lastActiveAt',
+      title: '最后活跃',
+      width: 160,
+      formatter({ cellValue }) {
+        return formatDateTime(cellValue);
       },
     },
     {
@@ -357,17 +386,23 @@ onMounted(() => {
 
     <!-- 页面头部 -->
     <div class="flex items-center justify-between mb-4">
-      <div class="flex items-center gap-3">
-        <Button type="text" :icon="h(ArrowLeftOutlined)" @click="handleBack">
-          返回项目列表
-        </Button>
-        <span class="text-lg font-semibold text-gray-800">项目任务监控</span>
-        <Tag v-if="projectStatus.status" :color="STATUS_MAP[projectStatus.status]?.color || 'default'">
-          {{ STATUS_MAP[projectStatus.status]?.text || projectStatus.status }}
-        </Tag>
+        <div class="flex items-center gap-3">
+          <Button type="text" :icon="h(ArrowLeftOutlined)" @click="handleBack">
+            返回项目列表
+          </Button>
+          <span class="text-lg font-semibold text-gray-800">项目任务监控</span>
+          <Tag v-if="projectStatus.status" :color="STATUS_MAP[projectStatus.status]?.color || 'default'">
+            {{ STATUS_MAP[projectStatus.status]?.text || projectStatus.status }}
+          </Tag>
+          <Tag
+            v-if="projectStatus.status === 'running'"
+            :color="projectStatus.isActuallyWorking ? 'success' : 'warning'"
+          >
+            {{ projectStatus.isActuallyWorking ? '实际活跃中' : '疑似空转/卡住' }}
+          </Tag>
+        </div>
+        <Button :icon="h(ReloadOutlined)" @click="handleRefresh">刷新</Button>
       </div>
-      <Button :icon="h(ReloadOutlined)" @click="handleRefresh">刷新</Button>
-    </div>
 
     <!-- 统计卡片（仅项目维度时显示） -->
     <template v-if="projectId">
@@ -432,6 +467,15 @@ onMounted(() => {
           </span>
           <span v-else-if="projectStatus.status === 'running'" class="text-green-500">
             所有批次已完成
+          </span>
+          <span v-if="projectStatus.status === 'running'" class="text-slate-500">
+            活跃任务：{{ projectStatus.activeRunningTasks }}
+          </span>
+          <span v-if="projectStatus.stalledTaskCount > 0" class="text-red-500">
+            疑似卡住：{{ projectStatus.stalledTaskCount }}
+          </span>
+          <span v-if="projectStatus.lastActiveAt" class="text-slate-500">
+            最后活跃：{{ formatDateTime(projectStatus.lastActiveAt) }}
           </span>
           <span v-if="projectStatus.pauseReason" class="text-orange-500">
             暂停原因：{{ projectStatus.pauseReason }}

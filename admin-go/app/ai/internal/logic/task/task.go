@@ -98,6 +98,10 @@ func (s *sTask) Detail(ctx context.Context, id snowflake.JsonInt64) (out *model.
 		Where("deleted_at IS NULL")
 	m = middleware.ApplyDataScope(ctx, m, "created_by", "dept_id")
 	err = m.Scan(out)
+	if err != nil {
+		return
+	}
+	err = s.enrichTaskDetailActivity(ctx, out)
 	return
 }
 
@@ -115,6 +119,10 @@ func (s *sTask) List(ctx context.Context, in *model.TaskListInput) (list []*mode
 		return
 	}
 	err = m.Page(in.PageNum, in.PageSize).OrderDesc("created_at").Scan(&list)
+	if err != nil {
+		return
+	}
+	err = s.enrichTaskListActivity(ctx, list)
 	return
 }
 

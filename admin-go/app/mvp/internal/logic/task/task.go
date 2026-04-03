@@ -8,6 +8,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"easymvp/app/mvp/internal/activity"
 	"easymvp/app/mvp/internal/dao"
 	"easymvp/app/mvp/internal/middleware"
 	"easymvp/app/mvp/internal/model"
@@ -128,6 +129,15 @@ func (s *sTask) Detail(ctx context.Context, id snowflake.JsonInt64) (out *model.
 			out.TaskName = val.String()
 		}
 	}
+	snapshots, err := activity.LoadTaskSnapshots(ctx, []int64{int64(out.ID)})
+	if err != nil {
+		return nil, err
+	}
+	if snapshot, ok := snapshots[int64(out.ID)]; ok {
+		out.LastActiveAt = snapshot.LastActiveAt
+		out.IsActuallyWorking = snapshot.IsActuallyWorking
+		out.Stalled = snapshot.Stalled
+	}
 	return
 }
 
@@ -224,6 +234,30 @@ func (s *sTask) fillRefFields(ctx context.Context, list []*model.TaskListOutput)
 	}
 }
 
+func (s *sTask) fillTaskActivity(ctx context.Context, list []*model.TaskListOutput) {
+	taskIDs := make([]int64, 0, len(list))
+	for _, item := range list {
+		if item == nil || item.ID == 0 {
+			continue
+		}
+		taskIDs = append(taskIDs, int64(item.ID))
+	}
+	snapshots, err := activity.LoadTaskSnapshots(ctx, taskIDs)
+	if err != nil {
+		return
+	}
+	for _, item := range list {
+		if item == nil {
+			continue
+		}
+		if snapshot, ok := snapshots[int64(item.ID)]; ok {
+			item.LastActiveAt = snapshot.LastActiveAt
+			item.IsActuallyWorking = snapshot.IsActuallyWorking
+			item.Stalled = snapshot.Stalled
+		}
+	}
+}
+
 // List 获取MVP任务表列表
 func (s *sTask) List(ctx context.Context, in *model.TaskListInput) (list []*model.TaskListOutput, total int, err error) {
 	m := s.applyListFilter(ctx, in)
@@ -249,6 +283,7 @@ func (s *sTask) List(ctx context.Context, in *model.TaskListInput) (list []*mode
 		return
 	}
 	s.fillRefFields(ctx, list)
+	s.fillTaskActivity(ctx, list)
 	return
 }
 // Export 导出MVP任务表（不分页）
@@ -259,6 +294,7 @@ func (s *sTask) Export(ctx context.Context, in *model.TaskListInput) (list []*mo
 		return
 	}
 	s.fillRefFields(ctx, list)
+	s.fillTaskActivity(ctx, list)
 	return
 }
 
@@ -292,6 +328,26 @@ func (s *sTask) Tree(ctx context.Context, in *model.TaskTreeInput) (tree []*mode
 	err = m.OrderAsc(dao.MvpTask.Columns().Sort).Scan(&list)
 	if err != nil {
 		return
+	}
+	treeTaskIDs := make([]int64, 0, len(list))
+	for _, item := range list {
+		if item == nil || item.ID == 0 {
+			continue
+		}
+		treeTaskIDs = append(treeTaskIDs, int64(item.ID))
+	}
+	snapshots, snapshotErr := activity.LoadTaskSnapshots(ctx, treeTaskIDs)
+	if snapshotErr == nil {
+		for _, item := range list {
+			if item == nil {
+				continue
+			}
+			if snapshot, ok := snapshots[int64(item.ID)]; ok {
+				item.LastActiveAt = snapshot.LastActiveAt
+				item.IsActuallyWorking = snapshot.IsActuallyWorking
+				item.Stalled = snapshot.Stalled
+			}
+		}
 	}
 
 	// 使用 map 迭代方式组装树

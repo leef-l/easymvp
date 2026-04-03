@@ -80,6 +80,10 @@ export function getProjectStatus(projectID: string) {
     activeBatch: number;
     totalTasks: number;
     statusCounts: Record<string, number>;
+    lastActiveAt?: string;
+    isActuallyWorking: boolean;
+    activeRunningTasks: number;
+    stalledTaskCount: number;
   }>(`${PREFIX}/project-status`, { params: { projectID } });
 }
 

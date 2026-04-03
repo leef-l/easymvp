@@ -9,6 +9,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	v1 "easymvp/app/mvp/api/mvp/v1"
+	"easymvp/app/mvp/internal/activity"
 	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/middleware"
 	"easymvp/utility/snowflake"
@@ -229,12 +230,21 @@ func (c *cWorkflow) ProjectStatus(ctx context.Context, req *v1.WorkflowProjectSt
 		total += sc.Count
 	}
 
+	activitySummary, err := activity.LoadProjectSummary(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+
 	return &v1.WorkflowProjectStatusRes{
-		Status:       project["status"].String(),
-		PauseReason:  project["pause_reason"].String(),
-		ActiveBatch:  engine.GetScheduler().GetActiveBatch(projectID),
-		TotalTasks:   total,
-		StatusCounts: statusCounts,
+		Status:            project["status"].String(),
+		PauseReason:       project["pause_reason"].String(),
+		ActiveBatch:       engine.GetScheduler().GetActiveBatch(projectID),
+		TotalTasks:        total,
+		StatusCounts:      statusCounts,
+		LastActiveAt:      activitySummary.LastActiveAt,
+		IsActuallyWorking: activitySummary.IsActuallyWorking,
+		ActiveRunningTasks: activitySummary.ActiveRunningTasks,
+		StalledTaskCount:  activitySummary.StalledTaskCount,
 	}, nil
 }
 

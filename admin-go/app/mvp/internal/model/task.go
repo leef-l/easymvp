@@ -75,6 +75,9 @@ type TaskDetailOutput struct {
 	CompletedAt *gtime.Time `json:"completedAt"`
 	CreatedAt *gtime.Time `json:"createdAt"`
 	UpdatedAt *gtime.Time `json:"updatedAt"`
+	LastActiveAt *gtime.Time `json:"lastActiveAt"`
+	IsActuallyWorking bool `json:"isActuallyWorking"`
+	Stalled bool `json:"stalled"`
 }
 
 // TaskListOutput MVP任务表列表输出
@@ -102,6 +105,9 @@ type TaskListOutput struct {
 	CompletedAt *gtime.Time `json:"completedAt"`
 	CreatedAt *gtime.Time `json:"createdAt"`
 	UpdatedAt *gtime.Time `json:"updatedAt"`
+	LastActiveAt *gtime.Time `json:"lastActiveAt"`
+	IsActuallyWorking bool `json:"isActuallyWorking"`
+	Stalled bool `json:"stalled"`
 }
 
 // TaskListInput MVP任务表列表查询输入
@@ -153,6 +159,10 @@ type TaskTreeOutput struct {
 	ErrorMessage string `json:"errorMessage"`
 	StartedAt *gtime.Time `json:"startedAt"`
 	CompletedAt *gtime.Time `json:"completedAt"`
+	UpdatedAt *gtime.Time `json:"updatedAt"`
+	LastActiveAt *gtime.Time `json:"lastActiveAt"`
+	IsActuallyWorking bool `json:"isActuallyWorking"`
+	Stalled bool `json:"stalled"`
 	Children []*TaskTreeOutput `json:"children"`
 }
 

@@ -2,6 +2,7 @@
 import type { VbenFormProps } from '#/adapter/form';
 import type { VxeGridProps } from '#/adapter/vxe-table';
 
+import dayjs from 'dayjs';
 import { Button, message, Modal, Tag } from 'ant-design-vue';
 import { Page, useVbenModal } from '@vben/common-ui';
 
@@ -65,11 +66,33 @@ function getStatusColor(status: string) {
   }
 }
 
+function getActivityColor(row: TaskItem) {
+  if (row.status !== 'running') {
+    return 'default';
+  }
+  return row.stalled ? 'error' : row.isActuallyWorking ? 'success' : 'warning';
+}
+
+function getActivityText(row: TaskItem) {
+  if (row.status !== 'running') {
+    return '-';
+  }
+  return row.stalled ? '疑似卡住' : row.isActuallyWorking ? '活跃中' : '待判定';
+}
+
 const gridOptions: VxeGridProps<TaskItem> = {
   columns: [
     { field: 'title', title: '任务标题', minWidth: 180 },
     { field: 'engineCode', title: '执行引擎', width: 120 },
     { field: 'status', title: '状态', width: 120, slots: { default: 'status_cell' } },
+    {
+      field: 'lastActiveAt',
+      title: '最后活跃',
+      width: 180,
+      formatter({ cellValue }) {
+        return cellValue ? dayjs(cellValue).format('YYYY-MM-DD HH:mm:ss') : '-';
+      },
+    },
     { field: 'repoPath', title: '仓库路径', minWidth: 220, showOverflow: 'tooltip' },
     { field: 'createdAt', title: '创建时间', width: 180, formatter: 'formatDateTime' },
     { title: '操作', width: 240, fixed: 'right', slots: { default: 'action' } },
@@ -139,9 +162,14 @@ async function handleCancel(row: TaskItem) {
         <Button type="primary" @click="handleCreate">新建任务</Button>
       </template>
       <template #status_cell="{ row }">
-        <Tag :color="getStatusColor(row.status)">
-          {{ row.status }}
-        </Tag>
+        <div class="flex flex-wrap gap-1">
+          <Tag :color="getStatusColor(row.status)">
+            {{ row.status }}
+          </Tag>
+          <Tag v-if="row.status === 'running'" :color="getActivityColor(row)">
+            {{ getActivityText(row) }}
+          </Tag>
+        </div>
       </template>
       <template #action="{ row }">
         <Button type="link" size="small" @click="handleView(row)">查看</Button>
