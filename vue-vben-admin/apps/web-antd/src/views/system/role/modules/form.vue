@@ -22,6 +22,11 @@ const dataScopeOptions = [
   { label: '自定义', value: 5 },
 ];
 
+const aiEngineOptions = [
+  { label: 'Aider', value: 'aider' },
+  { label: 'OpenHands', value: 'openhands' },
+];
+
 const emit = defineEmits<{ success: [] }>();
 const isEdit = ref(false);
 const editId = ref('');
@@ -55,6 +60,17 @@ const [Form, formApi] = useVbenForm({
       fieldName: 'dataScope',
       label: '数据范围',
       componentProps: { options: dataScopeOptions, placeholder: '请选择数据范围', allowClear: true, class: 'w-full' },
+    },
+    {
+      component: 'Select',
+      fieldName: 'defaultAiEngine',
+      label: '默认引擎',
+      componentProps: {
+        options: aiEngineOptions,
+        placeholder: '请选择默认 AI 执行引擎',
+        allowClear: true,
+        class: 'w-full',
+      },
     },
     {
       component: 'InputNumber',

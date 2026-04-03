@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,33 +28,60 @@ func GetAiderRunner() *AiderRunner {
 
 // AiderConfig Aider 运行配置
 type AiderConfig struct {
-	ModelCode    string // 模型代码（如 tc-code-latest, glm-5）
-	APIKey       string // API Key
-	BaseURL      string // API Base URL（不带 /v1）
-	ProviderType string // provider 类型（anthropic / openai_compatible）
-	SystemPrompt string // 系统提示词
-	WorkDir      string // 工作目录（项目代码所在目录）
-	Files        []string // 需要编辑的文件列表
-	ReadFiles    []string // 只读参考文件
-	Message      string // 任务指令
-	MaxTokens    int    // 最大输出 token
-	AutoCommit   bool   // 是否自动提交 git
-	Timeout      time.Duration // 超时时间
+	ModelCode            string        // 模型代码（如 tc-code-latest, glm-5）
+	APIKey               string        // API Key
+	BaseURL              string        // API Base URL（不带 /v1）
+	ProviderType         string        // provider 类型（anthropic / openai_compatible）
+	SystemPrompt         string        // 系统提示词
+	WorkDir              string        // 工作目录（项目代码所在目录）
+	Files                []string      // 需要编辑的文件列表
+	ReadFiles            []string      // 只读参考文件
+	Message              string        // 任务指令
+	MaxTokens            int           // 最大输出 token
+	AutoCommit           bool          // 是否自动提交 git
+	Timeout              time.Duration // 超时时间
+	MapTokens            int           // Repo map token 数
+	MaxChatHistoryTokens int           // chat history token 上限
+	CompactMode          bool          // 是否使用精简上下文模式
 }
 
 // AiderResult Aider 执行结果
 type AiderResult struct {
-	Output   string // 完整输出
-	ExitCode int    // 退出码
-	Error    error  // 错误
-	Duration time.Duration // 耗时
+	Output      string        // 完整输出
+	ExitCode    int           // 退出码
+	Error       error         // 错误
+	Duration    time.Duration // 耗时
+	FailureHint string        // 归纳后的失败说明
 }
 
 // Run 执行 Aider 任务
 func (r *AiderRunner) Run(ctx context.Context, cfg *AiderConfig) *AiderResult {
 	start := time.Now()
 
-	// 生成临时 model metadata 文件，让 Aider 知道模型的真实 token 限制
+	result := r.runOnce(ctx, cfg)
+
+	if result.Error != nil && r.isTokenLimitFailure(result.Output) && !cfg.CompactMode {
+		g.Log().Warningf(ctx, "[AiderRunner] 检测到 token limit，准备使用精简上下文重试")
+		compactCfg := r.buildCompactRetryConfig(cfg)
+		retryResult := r.runOnce(ctx, compactCfg)
+		retryResult.Output = strings.TrimSpace(result.Output) + "\n\n[AiderRunner] 检测到 token limit，已自动切换为精简上下文模式重试。\n\n" + strings.TrimSpace(retryResult.Output)
+		retryResult.Duration = time.Since(start)
+		if retryResult.Error == nil {
+			return retryResult
+		}
+		result = retryResult
+	}
+
+	result.Duration = time.Since(start)
+	result.FailureHint = r.buildFailureHint(result.Output, cfg)
+
+	g.Log().Infof(ctx, "[AiderRunner] 完成: 耗时=%v output_len=%d",
+		result.Duration, len(result.Output))
+
+	return result
+}
+
+func (r *AiderRunner) runOnce(ctx context.Context, cfg *AiderConfig) *AiderResult {
 	metadataFile, err := r.writeModelMetadata(cfg)
 	if err != nil {
 		g.Log().Warningf(ctx, "[AiderRunner] 生成 model metadata 失败: %v", err)
@@ -62,7 +90,15 @@ func (r *AiderRunner) Run(ctx context.Context, cfg *AiderConfig) *AiderResult {
 		defer os.Remove(metadataFile)
 	}
 
-	args := r.buildArgs(cfg, metadataFile)
+	messageFile, err := r.writeMessageFile(cfg.Message)
+	if err != nil {
+		g.Log().Warningf(ctx, "[AiderRunner] 写入 message file 失败，将回退为命令行参数: %v", err)
+	}
+	if messageFile != "" {
+		defer os.Remove(messageFile)
+	}
+
+	args := r.buildArgs(cfg, metadataFile, messageFile)
 	env := r.buildEnv(cfg)
 
 	timeout := cfg.Timeout
@@ -87,8 +123,7 @@ func (r *AiderRunner) Run(ctx context.Context, cfg *AiderConfig) *AiderResult {
 	err = cmd.Run()
 
 	result := &AiderResult{
-		Output:   stdout.String() + stderr.String(),
-		Duration: time.Since(start),
+		Output: stdout.String() + stderr.String(),
 	}
 
 	if err != nil {
@@ -99,14 +134,25 @@ func (r *AiderRunner) Run(ctx context.Context, cfg *AiderConfig) *AiderResult {
 		g.Log().Warningf(ctx, "[AiderRunner] 退出 code=%d err=%v", result.ExitCode, err)
 	}
 
-	g.Log().Infof(ctx, "[AiderRunner] 完成: 耗时=%v output_len=%d",
-		result.Duration, len(result.Output))
-
 	return result
 }
 
 // buildArgs 构建 Aider 命令行参数
-func (r *AiderRunner) buildArgs(cfg *AiderConfig, metadataFile string) []string {
+func (r *AiderRunner) buildArgs(cfg *AiderConfig, metadataFile string, messageFile string) []string {
+	mapTokens := cfg.MapTokens
+	if mapTokens == 0 && !cfg.CompactMode {
+		mapTokens = 512
+	}
+
+	maxChatHistoryTokens := cfg.MaxChatHistoryTokens
+	if maxChatHistoryTokens == 0 {
+		if cfg.CompactMode {
+			maxChatHistoryTokens = 512
+		} else {
+			maxChatHistoryTokens = 2048
+		}
+	}
+
 	args := []string{
 		"--model", r.formatModel(cfg),
 		"--no-auto-commits",
@@ -116,11 +162,17 @@ func (r *AiderRunner) buildArgs(cfg *AiderConfig, metadataFile string) []string 
 		"--no-browser",
 		"--yes-always",
 		"--chat-language", "Chinese",
+		"--map-tokens", strconv.Itoa(mapTokens),
+		"--max-chat-history-tokens", strconv.Itoa(maxChatHistoryTokens),
 	}
 
 	// 指定 model metadata 文件
 	if metadataFile != "" {
 		args = append(args, "--model-metadata-file", metadataFile)
+	}
+
+	if cfg.CompactMode {
+		args = append(args, "--subtree-only")
 	}
 
 	// 自动提交
@@ -134,8 +186,9 @@ func (r *AiderRunner) buildArgs(cfg *AiderConfig, metadataFile string) []string 
 		}
 	}
 
-	// 系统提示词（通过 --message-file 或 inline）
-	if cfg.Message != "" {
+	if messageFile != "" {
+		args = append(args, "--message-file", messageFile)
+	} else if cfg.Message != "" {
 		args = append(args, "--message", cfg.Message)
 	}
 
@@ -228,6 +281,18 @@ func (r *AiderRunner) writeModelMetadata(cfg *AiderConfig) (string, error) {
 	return tmpFile, nil
 }
 
+func (r *AiderRunner) writeMessageFile(message string) (string, error) {
+	if strings.TrimSpace(message) == "" {
+		return "", nil
+	}
+
+	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("aider-message-%d.txt", time.Now().UnixNano()))
+	if err := os.WriteFile(tmpFile, []byte(message), 0644); err != nil {
+		return "", err
+	}
+	return tmpFile, nil
+}
+
 // formatModel 格式化模型名称（Aider 需要 provider/model 格式）
 func (r *AiderRunner) formatModel(cfg *AiderConfig) string {
 	switch cfg.ProviderType {
@@ -251,15 +316,17 @@ func (r *AiderRunner) BuildConfigFromModel(ctx context.Context, modelInfo *Model
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
 	return &AiderConfig{
-		ModelCode:    modelInfo.ModelCode,
-		APIKey:       modelInfo.APIKey,
-		BaseURL:      baseURL,
-		ProviderType: modelInfo.ProviderType,
-		SystemPrompt: modelInfo.SystemPrompt,
-		WorkDir:      workDir,
-		MaxTokens:    modelInfo.MaxTokens,
-		AutoCommit:   false,
-		Timeout:      10 * time.Minute,
+		ModelCode:            modelInfo.ModelCode,
+		APIKey:               modelInfo.APIKey,
+		BaseURL:              baseURL,
+		ProviderType:         modelInfo.ProviderType,
+		SystemPrompt:         modelInfo.SystemPrompt,
+		WorkDir:              workDir,
+		MaxTokens:            modelInfo.MaxTokens,
+		AutoCommit:           false,
+		Timeout:              10 * time.Minute,
+		MapTokens:            512,
+		MaxChatHistoryTokens: 2048,
 	}
 }
 
@@ -277,4 +344,86 @@ func (r *AiderRunner) RunTask(ctx context.Context, projectID int64, taskID int64
 	}
 
 	return r.Run(ctx, cfg)
+}
+
+func (r *AiderRunner) buildCompactRetryConfig(cfg *AiderConfig) *AiderConfig {
+	compact := *cfg
+	compact.CompactMode = true
+	compact.MapTokens = 0
+	compact.MaxChatHistoryTokens = 512
+	compact.ReadFiles = nil
+	compact.Files = limitFiles(cfg.Files, 6)
+	compact.Message = r.compactMessage(cfg.Message)
+	return &compact
+}
+
+func (r *AiderRunner) compactMessage(message string) string {
+	message = strings.TrimSpace(message)
+	if len(message) > 2500 {
+		message = message[:2500] + "\n...(已自动截断上下文)"
+	}
+	return message + "\n\n请仅完成最小必要修改，优先修改最核心文件；如果变更过大，请先完成一部分可落地修改。"
+}
+
+func (r *AiderRunner) isTokenLimitFailure(output string) bool {
+	lower := strings.ToLower(output)
+	keywords := []string{
+		"token-limits.html",
+		"hit a token limit",
+		"exceeded output limit",
+		"input tokens:",
+		"output tokens:",
+		"context window",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(lower, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *AiderRunner) buildFailureHint(output string, cfg *AiderConfig) string {
+	if strings.TrimSpace(output) == "" {
+		return "Aider 无输出即退出，请检查 aider 可执行文件、模型配置和工作目录。"
+	}
+
+	if r.isTokenLimitFailure(output) {
+		return fmt.Sprintf("Aider 命中了 token limit。已尝试自动精简上下文重试，但仍失败。建议拆小任务、减少 affected_resources 数量，或改用上下文更大的模型。当前文件数=%d。", len(cfg.Files))
+	}
+
+	snippet := shortenForHint(output, 600)
+	return "Aider 执行失败，关键信息：" + snippet
+}
+
+func limitFiles(files []string, max int) []string {
+	if len(files) <= max {
+		return files
+	}
+	trimmed := make([]string, 0, max)
+	seen := make(map[string]struct{}, max)
+	for _, file := range files {
+		file = strings.TrimSpace(file)
+		if file == "" {
+			continue
+		}
+		if _, ok := seen[file]; ok {
+			continue
+		}
+		seen[file] = struct{}{}
+		trimmed = append(trimmed, file)
+		if len(trimmed) == max {
+			break
+		}
+	}
+	return trimmed
+}
+
+func shortenForHint(text string, max int) string {
+	text = strings.ReplaceAll(text, "\r", "")
+	text = strings.TrimSpace(text)
+	if len(text) <= max {
+		return text
+	}
+	return text[:max] + "...(截断)"
 }

@@ -375,6 +375,55 @@ func (e *Executor) buildTaskPrompt(task gdb.Record) string {
 	return prompt
 }
 
+// buildAiderTaskPrompt 为 Aider 构建更紧凑的任务指令，避免上下文过大触发 token limit。
+func (e *Executor) buildAiderTaskPrompt(task gdb.Record, resources []string) string {
+	name := task["name"].String()
+	desc := task["description"].String()
+
+	prompt := fmt.Sprintf("## 任务\n%s\n\n## 任务描述\n%s", name, desc)
+
+	if len(resources) > 0 {
+		limitedResources := resources
+		if len(limitedResources) > 12 {
+			limitedResources = limitedResources[:12]
+		}
+		prompt += "\n\n## 优先处理文件"
+		for _, resource := range limitedResources {
+			if resource == "" {
+				continue
+			}
+			prompt += "\n- " + resource
+		}
+		if len(resources) > len(limitedResources) {
+			prompt += fmt.Sprintf("\n- 其余 %d 个文件暂不优先处理，必要时再扩展", len(resources)-len(limitedResources))
+		}
+	}
+
+	taskID := task["id"].Int64()
+	deps, _ := g.DB().Model("mvp_task_dependency d").
+		LeftJoin("mvp_task t", "t.id = d.depends_on_id").
+		Fields("t.name, t.result").
+		Where("d.task_id", taskID).
+		Where("t.status", "completed").
+		Limit(2).
+		All()
+
+	if len(deps) > 0 {
+		prompt += "\n\n## 前置结果摘要"
+		for _, dep := range deps {
+			depName := dep["name"].String()
+			depResult := dep["result"].String()
+			if len(depResult) > 800 {
+				depResult = depResult[:800] + "...(截断)"
+			}
+			prompt += fmt.Sprintf("\n\n### %s\n%s", depName, depResult)
+		}
+	}
+
+	prompt += "\n\n请优先做最小必要改动，避免大范围重写；如果任务过大，请先完成核心改动。"
+	return prompt
+}
+
 // createAuditTask 为实施员任务创建对应的审计任务
 func (e *Executor) createAuditTask(ctx context.Context, projectID int64, implTaskID int64, implTask gdb.Record) {
 	// 检查是否已有审计任务（通过依赖关系）
@@ -424,11 +473,11 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 		workDir = "/www/wwwroot/project/easymvp"
 	}
 
-	// 2. 构建任务 prompt
-	taskPrompt := e.buildTaskPrompt(task)
-
-	// 3. 解析 affected_resources 作为需要编辑的文件
+	// 2. 解析 affected_resources 作为需要编辑的文件
 	resources := parseResources(task["affected_resources"].String())
+
+	// 3. 构建更紧凑的 Aider prompt，避免一次性塞入过多上下文
+	taskPrompt := e.buildAiderTaskPrompt(task, resources)
 
 	// 4. 创建对话记录（用于前端展示 Aider 过程）
 	conversationID, _ := e.ensureConversation(ctx, projectID, taskID, "implementer")
@@ -476,7 +525,11 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 
 	// 7. 判断结果
 	if result.Error != nil {
-		e.failTask(ctx, projectID, taskID, fmt.Sprintf("Aider执行失败(code=%d): %v", result.ExitCode, result.Error))
+		errMsg := result.FailureHint
+		if errMsg == "" {
+			errMsg = result.Error.Error()
+		}
+		e.failTask(ctx, projectID, taskID, fmt.Sprintf("Aider执行失败(code=%d): %s", result.ExitCode, errMsg))
 		return
 	}
 

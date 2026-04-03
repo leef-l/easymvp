@@ -1,0 +1,31 @@
+FROM golang:1.25-bookworm
+
+ARG GO_PROXY=https://proxy.golang.org,direct
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG APT_MIRROR=
+ARG APT_SECURITY_MIRROR=
+
+ENV CGO_ENABLED=0 \
+    GOPROXY=${GO_PROXY} \
+    GOSUMDB=sum.golang.org \
+    PIP_INDEX_URL=${PIP_INDEX_URL}
+
+WORKDIR /workspace/admin-go
+
+RUN if [ -n "${APT_MIRROR}" ] && [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+      sed -i "s|http://deb.debian.org/debian|https://${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
+    fi \
+    && if [ -n "${APT_SECURITY_MIRROR}" ] && [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+      sed -i "s|http://deb.debian.org/debian-security|https://${APT_SECURITY_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
+    fi
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends bash ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN go install github.com/gogf/cli/v2/cmd/gf@v2.10.0
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+CMD ["/bin/bash"]

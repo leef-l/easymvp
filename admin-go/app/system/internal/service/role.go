@@ -17,6 +17,8 @@ type IRole interface {
 	GetMenuIDs(ctx context.Context, roleID snowflake.JsonInt64) ([]snowflake.JsonInt64, error)
 	GrantDept(ctx context.Context, in *model.RoleGrantDeptInput) error
 	GetDeptIDs(ctx context.Context, roleID snowflake.JsonInt64) ([]snowflake.JsonInt64, error)
+	GrantAiEngine(ctx context.Context, in *model.RoleGrantAiEngineInput) error
+	GetAiEngineCodes(ctx context.Context, roleID snowflake.JsonInt64) ([]string, error)
 }
 
 var localRole IRole

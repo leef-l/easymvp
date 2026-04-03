@@ -31,11 +31,12 @@ func (s *sRole) Create(ctx context.Context, in *model.RoleCreateInput) error {
 	id := snowflake.Generate()
 	_, err := dao.Role.Ctx(ctx).Data(g.Map{
 		dao.Role.Columns().Id:        id,
-		dao.Role.Columns().ParentId: in.ParentID,
-		dao.Role.Columns().Title: in.Title,
+		dao.Role.Columns().ParentId:  in.ParentID,
+		dao.Role.Columns().Title:     in.Title,
 		dao.Role.Columns().DataScope: in.DataScope,
-		dao.Role.Columns().Sort: in.Sort,
-		dao.Role.Columns().Status: in.Status,
+		"default_ai_engine":          in.DefaultAiEngine,
+		dao.Role.Columns().Sort:      in.Sort,
+		dao.Role.Columns().Status:    in.Status,
 		dao.Role.Columns().IsAdmin:   0,
 		dao.Role.Columns().CreatedAt: gtime.Now(),
 		dao.Role.Columns().UpdatedAt: gtime.Now(),
@@ -47,11 +48,12 @@ func (s *sRole) Create(ctx context.Context, in *model.RoleCreateInput) error {
 func (s *sRole) Update(ctx context.Context, in *model.RoleUpdateInput) error {
 	// 禁止通过 API 修改 IsAdmin 字段
 	data := g.Map{
-		dao.Role.Columns().ParentId: in.ParentID,
-		dao.Role.Columns().Title: in.Title,
+		dao.Role.Columns().ParentId:  in.ParentID,
+		dao.Role.Columns().Title:     in.Title,
 		dao.Role.Columns().DataScope: in.DataScope,
-		dao.Role.Columns().Sort: in.Sort,
-		dao.Role.Columns().Status: in.Status,
+		"default_ai_engine":          in.DefaultAiEngine,
+		dao.Role.Columns().Sort:      in.Sort,
+		dao.Role.Columns().Status:    in.Status,
 		dao.Role.Columns().UpdatedAt: gtime.Now(),
 	}
 	_, err := dao.Role.Ctx(ctx).Where(dao.Role.Columns().Id, in.ID).Data(data).Update()
@@ -227,3 +229,48 @@ func (s *sRole) GetDeptIDs(ctx context.Context, roleID snowflake.JsonInt64) ([]s
 	return ids, nil
 }
 
+// GrantAiEngine 角色授权AI执行引擎（先删后插）
+func (s *sRole) GrantAiEngine(ctx context.Context, in *model.RoleGrantAiEngineInput) error {
+	_, err := g.DB().Ctx(ctx).Model("system_role_ai_engine").Where("role_id", in.ID).Delete()
+	if err != nil {
+		return err
+	}
+
+	if len(in.EngineCodes) == 0 {
+		return nil
+	}
+
+	data := make([]g.Map, 0, len(in.EngineCodes))
+	for _, engineCode := range in.EngineCodes {
+		if engineCode == "" {
+			continue
+		}
+		data = append(data, g.Map{
+			"role_id":     in.ID,
+			"engine_code": engineCode,
+		})
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	_, err = g.DB().Ctx(ctx).Model("system_role_ai_engine").Data(data).Insert()
+	return err
+}
+
+// GetAiEngineCodes 获取角色已授权AI执行引擎编码列表
+func (s *sRole) GetAiEngineCodes(ctx context.Context, roleID snowflake.JsonInt64) ([]string, error) {
+	var list []struct {
+		EngineCode string `json:"engineCode"`
+	}
+	err := g.DB().Ctx(ctx).Model("system_role_ai_engine").Where("role_id", roleID).Scan(&list)
+	if err != nil {
+		return nil, err
+	}
+	codes := make([]string, 0, len(list))
+	for _, item := range list {
+		if item.EngineCode != "" {
+			codes = append(codes, item.EngineCode)
+		}
+	}
+	return codes, nil
+}

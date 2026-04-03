@@ -11,6 +11,7 @@ import type { RoleItem } from '#/api/system/role/types';
 import FormModal from './modules/form.vue';
 import GrantMenuModal from './modules/grant-menu.vue';
 import GrantDeptModal from './modules/grant-dept.vue';
+import GrantAiEngineModal from './modules/grant-ai-engine.vue';
 import { ref } from 'vue';
 
 /** 标签颜色池 */
@@ -73,6 +74,7 @@ function getIsAdminColor(val: number): string {
 
 const grantMenuRef = ref();
 const grantDeptRef = ref();
+const grantAiEngineRef = ref();
 
 /** 表单弹窗 */
 const [FormModalComp, formModalApi] = useVbenModal({
@@ -118,11 +120,12 @@ const gridOptions: VxeGridProps<RoleItem> = {
     // { title: '序号', type: 'seq', width: 50 },
     { field: 'title', title: '角色名称', treeNode: true},
     { field: 'dataScope', title: '数据范围', width: 120, slots: { default: 'dataScope_cell' } },
+    { field: 'defaultAiEngine', title: '默认引擎', width: 120 },
     { field: 'sort', title: '排序（升序）' },
     { field: 'status', title: '状态', width: 120, slots: { default: 'status_cell' } },
     { field: 'isAdmin', title: '超级管理员', width: 120, slots: { default: 'isAdmin_cell' } },
     { field: 'createdAt', title: '创建时间', width: 180, formatter: 'formatDateTime' },
-    { title: '操作', width: 320, fixed: 'right', slots: { default: 'action' } },
+    { title: '操作', width: 410, fixed: 'right', slots: { default: 'action' } },
   ],
   pagerConfig: { enabled: false },
   treeConfig: {
@@ -182,6 +185,10 @@ function handleGrantMenu(row: RoleItem) {
 function handleGrantDept(row: RoleItem) {
   grantDeptRef.value?.open(row.id, row.dataScope);
 }
+
+function handleGrantAiEngine(row: RoleItem) {
+  grantAiEngineRef.value?.open(row.id);
+}
 </script>
 
 <template>
@@ -210,10 +217,12 @@ function handleGrantDept(row: RoleItem) {
         <Button type="link" size="small" @click="handleEdit(row)">编辑</Button>
         <Button type="link" size="small" @click="handleGrantMenu(row)">菜单权限</Button>
         <Button type="link" size="small" @click="handleGrantDept(row)">数据权限</Button>
+        <Button type="link" size="small" @click="handleGrantAiEngine(row)">AI引擎权限</Button>
         <Button type="link" danger size="small" @click="handleDelete(row)">删除</Button>
       </template>
     </Grid>
     <GrantMenuModal ref="grantMenuRef" @success="() => gridApi.reload()" />
     <GrantDeptModal ref="grantDeptRef" @success="() => gridApi.reload()" />
+    <GrantAiEngineModal ref="grantAiEngineRef" @success="() => gridApi.reload()" />
   </Page>
 </template>
