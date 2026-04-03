@@ -27,3 +27,6 @@ admin-go/.runtime-config/
 # Claude Code
 .claude/
 .aider*
+
+# Local test workspace
+admin-go/easymvp-test/
