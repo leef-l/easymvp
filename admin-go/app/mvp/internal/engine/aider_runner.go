@@ -274,7 +274,7 @@ func (r *AiderRunner) writeModelMetadata(cfg *AiderConfig) (string, error) {
 	}
 
 	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("aider-metadata-%d.json", time.Now().UnixNano()))
-	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+	if err := os.WriteFile(tmpFile, data, 0600); err != nil {
 		return "", err
 	}
 

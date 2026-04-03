@@ -2,6 +2,7 @@ package tasklog
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -88,20 +89,23 @@ func (c *cTaskLog) Export(ctx context.Context, req *v1.TaskLogExportReq) (res *v
 	r.Response.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	r.Response.Header().Set("Content-Disposition", `attachment; filename="task_log.csv"`)
 	r.Response.Write("\xEF\xBB\xBF") // UTF-8 BOM
+	// 使用 encoding/csv 正确转义，防止 CSV 注入和格式损坏
+	w := csv.NewWriter(r.Response.Writer)
 	// 表头
-	r.Response.Writeln("任务ID,动作,原状态,新状态,日志内容,操作者,创建时间")
+	_ = w.Write([]string{"任务名称", "动作", "原状态", "新状态", "日志内容", "操作者", "创建时间"})
 	// 数据行
 	for _, item := range list {
-		r.Response.Writefln("%v,%v,%v,%v,%v,%v,%v",
-			item.TaskName,
-			 item.Action,
-			 item.FromStatus,
-			 item.ToStatus,
-			 item.Message,
-			 item.Operator,
-			item.CreatedAt,
-		)
+		_ = w.Write([]string{
+			fmt.Sprintf("%v", item.TaskName),
+			fmt.Sprintf("%v", item.Action),
+			fmt.Sprintf("%v", item.FromStatus),
+			fmt.Sprintf("%v", item.ToStatus),
+			fmt.Sprintf("%v", item.Message),
+			fmt.Sprintf("%v", item.Operator),
+			fmt.Sprintf("%v", item.CreatedAt),
+		})
 	}
+	w.Flush()
 	return
 }
 

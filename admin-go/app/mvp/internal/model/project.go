@@ -75,6 +75,6 @@ type ProjectListInput struct {
 // ProjectBatchUpdateInput 批量编辑MVP项目表输入
 type ProjectBatchUpdateInput struct {
 	IDs    []snowflake.JsonInt64 `json:"ids"`
-	Status *int                  `json:"status"`
+	Status *string               `json:"status"`
 }
 

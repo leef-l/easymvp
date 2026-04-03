@@ -7,6 +7,7 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gcmd"
 
+	"easymvp/app/mvp/internal/controller/config"
 	"easymvp/app/mvp/internal/controller/conversation"
 	"easymvp/app/mvp/internal/controller/message"
 	"easymvp/app/mvp/internal/controller/project"
@@ -31,6 +32,7 @@ var (
 				group.Group("/api/mvp", func(group *ghttp.RouterGroup) {
 					group.Middleware(middleware.Auth)
 					group.Bind(
+						config.Config,
 						conversation.Conversation,
 						message.Message,
 						project.Project,

@@ -72,7 +72,7 @@ type MessageBatchDeleteRes struct {
 type MessageBatchUpdateReq struct {
 	g.Meta `path:"/message/batch-update" method:"put" tags:"MVP消息表" summary:"批量编辑MVP消息表"`
 	IDs    []snowflake.JsonInt64 `json:"ids" v:"required#ID列表不能为空" dc:"MVP消息表ID列表"`
-	Status *int                  `json:"status" dc:"状态"`
+	Status *string               `json:"status" dc:"状态"`
 }
 
 // MessageBatchUpdateRes 批量编辑MVP消息表响应

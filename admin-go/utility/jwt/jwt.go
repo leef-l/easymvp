@@ -1,6 +1,7 @@
 package jwt
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -24,7 +25,10 @@ var (
 
 func init() {
 	ctx := gctx.New()
-	key, _ := g.Cfg().Get(ctx, "jwt.secret", "easymvp-secret-key")
+	key, err := g.Cfg().Get(ctx, "jwt.secret")
+	if err != nil || key.IsEmpty() {
+		panic("jwt.secret 未配置，禁止使用默认密钥")
+	}
 	secret = []byte(key.String())
 	// 会员端独立 secret，未配置时回退到管理端 secret
 	mKey, _ := g.Cfg().Get(ctx, "jwt.memberSecret", "")
@@ -57,6 +61,9 @@ func GenerateToken(userID int64, username string, deptID int64) (string, error) 
 // ParseToken 解析 JWT Token
 func ParseToken(tokenStr string) (*Claims, error) {
 	token, err := gojwt.ParseWithClaims(tokenStr, &Claims{}, func(t *gojwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*gojwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("不支持的签名算法: %v", t.Header["alg"])
+		}
 		return secret, nil
 	})
 	if err != nil {
@@ -110,6 +117,9 @@ func VerifyAnyToken(tokenStr string) bool {
 // ParseMemberToken 解析会员 JWT Token
 func ParseMemberToken(tokenStr string) (*MemberClaims, error) {
 	token, err := gojwt.ParseWithClaims(tokenStr, &MemberClaims{}, func(t *gojwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*gojwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("不支持的签名算法: %v", t.Header["alg"])
+		}
 		return memberSecret, nil
 	})
 	if err != nil {

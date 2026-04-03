@@ -8,6 +8,7 @@ import { Button, message, Modal, Tag } from 'ant-design-vue';
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getConversationList, deleteConversation, batchDeleteConversation, exportConversation, importConversation, downloadImportTemplateConversation, batchUpdateConversation } from '#/api/mvp/conversation';
 import type { ConversationItem } from '#/api/mvp/conversation/types';
+import { getProjectList } from '#/api/mvp/project';
 import FormModal from './modules/form.vue';
 import DetailDrawer from './modules/detail-drawer.vue';
 
@@ -27,6 +28,21 @@ const [DetailDrawerComp, detailDrawerApi] = useVbenModal({
   destroyOnClose: true,
 });
 
+/** 项目选项 */
+const projectOptions = ref<{ label: string; value: string }[]>([]);
+async function loadProjectOptions() {
+  try {
+    const res = await getProjectList({ pageNum: 1, pageSize: 200 } as any);
+    projectOptions.value = (res?.list || []).map((p: any) => ({
+      label: p.name,
+      value: String(p.id),
+    }));
+  } catch {
+    // ignore
+  }
+}
+loadProjectOptions();
+
 /** 搜索表单配置 */
 const formOptions: VbenFormProps = {
   collapsed: false,
@@ -34,6 +50,30 @@ const formOptions: VbenFormProps = {
   submitOnChange: false,
   submitOnEnter: true,
   schema: [
+    {
+      component: 'ApiSelect',
+      componentProps: {
+        placeholder: '请选择项目',
+        allowClear: true,
+        options: projectOptions,
+      },
+      fieldName: 'projectID',
+      label: '所属项目',
+    },
+    {
+      component: 'Select',
+      componentProps: {
+        placeholder: '请选择角色类型',
+        allowClear: true,
+        options: [
+          { label: '架构师', value: 'architect' },
+          { label: '实施员', value: 'implementer' },
+          { label: '审���员', value: 'auditor' },
+        ],
+      },
+      fieldName: 'roleType',
+      label: '角色类型',
+    },
     {
       component: 'Input',
       componentProps: { placeholder: '请输入对话标题', allowClear: true },
@@ -227,7 +267,7 @@ function handleBatchUpdateStatus() {
     title: '批量修改状态',
     content: `确定要将选中的 ${rows.length} 条数据的状态切换吗？`,
     async onOk() {
-      const newStatus = rows[0]?.status === 1 ? 0 : 1;
+      const newStatus = String(rows[0]?.status) === '1' ? '0' : '1';
       await batchUpdateConversation({ ids: rows.map((r: ConversationItem) => r.id), status: newStatus });
       message.success('批量修改成功');
       gridApi.reload();

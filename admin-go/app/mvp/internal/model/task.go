@@ -106,13 +106,17 @@ type TaskListOutput struct {
 
 // TaskListInput MVP任务表列表查询输入
 type TaskListInput struct {
-	PageNum   int    `json:"pageNum"`
-	PageSize  int    `json:"pageSize"`
-	OrderBy   string `json:"orderBy"`
-	OrderDir  string `json:"orderDir"`
-	StartTime string `json:"startTime"`
-	EndTime   string `json:"endTime"`
-	Name string `json:"name"`
+	PageNum   int                `json:"pageNum"`
+	PageSize  int                `json:"pageSize"`
+	OrderBy   string             `json:"orderBy"`
+	OrderDir  string             `json:"orderDir"`
+	StartTime string             `json:"startTime"`
+	EndTime   string             `json:"endTime"`
+	Name      string             `json:"name"`
+	ProjectID snowflake.JsonInt64 `json:"projectID"`
+	Status    string             `json:"status"`
+	BatchNo   *int               `json:"batchNo"`
+	RoleType  string             `json:"roleType"`
 }
 
 // TaskTreeInput MVP任务表树形查询输入
@@ -156,6 +160,6 @@ type TaskTreeOutput struct {
 // TaskBatchUpdateInput 批量编辑MVP任务表输入
 type TaskBatchUpdateInput struct {
 	IDs    []snowflake.JsonInt64 `json:"ids"`
-	Status *int                  `json:"status"`
+	Status *string               `json:"status"`
 }
 

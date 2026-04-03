@@ -29,7 +29,8 @@ import {
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getTaskTree, getTaskDetail } from '#/api/mvp/task';
-import { getProjectStatus, retryTask } from '#/api/mvp/workflow';
+import { getProjectList } from '#/api/mvp/project';
+import { getProjectStatus, retryTask, skipTask } from '#/api/mvp/workflow';
 import type { TaskItem } from '#/api/mvp/task/types';
 import DetailDrawer from './modules/detail-drawer.vue';
 
@@ -66,12 +67,21 @@ const LEVEL_MAP: Record<string, { color: string; text: string }> = {
 interface ProjectStatusData {
   status: string;
   pauseReason?: string;
+  activeBatch: number;
   totalTasks: number;
   statusCounts: Record<string, number>;
 }
 
+// ===== 项目列表（供筛选下拉框使用） =====
+interface ProjectOption {
+  id: string;
+  name: string;
+}
+const projectOptions = ref<ProjectOption[]>([]);
+
 const projectStatus = ref<ProjectStatusData>({
   status: '',
+  activeBatch: 0,
   totalTasks: 0,
   statusCounts: {},
 });
@@ -106,6 +116,7 @@ let statusTimer: ReturnType<typeof setInterval> | null = null;
 
 onMounted(() => {
   loadProjectStatus();
+  loadProjectOptions();
   statusTimer = setInterval(loadProjectStatus, 5000);
 });
 
@@ -118,6 +129,20 @@ const searchName = ref('');
 const searchStatus = ref<string | undefined>(undefined);
 const searchBatchNo = ref<number | undefined>(undefined);
 const searchRole = ref<string | undefined>(undefined);
+const searchProjectId = ref<string | undefined>(projectId.value || undefined);
+
+/** 加载项目列表（供搜索下拉框使用） */
+async function loadProjectOptions() {
+  try {
+    const res = await getProjectList({ pageNum: 1, pageSize: 200 });
+    projectOptions.value = (res?.list ?? []).map((p: any) => ({
+      id: String(p.id),
+      name: p.name,
+    }));
+  } catch {
+    // 静默
+  }
+}
 
 // ===== 详情抽屉 =====
 const [DetailDrawerComp, detailDrawerApi] = useVbenModal({
@@ -128,6 +153,12 @@ const [DetailDrawerComp, detailDrawerApi] = useVbenModal({
 // ===== 表格列配置 =====
 const gridOptions: VxeGridProps<TaskItem> = {
   columns: [
+    {
+      field: 'projectName',
+      title: '所属项目',
+      width: 150,
+      visible: !projectId.value, // 项目维度进入时隐藏
+    },
     {
       field: 'name',
       title: '任务名称',
@@ -206,7 +237,9 @@ const gridOptions: VxeGridProps<TaskItem> = {
     ajax: {
       query: async () => {
         const params: Record<string, any> = {};
-        if (projectId.value) params.projectID = projectId.value;
+        // 优先用 URL 参数中的项目 ID，否则用搜索栏选择的项目
+        const pid = projectId.value || searchProjectId.value;
+        if (pid) params.projectID = pid;
         if (searchName.value) params.name = searchName.value;
         if (searchStatus.value) params.status = searchStatus.value;
         if (searchBatchNo.value !== undefined && searchBatchNo.value !== null) {
@@ -244,6 +277,22 @@ async function handleRetry(row: TaskItem) {
     loadProjectStatus();
   } catch {
     message.error('重试失败');
+  }
+}
+
+/** 跳过失败任务 */
+async function handleSkip(row: TaskItem) {
+  const pid = projectId.value || row.projectID;
+  if (!pid) return;
+  const reason = window.prompt('请输入跳过原因：');
+  if (!reason) return;
+  try {
+    await skipTask({ projectID: pid, taskID: row.id, reason });
+    message.success('已跳过该任务');
+    gridApi.reload();
+    loadProjectStatus();
+  } catch {
+    message.error('跳过失败');
   }
 }
 
@@ -377,8 +426,16 @@ onMounted(() => {
             {{ projectStatus.statusCounts?.completed || 0 }} / {{ projectStatus.totalTasks }}
           </span>
         </div>
-        <div v-if="projectStatus.pauseReason" class="mt-2 text-orange-500 text-sm">
-          暂停原因：{{ projectStatus.pauseReason }}
+        <div class="flex items-center gap-4 mt-2 text-sm">
+          <span v-if="projectStatus.activeBatch > 0" class="text-blue-500">
+            当前执行批次：第 {{ projectStatus.activeBatch }} 批
+          </span>
+          <span v-else-if="projectStatus.status === 'running'" class="text-green-500">
+            所有批次已完成
+          </span>
+          <span v-if="projectStatus.pauseReason" class="text-orange-500">
+            暂停原因：{{ projectStatus.pauseReason }}
+          </span>
         </div>
       </Card>
     </template>
@@ -386,6 +443,25 @@ onMounted(() => {
     <!-- 搜索筛选栏 -->
     <Card size="small" class="mb-3">
       <div class="flex flex-wrap gap-3 items-center">
+        <Select
+          v-if="!projectId"
+          v-model:value="searchProjectId"
+          placeholder="所属项目"
+          allow-clear
+          show-search
+          option-filter-prop="label"
+          style="width: 180px"
+          @change="handleSearch"
+        >
+          <SelectOption
+            v-for="p in projectOptions"
+            :key="p.id"
+            :value="p.id"
+            :label="p.name"
+          >
+            {{ p.name }}
+          </SelectOption>
+        </Select>
         <Input
           v-model:value="searchName"
           placeholder="任务名称"
@@ -434,6 +510,7 @@ onMounted(() => {
             searchStatus = undefined;
             searchBatchNo = undefined;
             searchRole = undefined;
+            if (!projectId) searchProjectId = undefined;
             handleSearch();
           }"
         >
@@ -470,7 +547,7 @@ onMounted(() => {
             查看结果
           </Button>
 
-          <!-- 失败：重试 -->
+          <!-- 失败：重试 + 跳过 -->
           <Button
             v-if="row.status === 'failed' || row.status === 'submit_error'"
             type="link"
@@ -479,6 +556,14 @@ onMounted(() => {
             @click="handleRetry(row)"
           >
             重试
+          </Button>
+          <Button
+            v-if="row.status === 'failed' || row.status === 'bug_found'"
+            type="link"
+            size="small"
+            @click="handleSkip(row)"
+          >
+            跳过
           </Button>
         </template>
       </Grid>

@@ -37,29 +37,54 @@ func NewWatchdog(checkInterval time.Duration, maxStaleCount int, maxRetries int)
 	}
 }
 
-// 全局看门狗（每2分钟检测，连续3次无进展认为卡死，最多自动重试3次）
-var defaultWatchdog = NewWatchdog(2*time.Minute, 3, 3)
+// 全局看门狗（延迟初始化，等数据库就绪后读取配置）
+var defaultWatchdog *Watchdog
 
-// GetWatchdog 获取全局看门狗
+// GetWatchdog 获取全局看门狗（首次调用时从配置加载参数）
 func GetWatchdog() *Watchdog {
+	if defaultWatchdog == nil {
+		ctx := context.Background()
+		checkInterval := GetConfigInt(ctx, "watchdog.check_interval", "engine.watchdog.checkInterval", 120)
+		maxStaleCount := GetConfigInt(ctx, "watchdog.max_stale_count", "engine.watchdog.maxStaleCount", 3)
+		maxRetries := GetConfigInt(ctx, "watchdog.max_retries", "engine.watchdog.maxRetries", 3)
+		defaultWatchdog = NewWatchdog(
+			time.Duration(checkInterval)*time.Second,
+			maxStaleCount,
+			maxRetries,
+		)
+		g.Log().Infof(ctx, "[Watchdog] 配置加载: checkInterval=%ds, maxStaleCount=%d, maxRetries=%d",
+			checkInterval, maxStaleCount, maxRetries)
+	}
 	return defaultWatchdog
 }
 
 // Start 启动看门狗
-func (w *Watchdog) Start() {
-	ctx, cancel := context.WithCancel(context.Background())
+func (w *Watchdog) Start(ctx context.Context) {
+	w.mu.Lock()
+	if w.cancel != nil {
+		w.cancel()
+	}
+	w.mu.Unlock()
+
+	childCtx, cancel := context.WithCancel(ctx)
+
+	w.mu.Lock()
 	w.cancel = cancel
+	w.mu.Unlock()
 
-	go w.heartbeatLoop(ctx)
-	go w.autoRestartLoop(ctx)
+	go w.heartbeatLoop(childCtx)
+	go w.autoRestartLoop(childCtx)
 
-	g.Log().Info(ctx, "[Watchdog] 启动，检测间隔:", w.checkInterval, "最大无进展次数:", w.maxStaleCount, "最大重试:", w.maxRetries)
+	g.Log().Info(childCtx, "[Watchdog] 启动，检测间隔:", w.checkInterval, "最大无进展次数:", w.maxStaleCount, "最大重试:", w.maxRetries)
 }
 
 // Stop 停止看门狗
 func (w *Watchdog) Stop() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if w.cancel != nil {
 		w.cancel()
+		w.cancel = nil
 	}
 }
 
@@ -80,7 +105,7 @@ func (w *Watchdog) heartbeatLoop(ctx context.Context) {
 
 // checkRunningTasks 检测所有 running 状态的任务
 func (w *Watchdog) checkRunningTasks(ctx context.Context) {
-	// 查询所有 running 状态的任务
+	// 查询所有 running 状态的任务（锁外执行 DB 操作）
 	tasks, err := g.DB().Model("mvp_task").
 		Where("status", "running").
 		Where("deleted_at IS NULL").
@@ -90,15 +115,31 @@ func (w *Watchdog) checkRunningTasks(ctx context.Context) {
 		return
 	}
 
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
+	// 锁外获取所有任务的最新 chunkID（DB 操作不持锁）
+	type taskInfo struct {
+		taskID      int64
+		projectID   int64
+		latestChunk int64
+	}
+	infos := make([]taskInfo, 0, len(tasks))
 	for _, task := range tasks {
-		taskID := task["id"].Int64()
-		projectID := task["project_id"].Int64()
+		tid := task["id"].Int64()
+		pid := task["project_id"].Int64()
+		chunkID := w.getLatestChunkID(ctx, tid)
+		infos = append(infos, taskInfo{tid, pid, chunkID})
+	}
 
-		// 查找该任务关联的最新对话消息的最新 chunk
-		latestChunkID := w.getLatestChunkID(ctx, taskID)
+	// 决策阶段：持锁，纯内存操作，确定哪些任务需要被标记为失败
+	type staleTask struct {
+		taskID    int64
+		projectID int64
+	}
+	var staleTasks []staleTask
+
+	w.mu.Lock()
+	for _, info := range infos {
+		taskID := info.taskID
+		latestChunkID := info.latestChunk
 
 		lastID, exists := w.lastChunkID[taskID]
 		if !exists {
@@ -114,18 +155,9 @@ func (w *Watchdog) checkRunningTasks(ctx context.Context) {
 			g.Log().Warningf(ctx, "[Watchdog] 任务 %d 无进展 (%d/%d)", taskID, w.staleCount[taskID], w.maxStaleCount)
 
 			if w.staleCount[taskID] >= w.maxStaleCount {
-				// 认为卡死，设为失败
+				// 认为卡死，加入待处理列表
 				g.Log().Errorf(ctx, "[Watchdog] 任务 %d 检测为卡死，标记为失败", taskID)
-				g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
-					"status":        "failed",
-					"error_message": "看门狗检测到任务无响应，自动标记为失败",
-					"updated_at":    gtime.Now(),
-				})
-				logTaskAction(taskID, "watchdog_timeout", "running", "failed", "连续无进展，看门狗判定卡死", "system")
-
-				// 释放调度器资源
-				GetScheduler().OnTaskFailed(projectID, taskID, "watchdog timeout")
-
+				staleTasks = append(staleTasks, staleTask{taskID, info.projectID})
 				// 清理跟踪状态
 				delete(w.staleCount, taskID)
 				delete(w.lastChunkID, taskID)
@@ -139,14 +171,28 @@ func (w *Watchdog) checkRunningTasks(ctx context.Context) {
 
 	// 清理已不在 running 状态的任务的跟踪记录
 	activeIDs := make(map[int64]bool)
-	for _, task := range tasks {
-		activeIDs[task["id"].Int64()] = true
+	for _, info := range infos {
+		activeIDs[info.taskID] = true
 	}
 	for taskID := range w.lastChunkID {
 		if !activeIDs[taskID] {
 			delete(w.lastChunkID, taskID)
 			delete(w.staleCount, taskID)
 		}
+	}
+	w.mu.Unlock()
+
+	// 锁外执行 DB 更新操作
+	for _, st := range staleTasks {
+		g.DB().Model("mvp_task").Where("id", st.taskID).Update(g.Map{
+			"status":        "failed",
+			"error_message": "看门狗检测到任务无响应，自动标记为失败",
+			"updated_at":    gtime.Now(),
+		})
+		logTaskAction(st.taskID, "watchdog_timeout", "running", "failed", "连续无进展，看门狗判定卡死", "system")
+
+		// 释放调度器资源
+		GetScheduler().OnTaskFailed(st.projectID, st.taskID, "watchdog timeout")
 	}
 }
 
@@ -190,6 +236,7 @@ func (w *Watchdog) autoRestartLoop(ctx context.Context) {
 
 // checkFailedTasks 检测 failed 任务并自动重启
 func (w *Watchdog) checkFailedTasks(ctx context.Context) {
+	// 锁外执行所有 DB 查询
 	tasks, err := g.DB().Model("mvp_task").
 		Where("status", "failed").
 		Where("deleted_at IS NULL").
@@ -198,42 +245,90 @@ func (w *Watchdog) checkFailedTasks(ctx context.Context) {
 		return
 	}
 
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	scheduler := GetScheduler()
-
+	// 过滤出项目仍在 running 状态的任务（锁外执行 DB 操作）
+	type failedTaskInfo struct {
+		taskID    int64
+		projectID int64
+		taskType  string
+		errMsg    string
+	}
+	var candidates []failedTaskInfo
 	for _, task := range tasks {
-		taskID := task["id"].Int64()
 		projectID := task["project_id"].Int64()
-
-		// 检查项目是否还在 running
 		project, _ := g.DB().Model("mvp_project").Where("id", projectID).Fields("status").One()
 		if project.IsEmpty() || project["status"].String() != "running" {
 			continue
 		}
+		candidates = append(candidates, failedTaskInfo{
+			taskID:    task["id"].Int64(),
+			projectID: projectID,
+			taskType:  task["role_type"].String(),
+			errMsg:    task["error_message"].String(),
+		})
+	}
 
-		retries := w.retryCount[taskID]
+	// 持锁阶段：纯内存决策，确定哪些任务需要重试或上报
+	type retryItem struct {
+		taskID    int64
+		projectID int64
+		retryNo   int
+	}
+	type escalateItem struct {
+		taskID    int64
+		projectID int64
+		errMsg    string
+		taskType  string
+	}
+	var retryList []retryItem
+	var escalateList []escalateItem
+
+	w.mu.Lock()
+	for _, info := range candidates {
+		retries := w.retryCount[info.taskID]
 		if retries >= w.maxRetries {
-			// 超过最大重试次数，汇报给架构师进入 bug 流程
-			g.Log().Errorf(ctx, "[Watchdog] 任务 %d 重试 %d 次仍失败，提交给架构师", taskID, retries)
-			logTaskAction(taskID, "escalate_to_architect", "failed", "bug_found",
-				"看门狗自动重启超过最大次数，升级给架构师处理", "system")
-
-			errMsg := task["error_message"].String()
-			go scheduler.ReportBug(context.Background(), projectID, taskID,
-				"任务多次自动重启仍然失败，错误信息：\n"+errMsg)
-			continue
+			escalateList = append(escalateList, escalateItem{
+				taskID:    info.taskID,
+				projectID: info.projectID,
+				errMsg:    info.errMsg,
+				taskType:  info.taskType,
+			})
+		} else {
+			w.retryCount[info.taskID] = retries + 1
+			retryList = append(retryList, retryItem{info.taskID, info.projectID, retries + 1})
 		}
+	}
+	w.mu.Unlock()
 
-		// 自动重启
-		w.retryCount[taskID] = retries + 1
-		g.Log().Infof(ctx, "[Watchdog] 自动重启任务 %d (第 %d/%d 次)", taskID, retries+1, w.maxRetries)
+	scheduler := GetScheduler()
 
-		logTaskAction(taskID, "auto_restart", "failed", "pending",
+	// 锁外执行实际操作
+	for _, item := range escalateList {
+		g.Log().Errorf(ctx, "[Watchdog] 任务 %d（%s）重试超过最大次数，升级处理", item.taskID, item.taskType)
+
+		// 更新任务状态为 escalated，防止下轮重复扫描
+		g.DB().Model("mvp_task").Where("id", item.taskID).Update(g.Map{
+			"status":     "escalated",
+			"updated_at": gtime.Now(),
+		})
+
+		logTaskAction(item.taskID, "escalate_to_architect", "failed", "escalated",
+			"看门狗自动重启超过最大次数，升级给架构师处理", "system")
+
+		if item.taskType == "auditor" {
+			// auditor 类型：通过 ReportBug 走 bug 闭环（关联实施员）
+			go scheduler.ReportBug(context.Background(), item.projectID, item.taskID,
+				"审计任务多次重试仍然失败，错误信息：\n"+item.errMsg)
+		} else {
+			// 非 auditor 类型：直接创建架构师分析任务
+			go scheduler.EscalateFailedTask(context.Background(), item.projectID, item.taskID, item.taskType, item.errMsg)
+		}
+	}
+
+	for _, item := range retryList {
+		g.Log().Infof(ctx, "[Watchdog] 自动重启任务 %d (第 %d/%d 次)", item.taskID, item.retryNo, w.maxRetries)
+		logTaskAction(item.taskID, "auto_restart", "failed", "pending",
 			"看门狗自动重启 ("+time.Now().Format("15:04:05")+")", "system")
-
-		scheduler.RetryTask(projectID, taskID)
+		scheduler.RetryTask(item.projectID, item.taskID)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // OpenAIProvider OpenAI 兼容的 Provider
@@ -22,7 +23,7 @@ type OpenAIProvider struct {
 func NewOpenAI(cfg Config) *OpenAIProvider {
 	return &OpenAIProvider{
 		config: cfg,
-		client: &http.Client{},
+		client: &http.Client{Timeout: 5 * time.Minute},
 	}
 }
 
@@ -97,8 +98,8 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 		return nil, fmt.Errorf("openai error: [%s] %s", result.Error.Type, result.Error.Message)
 	}
 
-	if len(result.Choices) == 0 {
-		return nil, fmt.Errorf("openai returned no choices")
+	if len(result.Choices) == 0 || result.Choices[0].Message == nil {
+		return nil, fmt.Errorf("AI 返回空响应")
 	}
 
 	chatResp := &ChatResponse{

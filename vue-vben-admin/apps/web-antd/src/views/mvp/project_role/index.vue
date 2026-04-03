@@ -19,21 +19,20 @@ const TAG_COLORS = ['green', 'red', 'blue', 'orange', 'cyan', 'purple', 'geekblu
 
 /** 状态选项 */
 const statusOptions = [
-  { label: '禁用', value: 0 },
-  { label: '启用', value: 1 },
+  { label: '禁用', value: '0' },
+  { label: '启用', value: '1' },
 ];
 
 /** 状态映射 */
-const statusMap: Record<number, string> = {
-  0: '禁用',
-  1: '启用',
+const statusMap: Record<string, string> = {
+  '0': '禁用',
+  '1': '启用',
 };
 
 /** 状态颜色 */
-function getStatusColor(val: number): string {
-  const keys = [0, 1];
-  const idx = keys.indexOf(val);
-  return TAG_COLORS[idx >= 0 ? idx % TAG_COLORS.length : 0] ?? 'default';
+function getStatusColor(val: string | number): string {
+  const colorMap: Record<string, string> = { '0': 'red', '1': 'green' };
+  return colorMap[String(val)] ?? 'default';
 }
 
 /** 渲染带 Tooltip 的列标题 */
@@ -264,7 +263,7 @@ function handleBatchUpdateStatus() {
     title: '批量修改状态',
     content: `确定要将选中的 ${rows.length} 条数据的状态切换吗？`,
     async onOk() {
-      const newStatus = rows[0]?.status === 1 ? 0 : 1;
+      const newStatus = String(rows[0]?.status) === '1' ? '0' : '1';
       await batchUpdateProjectRole({ ids: rows.map((r: ProjectRoleItem) => r.id), status: newStatus });
       message.success('批量修改成功');
       gridApi.reload();

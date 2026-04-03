@@ -55,8 +55,13 @@ func (e *ChatEngine) SendMessage(ctx context.Context, conversationID int64, cont
 		return 0, 0, err
 	}
 
-	// 3. 展开消息中的 "读取：路径" 指令
-	expandedContent := ExpandFileReads(content)
+	// 3. 展开消息中的 "读取：路径" 指令（限制在项目工作目录内）
+	project, _ := g.DB().Model("mvp_project").Where("id", projectID).Fields("work_dir").One()
+	workDir := project["work_dir"].String()
+	if workDir == "" {
+		workDir = "/www/wwwroot/project/easymvp"
+	}
+	expandedContent := ExpandFileReads(content, workDir)
 
 	// 4. 保存用户消息
 	msgID = int64(snowflake.Generate())
@@ -222,9 +227,11 @@ func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *M
 			// 更新 token 用量
 			if chunk.Usage != nil {
 				usageJSON, _ := json.Marshal(chunk.Usage)
-				g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
+				if _, err := g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
 					"token_usage": string(usageJSON),
-				})
+				}); err != nil {
+					g.Log().Errorf(ctx, "[ChatEngine] 更新 token_usage 失败: msg=%d, err=%v", replyID, err)
+				}
 			}
 		}
 

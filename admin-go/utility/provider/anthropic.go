@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // AnthropicProvider Anthropic Messages API Provider
@@ -22,7 +23,7 @@ type AnthropicProvider struct {
 func NewAnthropic(cfg Config) *AnthropicProvider {
 	return &AnthropicProvider{
 		config: cfg,
-		client: &http.Client{},
+		client: &http.Client{Timeout: 5 * time.Minute},
 	}
 }
 

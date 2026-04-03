@@ -48,6 +48,9 @@ func (s *sMessage) Create(ctx context.Context, in *model.MessageCreateInput) err
 
 // Update 更新MVP消息表
 func (s *sMessage) Update(ctx context.Context, in *model.MessageUpdateInput) error {
+	if err := middleware.CheckOwnership(ctx, dao.MvpMessage.Ctx(ctx).Where(dao.MvpMessage.Columns().DeletedAt, nil), in.ID, dao.MvpMessage.Columns().Id, dao.MvpMessage.Columns().CreatedBy); err != nil {
+		return err
+	}
 	data := g.Map{
 		dao.MvpMessage.Columns().ConversationId: in.ConversationID,
 		dao.MvpMessage.Columns().Role: in.Role,
@@ -63,6 +66,9 @@ func (s *sMessage) Update(ctx context.Context, in *model.MessageUpdateInput) err
 
 // Delete 软删除MVP消息表
 func (s *sMessage) Delete(ctx context.Context, id snowflake.JsonInt64) error {
+	if err := middleware.CheckOwnership(ctx, dao.MvpMessage.Ctx(ctx).Where(dao.MvpMessage.Columns().DeletedAt, nil), id, dao.MvpMessage.Columns().Id, dao.MvpMessage.Columns().CreatedBy); err != nil {
+		return err
+	}
 	_, err := dao.MvpMessage.Ctx(ctx).Where(dao.MvpMessage.Columns().Id, id).Data(g.Map{
 		dao.MvpMessage.Columns().DeletedAt: gtime.Now(),
 	}).Update()
@@ -71,7 +77,8 @@ func (s *sMessage) Delete(ctx context.Context, id snowflake.JsonInt64) error {
 
 // BatchDelete 批量软删除MVP消息表
 func (s *sMessage) BatchDelete(ctx context.Context, ids []snowflake.JsonInt64) error {
-	_, err := dao.MvpMessage.Ctx(ctx).WhereIn(dao.MvpMessage.Columns().Id, ids).Data(g.Map{
+	m := middleware.ApplyDataScope(ctx, dao.MvpMessage.Ctx(ctx), dao.MvpMessage.Columns().CreatedBy)
+	_, err := m.WhereIn(dao.MvpMessage.Columns().Id, ids).Data(g.Map{
 		dao.MvpMessage.Columns().DeletedAt: gtime.Now(),
 	}).Update()
 	return err
@@ -83,6 +90,9 @@ func (s *sMessage) Detail(ctx context.Context, id snowflake.JsonInt64) (out *mod
 	err = dao.MvpMessage.Ctx(ctx).Where(dao.MvpMessage.Columns().Id, id).Where(dao.MvpMessage.Columns().DeletedAt, nil).Scan(out)
 	if err != nil {
 		return nil, err
+	}
+	if out.ID == 0 {
+		return nil, fmt.Errorf("记录不存在")
 	}
 	// 查询对话ID关联显示
 	if out.ConversationID != 0 {
@@ -149,8 +159,11 @@ func (s *sMessage) List(ctx context.Context, in *model.MessageListInput) (list [
 	if err != nil {
 		return
 	}
-	// 动态排序
-	if in.OrderBy != "" {
+	// 动态排序（白名单防止 SQL 注入）
+	allowedOrderBy := map[string]bool{
+		"id": true, "role": true, "status": true, "created_at": true, "updated_at": true,
+	}
+	if in.OrderBy != "" && allowedOrderBy[in.OrderBy] {
 		if in.OrderDir == "desc" {
 			m = m.OrderDesc(in.OrderBy)
 		} else {
@@ -187,7 +200,8 @@ func (s *sMessage) BatchUpdate(ctx context.Context, in *model.MessageBatchUpdate
 	if in.Status != nil {
 		data[dao.MvpMessage.Columns().Status] = *in.Status
 	}
-	_, err := dao.MvpMessage.Ctx(ctx).WhereIn(dao.MvpMessage.Columns().Id, in.IDs).Data(data).Update()
+	m := middleware.ApplyDataScope(ctx, dao.MvpMessage.Ctx(ctx), dao.MvpMessage.Columns().CreatedBy)
+	_, err := m.WhereIn(dao.MvpMessage.Columns().Id, in.IDs).Data(data).Update()
 	return err
 }
 
@@ -218,6 +232,8 @@ func (s *sMessage) Import(ctx context.Context, file *ghttp.UploadFile) (success 
 		id := snowflake.Generate()
 		data := g.Map{
 			dao.MvpMessage.Columns().Id:        id,
+			dao.MvpMessage.Columns().CreatedBy: middleware.GetUserID(ctx),
+			dao.MvpMessage.Columns().DeptId:    middleware.GetDeptID(ctx),
 			dao.MvpMessage.Columns().CreatedAt: gtime.Now(),
 			dao.MvpMessage.Columns().UpdatedAt: gtime.Now(),
 		}

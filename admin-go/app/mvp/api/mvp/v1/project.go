@@ -73,7 +73,7 @@ type ProjectBatchDeleteRes struct {
 type ProjectBatchUpdateReq struct {
 	g.Meta `path:"/project/batch-update" method:"put" tags:"MVP项目表" summary:"批量编辑MVP项目表"`
 	IDs    []snowflake.JsonInt64 `json:"ids" v:"required#ID列表不能为空" dc:"MVP项目表ID列表"`
-	Status *int                  `json:"status" dc:"状态"`
+	Status *string               `json:"status" dc:"状态"`
 }
 
 // ProjectBatchUpdateRes 批量编辑MVP项目表响应

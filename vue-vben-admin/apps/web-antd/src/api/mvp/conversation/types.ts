@@ -23,6 +23,8 @@ export interface ConversationListParams {
   startTime?: string;
   endTime?: string;
   title?: string;
+  projectID?: string;
+  roleType?: string;
 }
 
 /** MVP对话表创建参数 */

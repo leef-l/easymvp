@@ -3,6 +3,7 @@ package main
 import (
 	_ "easymvp/app/mvp/internal/packed"
 
+	_ "easymvp/app/mvp/internal/logic/config"
 	_ "easymvp/app/mvp/internal/logic/conversation"
 	_ "easymvp/app/mvp/internal/logic/message"
 	_ "easymvp/app/mvp/internal/logic/project"

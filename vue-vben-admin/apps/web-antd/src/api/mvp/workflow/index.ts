@@ -7,6 +7,7 @@ const PREFIX = '/mvp/workflow';
 export function createProject(data: {
   name: string;
   description: string;
+  workDir: string;
   architectModelID: string;
 }) {
   return requestClient.post<{ projectID: string; conversationID: string }>(
@@ -46,6 +47,15 @@ export function retryTask(data: { projectID: string; taskID: string }) {
   return requestClient.post(`${PREFIX}/retry-task`, data);
 }
 
+/** 跳过失败任务（防止批次永久阻塞） */
+export function skipTask(data: {
+  projectID: string;
+  taskID: string;
+  reason: string;
+}) {
+  return requestClient.post(`${PREFIX}/skip-task`, data);
+}
+
 /** 角色预设项 */
 export interface RolePresetItem {
   roleType: string;
@@ -67,7 +77,24 @@ export function getProjectStatus(projectID: string) {
   return requestClient.get<{
     status: string;
     pauseReason?: string;
+    activeBatch: number;
     totalTasks: number;
     statusCounts: Record<string, number>;
   }>(`${PREFIX}/project-status`, { params: { projectID } });
+}
+
+/** 系统检测项 */
+export interface SystemCheckItem {
+  key: string;
+  name: string;
+  status: 'error' | 'ok' | 'warning';
+  message: string;
+  link: string;
+}
+
+/** 获取系统配置检测结果 */
+export function getSystemCheck() {
+  return requestClient.get<{ items: SystemCheckItem[]; allPass: boolean }>(
+    `${PREFIX}/system-check`,
+  );
 }

@@ -23,6 +23,15 @@ func (c *cChat) Send(ctx context.Context, req *v1.ChatSendReq) (res *v1.ChatSend
 	userID := middleware.GetUserID(ctx)
 	deptID := middleware.GetDeptID(ctx)
 
+	// 校验对话归属
+	conv, convErr := g.DB().Model("mvp_conversation").Where("id", req.ConversationID).Where("deleted_at IS NULL").One()
+	if convErr != nil || conv.IsEmpty() {
+		return nil, fmt.Errorf("对话不存在")
+	}
+	if conv["created_by"].Int64() != userID && userID != 1 {
+		return nil, fmt.Errorf("无权操作该对话")
+	}
+
 	msgID, replyID, err := engine.GetEngine().SendMessage(ctx, int64(req.ConversationID), req.Content, userID, deptID)
 	if err != nil {
 		return nil, err
@@ -52,6 +61,18 @@ func (c *cChat) SSE(ctx context.Context, req *v1.ChatSSEReq) (res *v1.ChatSSERes
 		writeSSEEvent(r, "done", `{"done":true}`)
 		r.Response.Flush()
 		return nil, nil
+	}
+
+	userID := middleware.GetUserID(ctx)
+	if userID != 1 {
+		convID := msg["conversation_id"].Int64()
+		conv, _ := g.DB().Model("mvp_conversation").Where("id", convID).Where("deleted_at IS NULL").One()
+		if conv.IsEmpty() || conv["created_by"].Int64() != userID {
+			writeSSEEvent(r, "error", `{"error":"无权访问"}`)
+			writeSSEEvent(r, "done", `{"done":true}`)
+			r.Response.Flush()
+			return nil, nil
+		}
 	}
 
 	status := msg["status"].String()
@@ -102,6 +123,14 @@ func (c *cChat) SSE(ctx context.Context, req *v1.ChatSSEReq) (res *v1.ChatSSERes
 
 // History 获取对话历史
 func (c *cChat) History(ctx context.Context, req *v1.ChatHistoryReq) (res *v1.ChatHistoryRes, err error) {
+	userID := middleware.GetUserID(ctx)
+	if userID != 1 {
+		conv, convErr := g.DB().Model("mvp_conversation").Where("id", req.ConversationID).Where("deleted_at IS NULL").One()
+		if convErr != nil || conv.IsEmpty() || conv["created_by"].Int64() != userID {
+			return nil, fmt.Errorf("无权访问该对话")
+		}
+	}
+
 	records, err := g.DB().Model("mvp_message m").
 		LeftJoin("ai_model am", "am.id = m.model_id").
 		Fields("m.id, m.role, m.content, m.status, m.created_at, am.name as model_name").

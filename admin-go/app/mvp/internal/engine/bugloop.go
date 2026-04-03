@@ -91,6 +91,40 @@ func (s *Scheduler) createBugAnalysisTask(ctx context.Context, projectID int64, 
 	go s.scheduleOnce(context.Background(), projectID)
 }
 
+// EscalateFailedTask 非 auditor 任务重试耗尽后，创建架构师分析任务
+// 与 ReportBug 不同，此方法直接基于失败任务本身创建分析任务，无需 auditor→implementer 关联
+func (s *Scheduler) EscalateFailedTask(ctx context.Context, projectID int64, failedTaskID int64, roleType string, errMsg string) {
+	failedTask, err := g.DB().Model("mvp_task").Where("id", failedTaskID).One()
+	if err != nil || failedTask.IsEmpty() {
+		g.Log().Errorf(ctx, "[EscalateFailedTask] 查询失败任务 %d 出错: %v", failedTaskID, err)
+		return
+	}
+
+	analysisTaskID := int64(snowflake.Generate())
+	_, err = g.DB().Model("mvp_task").Insert(g.Map{
+		"id":         analysisTaskID,
+		"project_id": projectID,
+		"parent_id":  failedTask["parent_id"].Int64(),
+		"name":       fmt.Sprintf("失败分析: %s", failedTask["name"].String()),
+		"description": fmt.Sprintf("任务「%s」（角色: %s）多次重试后仍然失败，请分析原因并给出解决方案：\n\n错误信息：\n%s\n\n原任务描述：\n%s",
+			failedTask["name"].String(), roleType, errMsg, failedTask["description"].String()),
+		"role_type":  "architect",
+		"status":     "pending",
+		"batch_no":   0, // 高优先级
+		"created_by": 0,
+		"dept_id":    0,
+		"created_at": gtime.Now(),
+		"updated_at": gtime.Now(),
+	})
+	if err != nil {
+		g.Log().Errorf(ctx, "[EscalateFailedTask] 创建架构师分析任务失败: %v", err)
+		return
+	}
+
+	logTaskAction(analysisTaskID, "created", "", "pending", "系统创建失败分析任务（升级处理）", "system")
+	go s.scheduleOnce(context.Background(), projectID)
+}
+
 // DispatchBugFix 架构师分析完成后，分派修复任务给实施员
 // analysisTaskID: 架构师分析任务 ID（已完成）
 // implTaskID: 原实施员任务 ID

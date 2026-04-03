@@ -3,6 +3,8 @@ package auth
 import (
 	"context"
 
+	"github.com/gogf/gf/v2/errors/gerror"
+
 	v1 "easymvp/app/system/api/system/v1"
 	"easymvp/app/system/internal/model"
 	"easymvp/app/system/internal/service"
@@ -36,7 +38,7 @@ func (c *cAuth) Login(ctx context.Context, req *v1.AuthLoginReq) (res *v1.AuthLo
 func (c *cAuth) Info(ctx context.Context, req *v1.AuthInfoReq) (res *v1.AuthInfoRes, err error) {
 	claims := GetClaims(ctx)
 	if claims == nil {
-		return nil, nil
+		return nil, gerror.New("未登录或登录已过期")
 	}
 	out, err := service.Auth().Info(ctx, snowflake.JsonInt64(claims.UserID))
 	if err != nil {
@@ -60,7 +62,7 @@ func (c *cAuth) Info(ctx context.Context, req *v1.AuthInfoReq) (res *v1.AuthInfo
 func (c *cAuth) ChangePassword(ctx context.Context, req *v1.AuthChangePasswordReq) (res *v1.AuthChangePasswordRes, err error) {
 	claims := GetClaims(ctx)
 	if claims == nil {
-		return nil, nil
+		return nil, gerror.New("未登录或登录已过期")
 	}
 	err = service.Auth().ChangePassword(ctx, &model.AuthChangePasswordInput{
 		UserID:      snowflake.JsonInt64(claims.UserID),
@@ -74,7 +76,7 @@ func (c *cAuth) ChangePassword(ctx context.Context, req *v1.AuthChangePasswordRe
 func (c *cAuth) Menus(ctx context.Context, req *v1.AuthMenusReq) (res *v1.AuthMenusRes, err error) {
 	claims := GetClaims(ctx)
 	if claims == nil {
-		return nil, nil
+		return nil, gerror.New("未登录或登录已过期")
 	}
 	menus, err := service.Auth().Menus(ctx, snowflake.JsonInt64(claims.UserID))
 	if err != nil {

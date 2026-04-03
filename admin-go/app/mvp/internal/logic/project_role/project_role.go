@@ -48,6 +48,9 @@ func (s *sProjectRole) Create(ctx context.Context, in *model.ProjectRoleCreateIn
 
 // Update 更新项目角色配置表
 func (s *sProjectRole) Update(ctx context.Context, in *model.ProjectRoleUpdateInput) error {
+	if err := middleware.CheckOwnership(ctx, dao.MvpProjectRole.Ctx(ctx).Where(dao.MvpProjectRole.Columns().DeletedAt, nil), in.ID, dao.MvpProjectRole.Columns().Id, dao.MvpProjectRole.Columns().CreatedBy); err != nil {
+		return err
+	}
 	data := g.Map{
 		dao.MvpProjectRole.Columns().ProjectId: in.ProjectID,
 		dao.MvpProjectRole.Columns().RoleType: in.RoleType,
@@ -63,6 +66,9 @@ func (s *sProjectRole) Update(ctx context.Context, in *model.ProjectRoleUpdateIn
 
 // Delete 软删除项目角色配置表
 func (s *sProjectRole) Delete(ctx context.Context, id snowflake.JsonInt64) error {
+	if err := middleware.CheckOwnership(ctx, dao.MvpProjectRole.Ctx(ctx).Where(dao.MvpProjectRole.Columns().DeletedAt, nil), id, dao.MvpProjectRole.Columns().Id, dao.MvpProjectRole.Columns().CreatedBy); err != nil {
+		return err
+	}
 	_, err := dao.MvpProjectRole.Ctx(ctx).Where(dao.MvpProjectRole.Columns().Id, id).Data(g.Map{
 		dao.MvpProjectRole.Columns().DeletedAt: gtime.Now(),
 	}).Update()
@@ -71,7 +77,9 @@ func (s *sProjectRole) Delete(ctx context.Context, id snowflake.JsonInt64) error
 
 // BatchDelete 批量软删除项目角色配置表
 func (s *sProjectRole) BatchDelete(ctx context.Context, ids []snowflake.JsonInt64) error {
-	_, err := dao.MvpProjectRole.Ctx(ctx).WhereIn(dao.MvpProjectRole.Columns().Id, ids).Data(g.Map{
+	m := dao.MvpProjectRole.Ctx(ctx).Where(dao.MvpProjectRole.Columns().DeletedAt, nil).WhereIn(dao.MvpProjectRole.Columns().Id, ids)
+	m = middleware.ApplyDataScope(ctx, m, dao.MvpProjectRole.Columns().CreatedBy, dao.MvpProjectRole.Columns().DeptId)
+	_, err := m.Data(g.Map{
 		dao.MvpProjectRole.Columns().DeletedAt: gtime.Now(),
 	}).Update()
 	return err
@@ -83,6 +91,9 @@ func (s *sProjectRole) Detail(ctx context.Context, id snowflake.JsonInt64) (out 
 	err = dao.MvpProjectRole.Ctx(ctx).Where(dao.MvpProjectRole.Columns().Id, id).Where(dao.MvpProjectRole.Columns().DeletedAt, nil).Scan(out)
 	if err != nil {
 		return nil, err
+	}
+	if out.ID == 0 {
+		return nil, fmt.Errorf("记录不存在")
 	}
 	// 查询项目ID关联显示
 	if out.ProjectID != 0 {
@@ -191,8 +202,9 @@ func (s *sProjectRole) List(ctx context.Context, in *model.ProjectRoleListInput)
 	if err != nil {
 		return
 	}
-	// 动态排序
-	if in.OrderBy != "" {
+	// 动态排序（白名单防 SQL 注入）
+	allowedOrderBy := map[string]bool{"id": true, "status": true, "role_type": true, "created_at": true, "updated_at": true}
+	if in.OrderBy != "" && allowedOrderBy[in.OrderBy] {
 		if in.OrderDir == "desc" {
 			m = m.OrderDesc(in.OrderBy)
 		} else {
@@ -229,7 +241,9 @@ func (s *sProjectRole) BatchUpdate(ctx context.Context, in *model.ProjectRoleBat
 	if in.Status != nil {
 		data[dao.MvpProjectRole.Columns().Status] = *in.Status
 	}
-	_, err := dao.MvpProjectRole.Ctx(ctx).WhereIn(dao.MvpProjectRole.Columns().Id, in.IDs).Data(data).Update()
+	m := dao.MvpProjectRole.Ctx(ctx).Where(dao.MvpProjectRole.Columns().DeletedAt, nil).WhereIn(dao.MvpProjectRole.Columns().Id, in.IDs)
+	m = middleware.ApplyDataScope(ctx, m, dao.MvpProjectRole.Columns().CreatedBy, dao.MvpProjectRole.Columns().DeptId)
+	_, err := m.Data(data).Update()
 	return err
 }
 
@@ -260,6 +274,8 @@ func (s *sProjectRole) Import(ctx context.Context, file *ghttp.UploadFile) (succ
 		id := snowflake.Generate()
 		data := g.Map{
 			dao.MvpProjectRole.Columns().Id:        id,
+			dao.MvpProjectRole.Columns().CreatedBy: middleware.GetUserID(ctx),
+			dao.MvpProjectRole.Columns().DeptId:    middleware.GetDeptID(ctx),
 			dao.MvpProjectRole.Columns().CreatedAt: gtime.Now(),
 			dao.MvpProjectRole.Columns().UpdatedAt: gtime.Now(),
 		}

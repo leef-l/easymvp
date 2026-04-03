@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -99,20 +100,23 @@ func (c *cProject) Export(ctx context.Context, req *v1.ProjectExportReq) (res *v
 	r.Response.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	r.Response.Header().Set("Content-Disposition", `attachment; filename="project.csv"`)
 	r.Response.Write("\xEF\xBB\xBF") // UTF-8 BOM
+	// 使用 encoding/csv 正确转义，防止 CSV 注入和格式损坏
+	w := csv.NewWriter(r.Response.Writer)
 	// 表头
-	r.Response.Writeln("项目名称,项目简介,状态,暂停原因,项目全局上下文,架构师使用的AI模型ID,创建时间")
+	_ = w.Write([]string{"项目名称", "项目简介", "状态", "暂停原因", "项目全局上下文", "架构师使用的AI模型ID", "创建时间"})
 	// 数据行
 	for _, item := range list {
-		r.Response.Writefln("%v,%v,%v,%v,%v,%v,%v",
-			item.Name,
-			 item.Description,
-			 item.Status,
-			 item.PauseReason,
-			 item.GlobalContext,
-			 item.ArchitectModelID,
-			item.CreatedAt,
-		)
+		_ = w.Write([]string{
+			fmt.Sprintf("%v", item.Name),
+			fmt.Sprintf("%v", item.Description),
+			fmt.Sprintf("%v", item.Status),
+			fmt.Sprintf("%v", item.PauseReason),
+			fmt.Sprintf("%v", item.GlobalContext),
+			fmt.Sprintf("%v", item.ArchitectModelID),
+			fmt.Sprintf("%v", item.CreatedAt),
+		})
 	}
+	w.Flush()
 	return
 }
 

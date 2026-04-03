@@ -48,6 +48,9 @@ func (s *sRolePreset) Create(ctx context.Context, in *model.RolePresetCreateInpu
 
 // Update 更新角色预设模板
 func (s *sRolePreset) Update(ctx context.Context, in *model.RolePresetUpdateInput) error {
+	if err := middleware.CheckOwnership(ctx, dao.MvpRolePreset.Ctx(ctx).Where(dao.MvpRolePreset.Columns().DeletedAt, nil), in.ID, dao.MvpRolePreset.Columns().Id, dao.MvpRolePreset.Columns().CreatedBy); err != nil {
+		return err
+	}
 	data := g.Map{
 		dao.MvpRolePreset.Columns().RoleType: in.RoleType,
 		dao.MvpRolePreset.Columns().RoleLevel: in.RoleLevel,
@@ -63,6 +66,9 @@ func (s *sRolePreset) Update(ctx context.Context, in *model.RolePresetUpdateInpu
 
 // Delete 软删除角色预设模板
 func (s *sRolePreset) Delete(ctx context.Context, id snowflake.JsonInt64) error {
+	if err := middleware.CheckOwnership(ctx, dao.MvpRolePreset.Ctx(ctx).Where(dao.MvpRolePreset.Columns().DeletedAt, nil), id, dao.MvpRolePreset.Columns().Id, dao.MvpRolePreset.Columns().CreatedBy); err != nil {
+		return err
+	}
 	_, err := dao.MvpRolePreset.Ctx(ctx).Where(dao.MvpRolePreset.Columns().Id, id).Data(g.Map{
 		dao.MvpRolePreset.Columns().DeletedAt: gtime.Now(),
 	}).Update()
@@ -71,7 +77,9 @@ func (s *sRolePreset) Delete(ctx context.Context, id snowflake.JsonInt64) error 
 
 // BatchDelete 批量软删除角色预设模板
 func (s *sRolePreset) BatchDelete(ctx context.Context, ids []snowflake.JsonInt64) error {
-	_, err := dao.MvpRolePreset.Ctx(ctx).WhereIn(dao.MvpRolePreset.Columns().Id, ids).Data(g.Map{
+	m := dao.MvpRolePreset.Ctx(ctx).Where(dao.MvpRolePreset.Columns().DeletedAt, nil).WhereIn(dao.MvpRolePreset.Columns().Id, ids)
+	m = middleware.ApplyDataScope(ctx, m, dao.MvpRolePreset.Columns().CreatedBy, dao.MvpRolePreset.Columns().DeptId)
+	_, err := m.Data(g.Map{
 		dao.MvpRolePreset.Columns().DeletedAt: gtime.Now(),
 	}).Update()
 	return err
@@ -83,6 +91,9 @@ func (s *sRolePreset) Detail(ctx context.Context, id snowflake.JsonInt64) (out *
 	err = dao.MvpRolePreset.Ctx(ctx).Where(dao.MvpRolePreset.Columns().Id, id).Where(dao.MvpRolePreset.Columns().DeletedAt, nil).Scan(out)
 	if err != nil {
 		return nil, err
+	}
+	if out.ID == 0 {
+		return nil, fmt.Errorf("记录不存在")
 	}
 	// 填充模型名称
 	if out.ModelID > 0 {
@@ -118,8 +129,9 @@ func (s *sRolePreset) List(ctx context.Context, in *model.RolePresetListInput) (
 	if err != nil {
 		return
 	}
-	// 动态排序
-	if in.OrderBy != "" {
+	// 动态排序（白名单防 SQL 注入）
+	allowedOrderBy := map[string]bool{"id": true, "status": true, "role_type": true, "sort": true, "created_at": true, "updated_at": true}
+	if in.OrderBy != "" && allowedOrderBy[in.OrderBy] {
 		if in.OrderDir == "desc" {
 			m = m.OrderDesc(in.OrderBy)
 		} else {
@@ -175,6 +187,7 @@ func (s *sRolePreset) Export(ctx context.Context, in *model.RolePresetListInput)
 	if err != nil {
 		return
 	}
+	s.fillRefFields(ctx, list)
 	return
 }
 
@@ -188,7 +201,9 @@ func (s *sRolePreset) BatchUpdate(ctx context.Context, in *model.RolePresetBatch
 	if in.Status != nil {
 		data[dao.MvpRolePreset.Columns().Status] = *in.Status
 	}
-	_, err := dao.MvpRolePreset.Ctx(ctx).WhereIn(dao.MvpRolePreset.Columns().Id, in.IDs).Data(data).Update()
+	m := dao.MvpRolePreset.Ctx(ctx).Where(dao.MvpRolePreset.Columns().DeletedAt, nil).WhereIn(dao.MvpRolePreset.Columns().Id, in.IDs)
+	m = middleware.ApplyDataScope(ctx, m, dao.MvpRolePreset.Columns().CreatedBy, dao.MvpRolePreset.Columns().DeptId)
+	_, err := m.Data(data).Update()
 	return err
 }
 
@@ -219,6 +234,8 @@ func (s *sRolePreset) Import(ctx context.Context, file *ghttp.UploadFile) (succe
 		id := snowflake.Generate()
 		data := g.Map{
 			dao.MvpRolePreset.Columns().Id:        id,
+			dao.MvpRolePreset.Columns().CreatedBy: middleware.GetUserID(ctx),
+			dao.MvpRolePreset.Columns().DeptId:    middleware.GetDeptID(ctx),
 			dao.MvpRolePreset.Columns().CreatedAt: gtime.Now(),
 			dao.MvpRolePreset.Columns().UpdatedAt: gtime.Now(),
 		}

@@ -22,7 +22,8 @@ var readCmdPattern = regexp.MustCompile(`(?m)^读取[：:]\s*(.+)$`)
 
 // ExpandFileReads 解析消息中的 "读取：路径" 指令，将文件/目录内容展开拼接到消息中
 // 原始指令保留，内容追加到消息末尾
-func ExpandFileReads(content string) string {
+// baseDir 为允许读取的根目录，路径必须在其内部（防止路径遍历）
+func ExpandFileReads(content string, baseDir string) string {
 	matches := readCmdPattern.FindAllStringSubmatch(content, -1)
 	if len(matches) == 0 {
 		return content
@@ -32,12 +33,19 @@ func ExpandFileReads(content string) string {
 	totalSize := 0
 
 	for _, m := range matches {
-		path := strings.TrimSpace(m[1])
-		if path == "" {
+		rawPath := strings.TrimSpace(m[1])
+		if rawPath == "" {
 			continue
 		}
 
-		block, size := readPath(path, fileReadMaxTotal-totalSize)
+		// 路径安全校验：解析为绝对路径后检查是否在 baseDir 内
+		safePath, err := sanitizePath(rawPath, baseDir)
+		if err != nil {
+			blocks = append(blocks, fmt.Sprintf("\n> ⚠️ 拒绝读取 `%s`: %v", rawPath, err))
+			continue
+		}
+
+		block, size := readPath(safePath, fileReadMaxTotal-totalSize)
 		if block != "" {
 			blocks = append(blocks, block)
 			totalSize += size
@@ -54,6 +62,42 @@ func ExpandFileReads(content string) string {
 	}
 
 	return content + "\n\n---\n以下是读取的文件内容：\n" + strings.Join(blocks, "\n")
+}
+
+// sanitizePath 校验路径安全性，防止路径遍历攻击
+// 将路径规范化为绝对路径，确保在 baseDir 内
+func sanitizePath(rawPath string, baseDir string) (string, error) {
+	if baseDir == "" {
+		return "", fmt.Errorf("未指定项目目录")
+	}
+	absBase, err := filepath.Abs(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("基础目录无效")
+	}
+
+	var absPath string
+	if filepath.IsAbs(rawPath) {
+		absPath = filepath.Clean(rawPath)
+	} else {
+		absPath = filepath.Clean(filepath.Join(absBase, rawPath))
+	}
+
+	// 解析符号链接，获取真实路径
+	realPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		// 文件不存在时用 Clean 后的路径检查前缀
+		realPath = absPath
+	}
+	realBase, err := filepath.EvalSymlinks(absBase)
+	if err != nil {
+		realBase = absBase
+	}
+
+	if !strings.HasPrefix(realPath, realBase+string(filepath.Separator)) && realPath != realBase {
+		return "", fmt.Errorf("路径不在项目目录内")
+	}
+
+	return absPath, nil
 }
 
 // readPath 读取文件或目录，返回格式化的内容和字节数

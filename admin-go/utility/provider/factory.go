@@ -51,8 +51,12 @@ func (f *Factory) Get(cfg Config) (Provider, error) {
 		return nil, err
 	}
 
-	// 写入缓存
+	// 写入缓存（double-check：防止并发时重复创建）
 	f.mu.Lock()
+	if existing, ok := f.cache[key]; ok {
+		f.mu.Unlock()
+		return existing, nil
+	}
 	f.cache[key] = p
 	f.mu.Unlock()
 

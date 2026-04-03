@@ -104,5 +104,7 @@ func SetWorkerID(id int64) {
 	if id < 0 || id > workerMax {
 		panic(fmt.Sprintf("worker ID must be between 0 and %d", workerMax))
 	}
+	defaultGen.mu.Lock()
 	defaultGen.workerID = id
+	defaultGen.mu.Unlock()
 }

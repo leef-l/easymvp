@@ -70,8 +70,8 @@ const [Form, formApi] = useVbenForm({
       component: 'Switch',
       fieldName: 'status',
       label: '状态',
-      componentProps: { checkedValue: 1, unCheckedValue: 0 },
-      defaultValue: 1,
+      componentProps: { checkedValue: '1', unCheckedValue: '0' },
+      defaultValue: '1',
     },
   ],
 });

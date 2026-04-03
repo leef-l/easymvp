@@ -13,6 +13,7 @@ type WorkflowCreateProjectReq struct {
 	g.Meta           `path:"/workflow/create-project" method:"post" tags:"项目流程" summary:"创建项目"`
 	Name             string              `json:"name" v:"required" dc:"项目名称"`
 	Description      string              `json:"description" dc:"项目简介"`
+	WorkDir          string              `json:"workDir" v:"required|max-length:500" dc:"代码工作目录（Aider执行路径）"`
 	ArchitectModelID snowflake.JsonInt64  `json:"architectModelID" v:"required" dc:"架构师AI模型ID"`
 }
 
@@ -69,6 +70,19 @@ type WorkflowRetryTaskRes struct {
 	g.Meta `mime:"application/json"`
 }
 
+// WorkflowSkipTaskReq 跳过失败任务请求
+type WorkflowSkipTaskReq struct {
+	g.Meta    `path:"/workflow/skip-task" method:"post" tags:"项目流程" summary:"跳过失败任务"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	TaskID    snowflake.JsonInt64 `json:"taskID" v:"required" dc:"任务ID"`
+	Reason    string              `json:"reason" v:"required" dc:"跳过原因"`
+}
+
+// WorkflowSkipTaskRes 跳过失败任务响应
+type WorkflowSkipTaskRes struct {
+	g.Meta `mime:"application/json"`
+}
+
 // WorkflowProjectStatusReq 获取项目状态请求
 type WorkflowProjectStatusReq struct {
 	g.Meta    `path:"/workflow/project-status" method:"get" tags:"项目流程" summary:"获取项目状态"`
@@ -80,6 +94,7 @@ type WorkflowProjectStatusRes struct {
 	g.Meta       `mime:"application/json"`
 	Status       string            `json:"status"`
 	PauseReason  string            `json:"pauseReason,omitempty"` // 暂停原因
+	ActiveBatch  int               `json:"activeBatch"`           // 当前活跃批次号
 	TotalTasks   int               `json:"totalTasks"`
 	StatusCounts map[string]int    `json:"statusCounts"` // 各状态任务数量
 }
@@ -116,4 +131,25 @@ type RolePresetItem struct {
 	ModelID      snowflake.JsonInt64 `json:"modelID"`
 	ModelName    string             `json:"modelName"`
 	SystemPrompt string             `json:"systemPrompt"`
+}
+
+// SystemCheckReq 系统配置检测请求
+type SystemCheckReq struct {
+	g.Meta `path:"/workflow/system-check" method:"get" tags:"项目流程" summary:"系统配置检测"`
+}
+
+// SystemCheckRes 系统配置检测响应
+type SystemCheckRes struct {
+	g.Meta  `mime:"application/json"`
+	Items   []SystemCheckItem `json:"items"`
+	AllPass bool              `json:"allPass"`
+}
+
+// SystemCheckItem 单项检测结果
+type SystemCheckItem struct {
+	Key     string `json:"key"`
+	Name    string `json:"name"`
+	Status  string `json:"status"`  // ok / warning / error
+	Message string `json:"message"`
+	Link    string `json:"link"`    // 前端跳转路径
 }
