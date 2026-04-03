@@ -7,6 +7,7 @@ import type {
   RoleUpdateParams,
   RoleGrantMenuParams,
   RoleGrantDeptParams,
+  RoleGrantAiEngineParams,
 } from './types';
 
 /** API 前缀 */
@@ -77,4 +78,18 @@ export async function getRoleDeptIds(roleId: string) {
     { params: { id: roleId } },
   );
   return res?.deptIds ?? [];
+}
+
+/** 授权 AI 执行引擎 */
+export function grantRoleAiEngine(data: RoleGrantAiEngineParams) {
+  return requestClient.post(`${PREFIX}/grant-ai-engine`, data);
+}
+
+/** 获取角色已授权 AI 执行引擎编码 */
+export async function getRoleAiEngineCodes(roleId: string) {
+  const res = await requestClient.get<{ engineCodes: string[] }>(
+    `${PREFIX}/ai-engine-codes`,
+    { params: { id: roleId } },
+  );
+  return res?.engineCodes ?? [];
 }

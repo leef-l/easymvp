@@ -15,12 +15,13 @@ type cRole struct{}
 // Create 创建角色表
 func (c *cRole) Create(ctx context.Context, req *v1.RoleCreateReq) (res *v1.RoleCreateRes, err error) {
 	err = service.Role().Create(ctx, &model.RoleCreateInput{
-		ParentID: req.ParentID,
-		Title: req.Title,
-		DataScope: req.DataScope,
-		Sort: req.Sort,
-		Status: req.Status,
-		IsAdmin: req.IsAdmin,
+		ParentID:        req.ParentID,
+		Title:           req.Title,
+		DataScope:       req.DataScope,
+		DefaultAiEngine: req.DefaultAiEngine,
+		Sort:            req.Sort,
+		Status:          req.Status,
+		IsAdmin:         req.IsAdmin,
 	})
 	return
 }
@@ -28,13 +29,14 @@ func (c *cRole) Create(ctx context.Context, req *v1.RoleCreateReq) (res *v1.Role
 // Update 更新角色表
 func (c *cRole) Update(ctx context.Context, req *v1.RoleUpdateReq) (res *v1.RoleUpdateRes, err error) {
 	err = service.Role().Update(ctx, &model.RoleUpdateInput{
-		ID: req.ID,
-		ParentID: req.ParentID,
-		Title: req.Title,
-		DataScope: req.DataScope,
-		Sort: req.Sort,
-		Status: req.Status,
-		IsAdmin: req.IsAdmin,
+		ID:              req.ID,
+		ParentID:        req.ParentID,
+		Title:           req.Title,
+		DataScope:       req.DataScope,
+		DefaultAiEngine: req.DefaultAiEngine,
+		Sort:            req.Sort,
+		Status:          req.Status,
+		IsAdmin:         req.IsAdmin,
 	})
 	return
 }
@@ -56,10 +58,10 @@ func (c *cRole) Detail(ctx context.Context, req *v1.RoleDetailReq) (res *v1.Role
 func (c *cRole) List(ctx context.Context, req *v1.RoleListReq) (res *v1.RoleListRes, err error) {
 	res = &v1.RoleListRes{}
 	res.List, res.Total, err = service.Role().List(ctx, &model.RoleListInput{
-		PageNum:  req.PageNum,
-		PageSize: req.PageSize,
+		PageNum:   req.PageNum,
+		PageSize:  req.PageSize,
 		DataScope: req.DataScope,
-		Status: req.Status,
+		Status:    req.Status,
 	})
 	return
 }
@@ -104,3 +106,18 @@ func (c *cRole) GetDeptIDs(ctx context.Context, req *v1.RoleGetDeptIDsReq) (res 
 	return
 }
 
+// GrantAiEngine 角色授权AI执行引擎
+func (c *cRole) GrantAiEngine(ctx context.Context, req *v1.RoleGrantAiEngineReq) (res *v1.RoleGrantAiEngineRes, err error) {
+	err = service.Role().GrantAiEngine(ctx, &model.RoleGrantAiEngineInput{
+		ID:          req.ID,
+		EngineCodes: req.EngineCodes,
+	})
+	return
+}
+
+// GetAiEngineCodes 获取角色已授权AI执行引擎编码列表
+func (c *cRole) GetAiEngineCodes(ctx context.Context, req *v1.RoleGetAiEngineCodesReq) (res *v1.RoleGetAiEngineCodesRes, err error) {
+	res = &v1.RoleGetAiEngineCodesRes{}
+	res.EngineCodes, err = service.Role().GetAiEngineCodes(ctx, req.ID)
+	return
+}

@@ -90,7 +90,12 @@ CREATE TABLE `system_menu` (
 LOCK TABLES `system_menu` WRITE;
 /*!40000 ALTER TABLE `system_menu` DISABLE KEYS */;
 INSERT INTO `system_menu` VALUES (314202735329153024,0,'upload管理',1,'/upload',NULL,'','AppstoreOutlined',50,1,0,NULL,1,0,0,'2026-03-31 07:02:49','2026-03-31 07:02:49',NULL),(314202735383678976,314202735329153024,'文件目录',2,'/upload/dir','upload/dir/index','upload:dir:list','',0,1,0,NULL,1,0,0,'2026-03-31 07:02:49','2026-03-31 07:29:22',NULL),(314202735413039104,314202735383678976,'文件目录新增',3,NULL,NULL,'upload:dir:create','',1,0,0,NULL,1,0,0,'2026-03-31 07:02:49','2026-03-31 07:29:22',NULL),(314202735450787840,314202735383678976,'文件目录修改',3,NULL,NULL,'upload:dir:update','',2,0,0,NULL,1,0,0,'2026-03-31 07:02:49','2026-03-31 07:29:22',NULL),(314202735484342272,314202735383678976,'文件目录删除',3,NULL,NULL,'upload:dir:delete','',3,0,0,NULL,1,0,0,'2026-03-31 07:02:49','2026-03-31 07:29:22',NULL),(314202735689863168,314202735329153024,'文件记录',2,'/upload/file','upload/file/index','upload:file:list','',0,1,0,NULL,1,0,0,'2026-03-31 07:02:49','2026-03-31 07:29:22',NULL),(314202735723417600,314202735689863168,'文件记录新增',3,NULL,NULL,'upload:file:create','',1,0,0,NULL,1,0,0,'2026-03-31 07:02:49','2026-03-31 07:29:22',NULL),(314202735748583424,314202735689863168,'文件记录修改',3,NULL,NULL,'upload:file:update','',2,0,0,NULL,1,0,0,'2026-03-31 07:02:49','2026-03-31 07:29:22',NULL),(314202735786332160,314202735689863168,'文件记录删除',3,NULL,NULL,'upload:file:delete','',3,0,0,NULL,1,0,0,'2026-03-31 07:02:49','2026-03-31 07:29:22',NULL),(314202736029601792,314202735329153024,'上传配置',2,'/upload/config','upload/config/index','upload:config:list','',0,1,0,NULL,1,0,0,'2026-03-31 07:02:50','2026-03-31 07:29:22',NULL),(314202736058961920,314202736029601792,'上传配置新增',3,NULL,NULL,'upload:config:create','',1,0,0,NULL,1,0,0,'2026-03-31 07:02:50','2026-03-31 07:29:22',NULL),(314202736088322048,314202736029601792,'上传配置修改',3,NULL,NULL,'upload:config:update','',2,0,0,NULL,1,0,0,'2026-03-31 07:02:50','2026-03-31 07:29:22',NULL),(314202736117682176,314202736029601792,'上传配置删除',3,NULL,NULL,'upload:config:delete','',3,0,0,NULL,1,0,0,'2026-03-31 07:02:50','2026-03-31 07:29:22',NULL),(314202736319008768,314202735329153024,'文件目录规则',2,'/upload/dir-rule','upload/dir_rule/index','upload:dir_rule:list','',0,1,0,NULL,1,0,0,'2026-03-31 07:02:50','2026-03-31 07:29:22',NULL),(314202736348368896,314202736319008768,'文件目录规则新增',3,NULL,NULL,'upload:dir_rule:create','',1,0,0,NULL,1,0,0,'2026-03-31 07:02:50','2026-03-31 07:29:22',NULL),(314202736373534720,314202736319008768,'文件目录规则修改',3,NULL,NULL,'upload:dir_rule:update','',2,0,0,NULL,1,0,0,'2026-03-31 07:02:50','2026-03-31 07:29:22',NULL),(314202736407089152,314202736319008768,'文件目录规则删除',3,NULL,NULL,'upload:dir_rule:delete','',3,0,0,NULL,1,0,0,'2026-03-31 07:02:50','2026-03-31 07:29:22',NULL),(314246519932850176,0,'陪玩管理',1,'/play',NULL,'','game-icons:joystick',50,1,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246520134176768,314246519932850176,'会员等级',2,'/play/member-level','play/member_level/index','play:member_level:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246520167731200,314246520134176768,'会员等级新增',3,NULL,NULL,'play:member_level:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246520201285632,314246520134176768,'会员等级修改',3,NULL,NULL,'play:member_level:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246520230645760,314246520134176768,'会员等级删除',3,NULL,NULL,'play:member_level:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246520327114752,314246519932850176,'会员',2,'/play/member','play/member/index','play:member:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246520364863488,314246520327114752,'会员新增',3,NULL,NULL,'play:member:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246520406806528,314246520327114752,'会员修改',3,NULL,NULL,'play:member:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246520436166656,314246520327114752,'会员删除',3,NULL,NULL,'play:member:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246520524247040,314246519932850176,'陪玩师等级',2,'/play/coach-level','play/coach_level/index','play:coach_level:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246520566190080,314246520524247040,'陪玩师等级新增',3,NULL,NULL,'play:coach_level:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246520603938816,314246520524247040,'陪玩师等级修改',3,NULL,NULL,'play:coach_level:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246520633298944,314246520524247040,'陪玩师等级删除',3,NULL,NULL,'play:coach_level:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246520784293888,314246519932850176,'陪玩师申请',2,'/play/coach-apply','play/coach_apply/index','play:coach_apply:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246520813654016,314246520784293888,'陪玩师申请新增',3,NULL,NULL,'play:coach_apply:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246520847208448,314246520784293888,'陪玩师申请修改',3,NULL,NULL,'play:coach_apply:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246520880762880,314246520784293888,'陪玩师申请删除',3,NULL,NULL,'play:coach_apply:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246521031757824,314246519932850176,'陪玩师',2,'/play/coach','play/coach/index','play:coach:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246521065312256,314246521031757824,'陪玩师新增',3,NULL,NULL,'play:coach:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246521090478080,314246521031757824,'陪玩师修改',3,NULL,NULL,'play:coach:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246521124032512,314246521031757824,'陪玩师删除',3,NULL,NULL,'play:coach:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246521220501504,314246519932850176,'店铺',2,'/play/shop','play/shop/index','play:shop:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246521249861632,314246521220501504,'店铺新增',3,NULL,NULL,'play:shop:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246521283416064,314246521220501504,'店铺修改',3,NULL,NULL,'play:shop:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246521316970496,314246521220501504,'店铺删除',3,NULL,NULL,'play:shop:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:48','2026-03-31 09:56:48',NULL),(314246521409245184,314246519932850176,'商品分类',2,'/play/category','play/category/index','play:category:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246521442799616,314246521409245184,'商品分类新增',3,NULL,NULL,'play:category:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246521480548352,314246521409245184,'商品分类修改',3,NULL,NULL,'play:category:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246521514102784,314246521409245184,'商品分类删除',3,NULL,NULL,'play:category:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246521673486336,314246519932850176,'商品',2,'/play/goods','play/goods/index','play:goods:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246521707040768,314246521673486336,'商品新增',3,NULL,NULL,'play:goods:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246521740595200,314246521673486336,'商品修改',3,NULL,NULL,'play:goods:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246521769955328,314246521673486336,'商品删除',3,NULL,NULL,'play:goods:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246522004836352,314246519932850176,'订单',2,'/play/order','play/order/index','play:order:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246522034196480,314246522004836352,'订单新增',3,NULL,NULL,'play:order:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246522063556608,314246522004836352,'订单修改',3,NULL,NULL,'play:order:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246522092916736,314246522004836352,'订单删除',3,NULL,NULL,'play:order:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246522281660416,314246519932850176,'支付记录',2,'/play/payment','play/payment/index','play:payment:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246522323603456,314246522281660416,'支付记录新增',3,NULL,NULL,'play:payment:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246522365546496,314246522281660416,'支付记录修改',3,NULL,NULL,'play:payment:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246522415878144,314246522281660416,'支付记录删除',3,NULL,NULL,'play:payment:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246522503958528,314246519932850176,'充值方案',2,'/play/recharge-plan','play/recharge_plan/index','play:recharge_plan:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246522537512960,314246522503958528,'充值方案新增',3,NULL,NULL,'play:recharge_plan:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246522579456000,314246522503958528,'充值方案修改',3,NULL,NULL,'play:recharge_plan:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246522604621824,314246522503958528,'充值方案删除',3,NULL,NULL,'play:recharge_plan:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246522730450944,314246519932850176,'充值订单',2,'/play/recharge-order','play/recharge_order/index','play:recharge_order:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246522759811072,314246522730450944,'充值订单新增',3,NULL,NULL,'play:recharge_order:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246522789171200,314246522730450944,'充值订单修改',3,NULL,NULL,'play:recharge_order:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246522814337024,314246522730450944,'充值订单删除',3,NULL,NULL,'play:recharge_order:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246522986303488,314246519932850176,'余额流水',2,'/play/balance-log','play/balance_log/index','play:balance_log:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523015663616,314246522986303488,'余额流水新增',3,NULL,NULL,'play:balance_log:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523045023744,314246522986303488,'余额流水修改',3,NULL,NULL,'play:balance_log:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523070189568,314246522986303488,'余额流水删除',3,NULL,NULL,'play:balance_log:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523154075648,314246519932850176,'活动',2,'/play/activity','play/activity/index','play:activity:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523183435776,314246523154075648,'活动新增',3,NULL,NULL,'play:activity:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523221184512,314246523154075648,'活动修改',3,NULL,NULL,'play:activity:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523250544640,314246523154075648,'活动删除',3,NULL,NULL,'play:activity:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523330236416,314246519932850176,'活动奖励',2,'/play/activity-reward','play/activity_reward/index','play:activity_reward:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523372179456,314246523330236416,'活动奖励新增',3,NULL,NULL,'play:activity_reward:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523405733888,314246523330236416,'活动奖励修改',3,NULL,NULL,'play:activity_reward:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523430899712,314246523330236416,'活动奖励删除',3,NULL,NULL,'play:activity_reward:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523523174400,314246519932850176,'活动步骤',2,'/play/activity-step','play/activity_step/index','play:activity_step:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523556728832,314246523523174400,'活动步骤新增',3,NULL,NULL,'play:activity_step:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523581894656,314246523523174400,'活动步骤修改',3,NULL,NULL,'play:activity_step:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523615449088,314246523523174400,'活动步骤删除',3,NULL,NULL,'play:activity_step:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523749666816,314246519932850176,'活动参与记录',2,'/play/activity-join','play/activity_join/index','play:activity_join:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523779026944,314246523749666816,'活动参与记录新增',3,NULL,NULL,'play:activity_join:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523812581376,314246523749666816,'活动参与记录修改',3,NULL,NULL,'play:activity_join:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523846135808,314246523749666816,'活动参与记录删除',3,NULL,NULL,'play:activity_join:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523934216192,314246519932850176,'优惠券模板',2,'/play/coupon','play/coupon/index','play:coupon:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523959382016,314246523934216192,'优惠券模板新增',3,NULL,NULL,'play:coupon:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246523988742144,314246523934216192,'优惠券模板修改',3,NULL,NULL,'play:coupon:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246524013907968,314246523934216192,'优惠券模板删除',3,NULL,NULL,'play:coupon:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246524190068736,314246519932850176,'会员优惠券',2,'/play/coupon-member','play/coupon_member/index','play:coupon_member:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246524215234560,314246524190068736,'会员优惠券新增',3,NULL,NULL,'play:coupon_member:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246524248788992,314246524190068736,'会员优惠券修改',3,NULL,NULL,'play:coupon_member:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246524273954816,314246524190068736,'会员优惠券删除',3,NULL,NULL,'play:coupon_member:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246524471087104,314246519932850176,'第三方登录绑定',2,'/play/oauth','play/oauth/index','play:oauth:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246524504641536,314246524471087104,'第三方登录绑定新增',3,NULL,NULL,'play:oauth:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246524529807360,314246524471087104,'第三方登录绑定修改',3,NULL,NULL,'play:oauth:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246524563361792,314246524471087104,'第三方登录绑定删除',3,NULL,NULL,'play:oauth:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246524756299776,314246519932850176,'评价',2,'/play/review','play/review/index','play:review:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246524785659904,314246524756299776,'评价新增',3,NULL,NULL,'play:review:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246524815020032,314246524756299776,'评价修改',3,NULL,NULL,'play:review:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246524840185856,314246524756299776,'评价删除',3,NULL,NULL,'play:review:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246525028929536,314246519932850176,'利润分成流水',2,'/play/profit-log','play/profit_log/index','play:profit_log:list','',0,1,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246525062483968,314246525028929536,'利润分成流水新增',3,NULL,NULL,'play:profit_log:create','',1,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246525087649792,314246525028929536,'利润分成流水修改',3,NULL,NULL,'play:profit_log:update','',2,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(314246525117009920,314246525028929536,'利润分成流水删除',3,NULL,NULL,'play:profit_log:delete','',3,0,0,NULL,1,0,0,'2026-03-31 09:56:49','2026-03-31 09:56:49',NULL),(1000000000000000010,0,'系统管理',1,'/system',NULL,'','SettingOutlined',100,1,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000011,1000000000000000010,'部门管理',2,'/system/dept','system/dept/index','system:dept:list','ApartmentOutlined',1,1,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000012,1000000000000000010,'角色管理',2,'/system/role','system/role/index','system:role:list','TeamOutlined',2,1,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000013,1000000000000000010,'菜单管理',2,'/system/menu','system/menu/index','system:menu:list','MenuOutlined',3,1,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000014,1000000000000000010,'用户管理',2,'/system/users','system/users/index','system:user:list','UserOutlined',4,1,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000021,1000000000000000011,'部门新增',3,NULL,NULL,'system:dept:create','',1,0,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000022,1000000000000000011,'部门修改',3,NULL,NULL,'system:dept:update','',2,0,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000023,1000000000000000011,'部门删除',3,NULL,NULL,'system:dept:delete','',3,0,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000031,1000000000000000012,'角色新增',3,NULL,NULL,'system:role:create','',1,0,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000032,1000000000000000012,'角色修改',3,NULL,NULL,'system:role:update','',2,0,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000033,1000000000000000012,'角色删除',3,NULL,NULL,'system:role:delete','',3,0,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000034,1000000000000000012,'资源授权',3,NULL,NULL,'system:role:grant:menu','',4,0,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000035,1000000000000000012,'数据授权',3,NULL,NULL,'system:role:grant:dept','',5,0,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000041,1000000000000000013,'菜单新增',3,NULL,NULL,'system:menu:create','',1,0,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000042,1000000000000000013,'菜单修改',3,NULL,NULL,'system:menu:update','',2,0,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000043,1000000000000000013,'菜单删除',3,NULL,NULL,'system:menu:delete','',3,0,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000051,1000000000000000014,'用户新增',3,NULL,NULL,'system:user:create','',1,0,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000052,1000000000000000014,'用户修改',3,NULL,NULL,'system:user:update','',2,0,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000053,1000000000000000014,'用户删除',3,NULL,NULL,'system:user:delete','',3,0,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000060,0,'仪表盘',1,'/dashboard',NULL,'','DashboardOutlined',0,1,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000061,1000000000000000060,'分析页',2,'/analytics','dashboard/analytics/index','','AreaChartOutlined',1,1,1,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL),(1000000000000000062,1000000000000000060,'工作台',2,'/workspace','dashboard/workspace/index','','DesktopOutlined',2,1,0,NULL,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL);
-/*!40000 ALTER TABLE `system_menu` ENABLE KEYS */;
+INSERT INTO `system_menu` (`id`,`parent_id`,`title`,`type`,`path`,`component`,`permission`,`icon`,`sort`,`is_show`,`is_cache`,`link_url`,`status`,`created_by`,`dept_id`,`created_at`,`updated_at`,`deleted_at`)
+SELECT 315020000000000001,315012657751003136,'执行引擎配置',2,'/ai/engine','ai/engine/index','ai:engine:list','',1,1,0,NULL,1,0,0,'2026-04-03 11:02:29','2026-04-03 11:02:29',NULL
+WHERE NOT EXISTS (SELECT 1 FROM `system_menu` WHERE `id` = 315020000000000001);
+INSERT INTO `system_menu` (`id`,`parent_id`,`title`,`type`,`path`,`component`,`permission`,`icon`,`sort`,`is_show`,`is_cache`,`link_url`,`status`,`created_by`,`dept_id`,`created_at`,`updated_at`,`deleted_at`)
+SELECT 315020000000000011,315012657751003136,'执行任务',2,'/ai/task','ai/task/index','ai:task:list','',2,1,0,NULL,1,0,0,'2026-04-03 11:02:30','2026-04-03 11:02:30',NULL
+WHERE NOT EXISTS (SELECT 1 FROM `system_menu` WHERE `id` = 315020000000000011);/*!40000 ALTER TABLE `system_menu` ENABLE KEYS */;
 UNLOCK TABLES;
 
 --
@@ -107,6 +112,8 @@ CREATE TABLE `system_role` (
   `data_scope` tinyint NOT NULL DEFAULT '1' COMMENT '数据范围:1=全部,2=本部门及以下,3=本部门,4=仅本人,5=自定义',
   `sort` int NOT NULL DEFAULT '0' COMMENT '排序（升序）',
   `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态:0=关闭,1=开启',
+  `is_admin` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否超级管理员:0=否,1=是',
+  `default_ai_engine` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '默认AI执行引擎: aider/openhands',
   `created_by` bigint unsigned DEFAULT NULL COMMENT '创建人ID',
   `dept_id` bigint unsigned DEFAULT NULL COMMENT '所属部门ID',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
@@ -124,8 +131,33 @@ CREATE TABLE `system_role` (
 
 LOCK TABLES `system_role` WRITE;
 /*!40000 ALTER TABLE `system_role` DISABLE KEYS */;
-INSERT INTO `system_role` VALUES (1000000000000000002,0,'超级管理员',1,0,1,0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL);
+INSERT INTO `system_role` VALUES (1000000000000000002,0,'超级管理员',1,0,1,1,'openhands',0,1000000000000000001,'2026-03-30 21:20:22','2026-03-30 21:20:22',NULL);
 /*!40000 ALTER TABLE `system_role` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `system_role_ai_engine`
+--
+
+DROP TABLE IF EXISTS `system_role_ai_engine`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `system_role_ai_engine` (
+  `role_id` bigint unsigned NOT NULL COMMENT '角色ID',
+  `engine_code` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '引擎编码',
+  PRIMARY KEY (`role_id`,`engine_code`),
+  KEY `idx_engine_code` (`engine_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='角色可用AI执行引擎';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `system_role_ai_engine`
+--
+
+LOCK TABLES `system_role_ai_engine` WRITE;
+/*!40000 ALTER TABLE `system_role_ai_engine` DISABLE KEYS */;
+INSERT INTO `system_role_ai_engine` VALUES (1000000000000000002,'aider'),(1000000000000000002,'openhands');
+/*!40000 ALTER TABLE `system_role_ai_engine` ENABLE KEYS */;
 UNLOCK TABLES;
 
 --
@@ -265,6 +297,126 @@ INSERT INTO `system_users` VALUES (1000000000000000003,'admin','240be518fabd2724
 UNLOCK TABLES;
 
 --
+-- Table structure for table `ai_engine`
+--
+
+DROP TABLE IF EXISTS `ai_engine`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `ai_engine` (
+  `id` bigint unsigned NOT NULL COMMENT '主键ID',
+  `code` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '引擎编码: aider/openhands',
+  `name` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '引擎名称',
+  `description` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '说明',
+  `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态:1启用 0禁用',
+  `sort` int NOT NULL DEFAULT '0' COMMENT '排序',
+  `created_by` bigint unsigned NOT NULL DEFAULT '0' COMMENT '创建人',
+  `dept_id` bigint unsigned NOT NULL DEFAULT '0' COMMENT '部门ID',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_engine_code` (`code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI执行引擎定义表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+LOCK TABLES `ai_engine` WRITE;
+/*!40000 ALTER TABLE `ai_engine` DISABLE KEYS */;
+INSERT INTO `ai_engine` VALUES
+(1000000000000001001,'aider','Aider','本地命令行代码执行引擎',1,10,1,0,'2026-04-02 00:00:00','2026-04-02 00:00:00',NULL),
+(1000000000000001002,'openhands','OpenHands','远程Agent执行引擎',1,20,1,0,'2026-04-02 00:00:00','2026-04-02 00:00:00',NULL);
+/*!40000 ALTER TABLE `ai_engine` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `ai_engine_config`
+--
+
+DROP TABLE IF EXISTS `ai_engine_config`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `ai_engine_config` (
+  `id` bigint unsigned NOT NULL COMMENT '主键ID',
+  `engine_code` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '引擎编码',
+  `base_url` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '服务地址',
+  `api_key` text COLLATE utf8mb4_unicode_ci COMMENT 'API Key',
+  `default_model_id` bigint unsigned DEFAULT NULL COMMENT '默认模型ID',
+  `timeout_seconds` int NOT NULL DEFAULT '600' COMMENT '超时时间(秒)',
+  `max_steps` int NOT NULL DEFAULT '20' COMMENT '最大执行步数',
+  `workspace_root` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '工作区根目录',
+  `command_template` varchar(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '命令模板',
+  `callback_url` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '回调地址',
+  `callback_secret` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '回调密钥',
+  `extra_config` json DEFAULT NULL COMMENT '额外配置JSON',
+  `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态:1启用 0禁用',
+  `created_by` bigint unsigned NOT NULL DEFAULT '0' COMMENT '创建人',
+  `dept_id` bigint unsigned NOT NULL DEFAULT '0' COMMENT '部门ID',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_engine_config_engine_code` (`engine_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI执行引擎配置表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `ai_task`
+--
+
+DROP TABLE IF EXISTS `ai_task`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `ai_task` (
+  `id` bigint unsigned NOT NULL COMMENT '主键ID',
+  `title` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '任务标题',
+  `engine_code` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '执行引擎',
+  `role_id` bigint unsigned DEFAULT NULL COMMENT '发起时角色ID',
+  `user_id` bigint unsigned NOT NULL COMMENT '发起用户ID',
+  `project_id` bigint unsigned DEFAULT NULL COMMENT '项目ID',
+  `repo_path` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '仓库路径',
+  `worktree_path` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '执行工作目录',
+  `branch_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '分支名称',
+  `instruction` longtext COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '用户指令',
+  `engine_config_snapshot` json DEFAULT NULL COMMENT '执行时配置快照',
+  `request_payload` json DEFAULT NULL COMMENT '请求体',
+  `response_summary` longtext COLLATE utf8mb4_unicode_ci COMMENT '执行结果摘要',
+  `error_message` longtext COLLATE utf8mb4_unicode_ci COMMENT '错误信息',
+  `status` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'pending/running/success/failed/cancelled',
+  `started_at` datetime DEFAULT NULL COMMENT '开始时间',
+  `finished_at` datetime DEFAULT NULL COMMENT '结束时间',
+  `created_by` bigint unsigned NOT NULL DEFAULT '0' COMMENT '创建人',
+  `dept_id` bigint unsigned NOT NULL DEFAULT '0' COMMENT '部门ID',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ai_task_user_id` (`user_id`),
+  KEY `idx_ai_task_engine_code` (`engine_code`),
+  KEY `idx_ai_task_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI执行任务表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `ai_task_log`
+--
+
+DROP TABLE IF EXISTS `ai_task_log`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `ai_task_log` (
+  `id` bigint unsigned NOT NULL COMMENT '主键ID',
+  `task_id` bigint unsigned NOT NULL COMMENT '任务ID',
+  `seq` int NOT NULL DEFAULT '0' COMMENT '日志序号',
+  `log_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'stdout' COMMENT 'stdout/stderr/system/event',
+  `content` longtext COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '日志内容',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ai_task_log_task_id` (`task_id`),
+  KEY `idx_ai_task_log_task_seq` (`task_id`,`seq`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI任务执行日志';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Dumping routines for database 'gbaseadmin'
 --
 !40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
@@ -278,3 +430,4 @@ UNLOCK TABLES;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
 -- Dump completed on 2026-03-31 10:01:48
+

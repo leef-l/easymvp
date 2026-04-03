@@ -12,7 +12,7 @@ gfcli:
   gen:
     dao:
       - link: "mysql:easymvp:JKcHFJYXnkrB6BXE@tcp(127.0.0.1:3306)/easymvp?charset=utf8mb4"
-        tables: "ai_model,ai_plan,ai_provider"
+        tables: "ai_engine,ai_engine_config,ai_model,ai_plan,ai_provider,ai_task,ai_task_log"
         descriptionTag: true
         noJsonTag: true
         noModelComment: false

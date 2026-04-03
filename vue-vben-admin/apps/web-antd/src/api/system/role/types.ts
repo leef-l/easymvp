@@ -7,6 +7,7 @@ export interface RoleItem {
   roleTitle?: string;
   title: string;
   dataScope?: number;
+  defaultAiEngine?: string;
   sort?: number;
   status?: number;
   isAdmin?: number;
@@ -28,6 +29,7 @@ export interface RoleCreateParams {
   parentID?: string;
   title: string;
   dataScope?: number;
+  defaultAiEngine?: string;
   sort?: number;
   status?: number;
   isAdmin?: number;
@@ -39,6 +41,7 @@ export interface RoleUpdateParams {
   parentID?: string;
   title: string;
   dataScope?: number;
+  defaultAiEngine?: string;
   sort?: number;
   status?: number;
   isAdmin?: number;
@@ -55,4 +58,10 @@ export interface RoleGrantDeptParams {
   id: string;
   dataScope: number;
   deptIds: string[];
+}
+
+/** 角色授权 AI 引擎参数 */
+export interface RoleGrantAiEngineParams {
+  id: string;
+  engineCodes: string[];
 }
