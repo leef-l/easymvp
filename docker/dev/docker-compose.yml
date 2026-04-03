@@ -18,6 +18,7 @@ x-admin-go-env: &admin-go-env
   DB_NAME: ${DB_NAME:-easymvp}
   JWT_SECRET: ${JWT_SECRET:-easymvp-secret-key}
   GOPROXY: ${GO_PROXY:-https://goproxy.cn,direct}
+  PATH: /usr/local/go/bin:/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.local/share/uv/tools/aider-chat/bin:/root/.local/share/uv/tools/openhands/bin
 
 services:
   mysql:

@@ -45,5 +45,19 @@ EOF
 
 export GF_GCFG_FILE="${CONFIG_FILE}"
 
+export PATH="/usr/local/go/bin:/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.local/share/uv/tools/aider-chat/bin:/root/.local/share/uv/tools/openhands/bin:${PATH:-}"
+
+if [[ -x "/root/.local/share/uv/tools/aider-chat/bin/aider" ]]; then
+  ln -sf /root/.local/share/uv/tools/aider-chat/bin/aider /usr/local/bin/aider
+fi
+
+if [[ -x "/root/.local/share/uv/tools/openhands/bin/openhands" ]]; then
+  ln -sf /root/.local/share/uv/tools/openhands/bin/openhands /usr/local/bin/openhands
+fi
+
+if [[ -x "/root/.local/share/uv/tools/openhands/bin/openhands-acp" ]]; then
+  ln -sf /root/.local/share/uv/tools/openhands/bin/openhands-acp /usr/local/bin/openhands-acp
+fi
+
 cd "/workspace/admin-go/app/${APP_NAME}"
 exec go run main.go

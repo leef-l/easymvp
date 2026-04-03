@@ -25,8 +25,11 @@ const { getEnabledTransition, getTransitionName } = useLayoutHook();
  * 是否显示component
  * @param route
  */
-const showComponent = (route: RouteLocationNormalizedLoadedGeneric) => {
-  return !route.meta.domCached && unref(renderRouteView);
+const showComponent = (
+  route: RouteLocationNormalizedLoadedGeneric,
+  component?: unknown,
+) => {
+  return Boolean(component) && !route.meta.domCached && unref(renderRouteView);
 };
 </script>
 
@@ -40,48 +43,40 @@ const showComponent = (route: RouteLocationNormalizedLoadedGeneric) => {
         :route="route"
         v-if="route.meta.domCached"
       />
-      <Transition
-        v-if="getEnabledTransition"
-        :name="getTransitionName(route)"
-        appear
-        mode="out-in"
-      >
-        <KeepAlive
-          v-if="keepAlive"
-          :exclude="getExcludeCachedTabs"
-          :include="getCachedTabs"
+      <template v-else-if="showComponent(route, Component)">
+        <Transition
+          v-if="getEnabledTransition"
+          :name="getTransitionName(route)"
+          appear
+          mode="out-in"
         >
-          <component
-            :is="transformComponent(Component, route)"
-            v-if="showComponent(route)"
-            v-show="!route.meta.iframeSrc"
-            :key="getTabKey(route)"
-          />
-        </KeepAlive>
-        <component
-          :is="Component"
-          v-else-if="showComponent(route)"
-          :key="getTabKey(route)"
-        />
-      </Transition>
-      <template v-else>
-        <KeepAlive
-          v-if="keepAlive"
-          :exclude="getExcludeCachedTabs"
-          :include="getCachedTabs"
-        >
-          <component
-            :is="transformComponent(Component, route)"
-            v-if="showComponent(route)"
-            v-show="!route.meta.iframeSrc"
-            :key="getTabKey(route)"
-          />
-        </KeepAlive>
-        <component
-          :is="Component"
-          v-else-if="showComponent(route)"
-          :key="getTabKey(route)"
-        />
+          <KeepAlive
+            v-if="keepAlive"
+            :exclude="getExcludeCachedTabs"
+            :include="getCachedTabs"
+          >
+            <component
+              :is="transformComponent(Component, route)"
+              v-show="!route.meta.iframeSrc"
+              :key="getTabKey(route)"
+            />
+          </KeepAlive>
+          <component :is="Component" v-else :key="getTabKey(route)" />
+        </Transition>
+        <template v-else>
+          <KeepAlive
+            v-if="keepAlive"
+            :exclude="getExcludeCachedTabs"
+            :include="getCachedTabs"
+          >
+            <component
+              :is="transformComponent(Component, route)"
+              v-show="!route.meta.iframeSrc"
+              :key="getTabKey(route)"
+            />
+          </KeepAlive>
+          <component :is="Component" v-else :key="getTabKey(route)" />
+        </template>
       </template>
     </RouterView>
   </div>

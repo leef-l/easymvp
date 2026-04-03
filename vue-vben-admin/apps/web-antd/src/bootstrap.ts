@@ -70,6 +70,7 @@ async function bootstrap(namespace: string) {
     }
   });
 
+  await router.isReady();
   app.mount('#app');
 }
 

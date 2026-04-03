@@ -14,7 +14,7 @@ import { preferences, usePreferences } from '@vben/preferences';
  * @param route
  */
 export function transformComponent(
-  component: VNode,
+  component: null | undefined | VNode,
   route: RouteLocationNormalizedLoadedGeneric,
 ) {
   // 组件视图未找到，如果有设置后备视图，则返回后备视图，如果没有，则抛出错误

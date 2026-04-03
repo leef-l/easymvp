@@ -14,6 +14,7 @@ ENV CGO_ENABLED=0 \
     UV_DEFAULT_INDEX=${PIP_INDEX_URL} \
     UV_INDEX_URL=${PIP_INDEX_URL} \
     UV_LOCK_TIMEOUT=600 \
+    UV_PYTHON_INSTALL_DIR=/root/.local/share/uv/python \
     PATH=/root/.local/bin:${PATH}
 
 WORKDIR /workspace/admin-go
@@ -30,6 +31,14 @@ RUN apt-get update \
     && python3 -m pip install -q --default-timeout 120 --retries 10 \
         --break-system-packages \
         -i "${PIP_INDEX_URL}" uv \
+    && uv python install 3.12 \
+    && uv tool install --python 3.12 aider-chat \
+    && uv tool install --python 3.12 openhands \
+    && ln -sf /root/.local/share/uv/tools/aider-chat/bin/aider /usr/local/bin/aider \
+    && ln -sf /root/.local/share/uv/tools/openhands/bin/openhands /usr/local/bin/openhands \
+    && ln -sf /root/.local/share/uv/tools/openhands/bin/openhands-acp /usr/local/bin/openhands-acp \
+    && aider --version \
+    && openhands --help >/dev/null \
     && rm -rf /var/lib/apt/lists/*
 
 COPY go.mod go.sum ./
