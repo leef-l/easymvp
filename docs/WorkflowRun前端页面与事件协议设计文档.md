@@ -654,23 +654,26 @@ Workflow Dashboard 初始化建议并行请求：
 
 ## 十二、实施顺序
 
-### 12.1 第一阶段
+### 12.1 第一阶段 ✅ 已落地
 
-- 项目页接入 `engineVersion`
-- Workflow Dashboard 基础版
+- 项目页接入 `engineVersion`（`project/modules/form.vue` 引擎版本选择）
+- Workflow Dashboard 基础版（`workflow/dashboard.vue` 已接通 `getProjectStatus` 真实数据）
+- Review Workspace 基础版（`workflow/review.vue` 审核状态/问题列表/手动审批驳回）
+- 前端状态常量同步（`consts.ts` 8 个阶段化状态 + 阶段类型映射）
+- `workflow/index.ts` API 层（`ProjectStatusResult` 含 V2 聚合字段）
+
+### 12.2 第二阶段（下一步）
+
+- Plan Design 页面（蓝图表、版本列表、版本 diff）
+- Review Workspace 完善（Issue Table 高级筛选、Stage Task Card）
 - 新 SSE workflow event 通道
-
-### 12.2 第二阶段
-
-- Plan Design 页面
-- Review Workspace 页面
-- review issue 表格与阶段任务卡片
 
 ### 12.3 第三阶段
 
 - Execution Console
 - Resource Lock 面板
 - Task Chain 抽屉
+- Batch Board
 
 ### 12.4 第四阶段
 

@@ -73,6 +73,14 @@
 2. 新后端模块可编译
 3. 项目创建可选择 `workflow_v2`
 
+### 3.4 实际进度：✅ 基本完成（2026-04-04）
+
+- 10 张新表已建成并执行
+- DAO/Entity/DO 已生成
+- `workflow/` 目录骨架（orchestrator/runtime/event/repo/domain/stage/scheduler/compat）已完成
+- runtime manager、event publisher 已实现
+- 前端 engineVersion 选择已落地
+
 ---
 
 ## 四、M2：设计阶段版本化
@@ -103,6 +111,22 @@
 1. 新项目每次拆分都生成新版本
 2. 旧版本可查询
 3. 不再覆盖旧任务
+
+### 4.4 实际进度：✅ 已完成（2026-04-04）
+
+后端已落地：
+- PlanVersionService（创建、提交审核、通过、驳回、版本号递增）
+- BlueprintCreator 回调模式（避免循环依赖）
+- 从 architect reply 生成 plan_version + task_blueprint
+- controller V2 分支（ConfirmPlan/ParseTasks 走蓝图路径）
+
+前端已落地：
+- 项目创建表单 engineVersion 选择
+
+未完成（可后置到 M6）：
+- Plan Design 独立页面
+- 版本 diff 面板
+- 版本 supersede 全流程可视化
 
 ---
 
@@ -138,6 +162,19 @@
 3. 审核拒绝可回退设计阶段
 4. 审核通过不再依赖旧 `draft task`
 
+### 5.4 实际进度：✅ 已完成（2026-04-04）
+
+后端已落地：
+- ReviewStageService 完整审核流程（precheck → auditor → coordinator → summary）
+- ReviewIssue 独立落库
+- 审核结论状态机（approve → 推进 execute / reject → 回退 design）
+- 手动审批/驳回 API
+- DesignRollbackFn 回调模式
+
+前端已落地：
+- `workflow/review.vue` 审核工作台（状态、问题列表、手动审批/驳回）
+- Review API（reviewStatus/reviewIssues/manualApprove/manualReject）
+
 ---
 
 ## 六、M4：执行阶段迁移
@@ -169,6 +206,33 @@
 1. 新项目执行阶段不再写旧 `mvp_task`
 2. 资源锁可视化
 3. 任务状态与执行流实时一致
+
+### 6.4 实际进度：🔶 大部分完成 + CR 收口（2026-04-04）
+
+后端已落地：
+- TaskService.InstantiateFromBlueprint（蓝图 → domain_task）
+- DomainTaskScheduler（批次门控 + 资源锁 + 并发控制 + 依赖检查）
+- ExecuteStageService + 执行器对接（aider/chat 桥接旧 engine）
+- review 通过 → execute stage 自动推进（CR-1 收口）
+- V2 Pause/Resume 分流到新 WorkflowService + DomainTaskScheduler（CR-2 收口）
+- V2 RetryTask/SkipTask 分流到新任务服务（CR-7 收口）
+- Resume 后重建 runtime context（CR-6 收口）
+- 审核异步链挂到 runtime context（CR-3 收口）
+- ProjectStatusAdapter 最小可用实现（P1-1）
+- project-status API V2 聚合字段（CR-4 收口）
+
+前端已落地：
+- Dashboard 接通真实 API（CR-5 收口）
+
+未完成（M5/M6 阶段）：
+- Execution Console 独立页面
+- Batch Board / Resource Lock Panel / Task Chain Drawer
+- watchdog v2（当前复用旧 watchdog 逻辑）
+
+P0 校准已完成：
+- WorkflowRun 状态从扁平改为阶段化（designing/reviewing/executing/reworking/paused/completed/failed/canceled）
+- FailStage 字段 fail_reason → error_message
+- CreateRun → StartDesign 语义闭环
 
 ---
 

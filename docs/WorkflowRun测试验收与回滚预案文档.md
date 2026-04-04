@@ -38,6 +38,37 @@
 - 兼容老项目
 - 回滚路径
 
+### 2.3 当前双轨期说明（截至 2026-04-04）
+
+当前系统处于**新旧引擎双轨运行期**，理解双轨边界是测试的前提：
+
+**旧链路（Legacy）**：
+- `internal/engine/` 仍是 legacy 项目的主执行链
+- `mvp_task` 表 + `engine.Scheduler` + `engine.Executor` + `engine.Watchdog`
+- 所有 `engine_version != 'workflow_v2'` 的项目走此链路
+
+**新链路（Workflow V2）**：
+- `internal/workflow/` 是新内核
+- `mvp_workflow_run` + `mvp_stage_run` + `mvp_domain_task` + `DomainTaskScheduler`
+- 所有 `engine_version = 'workflow_v2'` 的项目走此链路
+
+**控制面分流点**：
+- `CreateProject`：按 `engineVersion` 决定是否创建 `workflow_run`
+- `ConfirmPlan`：V2 走蓝图路径，Legacy 走旧调度器
+- `Pause/Resume`：按 `engine_version` 分流到不同服务
+- `RetryTask/SkipTask`：按 `engine_version` 分流到不同任务表
+- `ProjectStatus`：V2 返回 `workflowStatus/currentStage/progressPercent` 等聚合字段
+
+**共享部分**：
+- `engine.ChatEngine`（对话引擎）两套共用
+- `engine.AiderRunner`（Aider 执行器）两套共用
+- AI 模型解析（`ResolveModelInfo`）由 `executor_bridge.go` 导出供新链路调用
+
+**测试重点**：
+- 新旧项目在同一系统中并行运行时互不干扰
+- V2 项目的 Pause/Resume/Retry/Skip 不会误走旧调度器
+- Legacy 项目不受新代码路径影响
+
 ---
 
 ## 三、测试分层
@@ -287,7 +318,14 @@
 - 关闭 Workflow V2 开关
 - 停止新架构调度器
 
-### 8.3 不建议的回滚方式
+### 8.3 双轨期回滚要点
+
+1. 回滚不需要删除新表——新旧表完全独立，旧链路不读新表
+2. V2 项目如需回退到 Legacy，将 `engine_version` 改回 `legacy` 即可，后续操作走旧链路
+3. 已在新链路中产生的 `workflow_run/stage_run/domain_task` 数据保留，不需要迁移回旧表
+4. 控制面分流基于 `engine_version` 字段，修改该字段即可切换链路
+
+### 8.4 不建议的回滚方式
 
 - 删除新表
 - 强制迁回旧任务表
