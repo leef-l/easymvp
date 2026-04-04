@@ -312,7 +312,7 @@ func (p *TaskParser) normalizeTasks(ctx context.Context, tasks []ArchitectTask, 
 }
 
 // ConfirmDraftTasks 确认草稿任务：draft → pending
-// 通过状态机 CAS 逐条转换，避免绕过合法性校验
+// 全量确认：所有 draft 必须全部成功，任何失败则回滚已转换的任务
 func (p *TaskParser) ConfirmDraftTasks(ctx context.Context, projectID int64) (int, error) {
 	taskIDs, err := g.DB().Model("mvp_task").
 		Where("project_id", projectID).
@@ -323,19 +323,32 @@ func (p *TaskParser) ConfirmDraftTasks(ctx context.Context, projectID int64) (in
 	if err != nil {
 		return 0, err
 	}
+	if len(taskIDs) == 0 {
+		return 0, nil
+	}
 
-	confirmed := 0
+	// 逐条 CAS 转换，记录已成功的 ID 用于失败时回滚
+	var confirmedIDs []int64
 	for _, idVal := range taskIDs {
 		rows, err := updateTaskStatus(ctx, idVal.Int64(), "draft", "pending", nil)
-		if err != nil {
-			g.Log().Warningf(ctx, "[ConfirmDraftTasks] task=%d draft→pending 失败: %v", idVal.Int64(), err)
-			continue
+		if err != nil || rows == 0 {
+			// 部分失败：回滚已转换的任务
+			g.Log().Errorf(ctx, "[ConfirmDraftTasks] task=%d draft→pending 失败，回滚已确认的 %d 个任务: %v",
+				idVal.Int64(), len(confirmedIDs), err)
+			for _, rollbackID := range confirmedIDs {
+				if _, rbErr := updateTaskStatus(ctx, rollbackID, "pending", "draft", nil); rbErr != nil {
+					g.Log().Errorf(ctx, "[ConfirmDraftTasks] 回滚 task=%d pending→draft 失败: %v", rollbackID, rbErr)
+				}
+			}
+			errMsg := "CAS 未命中"
+			if err != nil {
+				errMsg = err.Error()
+			}
+			return 0, fmt.Errorf("确认任务 %d 失败: %s，已回滚 %d 个已确认任务", idVal.Int64(), errMsg, len(confirmedIDs))
 		}
-		if rows > 0 {
-			confirmed++
-		}
+		confirmedIDs = append(confirmedIDs, idVal.Int64())
 	}
-	return confirmed, nil
+	return len(confirmedIDs), nil
 }
 
 // GetDraftCount 获取项目草稿任务数量
