@@ -204,6 +204,11 @@ func (s *WorkflowService) Resume(ctx context.Context, workflowRunID int64) error
 	if rows == 0 {
 		return fmt.Errorf("工作流恢复失败（并发冲突）")
 	}
+
+	// 重建 runtime context（Pause 时已 Cancel）
+	projectID := wfRun["project_id"].Int64()
+	s.runtimeMgr.Create(workflowRunID, projectID)
+
 	return nil
 }
 

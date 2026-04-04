@@ -171,26 +171,81 @@ func (c *cWorkflow) Resume(ctx context.Context, req *v1.WorkflowResumeReq) (res 
 
 // RetryTask 重新执行失败任务
 func (c *cWorkflow) RetryTask(ctx context.Context, req *v1.WorkflowRetryTaskReq) (res *v1.WorkflowRetryTaskRes, err error) {
-	if err := checkProjectOwnership(ctx, int64(req.ProjectID)); err != nil {
+	projectID := int64(req.ProjectID)
+	taskID := int64(req.TaskID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
 	}
-	engine.GetWatchdog().ResetRetryCount(int64(req.TaskID))
-	err = engine.GetScheduler().RetryTask(int64(req.ProjectID), int64(req.TaskID))
-	if err != nil {
-		return nil, err
+
+	gw := compat.NewLegacyGateway()
+	isV2, _ := gw.IsWorkflowV2(ctx, projectID)
+
+	if isV2 {
+		// V2：通过 domainTask.TaskService 重试
+		taskSvc := orchestrator.GetExecuteStageService()
+		_ = taskSvc // 通过 registry 拿 TaskService
+		// 直接操作 domain_task: failed → pending
+		_, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
+			Where("id", taskID).Where("status", "failed").
+			Update(g.Map{
+				"status":     "pending",
+				"retry_count": g.Map{"retry_count": "retry_count + 1"},
+				"result":     nil,
+				"updated_at": g.Map{"updated_at": "NOW()"},
+			})
+		if err != nil {
+			return nil, err
+		}
+		// 调度器下一个 poll 会自动拾取
+	} else {
+		// Legacy
+		engine.GetWatchdog().ResetRetryCount(taskID)
+		if err := engine.GetScheduler().RetryTask(projectID, taskID); err != nil {
+			return nil, err
+		}
 	}
+
 	return &v1.WorkflowRetryTaskRes{}, nil
 }
 
 // SkipTask 跳过失败任务（防止批次永久阻塞）
 func (c *cWorkflow) SkipTask(ctx context.Context, req *v1.WorkflowSkipTaskReq) (res *v1.WorkflowSkipTaskRes, err error) {
-	if err := checkProjectOwnership(ctx, int64(req.ProjectID)); err != nil {
+	projectID := int64(req.ProjectID)
+	taskID := int64(req.TaskID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
 	}
-	err = engine.GetScheduler().SkipTask(ctx, int64(req.ProjectID), int64(req.TaskID), req.Reason)
-	if err != nil {
-		return nil, err
+
+	gw := compat.NewLegacyGateway()
+	isV2, _ := gw.IsWorkflowV2(ctx, projectID)
+
+	if isV2 {
+		// V2：跳过领域任务 (pending/failed → completed, result=skipped)
+		result, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
+			Where("id", taskID).
+			WhereIn("status", g.Slice{"pending", "failed"}).
+			Update(g.Map{
+				"status":       "completed",
+				"result":       "skipped",
+				"completed_at": g.Map{"completed_at": "NOW()"},
+				"updated_at":   g.Map{"updated_at": "NOW()"},
+			})
+		if err != nil {
+			return nil, err
+		}
+		rows, _ := result.RowsAffected()
+		if rows == 0 {
+			return nil, fmt.Errorf("任务不在可跳过的状态")
+		}
+		// 通知调度器重新调度（可能解锁后续批次）
+		_ = orchestrator.GetTaskScheduler().OnTaskCompleted(ctx, taskID)
+	} else {
+		// Legacy
+		if err := engine.GetScheduler().SkipTask(ctx, projectID, taskID, req.Reason); err != nil {
+			return nil, err
+		}
 	}
+
 	return &v1.WorkflowSkipTaskRes{}, nil
 }
 
