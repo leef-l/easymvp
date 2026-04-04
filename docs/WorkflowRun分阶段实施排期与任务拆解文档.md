@@ -220,6 +220,8 @@
 - 审核异步链挂到 runtime context（CR-3 收口）
 - ProjectStatusAdapter 最小可用实现（P1-1）
 - project-status API V2 聚合字段（CR-4 收口）
+- RetryTask 检查 RowsAffected，避免 V2 假成功（CR-8 收口）
+- execute 启动失败不再静默吞掉，开始收紧“审核成功但执行未启动”的假成功语义（CR-9 收口）
 
 前端已落地：
 - Dashboard 接通真实 API（CR-5 收口）
@@ -228,6 +230,120 @@
 - Execution Console 独立页面
 - Batch Board / Resource Lock Panel / Task Chain Drawer
 - watchdog v2（当前复用旧 watchdog 逻辑）
+- review → execute 的失败语义仍未完全原子化，当前已从“静默吞掉”提升为“显式报错/日志”，但还不是强一致事务阶段
+
+### 6.5 当前判断：M4 已进入“主链可用收口期”
+
+截至 `1b0b0a5`：
+
+1. WorkflowRun 主链已经不再是“骨架状态”，而是进入了可运行主链收口阶段。
+2. Claude 两轮 code review 修正（`07b0662`、`7f3dcdd`）以及后续补尾巴提交（`1b0b0a5`）已经把大部分 P0/P1 主链问题补掉。
+3. 当前 M4 剩余工作已从“大块建模”转向“执行控制台、可观测、失败一致性、隔离能力”。
+
+因此，从排期上不再建议继续把 M4 看成“尚未成型阶段”，而应视为：
+
+- 主链已成型
+- 工程化能力待补齐
+
+---
+
+## 七、M4.5：Git Worktree 任务级环境隔离
+
+### 7.1 目标
+
+在 WorkflowRun 执行主链已经基本稳定后，为写仓任务引入轻量级任务环境隔离。
+
+目标不是替代 WorkflowRun 主链，而是作为 M4 的执行层增强能力，优先解决：
+
+1. 主工作区污染
+2. 多任务写仓互相影响
+3. Aider / OpenHands / 未来 CLI 执行器缺少隔离
+
+### 7.2 为什么放在 M4 后、M5 前
+
+原因：
+
+1. 当前 WorkflowRun 主链已经基本闭环，可以承接执行层增强。
+2. 如果在 M2/M3 阶段就接入 worktree，会反复返工执行主链。
+3. 如果等到所有执行器都接完再做，主工作区污染会持续积累。
+
+因此，最合适的插入点是：
+
+- 在 M4 主链闭环后开始
+- 在 M5/M6 大规模前端与返工能力之前落地
+
+### 7.3 范围
+
+第一阶段只覆盖：
+
+1. `workflow_v2`
+2. 写仓任务
+3. 优先 `aider`
+
+暂不覆盖：
+
+1. legacy 主链
+2. `chat`
+3. 重型容器沙箱
+
+### 7.4 任务拆解
+
+#### 后端
+
+1. 新增 `mvp_task_workspace`
+2. 新增 `workspace/` 模块
+3. 实现 `git worktree prepare/cleanup`
+4. 在 execute 链路中接入 workspace manager
+5. Aider 改为使用 task workspace
+6. 任务结束后支持保留/清理 worktree
+
+#### 文档与运维
+
+1. 清理策略
+2. 回写策略
+3. 容量与磁盘占用监控
+
+### 7.5 验收标准
+
+1. `workflow_v2 + aider` 任务默认不直接在主工作区运行
+2. 失败任务不会直接污染主工作区
+3. 每个任务都能定位独立 workspace
+4. 清理策略可执行
+
+### 7.6 当前实施建议
+
+建议分两步：
+
+#### M4.5-A：地基阶段
+
+1. 表结构
+2. workspace manager
+3. create / cleanup 原型
+4. 先不切默认执行链
+
+#### M4.5-B：Aider 接入阶段
+
+1. 仅 `workflow_v2 + aider` 切入 worktree
+2. 先不处理 OpenHands 容器化
+3. 跑真实任务验证污染与回写策略
+
+### 7.7 与 OpenHands 的关系
+
+Git worktree 不是 OpenHands 的最终隔离形态。
+
+更准确的路线是：
+
+1. 先用 worktree 解决“目录污染问题”
+2. 后续再为 OpenHands 升级到 sandbox/container
+
+因此：
+
+- worktree 是执行层隔离第一版
+- OpenHands 容器化是后续增强，不应阻塞当前排期
+
+---
+
+## 八、M5：返工链重构与事件总线
 
 P0 校准已完成：
 - WorkflowRun 状态从扁平改为阶段化（designing/reviewing/executing/reworking/paused/completed/failed/canceled）
@@ -236,7 +352,19 @@ P0 校准已完成：
 
 ---
 
-## 七、M5：返工链重构与事件总线
+### 8.0 排期说明调整
+
+从当前代码进度看，M5 不应再紧接“执行主链未闭环”的旧假设推进。  
+正确顺序应改为：
+
+1. 先完成 M4 收口
+2. 插入 M4.5 worktree 隔离
+3. 再推进 M5 返工链与事件总线
+
+这样可以避免：
+
+1. 返工链建立在不稳定执行环境上
+2. 多执行器接入后继续污染主工作区
 
 ### 7.1 目标
 
@@ -267,7 +395,7 @@ P0 校准已完成：
 
 ---
 
-## 八、M6：前端控制台与旧链退役
+## 九、M6：前端控制台与旧链退役
 
 ### 8.1 目标
 
@@ -295,7 +423,7 @@ P0 校准已完成：
 
 ---
 
-## 九、任务包划分建议
+## 十、任务包划分建议
 
 ### 9.1 后端任务包
 
@@ -304,43 +432,46 @@ P0 校准已完成：
 - 包 C：plan version / blueprint
 - 包 D：review stage
 - 包 E：domain task / scheduler
-- 包 F：rework / event bus / compat
+- 包 F：task workspace / git worktree isolation
+- 包 G：rework / event bus / compat
 
 ### 9.2 前端任务包
 
-- 包 G：workflow dashboard
-- 包 H：plan design
-- 包 I：review workspace
-- 包 J：execution console
-- 包 K：event stream / timeline
+- 包 H：workflow dashboard
+- 包 I：plan design
+- 包 J：review workspace
+- 包 K：execution console
+- 包 L：event stream / timeline
 
 ### 9.3 测试任务包
 
-- 包 L：单元测试
-- 包 M：集成测试
-- 包 N：灰度验证与回归测试
+- 包 M：单元测试
+- 包 N：集成测试
+- 包 O：灰度验证与回归测试
 
 ---
 
-## 十、依赖关系
+## 十一、依赖关系
 
 ### 10.1 强依赖
 
 1. M1 完成后才能做 M2
 2. M2 完成后才能做 M3
 3. M3 完成后才能安全做 M4
-4. M4 完成后再做 M5
-5. M5 完成后才能做 M6
+4. M4 收口后先做 M4.5
+5. M4.5 完成后再做 M5
+6. M5 完成后才能做 M6
 
 ### 10.2 可并行部分
 
 - 前端页面骨架可与后端模型并行
 - Dashboard 与 Plan 页面可先行
+- worktree 地基建设可与 M4 后半段收口并行，但不建议在主链未稳前切默认执行链
 - 事件流接入可与 Rework 并行推进
 
 ---
 
-## 十一、里程碑交付物
+## 十二、里程碑交付物
 
 ### M1 交付物
 
@@ -366,6 +497,13 @@ P0 校准已完成：
 - execution scheduler
 - 执行控制台
 
+### M4.5 交付物
+
+- task workspace 表
+- git worktree manager
+- aider 隔离执行链
+- worktree 清理机制
+
 ### M5 交付物
 
 - rework stage
@@ -380,7 +518,7 @@ P0 校准已完成：
 
 ---
 
-## 十二、团队协作建议
+## 十三、团队协作建议
 
 ### 12.1 推荐分工
 
@@ -392,6 +530,7 @@ P0 校准已完成：
    - domain task
    - scheduler
    - watchdog
+   - task workspace
 3. 前端负责人：
    - workflow dashboard
    - review workspace
@@ -409,7 +548,7 @@ P0 校准已完成：
 
 ---
 
-## 十三、时间估算建议
+## 十四、时间估算建议
 
 如果是 2-3 名核心开发并行推进，建议按以下估算：
 
@@ -417,12 +556,13 @@ P0 校准已完成：
 - M2：4-6 天
 - M3：5-8 天
 - M4：7-10 天
+- M4.5：4-6 天
 - M5：5-7 天
 - M6：4-6 天
 
 整体建议周期：
 
-- 4 到 6 周
+- 4 到 7 周
 
 如果需要压缩周期，优先保证：
 
@@ -430,12 +570,40 @@ P0 校准已完成：
 - M2
 - M3
 - M4
+- M4.5
 
 M5/M6 可稍后补齐。
 
 ---
 
-## 十四、上线策略
+## 十五、当前剩余工作建议排序（2026-04-04 校准后）
+
+### P0：M4 收口
+
+1. execute 启动失败语义进一步收紧
+2. Execution Console 最小版
+3. watchdog v2 与 domain_task 对齐
+
+### P1：M4.5 地基
+
+1. `mvp_task_workspace`
+2. `workspace/` 模块
+3. worktree create/cleanup 原型
+
+### P1：M4.5 Aider 接入
+
+1. `workflow_v2 + aider` 切到 worktree
+2. 真实项目验证
+
+### P2：M5
+
+1. rework stage
+2. event stream
+3. timeline
+
+---
+
+## 十六、上线策略
 
 ### 14.1 灰度建议
 
@@ -456,7 +624,7 @@ M5/M6 可稍后补齐。
 
 ---
 
-## 十五、结论
+## 十七、结论
 
 实施上最重要的是克制，不要一边重构所有层，一边全量切流量。
 
@@ -465,5 +633,12 @@ M5/M6 可稍后补齐。
 - 架构上一步到位
 - 实施上分阶段达成
 - 每阶段都可交付、可验证、可回滚
+
+在当前代码进度下，建议正式采用下面的推进顺序：
+
+1. WorkflowRun 主链继续收口到稳定
+2. 插入 Git Worktree 任务级隔离
+3. 再继续返工链和事件总线
+4. 最后再推进执行器扩展和旧链退役
 
 这样才能把一次大重构真正落地。
