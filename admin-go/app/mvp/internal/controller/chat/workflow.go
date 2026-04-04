@@ -181,20 +181,21 @@ func (c *cWorkflow) RetryTask(ctx context.Context, req *v1.WorkflowRetryTaskReq)
 	isV2, _ := gw.IsWorkflowV2(ctx, projectID)
 
 	if isV2 {
-		// V2：通过 domainTask.TaskService 重试
-		taskSvc := orchestrator.GetExecuteStageService()
-		_ = taskSvc // 通过 registry 拿 TaskService
-		// 直接操作 domain_task: failed → pending
-		_, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		// V2：domain_task failed → pending
+		result, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
 			Where("id", taskID).Where("status", "failed").
 			Update(g.Map{
-				"status":     "pending",
+				"status":      "pending",
 				"retry_count": g.Map{"retry_count": "retry_count + 1"},
-				"result":     nil,
-				"updated_at": g.Map{"updated_at": "NOW()"},
+				"result":      nil,
+				"updated_at":  g.Map{"updated_at": "NOW()"},
 			})
 		if err != nil {
 			return nil, err
+		}
+		rows, _ := result.RowsAffected()
+		if rows == 0 {
+			return nil, fmt.Errorf("任务(%d)不在 failed 状态，无法重试", taskID)
 		}
 		// 调度器下一个 poll 会自动拾取
 	} else {
@@ -854,12 +855,11 @@ func (c *cWorkflow) ManualApprove(ctx context.Context, req *v1.WorkflowManualApp
 		stgSvc := orchestrator.GetStageService()
 		execStageRunID, err2 := stgSvc.StartStage(ctx, wfRunID, "execute")
 		if err2 != nil {
-			g.Log().Warningf(ctx, "[ManualApprove] 创建 execute stage 失败: %v", err2)
-		} else {
-			if err3 := execSvc.InstantiateAndStart(ctx, execStageRunID, planVersionID); err3 != nil {
-				g.Log().Warningf(ctx, "[ManualApprove] 执行阶段启动失败: %v", err3)
-				_ = stgSvc.FailStage(ctx, execStageRunID, err3.Error())
-			}
+			return nil, fmt.Errorf("审核已通过，但创建执行阶段失败: %w", err2)
+		}
+		if err3 := execSvc.InstantiateAndStart(ctx, execStageRunID, planVersionID); err3 != nil {
+			_ = stgSvc.FailStage(ctx, execStageRunID, err3.Error())
+			return nil, fmt.Errorf("审核已通过，但执行阶段启动失败: %w", err3)
 		}
 	}
 

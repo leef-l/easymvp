@@ -353,16 +353,23 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 		_ = s.stageCompleter.CompleteStage(ctx, stageRunID)
 
 		// 推进到 execute stage
+		executeStarted := false
 		if s.executeTriggerFn != nil {
 			if err := s.executeTriggerFn(ctx, workflowRunID, planVersionID); err != nil {
 				g.Log().Errorf(ctx, "[ReviewStage] 推进执行阶段失败: %v", err)
-				// 即使推进失败也不阻塞审核结论，后续可手动触发
+			} else {
+				executeStarted = true
 			}
 		}
 
-		// 通知架构师对话
-		engine.NotifyProjectArchitectConversation(ctx, projectID,
-			fmt.Sprintf("## 方案审核通过\n\n错误: %d，警告: %d\n\n项目已进入执行阶段。", errorCount, warningCount))
+		// 通知架构师对话（反映真实状态）
+		if executeStarted {
+			engine.NotifyProjectArchitectConversation(ctx, projectID,
+				fmt.Sprintf("## 方案审核通过\n\n错误: %d，警告: %d\n\n项目已进入执行阶段。", errorCount, warningCount))
+		} else {
+			engine.NotifyProjectArchitectConversation(ctx, projectID,
+				fmt.Sprintf("## 方案审核通过\n\n错误: %d，警告: %d\n\n⚠️ 执行阶段启动失败，请手动触发或检查日志。", errorCount, warningCount))
+		}
 
 		g.Log().Infof(ctx, "[ReviewStage] 审核通过 planVersionID=%d errors=%d warnings=%d", planVersionID, errorCount, warningCount)
 	} else {
