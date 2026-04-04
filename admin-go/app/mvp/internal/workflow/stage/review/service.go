@@ -23,11 +23,15 @@ type StageCompleter interface {
 	FailStage(ctx context.Context, stageRunID int64, reason string) error
 }
 
+// ExecuteTriggerFn 审核通过后触发执行阶段的回调。
+type ExecuteTriggerFn func(ctx context.Context, workflowRunID, planVersionID int64) error
+
 // Service 审核阶段服务。
 type Service struct {
 	stageCompleter   StageCompleter
 	issueRepo        *repo.ReviewIssueRepo
 	designRollbackFn DesignRollbackFn
+	executeTriggerFn ExecuteTriggerFn
 }
 
 // NewService 创建审核阶段服务。
@@ -345,13 +349,16 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 			Where("id", planVersionID).
 			Update(g.Map{"review_status": consts.PlanReviewStatusApproved, "approved_at": now, "updated_at": now})
 
-		// 项目状态 reviewing → running（后续 M4 会改为推进到 execute stage）
-		_, _ = g.DB().Model("mvp_project").Ctx(ctx).
-			Where("id", projectID).
-			Update(g.Map{"status": "running", "updated_at": now})
-
 		// 完成 review stage
 		_ = s.stageCompleter.CompleteStage(ctx, stageRunID)
+
+		// 推进到 execute stage
+		if s.executeTriggerFn != nil {
+			if err := s.executeTriggerFn(ctx, workflowRunID, planVersionID); err != nil {
+				g.Log().Errorf(ctx, "[ReviewStage] 推进执行阶段失败: %v", err)
+				// 即使推进失败也不阻塞审核结论，后续可手动触发
+			}
+		}
 
 		// 通知架构师对话
 		engine.NotifyProjectArchitectConversation(ctx, projectID,
@@ -396,6 +403,11 @@ var _ DesignRollbackFn // 类型守卫
 // 使用 Service 的字段方式存储。
 func (s *Service) SetDesignRollbackFn(fn DesignRollbackFn) {
 	s.designRollbackFn = fn
+}
+
+// SetExecuteTriggerFn 注册审核通过后的执行阶段触发回调。
+func (s *Service) SetExecuteTriggerFn(fn ExecuteTriggerFn) {
+	s.executeTriggerFn = fn
 }
 
 // buildRejectNotification 构建审核驳回通知消息。

@@ -10,9 +10,12 @@ import (
 	"easymvp/app/mvp/internal/consts"
 	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/workflow/domain/plan"
+	domainTask "easymvp/app/mvp/internal/workflow/domain/task"
 	"easymvp/app/mvp/internal/workflow/event"
 	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/app/mvp/internal/workflow/runtime"
+	"easymvp/app/mvp/internal/workflow/scheduler"
+	executeStage "easymvp/app/mvp/internal/workflow/stage/execute"
 	reviewStage "easymvp/app/mvp/internal/workflow/stage/review"
 )
 
@@ -22,6 +25,8 @@ var (
 	stageSvc        *StageService
 	planVersionSvc  *plan.PlanVersionService
 	reviewStageSvc  *reviewStage.Service
+	executeStageSvc *executeStage.Service
+	taskScheduler   *scheduler.DomainTaskScheduler
 	runtimeMgr      *runtime.Manager
 	eventBus        *event.Bus
 	eventPublisher  *event.Publisher
@@ -46,6 +51,12 @@ func Init() {
 		stageSvc = NewStageService(workflowSvc)
 		planVersionSvc = plan.NewPlanVersionService(planRepo, bpRepo)
 
+		// 执行阶段服务
+		taskRepo := repo.NewDomainTaskRepo()
+		taskSvc := domainTask.NewTaskService(taskRepo)
+		taskScheduler = scheduler.NewDomainTaskScheduler()
+		executeStageSvc = executeStage.NewService(taskSvc, taskScheduler, stageSvc)
+
 		// 审核阶段服务
 		issueRepo := repo.NewReviewIssueRepo()
 		reviewStageSvc = reviewStage.NewService(stageSvc, issueRepo)
@@ -54,6 +65,11 @@ func Init() {
 		reviewStageSvc.SetDesignRollbackFn(func(ctx context.Context, workflowRunID int64) error {
 			_, err := stageSvc.TransitionTo(ctx, workflowRunID, "design")
 			return err
+		})
+
+		// 注册审核通过后触发执行阶段的回调
+		reviewStageSvc.SetExecuteTriggerFn(func(ctx context.Context, workflowRunID, planVersionID int64) error {
+			return triggerExecuteStage(ctx, workflowRunID, planVersionID)
 		})
 
 		// 注册审核触发回调到 PlanVersionService（避免循环依赖）
@@ -136,14 +152,49 @@ func triggerReviewStage(ctx context.Context, projectID, planVersionID int64) err
 		return fmt.Errorf("创建 review stage 失败: %w", err)
 	}
 
-	// 异步运行审核流程
+	// 异步运行审核流程（使用 runtime context 响应工作流级取消/暂停）
 	go func() {
-		bgCtx := context.Background()
-		if err := reviewStageSvc.RunReview(bgCtx, stageRunID, planVersionID); err != nil {
-			g.Log().Errorf(bgCtx, "[triggerReviewStage] 审核流程失败: stageRunID=%d err=%v", stageRunID, err)
-			_ = stageSvc.FailStage(bgCtx, stageRunID, err.Error())
+		rtCtx := runtimeMgr.GetContext(workflowRunID)
+		if err := reviewStageSvc.RunReview(rtCtx, stageRunID, planVersionID); err != nil {
+			// 如果是 context 取消导致的错误，不标记为失败
+			if rtCtx.Err() != nil {
+				g.Log().Infof(rtCtx, "[triggerReviewStage] 审核流程被取消: stageRunID=%d", stageRunID)
+				return
+			}
+			g.Log().Errorf(rtCtx, "[triggerReviewStage] 审核流程失败: stageRunID=%d err=%v", stageRunID, err)
+			_ = stageSvc.FailStage(context.Background(), stageRunID, err.Error())
 		}
 	}()
 
 	return nil
+}
+
+// triggerExecuteStage 审核通过后触发执行阶段：创建 execute stage + 实例化蓝图 + 启动调度。
+func triggerExecuteStage(ctx context.Context, workflowRunID, planVersionID int64) error {
+	// 创建并启动 execute stage
+	stageRunID, err := stageSvc.StartStage(ctx, workflowRunID, "execute")
+	if err != nil {
+		return fmt.Errorf("创建 execute stage 失败: %w", err)
+	}
+
+	// 实例化蓝图为领域任务并启动调度
+	if err := executeStageSvc.InstantiateAndStart(ctx, stageRunID, planVersionID); err != nil {
+		_ = stageSvc.FailStage(ctx, stageRunID, err.Error())
+		return fmt.Errorf("执行阶段启动失败: %w", err)
+	}
+
+	g.Log().Infof(ctx, "[triggerExecuteStage] 执行阶段已启动 workflowRunID=%d stageRunID=%d planVersionID=%d", workflowRunID, stageRunID, planVersionID)
+	return nil
+}
+
+// GetExecuteStageService 获取执行阶段服务。
+func GetExecuteStageService() *executeStage.Service {
+	Init()
+	return executeStageSvc
+}
+
+// GetTaskScheduler 获取领域任务调度器。
+func GetTaskScheduler() *scheduler.DomainTaskScheduler {
+	Init()
+	return taskScheduler
 }

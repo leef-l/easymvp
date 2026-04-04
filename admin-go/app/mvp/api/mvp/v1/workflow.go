@@ -95,16 +95,21 @@ type WorkflowProjectStatusReq struct {
 
 // WorkflowProjectStatusRes 获取项目状态响应
 type WorkflowProjectStatusRes struct {
-	g.Meta       `mime:"application/json"`
-	Status       string            `json:"status"`
-	PauseReason  string            `json:"pauseReason,omitempty"` // 暂停原因
-	ActiveBatch  int               `json:"activeBatch"`           // 当前活跃批次号
-	TotalTasks   int               `json:"totalTasks"`
-	StatusCounts map[string]int    `json:"statusCounts"` // 各状态任务数量
-	LastActiveAt *gtime.Time       `json:"lastActiveAt,omitempty"`
-	IsActuallyWorking bool         `json:"isActuallyWorking"`
-	ActiveRunningTasks int         `json:"activeRunningTasks"`
-	StalledTaskCount int           `json:"stalledTaskCount"`
+	g.Meta             `mime:"application/json"`
+	Status             string         `json:"status"`
+	PauseReason        string         `json:"pauseReason,omitempty"`
+	ActiveBatch        int            `json:"activeBatch"`
+	TotalTasks         int            `json:"totalTasks"`
+	StatusCounts       map[string]int `json:"statusCounts"`
+	LastActiveAt       *gtime.Time    `json:"lastActiveAt,omitempty"`
+	IsActuallyWorking  bool           `json:"isActuallyWorking"`
+	ActiveRunningTasks int            `json:"activeRunningTasks"`
+	StalledTaskCount   int            `json:"stalledTaskCount"`
+	// V2 聚合字段
+	EngineVersion   string `json:"engineVersion,omitempty"`
+	WorkflowStatus  string `json:"workflowStatus,omitempty"`
+	CurrentStage    string `json:"currentStage,omitempty"`
+	ProgressPercent int    `json:"progressPercent,omitempty"`
 }
 
 // WorkflowParseTasksReq 手动解析架构师回复中的任务清单

@@ -76,19 +76,30 @@ export function getRolePresets(projectCategory?: string) {
   );
 }
 
+/** 项目状态响应 */
+export interface ProjectStatusResult {
+  status: string;
+  pauseReason?: string;
+  activeBatch: number;
+  totalTasks: number;
+  statusCounts: Record<string, number>;
+  lastActiveAt?: string;
+  isActuallyWorking: boolean;
+  activeRunningTasks: number;
+  stalledTaskCount: number;
+  // V2 聚合字段
+  engineVersion?: string;
+  workflowStatus?: string;
+  currentStage?: string;
+  progressPercent?: number;
+}
+
 /** 获取项目当前状态及任务统计 */
 export function getProjectStatus(projectID: string) {
-  return requestClient.get<{
-    status: string;
-    pauseReason?: string;
-    activeBatch: number;
-    totalTasks: number;
-    statusCounts: Record<string, number>;
-    lastActiveAt?: string;
-    isActuallyWorking: boolean;
-    activeRunningTasks: number;
-    stalledTaskCount: number;
-  }>(`${PREFIX}/project-status`, { params: { projectID } });
+  return requestClient.get<ProjectStatusResult>(
+    `${PREFIX}/project-status`,
+    { params: { projectID } },
+  );
 }
 
 /** 系统检测项 */

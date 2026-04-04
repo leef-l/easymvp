@@ -94,25 +94,78 @@ func (c *cWorkflow) ConfirmPlan(ctx context.Context, req *v1.WorkflowConfirmPlan
 
 // Pause 暂停项目
 func (c *cWorkflow) Pause(ctx context.Context, req *v1.WorkflowPauseReq) (res *v1.WorkflowPauseRes, err error) {
-	if err := checkProjectOwnership(ctx, int64(req.ProjectID)); err != nil {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
 	}
-	err = engine.GetScheduler().Pause(ctx, int64(req.ProjectID), req.PauseReason)
-	if err != nil {
-		return nil, err
+
+	gw := compat.NewLegacyGateway()
+	isV2, _ := gw.IsWorkflowV2(ctx, projectID)
+
+	if isV2 {
+		// V2：暂停 WorkflowRun + DomainTaskScheduler
+		wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+			Where("project_id", projectID).
+			WhereNotIn("status", g.Slice{"completed", "canceled", "paused"}).
+			WhereNull("deleted_at").OrderDesc("run_no").One()
+		if wfRun.IsEmpty() {
+			return nil, fmt.Errorf("没有活跃的工作流运行")
+		}
+		wfRunID := wfRun["id"].Int64()
+
+		wfSvc := orchestrator.GetWorkflowService()
+		if err := wfSvc.Pause(ctx, wfRunID, req.PauseReason); err != nil {
+			return nil, err
+		}
+		// 暂停调度器
+		orchestrator.GetTaskScheduler().Pause(ctx, wfRunID)
+	} else {
+		// Legacy：走旧调度器
+		if err := engine.GetScheduler().Pause(ctx, projectID, req.PauseReason); err != nil {
+			return nil, err
+		}
 	}
+
 	return &v1.WorkflowPauseRes{}, nil
 }
 
 // Resume 恢复项目
 func (c *cWorkflow) Resume(ctx context.Context, req *v1.WorkflowResumeReq) (res *v1.WorkflowResumeRes, err error) {
-	if err := checkProjectOwnership(ctx, int64(req.ProjectID)); err != nil {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
 	}
-	err = engine.GetScheduler().Resume(ctx, int64(req.ProjectID))
-	if err != nil {
-		return nil, err
+
+	gw := compat.NewLegacyGateway()
+	isV2, _ := gw.IsWorkflowV2(ctx, projectID)
+
+	if isV2 {
+		// V2：恢复 WorkflowRun + 重启调度器
+		wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+			Where("project_id", projectID).
+			Where("status", "paused").
+			WhereNull("deleted_at").OrderDesc("run_no").One()
+		if wfRun.IsEmpty() {
+			return nil, fmt.Errorf("没有暂停的工作流运行")
+		}
+		wfRunID := wfRun["id"].Int64()
+
+		wfSvc := orchestrator.GetWorkflowService()
+		if err := wfSvc.Resume(ctx, wfRunID); err != nil {
+			return nil, err
+		}
+		// 如果 workflow 当前阶段是 executing，重启调度器
+		currentStage := wfRun["current_stage"].String()
+		if currentStage == "execute" {
+			_ = orchestrator.GetTaskScheduler().Start(ctx, wfRunID)
+		}
+	} else {
+		// Legacy：走旧调度器
+		if err := engine.GetScheduler().Resume(ctx, projectID); err != nil {
+			return nil, err
+		}
 	}
+
 	return &v1.WorkflowResumeRes{}, nil
 }
 
@@ -342,13 +395,17 @@ func projectStatusV2(ctx context.Context, project gdb.Record) (*v1.WorkflowProje
 	}
 
 	res := &v1.WorkflowProjectStatusRes{
-		Status:       project["status"].String(),
-		PauseReason:  project["pause_reason"].String(),
-		TotalTasks:   totalTasks,
-		StatusCounts: statusCounts,
+		Status:          project["status"].String(),
+		PauseReason:     project["pause_reason"].String(),
+		TotalTasks:      totalTasks,
+		StatusCounts:    statusCounts,
+		EngineVersion:   dto.EngineVersion,
+		WorkflowStatus:  dto.WorkflowStatus,
+		CurrentStage:    dto.CurrentStage,
+		ProgressPercent: dto.ProgressPercent,
 	}
 
-	// 追加 workflow 层面的状态信息
+	// V2 项目状态以 workflow 状态为准
 	if dto.WorkflowStatus != "" {
 		res.Status = dto.WorkflowStatus
 	}
@@ -715,14 +772,41 @@ func (c *cWorkflow) ManualApprove(ctx context.Context, req *v1.WorkflowManualApp
 	}
 
 	pvSvc := orchestrator.GetPlanVersionService()
-	if err := pvSvc.Approve(ctx, pv["id"].Int64()); err != nil {
+	planVersionID := pv["id"].Int64()
+	if err := pvSvc.Approve(ctx, planVersionID); err != nil {
 		return nil, err
 	}
 
-	// 更新项目状态为 running
-	_, _ = g.DB().Model("mvp_project").Ctx(ctx).
-		Where("id", projectID).
-		Update(g.Map{"status": "running", "updated_at": g.Map{"updated_at": "NOW()"}})
+	// 查活跃的 workflow_run，推进到 execute stage
+	wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNotIn("status", g.Slice{"completed", "canceled"}).
+		WhereNull("deleted_at").
+		OrderDesc("run_no").
+		One()
+	if !wfRun.IsEmpty() {
+		wfRunID := wfRun["id"].Int64()
+		currentStageRunID := wfRun["current_stage_run_id"].Int64()
+
+		// 完成当前 review stage
+		if currentStageRunID > 0 {
+			stgSvc := orchestrator.GetStageService()
+			_ = stgSvc.CompleteStage(ctx, currentStageRunID)
+		}
+
+		// 创建 execute stage + 实例化 + 启动调度
+		execSvc := orchestrator.GetExecuteStageService()
+		stgSvc := orchestrator.GetStageService()
+		execStageRunID, err2 := stgSvc.StartStage(ctx, wfRunID, "execute")
+		if err2 != nil {
+			g.Log().Warningf(ctx, "[ManualApprove] 创建 execute stage 失败: %v", err2)
+		} else {
+			if err3 := execSvc.InstantiateAndStart(ctx, execStageRunID, planVersionID); err3 != nil {
+				g.Log().Warningf(ctx, "[ManualApprove] 执行阶段启动失败: %v", err3)
+				_ = stgSvc.FailStage(ctx, execStageRunID, err3.Error())
+			}
+		}
+	}
 
 	return &v1.WorkflowManualApproveRes{}, nil
 }
