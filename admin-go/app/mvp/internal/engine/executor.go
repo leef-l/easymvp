@@ -255,18 +255,20 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 		e.createAuditTask(ctx, projectID, taskID, task)
 	} else if roleType == "architect" {
 		// 双读：优先 task_kind，兼容旧数据名称前缀
+		// 使用项目级 ctx 传播取消信号
+		projCtx := e.scheduler.getProjectContext(projectID)
 		switch task["task_kind"].String() {
 		case consts.TaskKindBugAnalysis:
-			e.scheduler.AutoDispatchBugFix(context.Background(), projectID, taskID)
+			e.scheduler.AutoDispatchBugFix(projCtx, projectID, taskID)
 		case consts.TaskKindFailureAnalysis:
-			e.scheduler.AutoDispatchFailureFix(context.Background(), projectID, taskID)
+			e.scheduler.AutoDispatchFailureFix(projCtx, projectID, taskID)
 		default:
 			name := task["name"].String()
 			switch {
 			case strings.HasPrefix(name, "Bug分析:"):
-				e.scheduler.AutoDispatchBugFix(context.Background(), projectID, taskID)
+				e.scheduler.AutoDispatchBugFix(projCtx, projectID, taskID)
 			case strings.HasPrefix(name, "失败分析:"):
-				e.scheduler.AutoDispatchFailureFix(context.Background(), projectID, taskID)
+				e.scheduler.AutoDispatchFailureFix(projCtx, projectID, taskID)
 			}
 		}
 	}
@@ -703,7 +705,7 @@ func (e *Executor) escalateImplementerResourceIssue(ctx context.Context, project
 	})
 
 	e.scheduler.OnTaskEscalated(projectID, taskID, errMsg)
-	go e.scheduler.EscalateFailedTask(context.Background(), projectID, taskID, task["role_type"].String(), errMsg)
+	go e.scheduler.EscalateFailedTask(e.scheduler.getProjectContext(projectID), projectID, taskID, task["role_type"].String(), errMsg)
 }
 
 // failTask 标记任务失败
@@ -754,7 +756,7 @@ func (e *Executor) handleTaskFailure(ctx context.Context, projectID int64, taskI
 			"error_message": errMsg,
 		})
 		e.scheduler.OnTaskEscalated(projectID, taskID, errMsg)
-		go e.scheduler.EscalateFailedTask(context.Background(), projectID, taskID, roleType, errMsg)
+		go e.scheduler.EscalateFailedTask(e.scheduler.getProjectContext(projectID), projectID, taskID, roleType, errMsg)
 	default:
 		e.failTask(ctx, projectID, taskID, errMsg)
 	}

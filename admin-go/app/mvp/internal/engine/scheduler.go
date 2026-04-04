@@ -13,6 +13,12 @@ import (
 	"easymvp/utility/worktreeguard"
 )
 
+// projectRuntime 项目运行时句柄，保存可取消的 context 用于传播暂停信号
+type projectRuntime struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
 // Scheduler 任务调度器
 // 核心职责：扫描待执行任务、批次调度、依赖检查、资源冲突检测、动态推进
 //
@@ -32,7 +38,7 @@ type Scheduler struct {
 	lockedRes      map[string]int64             // 已锁定的资源 -> 占用任务 ID（内存缓存，与 DB 同步）
 	maxConcurrency int                          // 最大并发 goroutine 数
 	executor       *Executor                    // 任务执行器
-	projectCtx     map[int64]context.CancelFunc // 项目级 cancel 函数（暂停用）
+	projectCtx     map[int64]*projectRuntime    // 项目级运行句柄（ctx + cancel）
 }
 
 type resourceParseResult struct {
@@ -46,7 +52,7 @@ func NewScheduler(maxConcurrency int) *Scheduler {
 		running:        make(map[int64]bool),
 		lockedRes:      make(map[string]int64),
 		maxConcurrency: maxConcurrency,
-		projectCtx:     make(map[int64]context.CancelFunc),
+		projectCtx:     make(map[int64]*projectRuntime),
 	}
 	s.executor = NewExecutor(s)
 
@@ -118,10 +124,10 @@ func (s *Scheduler) StartProject(projectID int64) {
 	s.persistActiveBatch(projectID, batchNo)
 
 	s.mu.Lock()
-	if oldCancel, ok := s.projectCtx[projectID]; ok {
-		oldCancel()
+	if old, ok := s.projectCtx[projectID]; ok {
+		old.cancel()
 	}
-	s.projectCtx[projectID] = cancel
+	s.projectCtx[projectID] = &projectRuntime{ctx: ctx, cancel: cancel}
 	s.mu.Unlock()
 
 	g.Log().Infof(ctx, "[Scheduler] 项目 %d 启动调度，初始活跃批次: %d", projectID, batchNo)
@@ -131,22 +137,20 @@ func (s *Scheduler) StartProject(projectID int64) {
 
 // PauseProject 暂停项目调度
 func (s *Scheduler) PauseProject(projectID int64) {
-	// 1. 取消项目调度循环
+	// 1. 持锁取出并删除项目 runtime
 	s.mu.Lock()
-	if cancel, ok := s.projectCtx[projectID]; ok {
-		cancel()
+	rt, hasRuntime := s.projectCtx[projectID]
+	if hasRuntime {
 		delete(s.projectCtx, projectID)
 	}
-
-	// 2. 在持锁状态下清理内存中的 running 任务和资源锁
-	var runningTaskIDs []int64
-	for tid := range s.running {
-		runningTaskIDs = append(runningTaskIDs, tid)
-	}
-	// 只清理属于该项目的任务（需要查 DB 确认归属，但先清内存）
 	s.mu.Unlock()
 
-	// 3. 查询该项目的 running 任务
+	// 2. 锁外 cancel（停止调度循环 + 传播取消信号到所有异步链路）
+	if hasRuntime {
+		rt.cancel()
+	}
+
+	// 3. 锁外查询该项目的 running 任务 ID
 	runningTasks, _ := g.DB().Model("mvp_task").
 		Where("project_id", projectID).
 		Where("status", "running").
@@ -154,7 +158,7 @@ func (s *Scheduler) PauseProject(projectID int64) {
 		Fields("id").
 		All()
 
-	// 4. 持锁清理内存 + DB（原子操作）
+	// 4. 持锁只清理内存中的 running 和 lockedRes
 	s.mu.Lock()
 	for _, t := range runningTasks {
 		tid := t["id"].Int64()
@@ -165,8 +169,10 @@ func (s *Scheduler) PauseProject(projectID int64) {
 			}
 		}
 	}
-	// DB 操作在锁内，保证一致
-	g.DB().Model("mvp_task").
+	s.mu.Unlock()
+
+	// 5. 锁外批量更新 DB：running → pending
+	if _, err := g.DB().Model("mvp_task").
 		Where("project_id", projectID).
 		Where("status", "running").
 		Update(g.Map{
@@ -174,10 +180,11 @@ func (s *Scheduler) PauseProject(projectID int64) {
 			"locked_resources": nil,
 			"heartbeat_at":     nil,
 			"updated_at":       gtime.Now(),
-		})
-	s.mu.Unlock()
+		}); err != nil {
+		g.Log().Errorf(context.Background(), "[Scheduler] PauseProject DB 批量回退失败: project=%d, err=%v", projectID, err)
+	}
 
-	// 5. 重置项目活跃批次
+	// 6. 重置项目活跃批次
 	s.persistActiveBatch(projectID, 0)
 }
 
@@ -186,11 +193,8 @@ func (s *Scheduler) PauseProject(projectID int64) {
 func (s *Scheduler) getProjectContext(projectID int64) context.Context {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// projectCtx 存的是 CancelFunc，我们需要通过它创建的 context
-	// 但当前设计只存了 CancelFunc，没有存 context 本身
-	// 改为返回 Background — 后续 scheduleOnce 内部会检查 projectCtx 是否还存在
-	if _, ok := s.projectCtx[projectID]; !ok {
-		return context.Background()
+	if rt, ok := s.projectCtx[projectID]; ok {
+		return rt.ctx
 	}
 	return context.Background()
 }
@@ -225,21 +229,28 @@ func (s *Scheduler) OnTaskEscalated(projectID int64, taskID int64, message strin
 	go s.scheduleOnce(s.getProjectContext(projectID), projectID)
 }
 
-// releaseTaskResources 释放任务持有的资源锁（内存 + DB 在同一个锁内）
+// releaseTaskResources 释放任务持有的资源锁
+// 短锁优先：持锁只清内存，锁外做 DB 清理
 func (s *Scheduler) releaseTaskResources(taskID int64) {
 	s.mu.Lock()
+	_, wasRunning := s.running[taskID]
 	delete(s.running, taskID)
 	for res, tid := range s.lockedRes {
 		if tid == taskID {
 			delete(s.lockedRes, res)
 		}
 	}
-	// DB 操作在锁内执行，保证内存与 DB 一致
-	g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
-		"locked_resources": nil,
-		"heartbeat_at":     nil,
-	})
 	s.mu.Unlock()
+
+	// 锁外清理 DB，失败只记日志不回滚内存
+	if wasRunning {
+		if _, err := g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+			"locked_resources": nil,
+			"heartbeat_at":     nil,
+		}); err != nil {
+			g.Log().Errorf(context.Background(), "[Scheduler] releaseTaskResources DB 清理失败: task=%d, err=%v", taskID, err)
+		}
+	}
 }
 
 // scheduleLoop 调度主循环
@@ -275,11 +286,26 @@ func (s *Scheduler) scheduleOnce(ctx context.Context, projectID int64) {
 
 	batchNo := s.getActiveBatchFromDB(projectID)
 
+	// --- 阶段 1.5：阶段锁 —— 按项目状态过滤允许执行的角色 ---
+	projectStatus := ""
+	proj, _ := g.DB().Model("mvp_project").Where("id", projectID).Fields("status").One()
+	if !proj.IsEmpty() {
+		projectStatus = proj["status"].String()
+	}
+	allowedRoles := stageAllowedRoles(projectStatus)
+
 	// --- 阶段 2：锁外查 DB，获取候选任务 ---
 	query := g.DB().Model("mvp_task").
 		Where("project_id", projectID).
 		Where("status", "pending").
 		Where("deleted_at IS NULL")
+
+	// 阶段锁：只调度允许的角色
+	if len(allowedRoles) > 0 {
+		query = query.WhereIn("role_type", allowedRoles)
+	} else if projectStatus == "paused" || projectStatus == "designing" || projectStatus == "reviewing" {
+		return // 这些状态不应执行任何任务
+	}
 
 	if batchNo > 0 {
 		// 有活跃批次：只调度 batch_no=0（紧急）和当前活跃批次
@@ -334,16 +360,10 @@ func (s *Scheduler) scheduleOnce(ctx context.Context, projectID int64) {
 			continue
 		}
 
-		// 用 DB CAS 防止重复分发：只有 pending 才能变 running
-		affected, _ := g.DB().Model("mvp_task").
-			Where("id", taskID).
-			Where("status", "pending").
-			Update(g.Map{
-				"status":     "running",
-				"started_at": gtime.Now(),
-				"updated_at": gtime.Now(),
-			})
-		rows, _ := affected.RowsAffected()
+		// 用状态机 CAS 防止重复分发：只有 pending 才能变 running
+		rows, _ := updateTaskStatus(ctx, taskID, "pending", "running", g.Map{
+			"started_at": gtime.Now(),
+		})
 		if rows == 0 {
 			// 已被其他 goroutine 拿走，释放刚加的资源锁
 			for res, tid := range s.lockedRes {
@@ -448,10 +468,8 @@ func (s *Scheduler) batchCheckDependencies(ctx context.Context, taskIDs []int64)
 			if dfs(id) {
 				// 发现循环依赖，标记环中的一个任务为 failed 以打破死锁
 				g.Log().Errorf(ctx, "[Scheduler] 检测到循环依赖，强制标记任务 %d 为失败以打破死锁", cycleNode)
-				g.DB().Model("mvp_task").Where("id", cycleNode).Update(g.Map{
-					"status":        "failed",
+				updateTaskStatus(ctx, cycleNode, "pending", "failed", g.Map{
 					"error_message": "检测到循环依赖死锁，自动标记失败。请检查任务依赖关系。",
-					"updated_at":    gtime.Now(),
 				})
 				logTaskAction(cycleNode, "cycle_detected", "pending", "failed",
 					"循环依赖检测：打破死锁", "system")
@@ -568,8 +586,8 @@ func (s *Scheduler) checkProjectDone(projectID int64) {
 		})
 
 		s.mu.Lock()
-		if cancel, ok := s.projectCtx[projectID]; ok {
-			cancel()
+		if rt, ok := s.projectCtx[projectID]; ok {
+			rt.cancel()
 			delete(s.projectCtx, projectID)
 		}
 		s.mu.Unlock()
@@ -578,16 +596,24 @@ func (s *Scheduler) checkProjectDone(projectID int64) {
 
 // RetryTask 重新执行失败的任务
 func (s *Scheduler) RetryTask(projectID int64, taskID int64) error {
-	_, err := g.DB().Model("mvp_task").Where("id", taskID).WhereIn("status", g.Slice{"failed", "submit_error"}).Update(g.Map{
-		"status":        "pending",
+	// 查询当前状态，通过状态机校验
+	task, err := g.DB().Model("mvp_task").Where("id", taskID).Fields("status").One()
+	if err != nil || task.IsEmpty() {
+		return fmt.Errorf("任务不存在")
+	}
+	currentStatus := task["status"].String()
+
+	rows, err := updateTaskStatus(context.Background(), taskID, currentStatus, "pending", g.Map{
 		"error_message": nil,
-		"updated_at":    gtime.Now(),
 	})
 	if err != nil {
 		return err
 	}
+	if rows == 0 {
+		return fmt.Errorf("任务状态已变更，无法重试")
+	}
 
-	logTaskAction(taskID, "retry", "failed", "pending", "用户重新开始任务", "user")
+	logTaskAction(taskID, "retry", currentStatus, "pending", "用户重新开始任务", "user")
 
 	go s.scheduleOnce(s.getProjectContext(projectID), projectID)
 	return nil
@@ -596,26 +622,32 @@ func (s *Scheduler) RetryTask(projectID int64, taskID int64) error {
 // SkipTask 手动跳过无法完成的任务，防止批次永久阻塞
 // 将任务标记为 completed（跳过），并尝试推进批次
 func (s *Scheduler) SkipTask(ctx context.Context, projectID int64, taskID int64, reason string) error {
-	// 只允许跳过 failed/bug_found 状态的任务
-	result, err := g.DB().Model("mvp_task").
+	// 查询当前状态，只允许跳过 failed/bug_found
+	task, err := g.DB().Model("mvp_task").
 		Where("id", taskID).
 		Where("project_id", projectID).
-		WhereIn("status", g.Slice{"failed", "bug_found"}).
-		Update(g.Map{
-			"status":       "completed",
-			"result":       fmt.Sprintf("[已跳过] %s", reason),
-			"completed_at": gtime.Now(),
-			"updated_at":   gtime.Now(),
-		})
+		Fields("status").
+		One()
+	if err != nil || task.IsEmpty() {
+		return fmt.Errorf("任务不存在")
+	}
+	currentStatus := task["status"].String()
+	if currentStatus != "failed" && currentStatus != "bug_found" {
+		return fmt.Errorf("任务状态(%s)不允许跳过（仅 failed/bug_found 可跳过）", currentStatus)
+	}
+
+	rows, err := updateTaskStatus(ctx, taskID, currentStatus, "completed", g.Map{
+		"result":       fmt.Sprintf("[已跳过] %s", reason),
+		"completed_at": gtime.Now(),
+	})
 	if err != nil {
 		return err
 	}
-	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("任务不存在或状态不允许跳过（仅 failed/bug_found 可跳过）")
+		return fmt.Errorf("任务状态已变更，无法跳过")
 	}
 
-	logTaskAction(taskID, "skipped", "failed", "completed",
+	logTaskAction(taskID, "skipped", currentStatus, "completed",
 		fmt.Sprintf("用户手动跳过: %s", reason), "user")
 
 	// 尝试推进批次（单 goroutine 顺序执行，避免回调风暴）
@@ -679,6 +711,21 @@ func parseResourcesDetail(jsonStr string) resourceParseResult {
 	result.Resources = normalized
 	result.Rejected = dropped
 	return result
+}
+
+// stageAllowedRoles 阶段锁：根据项目状态返回允许执行的角色类型
+// designing/reviewing/paused 状态下不允许调度任何任务（返回 nil 表示不限制，空切片由调用方判断）
+func stageAllowedRoles(projectStatus string) g.Slice {
+	switch projectStatus {
+	case "running":
+		// running 状态：实施员、审计员可执行；架构师仅限系统创建的分析任务（batch_no=0）
+		return g.Slice{"implementer", "auditor", "architect"}
+	case "reviewing":
+		// reviewing 状态：只允许审计员和协调员（审核流程内部使用）
+		return g.Slice{"auditor", "coordinator"}
+	default:
+		return nil
+	}
 }
 
 // logTaskAction 记录任务日志

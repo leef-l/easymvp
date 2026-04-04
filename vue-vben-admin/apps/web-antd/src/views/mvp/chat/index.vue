@@ -175,6 +175,10 @@ async function connectSSE(replyID: string, targetMessageIndex: number) {
       }, 100);
     };
 
+    // 跟踪最近有效事件的状态，用于 done 时判断最终状态
+    let lastEventType = '';
+    let hasFailed = false;
+
     // 逐块读取数据
     while (true) {
       const { done, value } = await reader.read();
@@ -183,45 +187,99 @@ async function connectSSE(replyID: string, targetMessageIndex: number) {
       // 解码并追加到缓冲区
       buffer += decoder.decode(value, { stream: true });
 
-      // 按行解析 SSE 格式（data: {...}\n\n）
-      // 修复：只有以 \n 结尾的行才是完整行，未结尾的保留到 buffer
+      // 按行解析标准 SSE 格式（event: xxx\ndata: {...}\n\n）
       const lastNewline = buffer.lastIndexOf('\n');
-      if (lastNewline === -1) continue; // 没有完整行，继续读取
+      if (lastNewline === -1) continue;
 
       const complete = buffer.substring(0, lastNewline);
       buffer = buffer.substring(lastNewline + 1);
       const lines = complete.split('\n');
 
+      // 当前事件的 event 类型（每对 event/data 行共享）
+      let currentEvent = '';
+
       for (const line of lines) {
         const trimmed = line.trim();
+
+        // 解析 event: 行
+        if (trimmed.startsWith('event:')) {
+          currentEvent = trimmed.slice(6).trim();
+          continue;
+        }
+
         if (!trimmed.startsWith('data:')) continue;
 
         const jsonStr = trimmed.slice(5).trim();
         if (!jsonStr) continue;
 
+        // 使用当前 event 类型，然后重置
+        const eventType = currentEvent || '';
+        currentEvent = '';
+
         try {
           const data = JSON.parse(jsonStr);
+          const msg = messages.value[targetMessageIndex];
 
-          if (data.done) {
-            // 流式输出完成
-            const msg = messages.value[targetMessageIndex];
-            if (msg) {
-              msg.status = 'completed';
-              msg.content = msg.streamingContent || msg.content;
-              msg.streamingContent = undefined;
+          // 按事件类型分发处理
+          switch (eventType) {
+            case 'full': {
+              // 完整消息（已完成或已失败的消息直接返回）
+              if (msg) {
+                msg.content = data.content || msg.content;
+                msg.streamingContent = undefined;
+                msg.status = data.status || 'completed';
+                if (data.status === 'failed') hasFailed = true;
+              }
+              lastEventType = 'full';
+              break;
             }
-            // 最终滚动
-            if (scrollTimer) { clearTimeout(scrollTimer); scrollTimer = null; }
-            await scrollToBottom();
-            return;
-          }
-
-          if (data.content !== undefined) {
-            // 追加内容到流式缓冲
-            const msg = messages.value[targetMessageIndex];
-            if (msg) {
-              msg.streamingContent = (msg.streamingContent || '') + data.content;
-              debouncedScroll();
+            case 'error': {
+              // 错误事件
+              if (msg) {
+                msg.status = 'failed';
+                msg.content = data.error || msg.streamingContent || '（响应出现错误）';
+                msg.streamingContent = undefined;
+              }
+              hasFailed = true;
+              lastEventType = 'error';
+              break;
+            }
+            case 'done': {
+              // 流结束信号
+              if (msg) {
+                if (!hasFailed && msg.status !== 'failed') {
+                  // 没有收到过失败信号，标记完成
+                  msg.status = 'completed';
+                }
+                msg.content = msg.streamingContent || msg.content;
+                msg.streamingContent = undefined;
+              }
+              if (scrollTimer) { clearTimeout(scrollTimer); scrollTimer = null; }
+              await scrollToBottom();
+              return;
+            }
+            case 'chunk':
+            default: {
+              // chunk 事件或无事件类型（兼容旧格式）
+              if (data.done) {
+                // 兼容：data.done 标记（无 event 类型时的结束信号）
+                if (msg) {
+                  if (!hasFailed && msg.status !== 'failed') {
+                    msg.status = 'completed';
+                  }
+                  msg.content = msg.streamingContent || msg.content;
+                  msg.streamingContent = undefined;
+                }
+                if (scrollTimer) { clearTimeout(scrollTimer); scrollTimer = null; }
+                await scrollToBottom();
+                return;
+              }
+              if (data.content !== undefined && msg) {
+                msg.streamingContent = (msg.streamingContent || '') + data.content;
+                debouncedScroll();
+              }
+              lastEventType = 'chunk';
+              break;
             }
           }
         } catch {

@@ -59,6 +59,13 @@ func (s *Scheduler) ReportBug(ctx context.Context, projectID int64, auditorTaskI
 
 // createBugAnalysisTask 创建架构师 bug 分析任务
 func (s *Scheduler) createBugAnalysisTask(ctx context.Context, projectID int64, implTaskID int64, auditorTaskID int64, bugDescription string) {
+	// 暂停保护：项目已取消则不再创建派生任务
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
 	// 获取原实施任务信息
 	implTask, err := g.DB().Model("mvp_task").Where("id", implTaskID).One()
 	if err != nil || implTask.IsEmpty() {
@@ -105,6 +112,13 @@ func (s *Scheduler) createBugAnalysisTask(ctx context.Context, projectID int64, 
 // EscalateFailedTask 非 auditor 任务重试耗尽后，创建架构师分析任务
 // 与 ReportBug 不同，此方法直接基于失败任务本身创建分析任务，无需 auditor→implementer 关联
 func (s *Scheduler) EscalateFailedTask(ctx context.Context, projectID int64, failedTaskID int64, roleType string, errMsg string) {
+	// 暂停保护
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
 	failedTask, err := g.DB().Model("mvp_task").Where("id", failedTaskID).One()
 	if err != nil || failedTask.IsEmpty() {
 		g.Log().Errorf(ctx, "[EscalateFailedTask] 查询失败任务 %d 出错: %v", failedTaskID, err)
@@ -155,6 +169,13 @@ type architectTaskPatch struct {
 // analysisTaskID: 架构师分析任务 ID（已完成）
 // implTaskID: 原实施员任务 ID
 func (s *Scheduler) DispatchBugFix(ctx context.Context, projectID int64, analysisTaskID int64, implTaskID int64) error {
+	// 暂停保护
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	// 1. 获取架构师分析结果
 	analysisTask, err := g.DB().Model("mvp_task").Where("id", analysisTaskID).One()
 	if err != nil || analysisTask.IsEmpty() {
@@ -193,6 +214,13 @@ func (s *Scheduler) DispatchBugFix(ctx context.Context, projectID int64, analysi
 // AutoDispatchBugFix 架构师分析任务自动完成后的回调
 // 两跳回溯：bug_analysis.source_task_id → audit.source_task_id → implement.id
 func (s *Scheduler) AutoDispatchBugFix(ctx context.Context, projectID int64, analysisTaskID int64) {
+	// 暂停保护
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
 	analysisTask, err := g.DB().Model("mvp_task").Where("id", analysisTaskID).One()
 	if err != nil || analysisTask.IsEmpty() {
 		return
@@ -242,6 +270,13 @@ func (s *Scheduler) AutoDispatchBugFix(ctx context.Context, projectID int64, ana
 }
 
 func (s *Scheduler) AutoDispatchFailureFix(ctx context.Context, projectID int64, analysisTaskID int64) {
+	// 暂停保护
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
 	analysisTask, err := g.DB().Model("mvp_task").Where("id", analysisTaskID).One()
 	if err != nil || analysisTask.IsEmpty() {
 		return
