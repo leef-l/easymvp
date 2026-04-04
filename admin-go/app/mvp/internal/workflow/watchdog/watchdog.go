@@ -21,6 +21,9 @@ type SchedulerCallback interface {
 // RetryCallback 重试回调。
 type RetryCallback func(ctx context.Context, taskID int64) error
 
+// EscalateCallback 升级回调（触发 rework stage）。
+type EscalateCallback func(ctx context.Context, workflowRunID, taskID int64) error
+
 // DomainTaskWatchdog V2 链路任务看门狗。
 type DomainTaskWatchdog struct {
 	checkInterval time.Duration
@@ -32,8 +35,9 @@ type DomainTaskWatchdog struct {
 	retryCount map[int64]int // taskID → 已重试次数
 	cancel     context.CancelFunc
 
-	scheduler SchedulerCallback
-	retryFn   RetryCallback
+	scheduler   SchedulerCallback
+	retryFn     RetryCallback
+	escalateFn  EscalateCallback
 }
 
 // New 创建 V2 看门狗。
@@ -57,6 +61,9 @@ func (w *DomainTaskWatchdog) SetScheduler(s SchedulerCallback) { w.scheduler = s
 
 // SetRetryFn 注册重试回调。
 func (w *DomainTaskWatchdog) SetRetryFn(fn RetryCallback) { w.retryFn = fn }
+
+// SetEscalateFn 注册升级回调（触发 rework）。
+func (w *DomainTaskWatchdog) SetEscalateFn(fn EscalateCallback) { w.escalateFn = fn }
 
 // Start 启动看门狗。
 func (w *DomainTaskWatchdog) Start(ctx context.Context) {
@@ -233,8 +240,9 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 
 	// 过滤：只处理所属 workflow_run 仍在活跃状态的任务
 	type candidate struct {
-		taskID     int64
-		retryCount int
+		taskID        int64
+		workflowRunID int64
+		retryCount    int
 	}
 	var candidates []candidate
 	for _, task := range tasks {
@@ -247,8 +255,9 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 			continue
 		}
 		candidates = append(candidates, candidate{
-			taskID:     task["id"].Int64(),
-			retryCount: task["retry_count"].Int(),
+			taskID:        task["id"].Int64(),
+			workflowRunID: wfRunID,
+			retryCount:    task["retry_count"].Int(),
 		})
 	}
 
@@ -258,7 +267,8 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 		retryNo int
 	}
 	type escalateItem struct {
-		taskID int64
+		taskID        int64
+		workflowRunID int64
 	}
 	var retryList []retryItem
 	var escalateList []escalateItem
@@ -267,7 +277,7 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 	for _, c := range candidates {
 		totalRetries := w.retryCount[c.taskID] + c.retryCount
 		if totalRetries >= w.maxRetries {
-			escalateList = append(escalateList, escalateItem{taskID: c.taskID})
+			escalateList = append(escalateList, escalateItem{taskID: c.taskID, workflowRunID: c.workflowRunID})
 		} else {
 			w.retryCount[c.taskID]++
 			retryList = append(retryList, retryItem{c.taskID, totalRetries + 1})
@@ -299,17 +309,28 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 		}
 	}
 
-	// 执行升级
+	// 执行升级 → 触发 rework
 	for _, item := range escalateList {
 		g.Log().Errorf(ctx, "[WatchdogV2] 任务 %d 重试超限，升级为 escalated", item.taskID)
 
 		now := gtime.Now()
-		_, _ = g.DB().Model("mvp_domain_task").Ctx(ctx).
+		result, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
 			Where("id", item.taskID).
 			Where("status", domainTask.StatusFailed).
 			Update(g.Map{
 				"status":     domainTask.StatusEscalated,
 				"updated_at": now,
 			})
+		rows, _ := result.RowsAffected()
+		if rows == 0 {
+			continue
+		}
+
+		// 触发 rework stage
+		if w.escalateFn != nil {
+			if err := w.escalateFn(ctx, item.workflowRunID, item.taskID); err != nil {
+				g.Log().Errorf(ctx, "[WatchdogV2] 触发 rework 失败: task=%d err=%v", item.taskID, err)
+			}
+		}
 	}
 }

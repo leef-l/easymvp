@@ -198,9 +198,17 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 
 	g.Log().Infof(ctx, "[ReworkStage] 回写完成: analysis=%d → original=%d reason=%s", analysisTaskID, failedTaskID, patch.Reason)
 
-	// 6. 完成 rework stage，推回 execute/review
+	// 6. 完成 rework stage
 	if s.stageCompleter != nil {
 		_ = s.stageCompleter.CompleteStage(ctx, stageRunID)
+	}
+
+	// 7. 推回 execute：原任务已 pending，重启调度器拾取
+	workflowRunID := analysisTask["workflow_run_id"].Int64()
+	if s.executeTrigger != nil && workflowRunID > 0 {
+		if err := s.executeTrigger(ctx, workflowRunID, 0); err != nil {
+			g.Log().Errorf(ctx, "[ReworkStage] 重启调度失败: workflowRunID=%d err=%v", workflowRunID, err)
+		}
 	}
 
 	return nil

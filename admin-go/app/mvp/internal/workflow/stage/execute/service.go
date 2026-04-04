@@ -25,9 +25,10 @@ type StageCompleter interface {
 
 // Service 执行阶段服务。
 type Service struct {
-	taskSvc        *domainTask.TaskService
-	scheduler      *scheduler.DomainTaskScheduler
-	stageCompleter StageCompleter
+	taskSvc             *domainTask.TaskService
+	scheduler           *scheduler.DomainTaskScheduler
+	stageCompleter      StageCompleter
+	onAnalysisCompleted AnalysisCompletedFn
 }
 
 // NewService 创建执行阶段服务。
@@ -38,6 +39,9 @@ func NewService(ts *domainTask.TaskService, sched *scheduler.DomainTaskScheduler
 		stageCompleter: sc,
 	}
 }
+
+// SetAnalysisCompletedFn 注册 failure_analysis 完成后的回调。
+func (s *Service) SetAnalysisCompletedFn(fn AnalysisCompletedFn) { s.onAnalysisCompleted = fn }
 
 // InstantiateAndStart 将审核通过的蓝图实例化为领域任务并启动调度。
 func (s *Service) InstantiateAndStart(ctx context.Context, stageRunID int64, planVersionID int64) error {
@@ -61,9 +65,10 @@ func (s *Service) InstantiateAndStart(ctx context.Context, stageRunID int64, pla
 
 	// 2. 注册执行器
 	s.scheduler.SetExecutor(&domainTaskExecutor{
-		workflowRunID: workflowRunID,
-		scheduler:     s.scheduler,
-		wsMgr:         workspace.NewGitWorktreeManager(),
+		workflowRunID:       workflowRunID,
+		scheduler:           s.scheduler,
+		wsMgr:               workspace.NewGitWorktreeManager(),
+		onAnalysisCompleted: s.onAnalysisCompleted,
 	})
 
 	// 3. 注册完成回调
@@ -92,11 +97,15 @@ func (s *Service) InstantiateAndStart(ctx context.Context, stageRunID int64, pla
 	return s.scheduler.Start(ctx, workflowRunID)
 }
 
+// AnalysisCompletedFn 分析任务完成回调（路由到 rework service）。
+type AnalysisCompletedFn func(ctx context.Context, stageRunID, analysisTaskID int64) error
+
 // domainTaskExecutor 领域任务执行器，桥接旧 engine.Executor。
 type domainTaskExecutor struct {
-	workflowRunID int64
-	scheduler     *scheduler.DomainTaskScheduler
-	wsMgr         workspace.Manager
+	workflowRunID       int64
+	scheduler           *scheduler.DomainTaskScheduler
+	wsMgr               workspace.Manager
+	onAnalysisCompleted AnalysisCompletedFn
 }
 
 // ExecuteDomainTask 执行单个领域任务。
@@ -239,15 +248,43 @@ func (e *domainTaskExecutor) executeWithChat(ctx context.Context, projectID, tas
 
 // handleSuccess 任务成功。
 func (e *domainTaskExecutor) handleSuccess(ctx context.Context, taskID int64, result string) {
-	now := g.Map{
-		"status":       "completed",
-		"result":       result,
-		"completed_at": g.Map{"completed_at": "NOW()"},
-		"updated_at":   g.Map{"updated_at": "NOW()"},
-	}
+	now := gtime.Now()
 	_, _ = g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("id", taskID).Where("status", "running").
-		Update(now)
+		Update(g.Map{
+			"status":       domainTask.StatusCompleted,
+			"result":       result,
+			"completed_at": now,
+			"updated_at":   now,
+		})
+
+	// 检查是否为 failure_analysis 任务 → 路由到 rework OnAnalysisCompleted
+	isAnalysis := false
+	if e.onAnalysisCompleted != nil {
+		task, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+			Where("id", taskID).Fields("task_kind, stage_run_id").One()
+		if !task.IsEmpty() && task["task_kind"].String() == "failure_analysis" {
+			isAnalysis = true
+			stageRunID := task["stage_run_id"].Int64()
+			if err := e.onAnalysisCompleted(ctx, stageRunID, taskID); err != nil {
+				// 回调失败：回滚分析任务为 failed，让 watchdog 后续重试
+				g.Log().Errorf(ctx, "[domainTaskExecutor] OnAnalysisCompleted 失败，回滚分析任务: task=%d err=%v", taskID, err)
+				_, _ = g.DB().Model("mvp_domain_task").Ctx(ctx).
+					Where("id", taskID).
+					Where("status", domainTask.StatusCompleted).
+					Update(g.Map{
+						"status":     domainTask.StatusFailed,
+						"result":     fmt.Sprintf("rework 回调失败: %v", err),
+						"updated_at": gtime.Now(),
+					})
+				e.scheduler.OnTaskFailed(ctx, taskID, "rework callback failed: "+err.Error())
+				return
+			}
+		}
+	}
+
+	// 非 analysis 任务 或 analysis 回调成功：正常推进调度
+	_ = isAnalysis
 	_ = e.scheduler.OnTaskCompleted(ctx, taskID)
 }
 

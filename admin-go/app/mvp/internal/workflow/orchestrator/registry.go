@@ -90,6 +90,18 @@ func Init() {
 		reworkStageSvc = reworkStage.NewService()
 		reworkStageSvc.SetStageCompleter(stageSvc)
 
+		// 注册 rework 完成后推回 execute 的回调
+		reworkStageSvc.SetExecuteTrigger(func(ctx context.Context, workflowRunID, planVersionID int64) error {
+			// rework 完成后，原失败任务已被回写为 pending，重启调度即可
+			g.Log().Infof(ctx, "[Registry] rework 完成，重启调度: workflowRunID=%d", workflowRunID)
+			return taskScheduler.Start(ctx, workflowRunID)
+		})
+
+		// 注册 failure_analysis 完成回调到 execute service
+		executeStageSvc.SetAnalysisCompletedFn(func(ctx context.Context, stageRunID, analysisTaskID int64) error {
+			return reworkStageSvc.OnAnalysisCompleted(ctx, stageRunID, analysisTaskID)
+		})
+
 		// 注册阶段失败后的执行链终止回调
 		stageSvc.SetWorkflowFailedCallback(func(ctx context.Context, workflowRunID int64) {
 			g.Log().Infof(ctx, "[Registry] 工作流失败，终止执行链: workflowRunID=%d", workflowRunID)
@@ -107,6 +119,9 @@ func Init() {
 				return taskScheduler.Start(ctx, wfRunID.Int64())
 			}
 			return nil
+		})
+		domainWatchdog.SetEscalateFn(func(ctx context.Context, workflowRunID, taskID int64) error {
+			return triggerReworkStage(ctx, workflowRunID, taskID)
 		})
 		domainWatchdog.Start(context.Background())
 	})
