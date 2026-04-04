@@ -15,7 +15,7 @@ type WorkflowCreateProjectReq struct {
 	Name             string              `json:"name" v:"required" dc:"项目名称"`
 	ProjectCategory  string              `json:"projectCategory" v:"required|max-length:50" dc:"项目分类"`
 	Description      string              `json:"description" dc:"项目简介"`
-	WorkDir          string              `json:"workDir" v:"required|max-length:500" dc:"代码工作目录（Aider执行路径）"`
+	WorkDir          string              `json:"workDir" v:"max-length:500" dc:"代码工作目录（编码类项目必填，非编码类可留空由系统自动生成）"`
 	ArchitectModelID snowflake.JsonInt64  `json:"architectModelID" v:"required" dc:"架构师AI模型ID"`
 }
 

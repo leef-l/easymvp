@@ -24,7 +24,7 @@ type MvpMessageColumns struct {
 	Id             string // 雪花ID
 	ConversationId string // 对话ID
 	Role           string // 消息角色：user/assistant/system
-	MessageType    string // 消息类型
+	MessageType    string // 消息类型：chat_user/chat_reply/task_prompt/task_reply/system_notice/poison/general
 	Content        string // 消息内容
 	ModelId        string // 使用的AI模型ID
 	TokenUsage     string // token消耗：{prompt_tokens, completion_tokens}

@@ -24,17 +24,17 @@ type MvpRolePresetColumns struct {
 	Id              string // 雪花ID
 	ProjectCategory string // 项目分类
 	RoleType        string // 角色类型：architect/implementer/auditor/coordinator
-	RoleLevel    string // 角色等级：lite/pro/max
-	ModelId      string // AI模型ID
-	SystemPrompt  string // 默认系统提示词（角色设定）
-	ExecutionMode string // 执行方式: chat/aider/openhands
-	Status        string // 状态:0=禁用,1=启用
-	Sort         string // 排序
-	CreatedBy    string // 创建人ID
-	DeptId       string // 所属部门ID
-	CreatedAt    string // 创建时间
-	UpdatedAt    string // 更新时间
-	DeletedAt    string // 软删除时间
+	RoleLevel       string // 角色等级：lite/pro/max
+	ModelId         string // AI模型ID
+	SystemPrompt    string // 默认系统提示词（角色设定）
+	ExecutionMode   string // 执行方式: chat=对话模式, aider=Aider代码编辑, openhands=OpenHands沙箱
+	Status          string // 状态:0=禁用,1=启用
+	Sort            string // 排序
+	CreatedBy       string // 创建人ID
+	DeptId          string // 所属部门ID
+	CreatedAt       string // 创建时间
+	UpdatedAt       string // 更新时间
+	DeletedAt       string // 软删除时间
 }
 
 // mvpRolePresetColumns holds the columns for the table mvp_role_preset.
@@ -42,17 +42,17 @@ var mvpRolePresetColumns = MvpRolePresetColumns{
 	Id:              "id",
 	ProjectCategory: "project_category",
 	RoleType:        "role_type",
-	RoleLevel:    "role_level",
-	ModelId:      "model_id",
-	SystemPrompt:  "system_prompt",
-	ExecutionMode: "execution_mode",
-	Status:        "status",
-	Sort:         "sort",
-	CreatedBy:    "created_by",
-	DeptId:       "dept_id",
-	CreatedAt:    "created_at",
-	UpdatedAt:    "updated_at",
-	DeletedAt:    "deleted_at",
+	RoleLevel:       "role_level",
+	ModelId:         "model_id",
+	SystemPrompt:    "system_prompt",
+	ExecutionMode:   "execution_mode",
+	Status:          "status",
+	Sort:            "sort",
+	CreatedBy:       "created_by",
+	DeptId:          "dept_id",
+	CreatedAt:       "created_at",
+	UpdatedAt:       "updated_at",
+	DeletedAt:       "deleted_at",
 }
 
 // NewMvpRolePresetDao creates and returns a new DAO object for table data access.

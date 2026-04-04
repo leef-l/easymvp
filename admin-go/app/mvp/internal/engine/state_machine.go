@@ -1,8 +1,15 @@
 package engine
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
+)
 
 // 任务状态机：定义合法的状态转换路径，防止非法跳转
+// 所有任务状态变更必须通过 updateTaskStatus() 函数，禁止裸 Update
 
 // validTransitions 合法的任务状态转换表
 // key: 当前状态, value: 允许转换到的目标状态集合
@@ -12,7 +19,7 @@ var validTransitions = map[string]map[string]bool{
 	},
 	"pending": {
 		"running": true, // 调度器分发
-		"draft":   true, // 回退到草稿
+		"draft":   true, // 回退到草稿（审核不通过）
 	},
 	"running": {
 		"completed": true, // 正常完成
@@ -61,4 +68,38 @@ func ValidateTransition(from, to string) error {
 		return fmt.Errorf("非法状态转换: %s → %s", from, to)
 	}
 	return nil
+}
+
+// updateTaskStatus 统一的任务状态变更函数
+// 内部强制调用 ValidateTransition + DB CAS（乐观锁），防止并发冲突和非法跳转
+// extra: 额外需要更新的字段（如 error_message, result 等）
+// 返回实际影响的行数和错误
+func updateTaskStatus(ctx context.Context, taskID int64, fromStatus, toStatus string, extra g.Map) (int64, error) {
+	if err := ValidateTransition(fromStatus, toStatus); err != nil {
+		g.Log().Warningf(ctx, "[StateMachine] 非法状态转换被拦截: task=%d, %s → %s", taskID, fromStatus, toStatus)
+		return 0, err
+	}
+
+	data := g.Map{
+		"status":     toStatus,
+		"updated_at": gtime.Now(),
+	}
+	for k, v := range extra {
+		data[k] = v
+	}
+
+	result, err := g.DB().Model("mvp_task").
+		Where("id", taskID).
+		Where("status", fromStatus). // CAS: 只有当前状态匹配才更新
+		Update(data)
+	if err != nil {
+		return 0, fmt.Errorf("更新任务状态失败: task=%d, %s→%s, err=%w", taskID, fromStatus, toStatus, err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		g.Log().Infof(ctx, "[StateMachine] CAS 未命中: task=%d, 期望状态=%s→%s（可能已被其他路径处理）",
+			taskID, fromStatus, toStatus)
+	}
+	return rows, nil
 }

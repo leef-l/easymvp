@@ -3,6 +3,7 @@
 /** 项目状态枚举 */
 export const ProjectStatus = {
   DESIGNING: 'designing',
+  REVIEWING: 'reviewing',
   RUNNING: 'running',
   PAUSED: 'paused',
   COMPLETED: 'completed',
@@ -11,6 +12,7 @@ export const ProjectStatus = {
 /** 项目状态映射（用于列表/详情展示） */
 export const projectStatusMap: Record<string, { label: string; color: string }> = {
   designing: { label: '设计中', color: 'blue' },
+  reviewing: { label: '方案审核中', color: 'cyan' },
   running: { label: '执行中', color: 'green' },
   paused: { label: '已暂停', color: 'orange' },
   completed: { label: '已完成', color: 'default' },
@@ -19,6 +21,7 @@ export const projectStatusMap: Record<string, { label: string; color: string }> 
 /** 项目状态选项 */
 export const projectStatusOptions = [
   { label: '设计中', value: 'designing' },
+  { label: '方案审核中', value: 'reviewing' },
   { label: '执行中', value: 'running' },
   { label: '已暂停', value: 'paused' },
   { label: '已完成', value: 'completed' },
@@ -103,6 +106,66 @@ export const roleLevelMap: Record<string, { label: string; color: string }> = {
   lite: { label: 'Lite', color: 'default' },
   pro: { label: 'Pro', color: 'blue' },
   max: { label: 'Max', color: 'gold' },
+};
+
+// ==================== 引擎版本 ====================
+
+/** 引擎版本枚举 */
+export const EngineVersion = {
+  LEGACY: 'legacy',
+  WORKFLOW_V2: 'workflow_v2',
+} as const;
+
+/** 引擎版本映射 */
+export const engineVersionMap: Record<string, { label: string; color: string }> = {
+  legacy: { label: 'Legacy', color: 'default' },
+  workflow_v2: { label: 'Workflow V2', color: 'purple' },
+};
+
+/** 引擎版本选项 */
+export const engineVersionOptions = [
+  { label: 'Legacy (旧引擎)', value: 'legacy' },
+  { label: 'Workflow V2 (新引擎)', value: 'workflow_v2' },
+];
+
+// ==================== 工作流状态 ====================
+
+/** 工作流运行状态枚举 */
+export const WorkflowRunStatus = {
+  PENDING: 'pending',
+  RUNNING: 'running',
+  PAUSED: 'paused',
+  COMPLETED: 'completed',
+  CANCELED: 'canceled',
+} as const;
+
+/** 工作流状态映射 */
+export const workflowRunStatusMap: Record<string, { label: string; color: string }> = {
+  pending: { label: '待启动', color: 'default' },
+  running: { label: '运行中', color: 'green' },
+  paused: { label: '已暂停', color: 'orange' },
+  completed: { label: '已完成', color: 'blue' },
+  canceled: { label: '已取消', color: 'red' },
+};
+
+// ==================== 工作流阶段 ====================
+
+/** 阶段类型枚举 */
+export const StageType = {
+  DESIGN: 'design',
+  REVIEW: 'review',
+  EXECUTE: 'execute',
+  REWORK: 'rework',
+  COMPLETE: 'complete',
+} as const;
+
+/** 阶段类型映射 */
+export const stageTypeMap: Record<string, { label: string; color: string }> = {
+  design: { label: '设计', color: 'blue' },
+  review: { label: '审核', color: 'cyan' },
+  execute: { label: '执行', color: 'green' },
+  rework: { label: '返工', color: 'orange' },
+  complete: { label: '完成', color: 'default' },
 };
 
 // ==================== 执行方式 ====================

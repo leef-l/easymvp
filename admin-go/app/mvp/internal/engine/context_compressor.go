@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -17,7 +18,9 @@ import (
 // 1. 规则压缩优先：< 500字原文存、500-3000字规则截取、> 3000字才调 AI
 // 2. 批次合并压缩：同批次任务完成后一次性压缩成批次摘要，不是逐个压缩
 // 3. 渐进式全局摘要：新批次摘要合并进全局摘要（恒定 ~3000字），不累加
-type ContextCompressor struct{}
+type ContextCompressor struct {
+	projectLocks sync.Map // projectID(int64) → *sync.Mutex，项目级并发锁
+}
 
 var defaultCompressor = &ContextCompressor{}
 
@@ -177,9 +180,19 @@ func (c *ContextCompressor) CompressBatchContext(ctx context.Context, projectID 
 // 优化3: 渐进式全局摘要（恒定 ~3000字）
 // ----------------------------------------------------------------
 
+// getProjectLock 获取项目级互斥锁（延迟创建）
+func (c *ContextCompressor) getProjectLock(projectID int64) *sync.Mutex {
+	actual, _ := c.projectLocks.LoadOrStore(projectID, &sync.Mutex{})
+	return actual.(*sync.Mutex)
+}
+
 // mergeIntoGlobalContext 将新内容合并进全局上下文
 // 如果合并后超过 3000 字，调 AI 重新压缩为 3000 字
+// 使用项目级锁防止多批次同时完成时互相覆盖
 func (c *ContextCompressor) mergeIntoGlobalContext(ctx context.Context, projectID int64, newContent string) {
+	mu := c.getProjectLock(projectID)
+	mu.Lock()
+	defer mu.Unlock()
 	project, err := g.DB().Model("mvp_project").Where("id", projectID).
 		Fields("global_context, name, project_category").One()
 	if err != nil || project.IsEmpty() {

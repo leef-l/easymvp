@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, ref } from 'vue';
+import { h, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useVbenModal } from '@vben/common-ui';
 import { useVbenForm } from '#/adapter/form';
@@ -21,10 +21,19 @@ const architectModelOptions = ref<{ label: string; value: string }[]>([]);
 const allModelOptions = ref<{ label: string; value: string }[]>([]);
 /** 预设中的架构师默认模型ID */
 const presetArchitectModelID = ref<string>('');
+/** 当前选择的项目分类 */
+const selectedCategory = ref<string>('软件开发');
+
+/** 编码类分类（workDir 必填） */
+const codingCategories = ['软件开发', '游戏开发'];
+
+/** workDir 是否必填（编码类必填，其他可选） */
+const isWorkDirRequired = computed(() => codingCategories.includes(selectedCategory.value));
 
 /** 根据项目分类加载角色预设，更新架构师模型选项 */
 async function loadPresetsForCategory(category: string) {
   if (!category) return;
+  selectedCategory.value = category;
   try {
     const presetRes = await getRolePresets(category);
     const presets = presetRes?.list ?? [];
@@ -85,9 +94,9 @@ const createSchema = [
   {
     component: 'Input',
     fieldName: 'workDir',
-    label: tooltipLabel('代码工作目录', 'Aider 执行代码编辑时的项目根目录，必须是服务器上真实存在的路径'),
-    rules: 'required',
-    componentProps: { placeholder: '如：/www/wwwroot/project/my-app', maxlength: 500 },
+    label: tooltipLabel('工作目录', '编码类项目必填（Aider代码编辑的根目录）；非编码类可留空（系统自动生成）'),
+    rules: computed(() => isWorkDirRequired.value ? 'required' : undefined),
+    componentProps: { placeholder: computed(() => isWorkDirRequired.value ? '如：/www/wwwroot/project/my-app' : '可留空，系统自动生成'), maxlength: 500 },
   },
   {
     component: 'Select',

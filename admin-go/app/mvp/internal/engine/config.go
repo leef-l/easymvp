@@ -132,6 +132,16 @@ func GetHeartbeatTimeout(ctx context.Context, projectCategory string) int {
 	}
 }
 
+// GetReviewTimeout 获取方案审核超时时间（秒）
+func GetReviewTimeout(ctx context.Context) int {
+	return GetConfigInt(ctx, "review.timeout_seconds", "engine.review.timeoutSeconds", 300)
+}
+
+// GetReviewAutoFixBatch 审核预检时是否自动修正 batch_no 不合理的问题
+func GetReviewAutoFixBatch(ctx context.Context) bool {
+	return GetConfigInt(ctx, "review.auto_fix_batch", "engine.review.autoFixBatch", 1) == 1
+}
+
 // GetConfigString 读取字符串配置，三级 fallback
 func GetConfigString(ctx context.Context, key string, yamlPath string, defaultVal string) string {
 	// 0. 缓存

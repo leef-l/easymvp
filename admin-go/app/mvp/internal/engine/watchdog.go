@@ -228,23 +228,16 @@ func (w *Watchdog) checkRunningTasks(ctx context.Context) {
 	}
 	w.mu.Unlock()
 
-	// 锁外执行 DB 更新操作（使用 CAS：只有 status=running 才能标记为 failed，防止与正常完成竞争）
+	// 锁外执行 DB 更新操作（通过 updateTaskStatus 使用 CAS，防止与正常完成竞争）
 	for _, st := range staleTasks {
-		affected, err := g.DB().Model("mvp_task").
-			Where("id", st.taskID).
-			Where("status", "running"). // CAS: 只有还在 running 的才标记失败
-			Update(g.Map{
-				"status":        "failed",
-				"error_message": "看门狗检测: " + st.reason,
-				"updated_at":    gtime.Now(),
-			})
+		rows, err := updateTaskStatus(ctx, st.taskID, "running", "failed", g.Map{
+			"error_message": "看门狗检测: " + st.reason,
+		})
 		if err != nil {
 			g.Log().Errorf(ctx, "[Watchdog] 更新任务 %d 状态失败: %v", st.taskID, err)
 			continue
 		}
-		rows, _ := affected.RowsAffected()
 		if rows == 0 {
-			// 任务已被正常完成或其他路径处理，跳过
 			g.Log().Infof(ctx, "[Watchdog] 任务 %d 已不是 running 状态，跳过标记失败", st.taskID)
 			continue
 		}
@@ -373,10 +366,7 @@ func (w *Watchdog) checkFailedTasks(ctx context.Context) {
 		g.Log().Errorf(ctx, "[Watchdog] 任务 %d（%s）重试超过最大次数，升级处理", item.taskID, item.taskType)
 
 		// 更新任务状态为 escalated，防止下轮重复扫描
-		g.DB().Model("mvp_task").Where("id", item.taskID).Update(g.Map{
-			"status":     "escalated",
-			"updated_at": gtime.Now(),
-		})
+		updateTaskStatus(ctx, item.taskID, "failed", "escalated", nil)
 
 		logTaskAction(item.taskID, "escalate_to_architect", "failed", "escalated",
 			"看门狗自动重启超过最大次数，升级给架构师处理", "system")

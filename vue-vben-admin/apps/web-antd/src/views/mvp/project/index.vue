@@ -10,6 +10,7 @@ import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getProjectList, deleteProject } from '#/api/mvp/project';
 import { confirmPlan, resumeProject } from '#/api/mvp/workflow';
 import type { ProjectItem } from '#/api/mvp/project/types';
+import { engineVersionMap } from '../consts';
 
 import FormModal from './modules/form.vue';
 import PauseModal from './modules/pause-modal.vue';
@@ -20,6 +21,7 @@ const router = useRouter();
 /** 状态中文名称映射 */
 const STATUS_LABELS: Record<string, string> = {
   designing: '设计中',
+  reviewing: '方案审核中',
   running: '执行中',
   paused: '已暂停',
   completed: '已完成',
@@ -28,6 +30,7 @@ const STATUS_LABELS: Record<string, string> = {
 /** 状态 Tag 颜色映射 */
 const STATUS_COLORS: Record<string, string> = {
   designing: 'blue',
+  reviewing: 'cyan',
   running: 'green',
   paused: 'orange',
   completed: 'default',
@@ -72,6 +75,7 @@ const formOptions: VbenFormProps = {
         allowClear: true,
         options: [
           { label: '设计中', value: 'designing' },
+          { label: '方案审核中', value: 'reviewing' },
           { label: '执行中', value: 'running' },
           { label: '已暂停', value: 'paused' },
           { label: '已完成', value: 'completed' },
@@ -95,6 +99,12 @@ const gridOptions: VxeGridProps<ProjectItem> = {
       field: 'projectCategory',
       title: '项目分类',
       width: 120,
+    },
+    {
+      field: 'engineVersion',
+      title: '引擎版本',
+      width: 120,
+      slots: { default: 'col-engine-version' },
     },
     {
       field: 'status',
@@ -180,11 +190,11 @@ function handleViewStatus(row: ProjectItem) {
 function handleConfirmPlan(row: ProjectItem) {
   Modal.confirm({
     title: '确认实施方案',
-    content: '确认后系统将自动拆解任务并开始并行执行，是否继续？',
-    okText: '确认执行',
+    content: '确认后系统将先执行方案审核（系统预检 + AI审核 + 调度优化），审核通过后自动开始执行。',
+    okText: '确认方案',
     async onOk() {
       await confirmPlan(row.id);
-      message.success('方案已确认，AI任务开始调度');
+      message.success('方案已提交审核，请稍候...');
       gridApi.reload();
     },
   });
@@ -244,6 +254,13 @@ function handleDelete(row: ProjectItem) {
         </p>
       </template>
 
+      <!-- 引擎版本列 -->
+      <template #col-engine-version="{ row }">
+        <Tag :color="engineVersionMap[row.engineVersion ?? 'legacy']?.color ?? 'default'">
+          {{ engineVersionMap[row.engineVersion ?? 'legacy']?.label ?? 'Legacy' }}
+        </Tag>
+      </template>
+
       <!-- 状态 Tag 列 -->
       <template #col-status="{ row }">
         <Tag :color="STATUS_COLORS[row.status] ?? 'default'">
@@ -276,6 +293,12 @@ function handleDelete(row: ProjectItem) {
         <template v-if="row.status === 'designing'">
           <Button type="link" size="small" @click="handleChat(row)">进入对话</Button>
           <Button type="link" size="small" @click="handleConfirmPlan(row)">确认方案</Button>
+        </template>
+
+        <!-- 审核中：查看详情（只读等待） -->
+        <template v-else-if="row.status === 'reviewing'">
+          <Button type="link" size="small" @click="handleViewStatus(row)">查看详情</Button>
+          <Tag color="cyan" class="ml-1">审核中...</Tag>
         </template>
 
         <!-- 执行中：查看详情 + 暂停 -->

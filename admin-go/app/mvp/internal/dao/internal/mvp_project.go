@@ -21,38 +21,44 @@ type MvpProjectDao struct {
 
 // MvpProjectColumns defines and stores column names for the table mvp_project.
 type MvpProjectColumns struct {
-	Id               string // 雪花ID
-	Name             string // 项目名称
-	ProjectCategory  string // 项目分类
-	Description      string // 项目简介
-	Status           string // 状态：designing/confirmed/running/paused/completed
-	PauseReason      string // 暂停原因
-	GlobalContext    string // 项目全局上下文（架构师需求分析+方案设计的压缩摘要）
-	ArchitectModelId string // 架构师使用的AI模型ID
-	WorkDir          string // 项目代码工作目录（Aider执行路径）
-	CreatedBy        string // 创建人ID
-	DeptId           string // 所属部门ID
-	CreatedAt        string // 创建时间
-	UpdatedAt        string // 更新时间
-	DeletedAt        string // 软删除时间
+	Id                  string // 雪花ID
+	Name                string // 项目名称
+	ProjectCategory     string // 项目分类
+	Description         string // 项目简介
+	Status              string // 项目状态: designing/reviewing/running/paused/completed
+	PauseReason         string // 暂停原因
+	GlobalContext       string // 项目全局上下文（架构师需求分析+方案设计的压缩摘要）
+	ArchitectModelId    string // 架构师使用的AI模型ID
+	WorkDir             string // 项目代码工作目录（Aider执行路径）
+	ActiveBatchNo       string // 当前活跃批次号（调度器持久化，0=无活跃批次）
+	EngineVersion       string // 执行引擎版本: legacy/workflow_v2
+	ActiveWorkflowRunId string // 当前活跃工作流运行ID
+	CreatedBy           string // 创建人ID
+	DeptId              string // 所属部门ID
+	CreatedAt           string // 创建时间
+	UpdatedAt           string // 更新时间
+	DeletedAt           string // 软删除时间
 }
 
 // mvpProjectColumns holds the columns for the table mvp_project.
 var mvpProjectColumns = MvpProjectColumns{
-	Id:               "id",
-	Name:             "name",
-	ProjectCategory:  "project_category",
-	Description:      "description",
-	Status:           "status",
-	PauseReason:      "pause_reason",
-	GlobalContext:    "global_context",
-	ArchitectModelId: "architect_model_id",
-	WorkDir:          "work_dir",
-	CreatedBy:        "created_by",
-	DeptId:           "dept_id",
-	CreatedAt:        "created_at",
-	UpdatedAt:        "updated_at",
-	DeletedAt:        "deleted_at",
+	Id:                  "id",
+	Name:                "name",
+	ProjectCategory:     "project_category",
+	Description:         "description",
+	Status:              "status",
+	PauseReason:         "pause_reason",
+	GlobalContext:       "global_context",
+	ArchitectModelId:    "architect_model_id",
+	WorkDir:             "work_dir",
+	ActiveBatchNo:       "active_batch_no",
+	EngineVersion:       "engine_version",
+	ActiveWorkflowRunId: "active_workflow_run_id",
+	CreatedBy:           "created_by",
+	DeptId:              "dept_id",
+	CreatedAt:           "created_at",
+	UpdatedAt:           "updated_at",
+	DeletedAt:           "deleted_at",
 }
 
 // NewMvpProjectDao creates and returns a new DAO object for table data access.
