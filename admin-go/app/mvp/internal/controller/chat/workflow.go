@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -900,4 +901,255 @@ func (c *cWorkflow) ManualReject(ctx context.Context, req *v1.WorkflowManualReje
 		Update(g.Map{"status": "designing", "updated_at": g.Map{"updated_at": "NOW()"}})
 
 	return &v1.WorkflowManualRejectRes{}, nil
+}
+
+// ==================== Timeline / Rework / Stage History ====================
+
+// eventLabelMap 事件类型 → 可读标签
+var eventLabelMap = map[string]string{
+	"workflow.created":        "工作流已创建",
+	"workflow.paused":         "工作流已暂停",
+	"workflow.resumed":        "工作流已恢复",
+	"workflow.canceled":       "工作流已取消",
+	"workflow.completed":      "工作流已完成",
+	"stage.started":           "阶段已启动",
+	"stage.completed":         "阶段已完成",
+	"stage.failed":            "阶段失败",
+	"plan_version.created":    "方案版本已创建",
+	"plan_version.submitted":  "方案已提交审核",
+	"plan_version.approved":   "方案审核通过",
+	"plan_version.rejected":   "方案被驳回",
+	"review.issue_created":    "发现审核问题",
+	"review.decision_ready":   "审核决策就绪",
+	"task.created":            "任务已创建",
+	"task.started":            "任务已启动",
+	"task.completed":          "任务已完成",
+	"task.failed":             "任务失败",
+	"task.escalated":          "任务已升级",
+	"task.retried":            "任务已重试",
+}
+
+// Timeline 工作流事件时间线
+func (c *cWorkflow) Timeline(ctx context.Context, req *v1.WorkflowTimelineReq) (res *v1.WorkflowTimelineRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	limit := req.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+
+	// 查活跃 workflow_run
+	wfRuns, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at").
+		Fields("id").
+		OrderDesc("run_no").
+		All()
+	if err != nil || len(wfRuns) == 0 {
+		return &v1.WorkflowTimelineRes{Events: []v1.TimelineEvent{}}, nil
+	}
+
+	wfRunIDs := make([]int64, 0, len(wfRuns))
+	for _, r := range wfRuns {
+		wfRunIDs = append(wfRunIDs, r["id"].Int64())
+	}
+
+	events, err := g.DB().Model("mvp_workflow_event").Ctx(ctx).
+		WhereIn("workflow_run_id", wfRunIDs).
+		OrderDesc("created_at").
+		Limit(limit).
+		All()
+	if err != nil {
+		return nil, err
+	}
+
+	list := make([]v1.TimelineEvent, 0, len(events))
+	for _, e := range events {
+		eventType := e["event_type"].String()
+		label := eventLabelMap[eventType]
+		if label == "" {
+			label = eventType
+		}
+		// 补充 payload 中的上下文信息到 label
+		payload := e["payload"].String()
+		if payload != "" && payload != "null" {
+			var pm map[string]string
+			if json.Unmarshal([]byte(payload), &pm) == nil {
+				if st, ok := pm["stage_type"]; ok {
+					stageLabel := map[string]string{"design": "设计", "review": "审核", "execute": "执行", "rework": "返工", "complete": "完成"}[st]
+					if stageLabel != "" {
+						label = stageLabel + label[strings.Index(label, "阶段"):]
+						if strings.Index(label, "阶段") < 0 {
+							label = stageLabel + "阶段 " + label
+						}
+					}
+				}
+				if reason, ok := pm["reason"]; ok && reason != "" {
+					label += "：" + reason
+				}
+			}
+		}
+
+		item := v1.TimelineEvent{
+			ID:            snowflake.JsonInt64(e["id"].Int64()),
+			WorkflowRunID: snowflake.JsonInt64(e["workflow_run_id"].Int64()),
+			EntityType:    e["entity_type"].String(),
+			EventType:     eventType,
+			Label:         label,
+			Payload:       payload,
+			CreatedAt:     e["created_at"].GTime(),
+		}
+		if sid := e["stage_run_id"].Int64(); sid > 0 {
+			v := snowflake.JsonInt64(sid)
+			item.StageRunID = &v
+		}
+		if eid := e["entity_id"].Int64(); eid > 0 {
+			v := snowflake.JsonInt64(eid)
+			item.EntityID = &v
+		}
+		list = append(list, item)
+	}
+
+	return &v1.WorkflowTimelineRes{Events: list}, nil
+}
+
+// ReworkStatus 返工阶段状态
+func (c *cWorkflow) ReworkStatus(ctx context.Context, req *v1.WorkflowReworkStatusReq) (res *v1.WorkflowReworkStatusRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	// 查活跃 workflow_run
+	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at").
+		OrderDesc("run_no").
+		One()
+	if err != nil || wfRun.IsEmpty() {
+		return &v1.WorkflowReworkStatusRes{HasRework: false, History: []v1.ReworkRoundInfo{}}, nil
+	}
+	wfRunID := wfRun["id"].Int64()
+
+	// 查 handoff_record
+	handoffs, err := g.DB().Model("mvp_handoff_record").Ctx(ctx).
+		Where("workflow_run_id", wfRunID).
+		Where("handoff_type", "failure_escalation").
+		OrderAsc("created_at").
+		All()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(handoffs) == 0 {
+		return &v1.WorkflowReworkStatusRes{HasRework: false, History: []v1.ReworkRoundInfo{}}, nil
+	}
+
+	// 查当前 rework stage
+	var currentStage *v1.ReworkStageInfo
+	reworkStage, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).
+		Where("workflow_run_id", wfRunID).
+		Where("stage_type", "rework").
+		WhereNull("deleted_at").
+		OrderDesc("stage_no").
+		One()
+	if !reworkStage.IsEmpty() {
+		currentStage = &v1.ReworkStageInfo{
+			StageRunID: snowflake.JsonInt64(reworkStage["id"].Int64()),
+			Status:     reworkStage["status"].String(),
+			StartedAt:  reworkStage["started_at"].GTime(),
+		}
+	}
+
+	// 构建轮次历史
+	history := make([]v1.ReworkRoundInfo, 0, len(handoffs))
+	for i, h := range handoffs {
+		fromTaskID := h["from_task_id"].Int64()
+		toTaskID := h["to_task_id"].Int64()
+
+		// 查失败任务名称和原因
+		failedTask, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+			Where("id", fromTaskID).Fields("name, result").One()
+		failedName := ""
+		failedReason := h["reason"].String()
+		if !failedTask.IsEmpty() {
+			failedName = failedTask["name"].String()
+		}
+
+		// 查分析任务结果
+		var analysisID *snowflake.JsonInt64
+		analysisResult := ""
+		if toTaskID > 0 {
+			v := snowflake.JsonInt64(toTaskID)
+			analysisID = &v
+			analysisTask, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+				Where("id", toTaskID).Fields("result").One()
+			if !analysisTask.IsEmpty() {
+				analysisResult = analysisTask["result"].String()
+			}
+		}
+
+		history = append(history, v1.ReworkRoundInfo{
+			Round:          i + 1,
+			FailedTaskID:   snowflake.JsonInt64(fromTaskID),
+			FailedTaskName: failedName,
+			FailedReason:   failedReason,
+			AnalysisTaskID: analysisID,
+			AnalysisResult: analysisResult,
+			HandoffType:    h["handoff_type"].String(),
+			CreatedAt:      h["created_at"].GTime(),
+		})
+	}
+
+	return &v1.WorkflowReworkStatusRes{
+		HasRework:    true,
+		ReworkRounds: len(history),
+		CurrentStage: currentStage,
+		History:      history,
+	}, nil
+}
+
+// StageHistory 工作流阶段历史
+func (c *cWorkflow) StageHistory(ctx context.Context, req *v1.WorkflowStageHistoryReq) (res *v1.WorkflowStageHistoryRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at").
+		OrderDesc("run_no").
+		One()
+	if err != nil || wfRun.IsEmpty() {
+		return &v1.WorkflowStageHistoryRes{Stages: []v1.StageHistoryItem{}}, nil
+	}
+
+	stages, err := g.DB().Model("mvp_stage_run").Ctx(ctx).
+		Where("workflow_run_id", wfRun["id"].Int64()).
+		WhereNull("deleted_at").
+		Fields("id, stage_type, stage_no, status, started_at, finished_at, error_message").
+		OrderAsc("stage_no").
+		All()
+	if err != nil {
+		return nil, err
+	}
+
+	list := make([]v1.StageHistoryItem, 0, len(stages))
+	for _, s := range stages {
+		list = append(list, v1.StageHistoryItem{
+			ID:         snowflake.JsonInt64(s["id"].Int64()),
+			StageType:  s["stage_type"].String(),
+			StageNo:    s["stage_no"].Int(),
+			Status:     s["status"].String(),
+			StartedAt:  s["started_at"].GTime(),
+			FinishedAt: s["finished_at"].GTime(),
+			Error:      s["error_message"].String(),
+		})
+	}
+
+	return &v1.WorkflowStageHistoryRes{Stages: list}, nil
 }

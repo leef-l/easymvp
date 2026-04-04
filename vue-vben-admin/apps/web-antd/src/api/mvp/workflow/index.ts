@@ -120,6 +120,77 @@ export function getSystemCheck() {
   );
 }
 
+// ==================== Timeline / Rework / Stage History ====================
+
+/** 时间线事件 */
+export interface TimelineEvent {
+  id: string;
+  workflowRunID: string;
+  stageRunID?: string;
+  entityType: string;
+  entityID?: string;
+  eventType: string;
+  label: string;
+  payload?: string;
+  createdAt: string;
+}
+
+/** 获取工作流事件时间线 */
+export function getTimeline(projectID: string, limit = 50) {
+  return requestClient.get<{ events: TimelineEvent[] }>(
+    `${PREFIX}/timeline`,
+    { params: { projectID, limit } },
+  );
+}
+
+/** 返工阶段信息 */
+export interface ReworkStageInfo {
+  stageRunID: string;
+  status: string;
+  startedAt?: string;
+}
+
+/** 返工轮次信息 */
+export interface ReworkRoundInfo {
+  round: number;
+  failedTaskID: string;
+  failedTaskName: string;
+  failedReason: string;
+  analysisTaskID?: string;
+  analysisResult?: string;
+  handoffType: string;
+  createdAt: string;
+}
+
+/** 获取返工阶段状态 */
+export function getReworkStatus(projectID: string) {
+  return requestClient.get<{
+    hasRework: boolean;
+    reworkRounds: number;
+    currentStage?: ReworkStageInfo;
+    history: ReworkRoundInfo[];
+  }>(`${PREFIX}/rework-status`, { params: { projectID } });
+}
+
+/** 阶段历史项 */
+export interface StageHistoryItem {
+  id: string;
+  stageType: string;
+  stageNo: number;
+  status: string;
+  startedAt?: string;
+  finishedAt?: string;
+  error?: string;
+}
+
+/** 获取阶段历史 */
+export function getStageHistory(projectID: string) {
+  return requestClient.get<{ stages: StageHistoryItem[] }>(
+    `${PREFIX}/stage-history`,
+    { params: { projectID } },
+  );
+}
+
 // ==================== 审核相关 ====================
 
 /** 审核阶段子任务 */

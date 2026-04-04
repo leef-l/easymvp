@@ -250,3 +250,88 @@ type WorkflowManualRejectReq struct {
 type WorkflowManualRejectRes struct {
 	g.Meta `mime:"application/json"`
 }
+
+// ==================== Timeline / Rework / Stage History ====================
+
+// WorkflowTimelineReq 工作流时间线请求
+type WorkflowTimelineReq struct {
+	g.Meta    `path:"/workflow/timeline" method:"get" tags:"项目流程" summary:"工作流事件时间线"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	Limit     int                 `json:"limit" dc:"返回条数，默认50"`
+}
+
+// WorkflowTimelineRes 工作流时间线响应
+type WorkflowTimelineRes struct {
+	g.Meta `mime:"application/json"`
+	Events []TimelineEvent `json:"events"`
+}
+
+// TimelineEvent 时间线事件
+type TimelineEvent struct {
+	ID            snowflake.JsonInt64 `json:"id"`
+	WorkflowRunID snowflake.JsonInt64 `json:"workflowRunID"`
+	StageRunID    *snowflake.JsonInt64 `json:"stageRunID,omitempty"`
+	EntityType    string              `json:"entityType"`
+	EntityID      *snowflake.JsonInt64 `json:"entityID,omitempty"`
+	EventType     string              `json:"eventType"`
+	Label         string              `json:"label"`
+	Payload       string              `json:"payload,omitempty"`
+	CreatedAt     *gtime.Time         `json:"createdAt"`
+}
+
+// WorkflowReworkStatusReq 返工状态请求
+type WorkflowReworkStatusReq struct {
+	g.Meta    `path:"/workflow/rework-status" method:"get" tags:"项目流程" summary:"返工阶段状态"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// WorkflowReworkStatusRes 返工状态响应
+type WorkflowReworkStatusRes struct {
+	g.Meta       `mime:"application/json"`
+	HasRework    bool         `json:"hasRework"`
+	ReworkRounds int          `json:"reworkRounds"`
+	CurrentStage *ReworkStageInfo `json:"currentStage,omitempty"`
+	History      []ReworkRoundInfo `json:"history"`
+}
+
+// ReworkStageInfo 返工阶段信息
+type ReworkStageInfo struct {
+	StageRunID snowflake.JsonInt64 `json:"stageRunID"`
+	Status     string              `json:"status"`
+	StartedAt  *gtime.Time         `json:"startedAt,omitempty"`
+}
+
+// ReworkRoundInfo 返工轮次信息
+type ReworkRoundInfo struct {
+	Round          int                 `json:"round"`
+	FailedTaskID   snowflake.JsonInt64 `json:"failedTaskID"`
+	FailedTaskName string              `json:"failedTaskName"`
+	FailedReason   string              `json:"failedReason"`
+	AnalysisTaskID *snowflake.JsonInt64 `json:"analysisTaskID,omitempty"`
+	AnalysisResult string              `json:"analysisResult,omitempty"`
+	HandoffType    string              `json:"handoffType"`
+	CreatedAt      *gtime.Time         `json:"createdAt"`
+}
+
+// WorkflowStageHistoryReq 阶段历史请求
+type WorkflowStageHistoryReq struct {
+	g.Meta    `path:"/workflow/stage-history" method:"get" tags:"项目流程" summary:"工作流阶段历史"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// WorkflowStageHistoryRes 阶段历史响应
+type WorkflowStageHistoryRes struct {
+	g.Meta `mime:"application/json"`
+	Stages []StageHistoryItem `json:"stages"`
+}
+
+// StageHistoryItem 阶段历史项
+type StageHistoryItem struct {
+	ID         snowflake.JsonInt64 `json:"id"`
+	StageType  string              `json:"stageType"`
+	StageNo    int                 `json:"stageNo"`
+	Status     string              `json:"status"`
+	StartedAt  *gtime.Time         `json:"startedAt,omitempty"`
+	FinishedAt *gtime.Time         `json:"finishedAt,omitempty"`
+	Error      string              `json:"error,omitempty"`
+}
