@@ -242,6 +242,19 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 	return len(createdTasks), nil
 }
 
+// ExtractAndNormalize 解析 AI 回复并返回标准化的任务列表（不写入数据库）。
+// 供 V2 蓝图写入复用已有的解析和校验逻辑。
+func (p *TaskParser) ExtractAndNormalize(ctx context.Context, aiReply, projectCategory string) ([]ArchitectTask, error) {
+	plan, err := p.extractTaskPlan(aiReply)
+	if err != nil {
+		return nil, err
+	}
+	if len(plan.Tasks) == 0 {
+		return nil, nil
+	}
+	return p.normalizeTasks(ctx, plan.Tasks, projectCategory), nil
+}
+
 // DryParseTaskCount 仅解析AI回复，返回任务数量（不写入数据库）
 func (p *TaskParser) DryParseTaskCount(aiReply string) int {
 	plan, err := p.extractTaskPlan(aiReply)

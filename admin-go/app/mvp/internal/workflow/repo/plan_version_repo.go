@@ -31,6 +31,18 @@ func (r *PlanVersionRepo) GetByID(ctx context.Context, id int64) (*entity.MvpPla
 	return &ent, err
 }
 
+// NextVersionNo 获取项目下一个版本号。
+func (r *PlanVersionRepo) NextVersionNo(ctx context.Context, projectID int64) (int, error) {
+	val, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at").
+		Max("version_no")
+	if err != nil {
+		return 0, err
+	}
+	return int(val) + 1, nil
+}
+
 // ListByProject 查询项目所有版本。
 func (r *PlanVersionRepo) ListByProject(ctx context.Context, projectID int64) ([]entity.MvpPlanVersion, error) {
 	var list []entity.MvpPlanVersion

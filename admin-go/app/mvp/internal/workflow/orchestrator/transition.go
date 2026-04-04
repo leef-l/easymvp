@@ -9,12 +9,15 @@ const (
 	StageComplete = "complete"
 )
 
-// WorkflowStatus 工作流状态常量。
+// WorkflowStatus 工作流状态常量（阶段化语义）。
 const (
-	WorkflowPending   = "pending"
-	WorkflowRunning   = "running"
+	WorkflowDesigning = "designing"
+	WorkflowReviewing = "reviewing"
+	WorkflowExecuting = "executing"
+	WorkflowReworking = "reworking"
 	WorkflowPaused    = "paused"
 	WorkflowCompleted = "completed"
+	WorkflowFailed    = "failed"
 	WorkflowCanceled  = "canceled"
 )
 
@@ -29,10 +32,13 @@ const (
 
 // validWorkflowTransitions 合法的工作流状态迁移。
 var validWorkflowTransitions = map[string][]string{
-	WorkflowPending:   {WorkflowRunning, WorkflowCanceled},
-	WorkflowRunning:   {WorkflowPaused, WorkflowCompleted, WorkflowCanceled},
-	WorkflowPaused:    {WorkflowRunning, WorkflowCanceled},
+	WorkflowDesigning: {WorkflowReviewing, WorkflowPaused, WorkflowCanceled},
+	WorkflowReviewing: {WorkflowExecuting, WorkflowDesigning, WorkflowPaused, WorkflowCanceled}, // 驳回可回 designing
+	WorkflowExecuting: {WorkflowCompleted, WorkflowReworking, WorkflowPaused, WorkflowFailed, WorkflowCanceled},
+	WorkflowReworking: {WorkflowReviewing, WorkflowPaused, WorkflowCanceled},
+	WorkflowPaused:    {WorkflowDesigning, WorkflowReviewing, WorkflowExecuting, WorkflowReworking, WorkflowCanceled}, // 恢复到暂停前的阶段
 	WorkflowCompleted: {},
+	WorkflowFailed:    {WorkflowReworking, WorkflowCanceled}, // 失败后可返工或取消
 	WorkflowCanceled:  {},
 }
 
@@ -80,6 +86,24 @@ func IsValidStageTransition(from, to string) bool {
 		}
 	}
 	return false
+}
+
+// StageTypeToWorkflowStatus 将阶段类型映射为对应的 workflow 状态。
+func StageTypeToWorkflowStatus(stageType string) string {
+	switch stageType {
+	case StageDesign:
+		return WorkflowDesigning
+	case StageReview:
+		return WorkflowReviewing
+	case StageExecute:
+		return WorkflowExecuting
+	case StageRework:
+		return WorkflowReworking
+	case StageComplete:
+		return WorkflowCompleted
+	default:
+		return ""
+	}
 }
 
 // NextStage 返回当前阶段的下一个阶段，如果已是最后一个返回空。

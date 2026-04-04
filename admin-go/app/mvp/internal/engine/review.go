@@ -328,15 +328,17 @@ func containsGarbage(path string) bool {
 	return garbageRe.MatchString(path)
 }
 
-// auditorReview 审计员 AI 审核
+// auditorReview 审计员 AI 审核（legacy 入口）
 func auditorReview(ctx context.Context, projectID int64, tasks gdb.Result) (*AuditorReviewResult, error) {
-	// 获取审计员模型
 	modelInfo, err := getReviewRoleModel(ctx, projectID, "auditor")
 	if err != nil {
 		return nil, fmt.Errorf("获取审计员模型失败: %w", err)
 	}
+	return doAuditorReview(ctx, modelInfo, tasks)
+}
 
-	// 构建任务概要 JSON
+// doAuditorReview 审计员 AI 审核核心逻辑。
+func doAuditorReview(ctx context.Context, modelInfo *ModelInfo, tasks gdb.Result) (*AuditorReviewResult, error) {
 	taskSummaries := make([]map[string]interface{}, 0, len(tasks))
 	for _, t := range tasks {
 		taskSummaries = append(taskSummaries, map[string]interface{}{
@@ -395,13 +397,17 @@ func auditorReview(ctx context.Context, projectID int64, tasks gdb.Result) (*Aud
 	return &auditorResult, nil
 }
 
-// coordinatorOptimize 协调员 AI 优化
+// coordinatorOptimize 协调员 AI 优化（legacy 入口）
 func coordinatorOptimize(ctx context.Context, projectID int64, tasks gdb.Result) (*CoordinatorOptResult, error) {
 	modelInfo, err := getReviewRoleModel(ctx, projectID, "coordinator")
 	if err != nil {
 		return nil, fmt.Errorf("获取协调员模型失败: %w", err)
 	}
+	return doCoordinatorOptimize(ctx, modelInfo, tasks)
+}
 
+// doCoordinatorOptimize 协调员 AI 优化核心逻辑。
+func doCoordinatorOptimize(ctx context.Context, modelInfo *ModelInfo, tasks gdb.Result) (*CoordinatorOptResult, error) {
 	taskSummaries := make([]map[string]interface{}, 0, len(tasks))
 	for _, t := range tasks {
 		taskSummaries = append(taskSummaries, map[string]interface{}{

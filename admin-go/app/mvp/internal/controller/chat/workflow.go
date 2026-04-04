@@ -6,12 +6,15 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 
 	v1 "easymvp/app/mvp/api/mvp/v1"
 	"easymvp/app/mvp/internal/activity"
 	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/middleware"
+	"easymvp/app/mvp/internal/workflow/compat"
+	"easymvp/app/mvp/internal/workflow/orchestrator"
 	"easymvp/utility/snowflake"
 )
 
@@ -40,23 +43,49 @@ func (c *cWorkflow) CreateProject(ctx context.Context, req *v1.WorkflowCreatePro
 	userID := middleware.GetUserID(ctx)
 	deptID := middleware.GetDeptID(ctx)
 
-	projectID, convID, err := engine.CreateProject(ctx, req.Name, req.ProjectCategory, req.Description, req.WorkDir, int64(req.ArchitectModelID), userID, deptID)
+	projectID, convID, err := engine.CreateProject(ctx, req.Name, req.ProjectCategory, req.Description, req.WorkDir, int64(req.ArchitectModelID), userID, deptID, req.EngineVersion)
 	if err != nil {
 		return nil, err
+	}
+
+	var wfRunID int64
+	// V2：额外创建 WorkflowRun + 启动 design 阶段
+	if req.EngineVersion == "workflow_v2" {
+		wfSvc := orchestrator.GetWorkflowService()
+		wfRunID, err = wfSvc.CreateRun(ctx, projectID)
+		if err != nil {
+			g.Log().Warningf(ctx, "[CreateProject] V2 CreateRun 失败: %v", err)
+		} else {
+			if err2 := wfSvc.StartDesign(ctx, wfRunID); err2 != nil {
+				g.Log().Warningf(ctx, "[CreateProject] V2 StartDesign 失败: %v", err2)
+			}
+		}
 	}
 
 	return &v1.WorkflowCreateProjectRes{
 		ProjectID:      snowflake.JsonInt64(projectID),
 		ConversationID: snowflake.JsonInt64(convID),
+		WorkflowRunID:  snowflake.JsonInt64(wfRunID),
 	}, nil
 }
 
 // ConfirmPlan 确认实施方案
 func (c *cWorkflow) ConfirmPlan(ctx context.Context, req *v1.WorkflowConfirmPlanReq) (res *v1.WorkflowConfirmPlanRes, err error) {
-	if err := checkProjectOwnership(ctx, int64(req.ProjectID)); err != nil {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
 	}
-	err = engine.GetScheduler().ConfirmPlan(ctx, int64(req.ProjectID))
+
+	gw := compat.NewLegacyGateway()
+	isV2, _ := gw.IsWorkflowV2(ctx, projectID)
+
+	if isV2 {
+		// V2：走 PlanVersionService.SubmitForReview
+		err = orchestrator.GetPlanVersionService().SubmitForReview(ctx, projectID)
+	} else {
+		// Legacy：走旧调度器
+		err = engine.GetScheduler().ConfirmPlan(ctx, projectID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -115,10 +144,10 @@ func (c *cWorkflow) SkipTask(ctx context.Context, req *v1.WorkflowSkipTaskReq) (
 // ParseTasks 手动解析架构师回复中的任务清单（托底机制）
 // dryRun=true 时仅检查不创建，dryRun=false 时实际创建草案任务
 func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksReq) (res *v1.WorkflowParseTasksRes, err error) {
-	if err := checkProjectOwnership(ctx, int64(req.ProjectID)); err != nil {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
 	}
-	projectID := int64(req.ProjectID)
 
 	// 查找该项目的架构师对话
 	conv, err := g.DB().Model("mvp_conversation").
@@ -144,8 +173,11 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 
 	aiReply := msg["content"].String()
 
+	// 判断引擎版本
+	gw := compat.NewLegacyGateway()
+	isV2, _ := gw.IsWorkflowV2(ctx, projectID)
+
 	if req.DryRun {
-		// 仅检查，不创建
 		count := engine.GetParser().DryParseTaskCount(aiReply)
 		return &v1.WorkflowParseTasksRes{
 			HasTasks:  count > 0,
@@ -153,16 +185,21 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 		}, nil
 	}
 
-	// 实际创建草案任务
+	if isV2 {
+		// V2：解析为蓝图写入 plan_version + task_blueprint
+		count, err := parseAndCreateBlueprints(ctx, projectID, conv["id"].Int64(), msg["id"].Int64(), aiReply)
+		if err != nil {
+			return nil, err
+		}
+		return &v1.WorkflowParseTasksRes{HasTasks: count > 0, TaskCount: count}, nil
+	}
+
+	// Legacy：写入 mvp_task
 	count, err := engine.GetParser().ParseAndCreateTasks(ctx, projectID, aiReply)
 	if err != nil {
 		return nil, err
 	}
-
-	return &v1.WorkflowParseTasksRes{
-		HasTasks:  count > 0,
-		TaskCount: count,
-	}, nil
+	return &v1.WorkflowParseTasksRes{HasTasks: count > 0, TaskCount: count}, nil
 }
 
 // RolePresets 获取角色预设列表（前端创建项目时读取默认模型）
@@ -196,10 +233,10 @@ func (c *cWorkflow) RolePresets(ctx context.Context, req *v1.WorkflowRolePresets
 
 // ProjectStatus 获取项目状态
 func (c *cWorkflow) ProjectStatus(ctx context.Context, req *v1.WorkflowProjectStatusReq) (res *v1.WorkflowProjectStatusRes, err error) {
-	if err := checkProjectOwnership(ctx, int64(req.ProjectID)); err != nil {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
 	}
-	projectID := int64(req.ProjectID)
 
 	// 查项目状态
 	project, err := g.DB().Model("mvp_project").Where("id", projectID).Where("deleted_at IS NULL").One()
@@ -210,7 +247,15 @@ func (c *cWorkflow) ProjectStatus(ctx context.Context, req *v1.WorkflowProjectSt
 		return nil, fmt.Errorf("项目不存在")
 	}
 
-	// 统计各状态任务数
+	gw := compat.NewLegacyGateway()
+	isV2, _ := gw.IsWorkflowV2(ctx, projectID)
+
+	if isV2 {
+		// V2：从新表聚合状态
+		return projectStatusV2(ctx, project)
+	}
+
+	// Legacy：从 mvp_task 统计
 	type StatusCount struct {
 		Status string `json:"status"`
 		Count  int    `json:"count"`
@@ -238,16 +283,77 @@ func (c *cWorkflow) ProjectStatus(ctx context.Context, req *v1.WorkflowProjectSt
 	}
 
 	return &v1.WorkflowProjectStatusRes{
-		Status:            project["status"].String(),
-		PauseReason:       project["pause_reason"].String(),
-		ActiveBatch:       engine.GetScheduler().GetActiveBatch(projectID),
-		TotalTasks:        total,
-		StatusCounts:      statusCounts,
-		LastActiveAt:      activitySummary.LastActiveAt,
-		IsActuallyWorking: activitySummary.IsActuallyWorking,
+		Status:             project["status"].String(),
+		PauseReason:        project["pause_reason"].String(),
+		ActiveBatch:        engine.GetScheduler().GetActiveBatch(projectID),
+		TotalTasks:         total,
+		StatusCounts:       statusCounts,
+		LastActiveAt:       activitySummary.LastActiveAt,
+		IsActuallyWorking:  activitySummary.IsActuallyWorking,
 		ActiveRunningTasks: activitySummary.ActiveRunningTasks,
-		StalledTaskCount:  activitySummary.StalledTaskCount,
+		StalledTaskCount:   activitySummary.StalledTaskCount,
 	}, nil
+}
+
+// projectStatusV2 V2 引擎的项目状态聚合。
+func projectStatusV2(ctx context.Context, project gdb.Record) (*v1.WorkflowProjectStatusRes, error) {
+	projectID := project["id"].Int64()
+
+	// 使用 ProjectStatusAdapter 获取聚合状态
+	adapter := compat.NewProjectStatusAdapter()
+	dto, err := adapter.GetProjectStatus(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 蓝图状态统计（设计阶段用）
+	type StatusCount struct {
+		Status string `json:"status"`
+		Count  int    `json:"count"`
+	}
+	var counts []StatusCount
+	_ = g.DB().Model("mvp_task_blueprint AS bp").
+		InnerJoin("mvp_plan_version AS pv", "pv.id = bp.plan_version_id").
+		Where("pv.project_id", projectID).
+		WhereIn("pv.status", g.Slice{"draft", "active"}).
+		WhereNull("bp.deleted_at").
+		Fields("bp.blueprint_status AS status, COUNT(*) AS count").
+		Group("bp.blueprint_status").
+		Scan(&counts)
+
+	statusCounts := make(map[string]int)
+	bpTotal := 0
+	for _, sc := range counts {
+		statusCounts[sc.Status] = sc.Count
+		bpTotal += sc.Count
+	}
+
+	// 合并领域任务统计到 statusCounts
+	if dto.TotalTasks > 0 {
+		statusCounts["domain_total"] = dto.TotalTasks
+		statusCounts["domain_completed"] = dto.CompletedTasks
+		statusCounts["domain_failed"] = dto.FailedTasks
+		statusCounts["domain_running"] = dto.RunningTasks
+	}
+
+	totalTasks := bpTotal
+	if dto.TotalTasks > 0 {
+		totalTasks = dto.TotalTasks
+	}
+
+	res := &v1.WorkflowProjectStatusRes{
+		Status:       project["status"].String(),
+		PauseReason:  project["pause_reason"].String(),
+		TotalTasks:   totalTasks,
+		StatusCounts: statusCounts,
+	}
+
+	// 追加 workflow 层面的状态信息
+	if dto.WorkflowStatus != "" {
+		res.Status = dto.WorkflowStatus
+	}
+
+	return res, nil
 }
 
 // SystemCheck 系统配置检测
@@ -428,4 +534,226 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 	}
 
 	return &v1.SystemCheckRes{Items: items, AllPass: allPass}, nil
+}
+
+// parseAndCreateBlueprints V2 专用：解析 AI 回复并创建蓝图。
+func parseAndCreateBlueprints(ctx context.Context, projectID, conversationID, messageID int64, aiReply string) (int, error) {
+	// 获取项目分类
+	projectCategory, _ := g.DB().Model("mvp_project").Ctx(ctx).
+		Where("id", projectID).Value("project_category")
+
+	// 复用旧 TaskParser 提取结构化任务
+	tasks, err := engine.GetParser().ExtractAndNormalize(ctx, aiReply, projectCategory.String())
+	if err != nil || len(tasks) == 0 {
+		return 0, err
+	}
+
+	// 查当前活跃的 workflow_run
+	wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNotIn("status", g.Slice{"completed", "canceled"}).
+		WhereNull("deleted_at").
+		OrderDesc("run_no").
+		One()
+	var wfRunID int64
+	if !wfRun.IsEmpty() {
+		wfRunID = wfRun["id"].Int64()
+	}
+
+	// 创建 plan_version + blueprints
+	pvSvc := orchestrator.GetPlanVersionService()
+	_, bpCount, err := pvSvc.CreateFromArchitectReply(ctx, projectID, wfRunID, conversationID, messageID, tasks)
+	if err != nil {
+		return 0, err
+	}
+	return bpCount, nil
+}
+
+// ReviewStatus 获取项目审核状态（V2 专用）
+func (c *cWorkflow) ReviewStatus(ctx context.Context, req *v1.WorkflowReviewStatusReq) (res *v1.WorkflowReviewStatusRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	res = &v1.WorkflowReviewStatusRes{}
+
+	// 查最新的活跃 plan_version
+	pv, err := g.DB().Model("mvp_plan_version").Ctx(ctx).
+		Where("project_id", projectID).
+		WhereIn("status", g.Slice{"draft", "active"}).
+		WhereNull("deleted_at").
+		OrderDesc("version_no").
+		One()
+	if err != nil || pv.IsEmpty() {
+		return res, nil
+	}
+	pvID := pv["id"].Int64()
+	res.PlanVersionID = snowflake.JsonInt64(pvID)
+	res.ReviewStatus = pv["review_status"].String()
+
+	// 蓝图数
+	bpCount, _ := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
+		Where("plan_version_id", pvID).WhereNull("deleted_at").Count()
+	res.BlueprintCount = bpCount
+
+	// 查最新的 review stage_run
+	stageRun, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).
+		InnerJoin("mvp_workflow_run wf", "wf.id = mvp_stage_run.workflow_run_id").
+		Where("wf.project_id", projectID).
+		Where("mvp_stage_run.stage_type", "review").
+		WhereNull("mvp_stage_run.deleted_at").
+		Fields("mvp_stage_run.*").
+		OrderDesc("mvp_stage_run.stage_no").
+		One()
+	if !stageRun.IsEmpty() {
+		stageRunID := stageRun["id"].Int64()
+		res.StageRunID = snowflake.JsonInt64(stageRunID)
+		res.StageStatus = stageRun["status"].String()
+
+		// stage_tasks
+		var stageTasks []v1.ReviewStageTask
+		tasks, _ := g.DB().Model("mvp_stage_task").Ctx(ctx).
+			Where("stage_run_id", stageRunID).
+			WhereNull("deleted_at").
+			OrderAsc("created_at").
+			All()
+		for _, t := range tasks {
+			st := v1.ReviewStageTask{
+				ID:       snowflake.JsonInt64(t["id"].Int64()),
+				TaskType: t["task_type"].String(),
+				RoleType: t["role_type"].String(),
+				Status:   t["status"].String(),
+			}
+			if !t["started_at"].IsEmpty() {
+				startedAt := t["started_at"].GTime()
+				st.StartedAt = startedAt
+			}
+			if !t["completed_at"].IsEmpty() {
+				completedAt := t["completed_at"].GTime()
+				st.CompletedAt = completedAt
+			}
+			if t["error_message"].String() != "" {
+				st.ErrorMessage = t["error_message"].String()
+			}
+			stageTasks = append(stageTasks, st)
+		}
+		res.StageTasks = stageTasks
+
+		// issue 统计
+		res.ErrorCount, _ = g.DB().Model("mvp_review_issue").Ctx(ctx).
+			Where("stage_run_id", stageRunID).Where("severity", "error").Where("status", "open").Count()
+		res.WarningCount, _ = g.DB().Model("mvp_review_issue").Ctx(ctx).
+			Where("stage_run_id", stageRunID).Where("severity", "warning").Where("status", "open").Count()
+	}
+
+	return res, nil
+}
+
+// ReviewIssues 获取审核问题列表
+func (c *cWorkflow) ReviewIssues(ctx context.Context, req *v1.WorkflowReviewIssuesReq) (res *v1.WorkflowReviewIssuesRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	// 查最新的 review stage_run
+	stageRun, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).
+		InnerJoin("mvp_workflow_run wf", "wf.id = mvp_stage_run.workflow_run_id").
+		Where("wf.project_id", projectID).
+		Where("mvp_stage_run.stage_type", "review").
+		WhereNull("mvp_stage_run.deleted_at").
+		Fields("mvp_stage_run.id").
+		OrderDesc("mvp_stage_run.stage_no").
+		One()
+	if stageRun.IsEmpty() {
+		return &v1.WorkflowReviewIssuesRes{Issues: []v1.ReviewIssueItem{}}, nil
+	}
+
+	issues, _ := g.DB().Model("mvp_review_issue").Ctx(ctx).
+		Where("stage_run_id", stageRun["id"].Int64()).
+		WhereNull("deleted_at").
+		OrderDesc("severity").
+		OrderDesc("created_at").
+		All()
+
+	items := make([]v1.ReviewIssueItem, 0, len(issues))
+	for _, issue := range issues {
+		items = append(items, v1.ReviewIssueItem{
+			ID:         snowflake.JsonInt64(issue["id"].Int64()),
+			Severity:   issue["severity"].String(),
+			IssueCode:  issue["issue_code"].String(),
+			SourceRole: issue["source_role"].String(),
+			TaskName:   issue["task_name"].String(),
+			Message:    issue["message"].String(),
+			Suggestion: issue["suggestion"].String(),
+			Status:     issue["status"].String(),
+			CreatedAt:  issue["created_at"].GTime(),
+		})
+	}
+
+	return &v1.WorkflowReviewIssuesRes{Issues: items}, nil
+}
+
+// ManualApprove 手动审批通过
+func (c *cWorkflow) ManualApprove(ctx context.Context, req *v1.WorkflowManualApproveReq) (res *v1.WorkflowManualApproveRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	// 查活跃的 plan_version
+	pv, err := g.DB().Model("mvp_plan_version").Ctx(ctx).
+		Where("project_id", projectID).
+		Where("status", "active").
+		Where("review_status", "pending").
+		WhereNull("deleted_at").
+		OrderDesc("version_no").
+		One()
+	if err != nil || pv.IsEmpty() {
+		return nil, fmt.Errorf("没有待审核的方案版本")
+	}
+
+	pvSvc := orchestrator.GetPlanVersionService()
+	if err := pvSvc.Approve(ctx, pv["id"].Int64()); err != nil {
+		return nil, err
+	}
+
+	// 更新项目状态为 running
+	_, _ = g.DB().Model("mvp_project").Ctx(ctx).
+		Where("id", projectID).
+		Update(g.Map{"status": "running", "updated_at": g.Map{"updated_at": "NOW()"}})
+
+	return &v1.WorkflowManualApproveRes{}, nil
+}
+
+// ManualReject 手动驳回
+func (c *cWorkflow) ManualReject(ctx context.Context, req *v1.WorkflowManualRejectReq) (res *v1.WorkflowManualRejectRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	pv, err := g.DB().Model("mvp_plan_version").Ctx(ctx).
+		Where("project_id", projectID).
+		Where("status", "active").
+		Where("review_status", "pending").
+		WhereNull("deleted_at").
+		OrderDesc("version_no").
+		One()
+	if err != nil || pv.IsEmpty() {
+		return nil, fmt.Errorf("没有待审核的方案版本")
+	}
+
+	pvSvc := orchestrator.GetPlanVersionService()
+	if err := pvSvc.Reject(ctx, pv["id"].Int64()); err != nil {
+		return nil, err
+	}
+
+	// 项目状态回退 designing
+	_, _ = g.DB().Model("mvp_project").Ctx(ctx).
+		Where("id", projectID).
+		Update(g.Map{"status": "designing", "updated_at": g.Map{"updated_at": "NOW()"}})
+
+	return &v1.WorkflowManualRejectRes{}, nil
 }

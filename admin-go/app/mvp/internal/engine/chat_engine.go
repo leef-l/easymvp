@@ -291,7 +291,14 @@ func (e *ChatEngine) tryParseArchitectTasks(conversationID int64, aiReply string
 
 	projectID := conv["project_id"].Int64()
 
-	// 尝试解析
+	// 判断引擎版本
+	ev, _ := g.DB().Model("mvp_project").Where("id", projectID).Value("engine_version")
+	if ev.String() == "workflow_v2" {
+		e.tryParseArchitectBlueprints(ctx, projectID, conv["id"].Int64(), conversationID, aiReply)
+		return
+	}
+
+	// Legacy：写入 mvp_task
 	count, err := GetParser().ParseAndCreateTasks(ctx, projectID, aiReply)
 	if err != nil {
 		g.Log().Warningf(ctx, "[ChatEngine] 解析任务失败: %v", err)
@@ -299,10 +306,54 @@ func (e *ChatEngine) tryParseArchitectTasks(conversationID int64, aiReply string
 	}
 	if count > 0 {
 		g.Log().Infof(ctx, "[ChatEngine] 架构师回复中解析出 %d 个任务（draft），项目 %d", count, projectID)
-		// 注：前端在架构师回复结束后会主动调用 loadProjectStatus() 刷新草稿任务数，
-		// 因此不再通过 SSE 推送 tasks_parsed 事件（之前推到 conversationID channel，
-		// 但前端只订阅 messageID channel，导致这条通知始终无效）。
 	}
+}
+
+// BlueprintCreator V2 蓝图创建回调，由 orchestrator 包注册。
+// 避免 engine→orchestrator 循环依赖。
+type BlueprintCreator func(ctx context.Context, projectID, workflowRunID, conversationID, messageID int64, tasks []ArchitectTask) (planVersionID int64, count int, err error)
+
+var blueprintCreatorFn BlueprintCreator
+
+// RegisterBlueprintCreator 注册 V2 蓝图创建回调（应用启动时由 orchestrator.Init 调用）。
+func RegisterBlueprintCreator(fn BlueprintCreator) {
+	blueprintCreatorFn = fn
+}
+
+// tryParseArchitectBlueprints V2 专用：解析 AI 回复并创建蓝图。
+func (e *ChatEngine) tryParseArchitectBlueprints(ctx context.Context, projectID, conversationID, messageID int64, aiReply string) {
+	if blueprintCreatorFn == nil {
+		g.Log().Warningf(ctx, "[ChatEngine] V2 蓝图创建回调未注册，跳过")
+		return
+	}
+
+	// 获取项目分类
+	projectCategory, _ := g.DB().Model("mvp_project").Ctx(ctx).
+		Where("id", projectID).Value("project_category")
+
+	tasks, err := GetParser().ExtractAndNormalize(ctx, aiReply, projectCategory.String())
+	if err != nil || len(tasks) == 0 {
+		return
+	}
+
+	// 查活跃的 workflow_run
+	wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("project_id", projectID).
+		WhereIn("status", g.Slice{"pending", "running", "paused"}).
+		WhereNull("deleted_at").
+		OrderDesc("run_no").
+		One()
+	var wfRunID int64
+	if !wfRun.IsEmpty() {
+		wfRunID = wfRun["id"].Int64()
+	}
+
+	pvID, bpCount, err := blueprintCreatorFn(ctx, projectID, wfRunID, conversationID, messageID, tasks)
+	if err != nil {
+		g.Log().Warningf(ctx, "[ChatEngine] V2 创建蓝图失败: %v", err)
+		return
+	}
+	g.Log().Infof(ctx, "[ChatEngine] V2 架构师回复解析出 %d 个蓝图, planVersion=%d, 项目 %d", bpCount, pvID, projectID)
 }
 
 // loadHistory 加载对话历史（排除当前正在 streaming 的消息）

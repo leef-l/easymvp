@@ -18,6 +18,18 @@ func NewWorkflowRunRepo() *WorkflowRunRepo { return &WorkflowRunRepo{} }
 
 func (r *WorkflowRunRepo) table() string { return "mvp_workflow_run" }
 
+// NextRunNo 获取项目下一个 run_no。
+func (r *WorkflowRunRepo) NextRunNo(ctx context.Context, projectID int64) (int, error) {
+	val, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at").
+		Max("run_no")
+	if err != nil {
+		return 0, err
+	}
+	return int(val) + 1, nil
+}
+
 // Create 创建工作流运行记录。
 func (r *WorkflowRunRepo) Create(ctx context.Context, data g.Map) (int64, error) {
 	id := snowflake.Generate()

@@ -10,11 +10,13 @@ export function createProject(data: {
   description: string;
   workDir: string;
   architectModelID: string;
+  engineVersion?: string;
 }) {
-  return requestClient.post<{ projectID: string; conversationID: string }>(
-    `${PREFIX}/create-project`,
-    data,
-  );
+  return requestClient.post<{
+    projectID: string;
+    conversationID: string;
+    workflowRunID: string;
+  }>(`${PREFIX}/create-project`, data);
 }
 
 /** 确认实施方案（由设计阶段进入执行阶段） */
@@ -103,4 +105,62 @@ export function getSystemCheck() {
   return requestClient.get<{ items: SystemCheckItem[]; allPass: boolean }>(
     `${PREFIX}/system-check`,
   );
+}
+
+// ==================== 审核相关 ====================
+
+/** 审核阶段子任务 */
+export interface ReviewStageTask {
+  id: string;
+  taskType: string;
+  roleType: string;
+  status: string;
+  startedAt?: string;
+  completedAt?: string;
+  errorMessage?: string;
+}
+
+/** 审核问题项 */
+export interface ReviewIssueItem {
+  id: string;
+  severity: string;
+  issueCode: string;
+  sourceRole: string;
+  taskName: string;
+  message: string;
+  suggestion?: string;
+  status: string;
+  createdAt: string;
+}
+
+/** 获取审核状态 */
+export function getReviewStatus(projectID: string) {
+  return requestClient.get<{
+    planVersionID: string;
+    reviewStatus: string;
+    stageRunID: string;
+    stageStatus: string;
+    stageTasks: ReviewStageTask[];
+    errorCount: number;
+    warningCount: number;
+    blueprintCount: number;
+  }>(`${PREFIX}/review-status`, { params: { projectID } });
+}
+
+/** 获取审核问题列表 */
+export function getReviewIssues(projectID: string) {
+  return requestClient.get<{ issues: ReviewIssueItem[] }>(
+    `${PREFIX}/review-issues`,
+    { params: { projectID } },
+  );
+}
+
+/** 手动审批通过 */
+export function manualApprove(projectID: string) {
+  return requestClient.post(`${PREFIX}/manual-approve`, { projectID });
+}
+
+/** 手动驳回 */
+export function manualReject(projectID: string, reason: string) {
+  return requestClient.post(`${PREFIX}/manual-reject`, { projectID, reason });
 }

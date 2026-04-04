@@ -130,22 +130,28 @@ export const engineVersionOptions = [
 
 // ==================== 工作流状态 ====================
 
-/** 工作流运行状态枚举 */
+/** 工作流运行状态枚举（阶段化语义） */
 export const WorkflowRunStatus = {
-  PENDING: 'pending',
-  RUNNING: 'running',
+  DESIGNING: 'designing',
+  REVIEWING: 'reviewing',
+  EXECUTING: 'executing',
+  REWORKING: 'reworking',
   PAUSED: 'paused',
   COMPLETED: 'completed',
+  FAILED: 'failed',
   CANCELED: 'canceled',
 } as const;
 
 /** 工作流状态映射 */
 export const workflowRunStatusMap: Record<string, { label: string; color: string }> = {
-  pending: { label: '待启动', color: 'default' },
-  running: { label: '运行中', color: 'green' },
-  paused: { label: '已暂停', color: 'orange' },
+  designing: { label: '设计中', color: 'cyan' },
+  reviewing: { label: '审核中', color: 'purple' },
+  executing: { label: '执行中', color: 'green' },
+  reworking: { label: '返工中', color: 'orange' },
+  paused: { label: '已暂停', color: 'default' },
   completed: { label: '已完成', color: 'blue' },
-  canceled: { label: '已取消', color: 'red' },
+  failed: { label: '已失败', color: 'red' },
+  canceled: { label: '已取消', color: 'volcano' },
 };
 
 // ==================== 工作流阶段 ====================

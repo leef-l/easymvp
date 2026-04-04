@@ -133,7 +133,7 @@ func (s *Scheduler) Resume(ctx context.Context, projectID int64) error {
 
 // CreateProject 创建项目并初始化架构师对话
 // architectModelID 为前端传入的架构师模型，若为 0 则从预设读取
-func CreateProject(ctx context.Context, name, projectCategory, description, workDir string, architectModelID int64, userID int64, deptID int64) (int64, int64, error) {
+func CreateProject(ctx context.Context, name, projectCategory, description, workDir string, architectModelID int64, userID int64, deptID int64, engineVersion ...string) (int64, int64, error) {
 	// 1.5 默认分类
 	if projectCategory == "" {
 		projectCategory = "软件开发"
@@ -174,6 +174,12 @@ func CreateProject(ctx context.Context, name, projectCategory, description, work
 		}
 	}
 
+	// 解析引擎版本
+	ev := "legacy"
+	if len(engineVersion) > 0 && engineVersion[0] == "workflow_v2" {
+		ev = "workflow_v2"
+	}
+
 	// 2. 创建项目
 	_, err = g.DB().Model("mvp_project").Insert(g.Map{
 		"id":                 projectID,
@@ -181,6 +187,7 @@ func CreateProject(ctx context.Context, name, projectCategory, description, work
 		"project_category":   projectCategory,
 		"description":        description,
 		"status":             "designing",
+		"engine_version":     ev,
 		"work_dir":           workDir,
 		"architect_model_id": architectModelID,
 		"created_by":         userID,

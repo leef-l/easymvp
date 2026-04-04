@@ -11,7 +11,7 @@ import {
 } from '#/api/mvp/project';
 import { createProject as workflowCreateProject, getRolePresets } from '#/api/mvp/workflow';
 import { getModelList } from '#/api/ai/model';
-import { projectCategoryOptions } from '#/views/mvp/consts';
+import { projectCategoryOptions, engineVersionOptions } from '#/views/mvp/consts';
 
 const router = useRouter();
 
@@ -105,6 +105,13 @@ const createSchema = [
     rules: 'selectRequired',
     componentProps: { options: architectModelOptions, placeholder: '请选择架构师使用的AI模型', allowClear: true, showSearch: true, optionFilterProp: 'label', class: 'w-full' },
   },
+  {
+    component: 'Select',
+    fieldName: 'engineVersion',
+    label: tooltipLabel('引擎版本', '旧版（Legacy）直接写 mvp_task；新版（WorkflowV2）使用 plan_version + 蓝图，支持阶段化流程'),
+    componentProps: { options: engineVersionOptions, placeholder: '请选择引擎版本' },
+    defaultValue: 'legacy',
+  },
 ];
 
 /** 编辑时的表单字段 */
@@ -184,6 +191,7 @@ const [Modal, modalApi] = useVbenModal({
           description: values.description || '',
           workDir: values.workDir,
           architectModelID: values.architectModelID,
+          engineVersion: values.engineVersion || 'legacy',
         });
         message.success('项目创建成功，正在跳转到对话页面...');
         emit('success');

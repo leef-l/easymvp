@@ -65,3 +65,60 @@ var AllRoleLevels = []string{
 	RoleLevelPro,
 	RoleLevelMax,
 }
+
+// 引擎版本
+const (
+	EngineVersionLegacy     = "legacy"
+	EngineVersionWorkflowV2 = "workflow_v2"
+)
+
+// 工作流运行状态（阶段化语义）
+const (
+	WorkflowRunStatusDesigning = "designing"
+	WorkflowRunStatusReviewing = "reviewing"
+	WorkflowRunStatusExecuting = "executing"
+	WorkflowRunStatusReworking = "reworking"
+	WorkflowRunStatusPaused    = "paused"
+	WorkflowRunStatusCompleted = "completed"
+	WorkflowRunStatusFailed    = "failed"
+	WorkflowRunStatusCanceled  = "canceled"
+)
+
+// 阶段类型
+const (
+	StageTypeDesign   = "design"
+	StageTypeReview   = "review"
+	StageTypeExecute  = "execute"
+	StageTypeRework   = "rework"
+	StageTypeComplete = "complete"
+)
+
+// 阶段状态
+const (
+	StageStatusPending   = "pending"
+	StageStatusRunning   = "running"
+	StageStatusCompleted = "completed"
+	StageStatusFailed    = "failed"
+	StageStatusSkipped   = "skipped"
+)
+
+// 计划版本状态
+const (
+	PlanVersionStatusDraft      = "draft"
+	PlanVersionStatusActive     = "active"
+	PlanVersionStatusSuperseded = "superseded"
+)
+
+// 计划版本审核状态
+const (
+	PlanReviewStatusPending  = "pending"
+	PlanReviewStatusApproved = "approved"
+	PlanReviewStatusRejected = "rejected"
+)
+
+// 蓝图状态
+const (
+	BlueprintStatusDraft      = "draft"
+	BlueprintStatusConfirmed  = "confirmed"
+	BlueprintStatusSuperseded = "superseded"
+)

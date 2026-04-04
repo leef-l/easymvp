@@ -17,13 +17,15 @@ type WorkflowCreateProjectReq struct {
 	Description      string              `json:"description" dc:"项目简介"`
 	WorkDir          string              `json:"workDir" v:"max-length:500" dc:"代码工作目录（编码类项目必填，非编码类可留空由系统自动生成）"`
 	ArchitectModelID snowflake.JsonInt64  `json:"architectModelID" v:"required" dc:"架构师AI模型ID"`
+	EngineVersion    string               `json:"engineVersion" dc:"引擎版本: legacy(默认) / workflow_v2"`
 }
 
 // WorkflowCreateProjectRes 创建项目响应
 type WorkflowCreateProjectRes struct {
 	g.Meta         `mime:"application/json"`
 	ProjectID      snowflake.JsonInt64 `json:"projectID"`
-	ConversationID snowflake.JsonInt64 `json:"conversationID"` // 架构师对话 ID
+	ConversationID snowflake.JsonInt64 `json:"conversationID"`    // 架构师对话 ID
+	WorkflowRunID  snowflake.JsonInt64 `json:"workflowRunID"`     // V2 工作流运行 ID（legacy 为 0）
 }
 
 // WorkflowConfirmPlanReq 确认实施方案请求
@@ -159,4 +161,84 @@ type SystemCheckItem struct {
 	Status  string `json:"status"`  // ok / warning / error
 	Message string `json:"message"`
 	Link    string `json:"link"`    // 前端跳转路径
+}
+
+// ==================== 审核相关 API ====================
+
+// WorkflowReviewStatusReq 获取审核状态请求
+type WorkflowReviewStatusReq struct {
+	g.Meta    `path:"/workflow/review-status" method:"get" tags:"项目流程" summary:"获取审核状态"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// WorkflowReviewStatusRes 获取审核状态响应
+type WorkflowReviewStatusRes struct {
+	g.Meta          `mime:"application/json"`
+	PlanVersionID   snowflake.JsonInt64 `json:"planVersionID"`
+	ReviewStatus    string              `json:"reviewStatus"`    // pending/approved/rejected
+	StageRunID      snowflake.JsonInt64 `json:"stageRunID"`
+	StageStatus     string              `json:"stageStatus"`     // pending/running/completed/failed
+	StageTasks      []ReviewStageTask   `json:"stageTasks"`
+	ErrorCount      int                 `json:"errorCount"`
+	WarningCount    int                 `json:"warningCount"`
+	BlueprintCount  int                 `json:"blueprintCount"`
+}
+
+// ReviewStageTask 审核阶段子任务
+type ReviewStageTask struct {
+	ID        snowflake.JsonInt64 `json:"id"`
+	TaskType  string              `json:"taskType"`
+	RoleType  string              `json:"roleType"`
+	Status    string              `json:"status"`
+	StartedAt *gtime.Time         `json:"startedAt,omitempty"`
+	CompletedAt *gtime.Time       `json:"completedAt,omitempty"`
+	ErrorMessage string           `json:"errorMessage,omitempty"`
+}
+
+// WorkflowReviewIssuesReq 获取审核问题列表请求
+type WorkflowReviewIssuesReq struct {
+	g.Meta    `path:"/workflow/review-issues" method:"get" tags:"项目流程" summary:"获取审核问题列表"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// WorkflowReviewIssuesRes 获取审核问题列表响应
+type WorkflowReviewIssuesRes struct {
+	g.Meta `mime:"application/json"`
+	Issues []ReviewIssueItem `json:"issues"`
+}
+
+// ReviewIssueItem 审核问题项
+type ReviewIssueItem struct {
+	ID          snowflake.JsonInt64 `json:"id"`
+	Severity    string              `json:"severity"`
+	IssueCode   string              `json:"issueCode"`
+	SourceRole  string              `json:"sourceRole"`
+	TaskName    string              `json:"taskName"`
+	Message     string              `json:"message"`
+	Suggestion  string              `json:"suggestion,omitempty"`
+	Status      string              `json:"status"`
+	CreatedAt   *gtime.Time         `json:"createdAt"`
+}
+
+// WorkflowManualApproveReq 手动审批请求（跳过 AI 审核，人工通过）
+type WorkflowManualApproveReq struct {
+	g.Meta    `path:"/workflow/manual-approve" method:"post" tags:"项目流程" summary:"手动审批通过"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// WorkflowManualApproveRes 手动审批响应
+type WorkflowManualApproveRes struct {
+	g.Meta `mime:"application/json"`
+}
+
+// WorkflowManualRejectReq 手动驳回请求
+type WorkflowManualRejectReq struct {
+	g.Meta    `path:"/workflow/manual-reject" method:"post" tags:"项目流程" summary:"手动驳回"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	Reason    string              `json:"reason" v:"required" dc:"驳回原因"`
+}
+
+// WorkflowManualRejectRes 手动驳回响应
+type WorkflowManualRejectRes struct {
+	g.Meta `mime:"application/json"`
 }
