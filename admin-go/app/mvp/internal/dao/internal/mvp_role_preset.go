@@ -28,6 +28,7 @@ type MvpRolePresetColumns struct {
 	ModelId         string // AI模型ID
 	SystemPrompt    string // 默认系统提示词（角色设定）
 	ExecutionMode   string // 执行方式: chat=对话模式, aider=Aider代码编辑, openhands=OpenHands沙箱
+	IsDefault       string // 是否为默认模板（1=默认，0=扩展）
 	Status          string // 状态:0=禁用,1=启用
 	Sort            string // 排序
 	CreatedBy       string // 创建人ID
@@ -46,6 +47,7 @@ var mvpRolePresetColumns = MvpRolePresetColumns{
 	ModelId:         "model_id",
 	SystemPrompt:    "system_prompt",
 	ExecutionMode:   "execution_mode",
+	IsDefault:       "is_default",
 	Status:          "status",
 	Sort:            "sort",
 	CreatedBy:       "created_by",

@@ -153,10 +153,11 @@ func CreateProject(ctx context.Context, name, projectCategory, description, work
 		}
 	}
 
-	// 1. 按项目分类读取角色预设模板
+	// 1. 按项目分类读取默认角色预设模板（is_default=1）
 	presets, err := g.DB().Model("mvp_role_preset").
 		Where("status", 1).
 		Where("project_category", projectCategory).
+		Where("is_default", 1).
 		Where("deleted_at IS NULL").
 		OrderAsc("sort").
 		All()

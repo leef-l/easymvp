@@ -19,6 +19,7 @@ type MvpRolePreset struct {
 	ModelId         any         // AI模型ID
 	SystemPrompt    any         // 默认系统提示词（角色设定）
 	ExecutionMode   any         // 执行方式: chat=对话模式, aider=Aider代码编辑, openhands=OpenHands沙箱
+	IsDefault       any         // 是否为默认模板（1=默认，0=扩展）
 	Status          any         // 状态:0=禁用,1=启用
 	Sort            any         // 排序
 	CreatedBy       any         // 创建人ID

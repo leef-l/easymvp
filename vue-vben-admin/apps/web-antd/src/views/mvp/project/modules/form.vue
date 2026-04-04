@@ -3,15 +3,15 @@ import { h, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useVbenModal } from '@vben/common-ui';
 import { useVbenForm } from '#/adapter/form';
-import { message, Tooltip } from 'ant-design-vue';
-import { QuestionCircleOutlined } from '@ant-design/icons-vue';
+import { message, Tooltip, Tag } from 'ant-design-vue';
+import { QuestionCircleOutlined, TeamOutlined } from '@ant-design/icons-vue';
 import {
   getProjectDetail,
   updateProject,
 } from '#/api/mvp/project';
-import { createProject as workflowCreateProject, getRolePresets } from '#/api/mvp/workflow';
+import { createProject as workflowCreateProject, getRolePresets, type RolePresetItem } from '#/api/mvp/workflow';
 import { getModelList } from '#/api/ai/model';
-import { projectCategoryOptions, engineVersionOptions } from '#/views/mvp/consts';
+import { projectCategoryOptions, engineVersionOptions, roleTypeMap, roleLevelMap, executionModeMap } from '#/views/mvp/consts';
 
 const router = useRouter();
 
@@ -23,6 +23,8 @@ const allModelOptions = ref<{ label: string; value: string }[]>([]);
 const presetArchitectModelID = ref<string>('');
 /** 当前选择的项目分类 */
 const selectedCategory = ref<string>('软件开发');
+/** 当前分类的默认角色预设（用于只读展示） */
+const defaultPresets = ref<RolePresetItem[]>([]);
 
 /** 编码类分类（workDir 必填） */
 const codingCategories = ['软件开发', '游戏开发'];
@@ -37,6 +39,7 @@ async function loadPresetsForCategory(category: string) {
   try {
     const presetRes = await getRolePresets(category);
     const presets = presetRes?.list ?? [];
+    defaultPresets.value = presets;
     // 从预设中提取架构师模型
     const architectPreset = presets.find((p) => p.roleType === 'architect');
     if (architectPreset?.modelID) {
@@ -251,8 +254,10 @@ const [Modal, modalApi] = useVbenModal({
             label: `${item.name} (${item.modelCode})`,
             value: item.id,
           }));
+          // 保存默认预设列表用于展示
+          defaultPresets.value = presetRes?.list ?? [];
           // 读取预设中架构师的默认模型
-          const architectPreset = (presetRes?.list ?? []).find(
+          const architectPreset = defaultPresets.value.find(
             (p) => p.roleType === 'architect',
           );
           if (architectPreset?.modelID) {
@@ -269,5 +274,28 @@ const [Modal, modalApi] = useVbenModal({
 <template>
   <Modal class="w-[600px]">
     <Form />
+    <!-- 默认 AI 团队组成预览（仅新建模式） -->
+    <div v-if="!isEdit && defaultPresets.length > 0" class="mt-4 rounded border border-gray-200 bg-gray-50 p-3">
+      <div class="mb-2 flex items-center text-sm font-medium text-gray-600">
+        <TeamOutlined class="mr-1" />
+        默认 AI 团队组成
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <div
+          v-for="preset in defaultPresets"
+          :key="`${preset.roleType}-${preset.roleLevel}`"
+          class="flex items-center gap-1"
+        >
+          <Tag :color="roleTypeMap[preset.roleType]?.color || 'default'">
+            {{ roleTypeMap[preset.roleType]?.label || preset.roleType }}
+          </Tag>
+          <span class="text-xs text-gray-500">
+            {{ roleLevelMap[preset.roleLevel]?.label || preset.roleLevel }}
+            · {{ executionModeMap[preset.executionMode]?.label || preset.executionMode }}
+            · {{ preset.modelName || '未绑定' }}
+          </span>
+        </div>
+      </div>
+    </div>
   </Modal>
 </template>

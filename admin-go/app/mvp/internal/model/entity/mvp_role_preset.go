@@ -17,6 +17,7 @@ type MvpRolePreset struct {
 	ModelId         uint64      `orm:"model_id"         description:"AI模型ID"`                                                  // AI模型ID
 	SystemPrompt    string      `orm:"system_prompt"    description:"默认系统提示词（角色设定）"`                                           // 默认系统提示词（角色设定）
 	ExecutionMode   string      `orm:"execution_mode"   description:"执行方式: chat=对话模式, aider=Aider代码编辑, openhands=OpenHands沙箱"` // 执行方式: chat=对话模式, aider=Aider代码编辑, openhands=OpenHands沙箱
+	IsDefault       int         `orm:"is_default"       description:"是否为默认模板（1=默认，0=扩展）"`                                      // 是否为默认模板（1=默认，0=扩展）
 	Status          int         `orm:"status"           description:"状态:0=禁用,1=启用"`                                            // 状态:0=禁用,1=启用
 	Sort            int         `orm:"sort"             description:"排序"`                                                      // 排序
 	CreatedBy       uint64      `orm:"created_by"       description:"创建人ID"`                                                   // 创建人ID

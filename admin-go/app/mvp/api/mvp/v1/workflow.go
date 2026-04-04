@@ -130,6 +130,7 @@ type WorkflowParseTasksRes struct {
 type WorkflowRolePresetsReq struct {
 	g.Meta          `path:"/workflow/role-presets" method:"get" tags:"项目流程" summary:"获取角色预设列表"`
 	ProjectCategory string `json:"projectCategory" dc:"项目分类，为空则返回全部"`
+	All             bool   `json:"all" dc:"是否返回全部预设（含扩展），默认只返回默认模板"`
 }
 
 // WorkflowRolePresetsRes 获取角色预设列表响应
@@ -140,11 +141,13 @@ type WorkflowRolePresetsRes struct {
 
 // RolePresetItem 角色预设项
 type RolePresetItem struct {
-	RoleType     string             `json:"roleType"`
-	RoleLevel    string             `json:"roleLevel"`
-	ModelID      snowflake.JsonInt64 `json:"modelID"`
-	ModelName    string             `json:"modelName"`
-	SystemPrompt string             `json:"systemPrompt"`
+	RoleType      string             `json:"roleType"`
+	RoleLevel     string             `json:"roleLevel"`
+	ModelID       snowflake.JsonInt64 `json:"modelID"`
+	ModelName     string             `json:"modelName"`
+	ExecutionMode string             `json:"executionMode"`
+	SystemPrompt  string             `json:"systemPrompt"`
+	IsDefault     bool               `json:"isDefault"`
 }
 
 // SystemCheckReq 系统配置检测请求

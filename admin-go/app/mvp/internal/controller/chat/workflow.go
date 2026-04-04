@@ -315,11 +315,14 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 func (c *cWorkflow) RolePresets(ctx context.Context, req *v1.WorkflowRolePresetsReq) (res *v1.WorkflowRolePresetsRes, err error) {
 	m := g.DB().Model("mvp_role_preset AS p").
 		LeftJoin("ai_model AS m", "m.id = p.model_id").
-		Fields("p.role_type, p.role_level, p.model_id, m.name AS model_name, p.system_prompt").
+		Fields("p.role_type, p.role_level, p.model_id, m.name AS model_name, p.system_prompt, p.execution_mode, p.is_default").
 		Where("p.status", 1).
 		Where("p.deleted_at IS NULL")
 	if req.ProjectCategory != "" {
 		m = m.Where("p.project_category", req.ProjectCategory)
+	}
+	if !req.All {
+		m = m.Where("p.is_default", 1)
 	}
 	presets, err := m.OrderAsc("p.sort").All()
 	if err != nil {
@@ -329,11 +332,13 @@ func (c *cWorkflow) RolePresets(ctx context.Context, req *v1.WorkflowRolePresets
 	list := make([]v1.RolePresetItem, 0, len(presets))
 	for _, p := range presets {
 		list = append(list, v1.RolePresetItem{
-			RoleType:     p["role_type"].String(),
-			RoleLevel:    p["role_level"].String(),
-			ModelID:      snowflake.JsonInt64(p["model_id"].Int64()),
-			ModelName:    p["model_name"].String(),
-			SystemPrompt: p["system_prompt"].String(),
+			RoleType:      p["role_type"].String(),
+			RoleLevel:     p["role_level"].String(),
+			ModelID:       snowflake.JsonInt64(p["model_id"].Int64()),
+			ModelName:     p["model_name"].String(),
+			ExecutionMode: p["execution_mode"].String(),
+			SystemPrompt:  p["system_prompt"].String(),
+			IsDefault:     p["is_default"].Bool(),
 		})
 	}
 

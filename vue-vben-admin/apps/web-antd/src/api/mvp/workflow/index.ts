@@ -65,7 +65,9 @@ export interface RolePresetItem {
   roleLevel: string;
   modelID: string;
   modelName: string;
+  executionMode: string;
   systemPrompt: string;
+  isDefault: boolean;
 }
 
 /** 获取角色预设列表（可按项目分类过滤） */
