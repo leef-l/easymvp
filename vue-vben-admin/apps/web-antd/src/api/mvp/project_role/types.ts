@@ -4,6 +4,7 @@
 export interface ProjectRoleItem {
   id: string;
   projectID: string;
+  projectCategory?: string;
   projectName?: string;
   roleType: string;
   roleLevel?: string;
@@ -28,6 +29,7 @@ export interface ProjectRoleListParams {
 /** 项目角色配置表创建参数 */
 export interface ProjectRoleCreateParams {
   projectID: string;
+  projectCategory: string;
   roleType: string;
   roleLevel?: string;
   modelID: string;
@@ -39,6 +41,7 @@ export interface ProjectRoleCreateParams {
 export interface ProjectRoleUpdateParams {
   id: string;
   projectID: string;
+  projectCategory?: string;
   roleType: string;
   roleLevel?: string;
   modelID: string;

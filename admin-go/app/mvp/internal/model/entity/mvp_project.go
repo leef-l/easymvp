@@ -12,6 +12,7 @@ import (
 type MvpProject struct {
 	Id               uint64      `orm:"id"                 description:"雪花ID"`                                            // 雪花ID
 	Name             string      `orm:"name"               description:"项目名称"`                                            // 项目名称
+	ProjectCategory  string      `orm:"project_category"   description:"项目分类"`                                            // 项目分类
 	Description      string      `orm:"description"        description:"项目简介"`                                            // 项目简介
 	Status           string      `orm:"status"             description:"状态：designing/confirmed/running/paused/completed"` // 状态：designing/confirmed/running/paused/completed
 	PauseReason      string      `orm:"pause_reason"       description:"暂停原因"`                                            // 暂停原因

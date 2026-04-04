@@ -4,6 +4,7 @@
 export interface ProjectItem {
   id: string;
   name: string;
+  projectCategory?: string;
   description?: string;
   status?: string;
   pauseReason?: string;
@@ -28,6 +29,7 @@ export interface ProjectListParams {
 /** MVP项目表创建参数 */
 export interface ProjectCreateParams {
   name: string;
+  projectCategory: string;
   description?: string;
   status?: string;
   pauseReason?: string;
@@ -39,6 +41,7 @@ export interface ProjectCreateParams {
 export interface ProjectUpdateParams {
   id: string;
   name: string;
+  projectCategory?: string;
   description?: string;
   status?: string;
   pauseReason?: string;

@@ -3,12 +3,67 @@ package engine
 import (
 	"context"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 )
 
-// GetConfigInt 读取整型配置，三级 fallback：数据库 mvp_config → config.yaml → 硬编码默认值
+// configCache 配置缓存（内存 + TTL）
+// 避免每次 GetConfigInt/GetConfigString 都查 DB
+type configCache struct {
+	mu      sync.RWMutex
+	entries map[string]*cacheEntry
+	ttl     time.Duration
+}
+
+type cacheEntry struct {
+	value     string
+	expiresAt time.Time
+}
+
+var cfgCache = &configCache{
+	entries: make(map[string]*cacheEntry),
+	ttl:     60 * time.Second, // 默认 60 秒 TTL
+}
+
+// ClearConfigCache 清除配置缓存（管理员修改配置后调用）
+func ClearConfigCache() {
+	cfgCache.mu.Lock()
+	cfgCache.entries = make(map[string]*cacheEntry)
+	cfgCache.mu.Unlock()
+}
+
+// getFromCache 从缓存读取，返回 (value, found)
+func (c *configCache) get(key string) (string, bool) {
+	c.mu.RLock()
+	entry, ok := c.entries[key]
+	c.mu.RUnlock()
+	if !ok || time.Now().After(entry.expiresAt) {
+		return "", false
+	}
+	return entry.value, true
+}
+
+// set 写入缓存
+func (c *configCache) set(key, value string) {
+	c.mu.Lock()
+	c.entries[key] = &cacheEntry{
+		value:     value,
+		expiresAt: time.Now().Add(c.ttl),
+	}
+	c.mu.Unlock()
+}
+
+// GetConfigInt 读取整型配置，三级 fallback：缓存 → 数据库 mvp_config → config.yaml → 硬编码默认值
 func GetConfigInt(ctx context.Context, key string, yamlPath string, defaultVal int) int {
+	// 0. 缓存
+	if cached, ok := cfgCache.get(key); ok {
+		if v, e := strconv.Atoi(cached); e == nil {
+			return v
+		}
+	}
+
 	// 1. 数据库 mvp_config 表
 	row, err := g.DB().Model("mvp_config").
 		Where("config_key", key).
@@ -16,7 +71,9 @@ func GetConfigInt(ctx context.Context, key string, yamlPath string, defaultVal i
 		Fields("config_value").
 		One()
 	if err == nil && !row.IsEmpty() {
-		if v, e := strconv.Atoi(row["config_value"].String()); e == nil {
+		val := row["config_value"].String()
+		cfgCache.set(key, val) // 写缓存
+		if v, e := strconv.Atoi(val); e == nil {
 			return v
 		}
 	}
@@ -33,6 +90,11 @@ func GetConfigInt(ctx context.Context, key string, yamlPath string, defaultVal i
 
 // GetConfigString 读取字符串配置，三级 fallback
 func GetConfigString(ctx context.Context, key string, yamlPath string, defaultVal string) string {
+	// 0. 缓存
+	if cached, ok := cfgCache.get(key); ok {
+		return cached
+	}
+
 	// 1. 数据库
 	row, err := g.DB().Model("mvp_config").
 		Where("config_key", key).
@@ -40,7 +102,9 @@ func GetConfigString(ctx context.Context, key string, yamlPath string, defaultVa
 		Fields("config_value").
 		One()
 	if err == nil && !row.IsEmpty() {
-		return row["config_value"].String()
+		val := row["config_value"].String()
+		cfgCache.set(key, val) // 写缓存
+		return val
 	}
 
 	// 2. config.yaml

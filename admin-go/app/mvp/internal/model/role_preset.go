@@ -10,6 +10,7 @@ import (
 
 // RolePresetCreateInput 创建角色预设模板输入
 type RolePresetCreateInput struct {
+	ProjectCategory string `json:"projectCategory"`
 	RoleType string `json:"roleType"`
 	RoleLevel string `json:"roleLevel"`
 	ModelID snowflake.JsonInt64 `json:"modelID"`
@@ -21,6 +22,7 @@ type RolePresetCreateInput struct {
 // RolePresetUpdateInput 更新角色预设模板输入
 type RolePresetUpdateInput struct {
 	ID snowflake.JsonInt64 `json:"id"`
+	ProjectCategory string `json:"projectCategory"`
 	RoleType string `json:"roleType"`
 	RoleLevel string `json:"roleLevel"`
 	ModelID snowflake.JsonInt64 `json:"modelID"`
@@ -32,6 +34,7 @@ type RolePresetUpdateInput struct {
 // RolePresetDetailOutput 角色预设模板详情输出
 type RolePresetDetailOutput struct {
 	ID snowflake.JsonInt64 `json:"id"`
+	ProjectCategory string `json:"projectCategory"`
 	RoleType string `json:"roleType"`
 	RoleLevel string `json:"roleLevel"`
 	ModelID snowflake.JsonInt64 `json:"modelID"`
@@ -46,6 +49,7 @@ type RolePresetDetailOutput struct {
 // RolePresetListOutput 角色预设模板列表输出
 type RolePresetListOutput struct {
 	ID snowflake.JsonInt64 `json:"id"`
+	ProjectCategory string `json:"projectCategory"`
 	RoleType string `json:"roleType"`
 	RoleLevel string `json:"roleLevel"`
 	ModelID snowflake.JsonInt64 `json:"modelID"`

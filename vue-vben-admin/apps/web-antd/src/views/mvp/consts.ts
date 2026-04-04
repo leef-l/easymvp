@@ -1,3 +1,12 @@
+/** 项目分类选项 */
+export const projectCategoryOptions = [
+  { label: '软件开发', value: '软件开发' },
+  { label: '数据分析', value: '数据分析' },
+  { label: '产品设计', value: '产品设计' },
+  { label: '内容创作', value: '内容创作' },
+  { label: '其他', value: '其他' },
+];
+
 /** 角色类型选项 */
 export const roleTypeOptions = [
   { label: '架构师', value: 'architect' },

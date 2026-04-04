@@ -11,6 +11,7 @@ import (
 // ProjectRoleCreateInput 创建项目角色配置表输入
 type ProjectRoleCreateInput struct {
 	ProjectID snowflake.JsonInt64 `json:"projectID"`
+	ProjectCategory string `json:"projectCategory"`
 	RoleType string `json:"roleType"`
 	RoleLevel string `json:"roleLevel"`
 	ModelID snowflake.JsonInt64 `json:"modelID"`
@@ -22,6 +23,7 @@ type ProjectRoleCreateInput struct {
 type ProjectRoleUpdateInput struct {
 	ID snowflake.JsonInt64 `json:"id"`
 	ProjectID snowflake.JsonInt64 `json:"projectID"`
+	ProjectCategory string `json:"projectCategory"`
 	RoleType string `json:"roleType"`
 	RoleLevel string `json:"roleLevel"`
 	ModelID snowflake.JsonInt64 `json:"modelID"`
@@ -33,6 +35,7 @@ type ProjectRoleUpdateInput struct {
 type ProjectRoleDetailOutput struct {
 	ID snowflake.JsonInt64 `json:"id"`
 	ProjectID snowflake.JsonInt64 `json:"projectID"`
+	ProjectCategory string `json:"projectCategory"`
 	ProjectName string `json:"projectName"`
 	RoleType string `json:"roleType"`
 	RoleLevel string `json:"roleLevel"`
@@ -48,6 +51,7 @@ type ProjectRoleDetailOutput struct {
 type ProjectRoleListOutput struct {
 	ID snowflake.JsonInt64 `json:"id"`
 	ProjectID snowflake.JsonInt64 `json:"projectID"`
+	ProjectCategory string `json:"projectCategory"`
 	ProjectName string `json:"projectName"`
 	RoleType string `json:"roleType"`
 	RoleLevel string `json:"roleLevel"`

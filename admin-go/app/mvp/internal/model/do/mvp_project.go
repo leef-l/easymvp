@@ -14,6 +14,7 @@ type MvpProject struct {
 	g.Meta           `orm:"table:mvp_project, do:true"`
 	Id               any         // 雪花ID
 	Name             any         // 项目名称
+	ProjectCategory  any         // 项目分类
 	Description      any         // 项目简介
 	Status           any         // 状态：designing/confirmed/running/paused/completed
 	PauseReason      any         // 暂停原因

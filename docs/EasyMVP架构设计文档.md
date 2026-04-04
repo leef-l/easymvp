@@ -1,6 +1,6 @@
 # EasyMVP 架构设计文档
 
-> 版本：v2.0 | 更新日期：2026-04-02
+> 版本：v2.1 | 更新日期：2026-04-04
 
 ---
 
@@ -137,7 +137,36 @@ easymvp/
 | **pro** | 中等模型 | 依赖任务摘要 | 常规功能开发 |
 | **lite** | 轻量模型 | 依赖任务摘要 | 简单任务、配置修改 |
 
-### 4.3 项目状态机
+### 4.3 项目分类与角色预设
+
+**核心机制**：每个项目有 `project_category`（如"软件开发"、"数据分析"），决定该项目使用哪套 AI 角色配置。
+
+```
+mvp_role_preset（按分类存储角色模板）
+  │
+  │ 创建项目时，按 project_category 过滤
+  ▼
+mvp_project_role（项目实际使用的角色配置）
+  │
+  │ 任务执行时，按 role_type + role_level 查找
+  ▼
+ai_model（获取具体的 AI 模型、API Key、系统提示词）
+```
+
+**创建项目流程**：
+1. 用户选择 `projectCategory`（如"软件开发"）和架构师模型
+2. 后端从 `mvp_role_preset` 查找该分类下的所有角色预设
+3. 为每个预设创建 `mvp_project_role` 记录（绑定到当前项目）
+4. 系统提示词优先级：模型 `role_prompt` > 预设 `system_prompt`
+5. 架构师角色特殊处理：动态拼接项目名称和描述
+
+**前端联动**：
+- 项目创建表单中，切换 `projectCategory` 下拉框会触发 `getRolePresets(category)` 重新加载
+- 架构师模型下拉框自动更新为该分类预设中的架构师模型
+
+**预设分类**（可扩展）：软件开发、数据分析、产品设计、内容创作、其他
+
+### 4.4 项目状态机
 
 ```
                     用户创建项目
@@ -162,7 +191,7 @@ easymvp/
               └──────┘ 用户恢复
 ```
 
-### 4.4 任务状态机
+### 4.5 任务状态机
 
 ```
 draft ──→ pending ──→ running ──→ completed
@@ -586,6 +615,7 @@ ai_provider (供应商)
 |------|------|------|
 | id | bigint PK | 雪花 ID |
 | name | varchar(200) | 项目名称 |
+| project_category | varchar(50) | 项目分类（决定角色预设） |
 | description | text | 项目简介 |
 | status | varchar(20) | designing/running/paused/completed |
 | pause_reason | text | 暂停原因 |
@@ -639,6 +669,7 @@ ai_provider (供应商)
 | id | bigint PK | 雪花 ID |
 | conversation_id | bigint FK | 所属对话 |
 | role | varchar(20) | user/assistant/system |
+| message_type | varchar(30) | 消息类型（chat_user/chat_reply/task_prompt/task_reply/system_message/poison） |
 | content | longtext | 消息内容 |
 | model_id | bigint FK | AI 模型（仅 assistant） |
 | token_usage | json | Token 用量统计 |
@@ -648,12 +679,25 @@ ai_provider (供应商)
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | id | bigint PK | 雪花 ID |
+| project_category | varchar(50) | 项目分类（如"软件开发"） |
 | role_type | varchar(20) | 角色类型 |
 | role_level | varchar(10) | 角色等级 |
 | model_id | bigint FK | 关联模型 |
 | system_prompt | text | 系统提示词 |
 | status | tinyint(1) | 启用状态 |
 | sort | int | 排序 |
+
+#### mvp_project_role（项目角色配置）
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | bigint PK | 雪花 ID |
+| project_id | bigint FK | 所属项目 |
+| project_category | varchar(50) | 项目分类（冗余，便于查询） |
+| role_type | varchar(20) | 角色类型 |
+| role_level | varchar(10) | 角色等级 |
+| model_id | bigint FK | AI 模型 |
+| system_prompt | text | 系统提示词 |
+| status | tinyint(1) | 启用状态 |
 
 #### AI 配置表
 
@@ -700,5 +744,5 @@ ai_provider (供应商)
 | **资源锁机制** | affected_resources 声明式冲突检测，比文件锁更灵活 |
 | **三层上下文压缩** | 规则优先降低 token 消耗，AI 兜底保证质量 |
 | **看门狗 + Bug 闭环** | 无人值守运行的核心保障，自动修复 > 人工干预 |
-| **角色预设模板** | 新项目一键复用配置，降低使用门槛 |
+| **角色预设模板 + 项目分类** | 按分类维护不同 AI 配置，新项目一键复用，切换分类自动联动模型 |
 | **Codegen + 手写分离** | CRUD 自动生成，核心逻辑手写，互不干扰 |

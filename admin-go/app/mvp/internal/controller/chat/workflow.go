@@ -40,7 +40,7 @@ func (c *cWorkflow) CreateProject(ctx context.Context, req *v1.WorkflowCreatePro
 	userID := middleware.GetUserID(ctx)
 	deptID := middleware.GetDeptID(ctx)
 
-	projectID, convID, err := engine.CreateProject(ctx, req.Name, req.Description, req.WorkDir, int64(req.ArchitectModelID), userID, deptID)
+	projectID, convID, err := engine.CreateProject(ctx, req.Name, req.ProjectCategory, req.Description, req.WorkDir, int64(req.ArchitectModelID), userID, deptID)
 	if err != nil {
 		return nil, err
 	}
@@ -167,13 +167,15 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 
 // RolePresets 获取角色预设列表（前端创建项目时读取默认模型）
 func (c *cWorkflow) RolePresets(ctx context.Context, req *v1.WorkflowRolePresetsReq) (res *v1.WorkflowRolePresetsRes, err error) {
-	presets, err := g.DB().Model("mvp_role_preset AS p").
+	m := g.DB().Model("mvp_role_preset AS p").
 		LeftJoin("ai_model AS m", "m.id = p.model_id").
 		Fields("p.role_type, p.role_level, p.model_id, m.name AS model_name, p.system_prompt").
 		Where("p.status", 1).
-		Where("p.deleted_at IS NULL").
-		OrderAsc("p.sort").
-		All()
+		Where("p.deleted_at IS NULL")
+	if req.ProjectCategory != "" {
+		m = m.Where("p.project_category", req.ProjectCategory)
+	}
+	presets, err := m.OrderAsc("p.sort").All()
 	if err != nil {
 		return nil, err
 	}

@@ -32,6 +32,7 @@ func (s *sRolePreset) Create(ctx context.Context, in *model.RolePresetCreateInpu
 	id := snowflake.Generate()
 	_, err := dao.MvpRolePreset.Ctx(ctx).Data(g.Map{
 		dao.MvpRolePreset.Columns().Id:        id,
+		dao.MvpRolePreset.Columns().ProjectCategory: in.ProjectCategory,
 		dao.MvpRolePreset.Columns().RoleType: in.RoleType,
 		dao.MvpRolePreset.Columns().RoleLevel: in.RoleLevel,
 		dao.MvpRolePreset.Columns().ModelId: in.ModelID,
@@ -52,6 +53,7 @@ func (s *sRolePreset) Update(ctx context.Context, in *model.RolePresetUpdateInpu
 		return err
 	}
 	data := g.Map{
+		dao.MvpRolePreset.Columns().ProjectCategory: in.ProjectCategory,
 		dao.MvpRolePreset.Columns().RoleType: in.RoleType,
 		dao.MvpRolePreset.Columns().RoleLevel: in.RoleLevel,
 		dao.MvpRolePreset.Columns().ModelId: in.ModelID,

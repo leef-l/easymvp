@@ -20,6 +20,7 @@ type cProject struct{}
 func (c *cProject) Create(ctx context.Context, req *v1.ProjectCreateReq) (res *v1.ProjectCreateRes, err error) {
 	err = service.Project().Create(ctx, &model.ProjectCreateInput{
 		Name: req.Name,
+		ProjectCategory: req.ProjectCategory,
 		Description: req.Description,
 		Status: req.Status,
 		PauseReason: req.PauseReason,
@@ -34,6 +35,7 @@ func (c *cProject) Update(ctx context.Context, req *v1.ProjectUpdateReq) (res *v
 	err = service.Project().Update(ctx, &model.ProjectUpdateInput{
 		ID: req.ID,
 		Name: req.Name,
+		ProjectCategory: req.ProjectCategory,
 		Description: req.Description,
 		PauseReason: req.PauseReason,
 		GlobalContext: req.GlobalContext,

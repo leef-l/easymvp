@@ -269,6 +269,7 @@ func (s *Scheduler) scheduleOnce(ctx context.Context, projectID int64) {
 // batchCheckDependencies 批量检查多个任务的依赖是否已满足
 // 返回 taskID -> bool，true 表示所有依赖已完成
 // 单次查询替代 N+1，大幅减少 DB 开销
+// 同时检测循环依赖：如果发现环，标记环中一个任务为 failed
 func (s *Scheduler) batchCheckDependencies(ctx context.Context, taskIDs []int64) map[int64]bool {
 	result := make(map[int64]bool, len(taskIDs))
 	for _, id := range taskIDs {
@@ -280,9 +281,6 @@ func (s *Scheduler) batchCheckDependencies(ctx context.Context, taskIDs []int64)
 	}
 
 	// 一次性查出所有候选任务的依赖关系及其状态
-	// SQL: SELECT d.task_id, d.depends_on_id, t.status
-	//      FROM mvp_task_dependency d LEFT JOIN mvp_task t ON t.id = d.depends_on_id
-	//      WHERE d.task_id IN (...)
 	deps, err := g.DB().Model("mvp_task_dependency d").
 		LeftJoin("mvp_task t", "t.id = d.depends_on_id").
 		Fields("d.task_id, d.depends_on_id, t.status").
@@ -290,18 +288,77 @@ func (s *Scheduler) batchCheckDependencies(ctx context.Context, taskIDs []int64)
 		All()
 	if err != nil {
 		g.Log().Errorf(ctx, "[Scheduler] 批量依赖检查失败: %v", err)
-		// 查询失败时保守处理：全部标记为不满足
 		for _, id := range taskIDs {
 			result[id] = false
 		}
 		return result
 	}
 
+	// 构建依赖图并检测循环依赖
+	graph := make(map[int64][]int64)        // taskID -> 依赖的任务列表
+	depStatusMap := make(map[int64]string)   // depends_on_id -> status
 	for _, dep := range deps {
 		taskID := dep["task_id"].Int64()
+		depOnID := dep["depends_on_id"].Int64()
 		depStatus := dep["status"].String()
+		graph[taskID] = append(graph[taskID], depOnID)
+		depStatusMap[depOnID] = depStatus
+
 		if depStatus != "completed" {
 			result[taskID] = false
+		}
+	}
+
+	// DFS 循环依赖检测：只检查当前候选任务集中的互相依赖
+	candidateSet := make(map[int64]bool, len(taskIDs))
+	for _, id := range taskIDs {
+		candidateSet[id] = true
+	}
+
+	// 检测候选集内的环：如果 A→B→A 且 A、B 都在 pending 候选中，则形成死锁
+	visited := make(map[int64]int) // 0=未访问, 1=访问中, 2=已完成
+	var cycleNode int64
+
+	var dfs func(node int64) bool
+	dfs = func(node int64) bool {
+		visited[node] = 1 // 标记为访问中
+		for _, dep := range graph[node] {
+			if !candidateSet[dep] {
+				continue // 依赖不在候选集中，不构成死锁
+			}
+			status := depStatusMap[dep]
+			if status == "completed" {
+				continue // 已完成的依赖不构成环
+			}
+			if visited[dep] == 1 {
+				// 发现环！
+				cycleNode = dep
+				return true
+			}
+			if visited[dep] == 0 {
+				if dfs(dep) {
+					return true
+				}
+			}
+		}
+		visited[node] = 2 // 标记为已完成
+		return false
+	}
+
+	for _, id := range taskIDs {
+		if visited[id] == 0 {
+			if dfs(id) {
+				// 发现循环依赖，标记环中的一个任务为 failed 以打破死锁
+				g.Log().Errorf(ctx, "[Scheduler] 检测到循环依赖，强制标记任务 %d 为失败以打破死锁", cycleNode)
+				g.DB().Model("mvp_task").Where("id", cycleNode).Update(g.Map{
+					"status":        "failed",
+					"error_message": "检测到循环依赖死锁，自动标记失败。请检查任务依赖关系。",
+					"updated_at":    gtime.Now(),
+				})
+				logTaskAction(cycleNode, "cycle_detected", "pending", "failed",
+					"循环依赖检测：打破死锁", "system")
+				result[cycleNode] = false
+			}
 		}
 	}
 

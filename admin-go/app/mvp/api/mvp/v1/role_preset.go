@@ -16,6 +16,7 @@ var _ = gtime.New
 // RolePresetCreateReq 创建角色预设模板请求
 type RolePresetCreateReq struct {
 	g.Meta `path:"/role_preset/create" method:"post" tags:"角色预设模板" summary:"创建角色预设模板"`
+	ProjectCategory string `json:"projectCategory" v:"required|max-length:50" dc:"项目分类"`
 	RoleType string `json:"roleType" v:"required|max-length:20" dc:"角色类型"`
 	RoleLevel string `json:"roleLevel" v:"max-length:10" dc:"角色等级"`
 	ModelID snowflake.JsonInt64 `json:"modelID" v:"required" dc:"AI模型ID"`
@@ -33,6 +34,7 @@ type RolePresetCreateRes struct {
 type RolePresetUpdateReq struct {
 	g.Meta `path:"/role_preset/update" method:"put" tags:"角色预设模板" summary:"更新角色预设模板"`
 	ID     snowflake.JsonInt64 `json:"id" v:"required#ID不能为空" dc:"角色预设模板ID"`
+	ProjectCategory string `json:"projectCategory" dc:"项目分类"`
 	RoleType string `json:"roleType" dc:"角色类型"`
 	RoleLevel string `json:"roleLevel" dc:"角色等级"`
 	ModelID snowflake.JsonInt64 `json:"modelID" dc:"AI模型ID"`

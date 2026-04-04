@@ -33,6 +33,7 @@ func (s *sProjectRole) Create(ctx context.Context, in *model.ProjectRoleCreateIn
 	_, err := dao.MvpProjectRole.Ctx(ctx).Data(g.Map{
 		dao.MvpProjectRole.Columns().Id:        id,
 		dao.MvpProjectRole.Columns().ProjectId: in.ProjectID,
+		dao.MvpProjectRole.Columns().ProjectCategory: in.ProjectCategory,
 		dao.MvpProjectRole.Columns().RoleType: in.RoleType,
 		dao.MvpProjectRole.Columns().RoleLevel: in.RoleLevel,
 		dao.MvpProjectRole.Columns().ModelId: in.ModelID,
@@ -53,6 +54,7 @@ func (s *sProjectRole) Update(ctx context.Context, in *model.ProjectRoleUpdateIn
 	}
 	data := g.Map{
 		dao.MvpProjectRole.Columns().ProjectId: in.ProjectID,
+		dao.MvpProjectRole.Columns().ProjectCategory: in.ProjectCategory,
 		dao.MvpProjectRole.Columns().RoleType: in.RoleType,
 		dao.MvpProjectRole.Columns().RoleLevel: in.RoleLevel,
 		dao.MvpProjectRole.Columns().ModelId: in.ModelID,

@@ -23,6 +23,7 @@ type MvpProjectDao struct {
 type MvpProjectColumns struct {
 	Id               string // 雪花ID
 	Name             string // 项目名称
+	ProjectCategory  string // 项目分类
 	Description      string // 项目简介
 	Status           string // 状态：designing/confirmed/running/paused/completed
 	PauseReason      string // 暂停原因
@@ -40,6 +41,7 @@ type MvpProjectColumns struct {
 var mvpProjectColumns = MvpProjectColumns{
 	Id:               "id",
 	Name:             "name",
+	ProjectCategory:  "project_category",
 	Description:      "description",
 	Status:           "status",
 	PauseReason:      "pause_reason",

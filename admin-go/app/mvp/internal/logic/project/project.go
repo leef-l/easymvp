@@ -39,6 +39,7 @@ func (s *sProject) Create(ctx context.Context, in *model.ProjectCreateInput) err
 	_, err = dao.MvpProject.Ctx(ctx).Data(g.Map{
 		dao.MvpProject.Columns().Id:               id,
 		dao.MvpProject.Columns().Name:             in.Name,
+		dao.MvpProject.Columns().ProjectCategory:  in.ProjectCategory,
 		dao.MvpProject.Columns().Description:      in.Description,
 		dao.MvpProject.Columns().Status:           in.Status,
 		dao.MvpProject.Columns().PauseReason:      in.PauseReason,
@@ -65,6 +66,7 @@ func (s *sProject) Update(ctx context.Context, in *model.ProjectUpdateInput) err
 	}
 	data := g.Map{
 		dao.MvpProject.Columns().Name:             in.Name,
+		dao.MvpProject.Columns().ProjectCategory:  in.ProjectCategory,
 		dao.MvpProject.Columns().Description:      in.Description,
 		dao.MvpProject.Columns().PauseReason:      in.PauseReason,
 		dao.MvpProject.Columns().GlobalContext:    in.GlobalContext,

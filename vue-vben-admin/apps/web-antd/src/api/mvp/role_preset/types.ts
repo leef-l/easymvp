@@ -3,6 +3,7 @@
 /** 角色预设模板项 */
 export interface RolePresetItem {
   id: string;
+  projectCategory?: string;
   roleType: string;
   roleLevel?: string;
   modelID: string;
@@ -27,6 +28,7 @@ export interface RolePresetListParams {
 
 /** 角色预设模板创建参数 */
 export interface RolePresetCreateParams {
+  projectCategory: string;
   roleType: string;
   roleLevel?: string;
   modelID: string;
@@ -38,6 +40,7 @@ export interface RolePresetCreateParams {
 /** 角色预设模板更新参数 */
 export interface RolePresetUpdateParams {
   id: string;
+  projectCategory?: string;
   roleType: string;
   roleLevel?: string;
   modelID: string;

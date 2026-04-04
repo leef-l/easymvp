@@ -39,6 +39,7 @@ const [Modal, modalApi] = useVbenModal({
   <Modal class="w-[600px]">
     <Descriptions v-if="detail" bordered :column="1" size="small">
       <DescriptionsItem label="ID">{{ detail.id }}</DescriptionsItem>
+      <DescriptionsItem label="项目分类">{{ detail.projectCategory || '-' }}</DescriptionsItem>
       <DescriptionsItem label="角色类型">
         <Tag v-if="roleTypeMap[detail.roleType]" :color="roleTypeMap[detail.roleType].color">
           {{ roleTypeMap[detail.roleType].label }}

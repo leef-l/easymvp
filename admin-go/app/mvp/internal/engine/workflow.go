@@ -88,7 +88,7 @@ func (s *Scheduler) Resume(ctx context.Context, projectID int64) error {
 
 // CreateProject 创建项目并初始化架构师对话
 // architectModelID 为前端传入的架构师模型，若为 0 则从预设读取
-func CreateProject(ctx context.Context, name, description, workDir string, architectModelID int64, userID int64, deptID int64) (int64, int64, error) {
+func CreateProject(ctx context.Context, name, projectCategory, description, workDir string, architectModelID int64, userID int64, deptID int64) (int64, int64, error) {
 	workDir, _, err := EnsureWorkDir(workDir)
 	if err != nil {
 		return 0, 0, err
@@ -96,9 +96,15 @@ func CreateProject(ctx context.Context, name, description, workDir string, archi
 
 	projectID := int64(snowflake.Generate())
 
-	// 1. 读取角色预设模板
+	// 1.5 默认分类
+	if projectCategory == "" {
+		projectCategory = "软件开发"
+	}
+
+	// 1. 按项目分类读取角色预设模板
 	presets, err := g.DB().Model("mvp_role_preset").
 		Where("status", 1).
+		Where("project_category", projectCategory).
 		Where("deleted_at IS NULL").
 		OrderAsc("sort").
 		All()
@@ -120,6 +126,7 @@ func CreateProject(ctx context.Context, name, description, workDir string, archi
 	_, err = g.DB().Model("mvp_project").Insert(g.Map{
 		"id":                 projectID,
 		"name":               name,
+		"project_category":   projectCategory,
 		"description":        description,
 		"status":             "designing",
 		"work_dir":           workDir,
@@ -177,10 +184,11 @@ func CreateProject(ctx context.Context, name, description, workDir string, archi
 		}
 
 		_, err = g.DB().Model("mvp_project_role").Insert(g.Map{
-			"id":            int64(snowflake.Generate()),
-			"project_id":    projectID,
-			"role_type":     roleType,
-			"role_level":    p["role_level"].String(),
+			"id":               int64(snowflake.Generate()),
+			"project_id":       projectID,
+			"project_category": projectCategory,
+			"role_type":        roleType,
+			"role_level":       p["role_level"].String(),
 			"model_id":      modelID,
 			"system_prompt": systemPrompt,
 			"status":        1,
@@ -197,9 +205,10 @@ func CreateProject(ctx context.Context, name, description, workDir string, archi
 	// 如果预设为空，至少创建架构师角色（兼容无预设场景）
 	if len(presets) == 0 && architectModelID > 0 {
 		_, err = g.DB().Model("mvp_project_role").Insert(g.Map{
-			"id":            int64(snowflake.Generate()),
-			"project_id":    projectID,
-			"role_type":     "architect",
+			"id":               int64(snowflake.Generate()),
+			"project_id":       projectID,
+			"project_category": projectCategory,
+			"role_type":        "architect",
 			"model_id":      architectModelID,
 			"system_prompt": buildArchitectPrompt(name, description, modelPromptMap[architectModelID]),
 			"status":        1,

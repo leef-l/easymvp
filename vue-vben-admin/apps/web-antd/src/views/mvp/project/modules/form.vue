@@ -11,6 +11,7 @@ import {
 } from '#/api/mvp/project';
 import { createProject as workflowCreateProject, getRolePresets } from '#/api/mvp/workflow';
 import { getModelList } from '#/api/ai/model';
+import { projectCategoryOptions } from '#/views/mvp/consts';
 
 const router = useRouter();
 
@@ -20,6 +21,29 @@ const architectModelOptions = ref<{ label: string; value: string }[]>([]);
 const allModelOptions = ref<{ label: string; value: string }[]>([]);
 /** 预设中的架构师默认模型ID */
 const presetArchitectModelID = ref<string>('');
+
+/** 根据项目分类加载角色预设，更新架构师模型选项 */
+async function loadPresetsForCategory(category: string) {
+  if (!category) return;
+  try {
+    const presetRes = await getRolePresets(category);
+    const presets = presetRes?.list ?? [];
+    // 从预设中提取架构师模型
+    const architectPreset = presets.find((p) => p.roleType === 'architect');
+    if (architectPreset?.modelID) {
+      // 确保预设中的模型在下拉列表中
+      const exists = architectModelOptions.value.some((o) => o.value === architectPreset.modelID);
+      if (!exists) {
+        architectModelOptions.value.push({
+          label: `${architectPreset.modelName || '预设模型'}`,
+          value: architectPreset.modelID,
+        });
+      }
+      presetArchitectModelID.value = architectPreset.modelID;
+      formApi.setValues({ architectModelID: architectPreset.modelID });
+    }
+  } catch { /* ignore */ }
+}
 
 /** 渲染带 Tooltip 的表单 label */
 function tooltipLabel(label: string, tip: string) {
@@ -43,6 +67,14 @@ const createSchema = [
     label: '项目名称',
     rules: 'required',
     componentProps: { placeholder: '请输入项目名称', maxlength: 200 },
+  },
+  {
+    component: 'Select',
+    fieldName: 'projectCategory',
+    label: '项目分类',
+    rules: 'selectRequired',
+    componentProps: { options: projectCategoryOptions, placeholder: '请选择项目分类', allowClear: true, onChange: (val: string) => loadPresetsForCategory(val) },
+    defaultValue: '软件开发',
   },
   {
     component: 'Textarea',
@@ -74,6 +106,12 @@ const editSchema = [
     label: '项目名称',
     rules: 'required',
     componentProps: { placeholder: '请输入项目名称', maxlength: 200 },
+  },
+  {
+    component: 'Select',
+    fieldName: 'projectCategory',
+    label: '项目分类',
+    componentProps: { options: projectCategoryOptions, placeholder: '请选择项目分类', allowClear: true },
   },
   {
     component: 'Textarea',
@@ -133,6 +171,7 @@ const [Modal, modalApi] = useVbenModal({
         // 调用工作流 API 创建项目（会自动根据预设创建全部角色配置）
         const res = await workflowCreateProject({
           name: values.name,
+          projectCategory: values.projectCategory || '软件开发',
           description: values.description || '',
           workDir: values.workDir,
           architectModelID: values.architectModelID,
@@ -188,7 +227,7 @@ const [Modal, modalApi] = useVbenModal({
           // 并行加载架构师模型列表和预设
           const [modelRes, presetRes] = await Promise.all([
             getModelList({ pageNum: 1, pageSize: 1000, capability: 'architect' }),
-            getRolePresets(),
+            getRolePresets('软件开发'),
           ]);
           // 架构师模型下拉选项
           architectModelOptions.value = (modelRes?.list ?? []).map((item: any) => ({

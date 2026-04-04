@@ -95,6 +95,7 @@ const gridOptions: VxeGridProps<ProjectRoleItem> = {
     { type: 'checkbox', width: 50 },
     { title: '序号', type: 'seq', width: 50 },
     { field: 'projectName', title: '所属项目', minWidth: 120 },
+    { field: 'projectCategory', title: '项目分类', width: 100 },
     { field: 'roleType', title: '角色类型', width: 100, slots: { default: 'roleType_cell' } },
     { field: 'roleLevel', title: '角色等级', width: 100, slots: { default: 'roleLevel_cell' } },
     { field: 'modelName', title: 'AI模型', minWidth: 160 },

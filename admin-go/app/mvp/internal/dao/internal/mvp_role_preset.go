@@ -21,8 +21,9 @@ type MvpRolePresetDao struct {
 
 // MvpRolePresetColumns defines and stores column names for the table mvp_role_preset.
 type MvpRolePresetColumns struct {
-	Id           string // 雪花ID
-	RoleType     string // 角色类型：architect/implementer/auditor/coordinator
+	Id              string // 雪花ID
+	ProjectCategory string // 项目分类
+	RoleType        string // 角色类型：architect/implementer/auditor/coordinator
 	RoleLevel    string // 角色等级：lite/pro/max
 	ModelId      string // AI模型ID
 	SystemPrompt string // 默认系统提示词（角色设定）
@@ -37,8 +38,9 @@ type MvpRolePresetColumns struct {
 
 // mvpRolePresetColumns holds the columns for the table mvp_role_preset.
 var mvpRolePresetColumns = MvpRolePresetColumns{
-	Id:           "id",
-	RoleType:     "role_type",
+	Id:              "id",
+	ProjectCategory: "project_category",
+	RoleType:        "role_type",
 	RoleLevel:    "role_level",
 	ModelId:      "model_id",
 	SystemPrompt: "system_prompt",

@@ -11,6 +11,7 @@ import (
 // ProjectCreateInput 创建MVP项目表输入
 type ProjectCreateInput struct {
 	Name string `json:"name"`
+	ProjectCategory string `json:"projectCategory"`
 	Description string `json:"description"`
 	Status string `json:"status"`
 	PauseReason string `json:"pauseReason"`
@@ -23,6 +24,7 @@ type ProjectCreateInput struct {
 type ProjectUpdateInput struct {
 	ID snowflake.JsonInt64 `json:"id"`
 	Name string `json:"name"`
+	ProjectCategory string `json:"projectCategory"`
 	Description string `json:"description"`
 	PauseReason string `json:"pauseReason"`
 	GlobalContext string `json:"globalContext"`
@@ -34,6 +36,7 @@ type ProjectUpdateInput struct {
 type ProjectDetailOutput struct {
 	ID snowflake.JsonInt64 `json:"id"`
 	Name string `json:"name"`
+	ProjectCategory string `json:"projectCategory"`
 	Description string `json:"description"`
 	Status string `json:"status"`
 	PauseReason string `json:"pauseReason"`
@@ -49,6 +52,7 @@ type ProjectDetailOutput struct {
 type ProjectListOutput struct {
 	ID snowflake.JsonInt64 `json:"id"`
 	Name string `json:"name"`
+	ProjectCategory string `json:"projectCategory"`
 	Description string `json:"description"`
 	Status string `json:"status"`
 	PauseReason string `json:"pauseReason"`

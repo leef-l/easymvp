@@ -17,6 +17,7 @@ var _ = gtime.New
 type ProjectRoleCreateReq struct {
 	g.Meta `path:"/project_role/create" method:"post" tags:"项目角色配置表" summary:"创建项目角色配置表"`
 	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	ProjectCategory string `json:"projectCategory" v:"required|max-length:50" dc:"项目分类"`
 	RoleType string `json:"roleType" v:"required|max-length:20" dc:"角色类型"`
 	RoleLevel string `json:"roleLevel" v:"max-length:10" dc:"角色等级"`
 	ModelID snowflake.JsonInt64 `json:"modelID" v:"required" dc:"AI模型ID"`
@@ -34,6 +35,7 @@ type ProjectRoleUpdateReq struct {
 	g.Meta `path:"/project_role/update" method:"put" tags:"项目角色配置表" summary:"更新项目角色配置表"`
 	ID     snowflake.JsonInt64 `json:"id" v:"required#ID不能为空" dc:"项目角色配置表ID"`
 	ProjectID snowflake.JsonInt64 `json:"projectID" dc:"项目ID"`
+	ProjectCategory string `json:"projectCategory" dc:"项目分类"`
 	RoleType string `json:"roleType" dc:"角色类型"`
 	RoleLevel string `json:"roleLevel" dc:"角色等级"`
 	ModelID snowflake.JsonInt64 `json:"modelID" dc:"AI模型ID"`

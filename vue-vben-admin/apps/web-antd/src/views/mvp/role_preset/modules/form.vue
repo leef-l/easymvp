@@ -10,7 +10,7 @@ import {
   updateRolePreset,
 } from '#/api/mvp/role_preset';
 import { getModelList } from '#/api/ai/model';
-import { roleTypeOptions, roleLevelOptions } from '../../consts';
+import { roleTypeOptions, roleLevelOptions, projectCategoryOptions } from '../../consts';
 
 const modelIDOptions = ref<{ label: string; value: string }[]>([]);
 
@@ -32,6 +32,14 @@ const editId = ref('');
 const [Form, formApi] = useVbenForm({
   showDefaultActions: false,
   schema: [
+    {
+      component: 'Select',
+      fieldName: 'projectCategory',
+      label: '项目分类',
+      rules: 'selectRequired',
+      componentProps: { options: projectCategoryOptions, placeholder: '请选择项目分类', allowClear: true, class: 'w-full' },
+      defaultValue: '软件开发',
+    },
     {
       component: 'Select',
       fieldName: 'roleType',

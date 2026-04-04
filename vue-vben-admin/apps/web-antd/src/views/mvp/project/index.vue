@@ -92,6 +92,11 @@ const gridOptions: VxeGridProps<ProjectItem> = {
       slots: { default: 'col-name' },
     },
     {
+      field: 'projectCategory',
+      title: '项目分类',
+      width: 120,
+    },
+    {
       field: 'status',
       title: '状态',
       width: 100,

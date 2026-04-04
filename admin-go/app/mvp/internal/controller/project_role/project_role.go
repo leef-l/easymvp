@@ -20,6 +20,7 @@ type cProjectRole struct{}
 func (c *cProjectRole) Create(ctx context.Context, req *v1.ProjectRoleCreateReq) (res *v1.ProjectRoleCreateRes, err error) {
 	err = service.ProjectRole().Create(ctx, &model.ProjectRoleCreateInput{
 		ProjectID: req.ProjectID,
+		ProjectCategory: req.ProjectCategory,
 		RoleType: req.RoleType,
 		RoleLevel: req.RoleLevel,
 		ModelID: req.ModelID,
@@ -34,6 +35,7 @@ func (c *cProjectRole) Update(ctx context.Context, req *v1.ProjectRoleUpdateReq)
 	err = service.ProjectRole().Update(ctx, &model.ProjectRoleUpdateInput{
 		ID: req.ID,
 		ProjectID: req.ProjectID,
+		ProjectCategory: req.ProjectCategory,
 		RoleType: req.RoleType,
 		RoleLevel: req.RoleLevel,
 		ModelID: req.ModelID,

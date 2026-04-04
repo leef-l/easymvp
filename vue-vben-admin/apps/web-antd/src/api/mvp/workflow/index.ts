@@ -6,6 +6,7 @@ const PREFIX = '/mvp/workflow';
 /** 创建项目（通过工作流，返回项目ID和对话ID） */
 export function createProject(data: {
   name: string;
+  projectCategory: string;
   description: string;
   workDir: string;
   architectModelID: string;
@@ -65,10 +66,11 @@ export interface RolePresetItem {
   systemPrompt: string;
 }
 
-/** 获取角色预设列表 */
-export function getRolePresets() {
+/** 获取角色预设列表（可按项目分类过滤） */
+export function getRolePresets(projectCategory?: string) {
   return requestClient.get<{ list: RolePresetItem[] }>(
     `${PREFIX}/role-presets`,
+    { params: projectCategory ? { projectCategory } : {} },
   );
 }
 

@@ -22,8 +22,9 @@ type MvpProjectRoleDao struct {
 // MvpProjectRoleColumns defines and stores column names for the table mvp_project_role.
 type MvpProjectRoleColumns struct {
 	Id           string // 雪花ID
-	ProjectId    string // 项目ID
-	RoleType     string // 角色类型：architect/implementer/auditor/coordinator
+	ProjectId       string // 项目ID
+	ProjectCategory string // 项目分类
+	RoleType        string // 角色类型：architect/implementer/auditor/coordinator
 	RoleLevel    string // 角色等级：lite/pro/max
 	ModelId      string // AI模型ID
 	SystemPrompt string // 系统提示词（角色设定）
@@ -38,8 +39,9 @@ type MvpProjectRoleColumns struct {
 // mvpProjectRoleColumns holds the columns for the table mvp_project_role.
 var mvpProjectRoleColumns = MvpProjectRoleColumns{
 	Id:           "id",
-	ProjectId:    "project_id",
-	RoleType:     "role_type",
+	ProjectId:       "project_id",
+	ProjectCategory: "project_category",
+	RoleType:        "role_type",
 	RoleLevel:    "role_level",
 	ModelId:      "model_id",
 	SystemPrompt: "system_prompt",
