@@ -91,16 +91,23 @@ func (s *Scheduler) Resume(ctx context.Context, projectID int64) error {
 // CreateProject 创建项目并初始化架构师对话
 // architectModelID 为前端传入的架构师模型，若为 0 则从预设读取
 func CreateProject(ctx context.Context, name, projectCategory, description, workDir string, architectModelID int64, userID int64, deptID int64) (int64, int64, error) {
-	workDir, _, err := EnsureWorkDir(workDir)
-	if err != nil {
-		return 0, 0, err
+	// 1.5 默认分类
+	if projectCategory == "" {
+		projectCategory = "软件开发"
 	}
 
 	projectID := int64(snowflake.Generate())
 
-	// 1.5 默认分类
-	if projectCategory == "" {
-		projectCategory = "软件开发"
+	// 非编码类项目如果未指定工作目录，自动生成
+	if workDir == "" {
+		workDir = GenerateWorkDir(projectCategory, projectID)
+	}
+	if workDir != "" {
+		var err error
+		workDir, _, err = EnsureWorkDir(workDir)
+		if err != nil {
+			return 0, 0, err
+		}
 	}
 
 	// 1. 按项目分类读取角色预设模板
@@ -178,7 +185,7 @@ func CreateProject(ctx context.Context, name, projectCategory, description, work
 		// 架构师特殊处理：动态拼接项目信息
 		systemPrompt := ""
 		if roleType == "architect" {
-			systemPrompt = buildArchitectPrompt(name, description, modelPromptMap[modelID])
+			systemPrompt = buildArchitectPromptWithCategory(name, description, modelPromptMap[modelID], projectCategory)
 		} else if rp, ok := modelPromptMap[modelID]; ok && rp != "" {
 			systemPrompt = rp
 		} else {
@@ -253,14 +260,32 @@ func CreateProject(ctx context.Context, name, projectCategory, description, work
 
 // buildArchitectPrompt 构建架构师系统提示词
 // 优先使用模型自带的 role_prompt，拼接项目上下文信息
+// projectCategory 用于选择分类族对应的兜底模板
 func buildArchitectPrompt(projectName, projectDesc string, modelRolePrompt string) string {
+	return buildArchitectPromptWithCategory(projectName, projectDesc, modelRolePrompt, "")
+}
+
+// buildArchitectPromptWithCategory 带项目分类的架构师提示词构建
+func buildArchitectPromptWithCategory(projectName, projectDesc string, modelRolePrompt string, projectCategory string) string {
 	projectContext := fmt.Sprintf("\n\n===== 当前项目 =====\n项目名称：%s\n项目简介：%s", projectName, projectDesc)
 
 	if modelRolePrompt != "" {
 		return modelRolePrompt + projectContext
 	}
 
-	// 兜底：模型没有配 role_prompt 时使用默认提示词
+	// 根据分类族选择兜底模板
+	family := GetCategoryFamily(projectCategory)
+	switch family {
+	case CategoryFamilyCreative:
+		return buildCreativeArchitectPrompt(projectName, projectDesc)
+	case CategoryFamilyAnalysis:
+		return buildAnalysisArchitectPrompt(projectName, projectDesc)
+	default:
+		return buildCodingArchitectPrompt(projectName, projectDesc)
+	}
+}
+
+func buildCodingArchitectPrompt(projectName, projectDesc string) string {
 	return fmt.Sprintf(`你是一个资深软件架构师，负责项目「%s」的需求分析和方案设计。
 
 项目简介：
@@ -282,6 +307,74 @@ func buildArchitectPrompt(projectName, projectDesc string, modelRolePrompt strin
       "role_level": "max/pro/lite",
       "batch_no": 1,
       "affected_resources": ["file1.go", "file2.go"],
+      "depends_on": []
+    }
+  ]
+}`, projectName, projectDesc)
+}
+
+func buildCreativeArchitectPrompt(projectName, projectDesc string) string {
+	return fmt.Sprintf(`你是一个资深创意总监，负责项目「%s」的创意策划和内容架构设计。
+
+项目简介：
+%s
+
+你的职责：
+1. 与用户沟通，深入理解创意需求和风格方向
+2. 设计内容架构（世界观、人物关系、故事线、章节/幕结构）
+3. 将项目按内容模块拆分为可并行的创作任务
+4. 确保不同创作者之间的内容不冲突（不覆盖同一章节/角色/场景）
+5. 为每个任务标注：任务名称、描述、角色等级(lite/pro/max)、执行批次号、涉及的资源范围、依赖关系
+
+任务拆分规则：
+- 按章节/幕/场景为最小创作单元
+- 人物设定、世界观设定为前置任务（批次 1）
+- 正文创作按剧情线并行，按时间线串行
+- affected_resources 使用相对路径（如 "chapters/ch01.md"）
+
+输出任务清单时请使用 JSON 格式：
+{
+  "tasks": [
+    {
+      "name": "任务名称",
+      "description": "详细描述（含创作要求和风格指南）",
+      "role_level": "max/pro/lite",
+      "batch_no": 1,
+      "affected_resources": ["chapters/ch01.md"],
+      "depends_on": []
+    }
+  ]
+}`, projectName, projectDesc)
+}
+
+func buildAnalysisArchitectPrompt(projectName, projectDesc string) string {
+	return fmt.Sprintf(`你是一个资深分析架构师，负责项目「%s」的分析方案设计和任务编排。
+
+项目简介：
+%s
+
+你的职责：
+1. 与用户沟通，明确分析目标、数据源和交付物
+2. 设计分析流程（数据采集 → 清洗 → 分析 → 可视化 → 报告）
+3. 将项目按分析阶段和数据维度拆分为可执行的任务
+4. 确保数据管道的上下游依赖关系正确
+5. 为每个任务标注：任务名称、描述、角色等级(lite/pro/max)、执行批次号、涉及的资源范围、依赖关系
+
+任务拆分规则：
+- 数据源接入和清洗为前置任务（批次 1）
+- 不同维度的分析可以并行
+- 汇总报告和可视化依赖所有分析任务
+- affected_resources 使用相对路径（如 "reports/summary.md", "data/cleaned.csv"）
+
+输出任务清单时请使用 JSON 格式：
+{
+  "tasks": [
+    {
+      "name": "任务名称",
+      "description": "详细描述（含分析方法、数据源、预期输出）",
+      "role_level": "max/pro/lite",
+      "batch_no": 1,
+      "affected_resources": ["reports/summary.md"],
       "depends_on": []
     }
   ]

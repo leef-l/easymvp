@@ -29,6 +29,46 @@ func GetCompressor() *ContextCompressor {
 // 优化1: 单任务智能压缩（规则优先，减少 AI 调用）
 // ----------------------------------------------------------------
 
+// compressionParams 分类族压缩参数
+type compressionParams struct {
+	ShortThreshold  int // 短文本阈值（原文保留）
+	MediumThreshold int // 中等文本阈值（规则截取）
+	GlobalLimit     int // 全局上下文上限
+	TaskPrompt      string // AI 压缩任务的系统提示词
+	ProjectPrompt   string // AI 压缩项目的系统提示词
+}
+
+// getCompressionParams 根据项目分类族获取压缩参数
+func getCompressionParams(projectCategory string) compressionParams {
+	family := GetCategoryFamily(projectCategory)
+	switch family {
+	case CategoryFamilyCreative:
+		return compressionParams{
+			ShortThreshold:  800,  // 创意内容阈值更高（保留更多原文细节）
+			MediumThreshold: 5000,
+			GlobalLimit:     5000, // 创意项目需要更多上下文（世界观/人物/风格一致性）
+			TaskPrompt:      `将以下创意任务内容压缩为300字以内的摘要。保留：创意产出（章节/场景/人物）、风格约束、剧情走向、世界观/设定变更。纯文本输出。`,
+			ProjectPrompt:   `将以下创意项目架构师对话压缩为5000字以内的全局上下文。保留：世界观设定、人物关系图谱、风格指南、剧情主线和支线、创作约束。这将作为所有后续创作任务的背景知识。`,
+		}
+	case CategoryFamilyAnalysis:
+		return compressionParams{
+			ShortThreshold:  500,
+			MediumThreshold: 3000,
+			GlobalLimit:     4000, // 分析项目需要保留数据定义和指标口径
+			TaskPrompt:      `将以下分析任务内容压缩为200字以内的摘要。保留：分析方法、数据源、关键结论、可视化说明、指标口径。纯文本输出。`,
+			ProjectPrompt:   `将以下分析项目架构师对话压缩为4000字以内的全局上下文。保留：分析目标、数据源定义、指标口径、分析维度、交付物要求。这将作为所有后续分析任务的背景知识。`,
+		}
+	default:
+		return compressionParams{
+			ShortThreshold:  500,
+			MediumThreshold: 3000,
+			GlobalLimit:     3000,
+			TaskPrompt:      `将以下任务内容压缩为200字以内的摘要。保留：目标、结果、关键决策、产出物。纯文本输出。`,
+			ProjectPrompt:   `将以下项目架构师对话压缩为3000字以内的全局上下文。保留：需求、方案、架构、模块划分、约束、依赖关系。这将作为所有后续任务的背景知识。`,
+		}
+	}
+}
+
 // CompressTaskContext 压缩单个任务的上下文
 func (c *ContextCompressor) CompressTaskContext(ctx context.Context, projectID int64, taskID int64) error {
 	task, err := g.DB().Model("mvp_task").Where("id", taskID).One()
@@ -38,6 +78,9 @@ func (c *ContextCompressor) CompressTaskContext(ctx context.Context, projectID i
 	if task.IsEmpty() {
 		return nil
 	}
+
+	// 获取项目分类
+	params := c.getProjectCompressionParams(ctx, projectID)
 
 	// 获取任务结果文本
 	content := task["result"].String()
@@ -49,15 +92,15 @@ func (c *ContextCompressor) CompressTaskContext(ctx context.Context, projectID i
 		return nil
 	}
 
-	// 规则压缩：按长度分级
+	// 规则压缩：按长度分级（使用分类感知的阈值）
 	var summary string
 	switch {
-	case len(content) < 500:
+	case len(content) < params.ShortThreshold:
 		// 很短，原文保存，不调 AI
 		summary = content
 
-	case len(content) < 3000:
-		// 中等长度，规则截取：前500字（核心结论）+ 末200字（最终总结）
+	case len(content) < params.MediumThreshold:
+		// 中等长度，规则截取
 		summary = ruleCompress(content)
 
 	default:
@@ -66,7 +109,7 @@ func (c *ContextCompressor) CompressTaskContext(ctx context.Context, projectID i
 		if err != nil {
 			summary = ruleCompress(content)
 		} else {
-			aiSummary, err := c.aiCompressTask(ctx, modelInfo, task["name"].String(), content)
+			aiSummary, err := c.aiCompressTask(ctx, modelInfo, task["name"].String(), content, params.TaskPrompt)
 			if err != nil {
 				summary = ruleCompress(content)
 			} else {
@@ -77,6 +120,15 @@ func (c *ContextCompressor) CompressTaskContext(ctx context.Context, projectID i
 
 	c.saveSummary(ctx, taskID, summary)
 	return nil
+}
+
+// getProjectCompressionParams 获取项目的压缩参数
+func (c *ContextCompressor) getProjectCompressionParams(ctx context.Context, projectID int64) compressionParams {
+	project, err := g.DB().Model("mvp_project").Where("id", projectID).Fields("project_category").One()
+	if err != nil || project.IsEmpty() {
+		return getCompressionParams("")
+	}
+	return getCompressionParams(project["project_category"].String())
 }
 
 // ----------------------------------------------------------------
@@ -129,29 +181,29 @@ func (c *ContextCompressor) CompressBatchContext(ctx context.Context, projectID 
 // 如果合并后超过 3000 字，调 AI 重新压缩为 3000 字
 func (c *ContextCompressor) mergeIntoGlobalContext(ctx context.Context, projectID int64, newContent string) {
 	project, err := g.DB().Model("mvp_project").Where("id", projectID).
-		Fields("global_context, name").One()
+		Fields("global_context, name, project_category").One()
 	if err != nil || project.IsEmpty() {
 		return
 	}
 
+	params := getCompressionParams(project["project_category"].String())
 	existing := project["global_context"].String()
 	merged := existing + "\n\n" + newContent
 
-	if len(merged) < 3000 {
+	if len(merged) < params.GlobalLimit {
 		// 还没超，直接追加
 		c.saveProjectContext(ctx, projectID, merged)
 		return
 	}
 
-	// 超了，调 AI 重新压缩整个全局上下文为 ~3000 字
+	// 超了，调 AI 重新压缩
 	modelInfo, err := c.getCompressModel(ctx, projectID)
 	if err != nil {
-		// 无法调 AI，用规则截取
 		c.saveProjectContext(ctx, projectID, ruleCompress(merged))
 		return
 	}
 
-	compressed, err := c.aiMergeGlobal(ctx, modelInfo, project["name"].String(), merged)
+	compressed, err := c.aiMergeGlobal(ctx, modelInfo, project["name"].String(), merged, params.GlobalLimit)
 	if err != nil {
 		c.saveProjectContext(ctx, projectID, ruleCompress(merged))
 		return
@@ -185,7 +237,9 @@ func (c *ContextCompressor) CompressProjectContext(ctx context.Context, projectI
 	}
 	dialog := dialogText.String()
 
-	if len(dialog) < 3000 {
+	params := c.getProjectCompressionParams(ctx, projectID)
+
+	if len(dialog) < params.GlobalLimit {
 		c.saveProjectContext(ctx, projectID, dialog)
 		return nil
 	}
@@ -202,7 +256,7 @@ func (c *ContextCompressor) CompressProjectContext(ctx context.Context, projectI
 		projectName = project["name"].String()
 	}
 
-	summary, err := c.aiCompressProject(ctx, modelInfo, projectName, dialog)
+	summary, err := c.aiCompressProject(ctx, modelInfo, projectName, dialog, params.ProjectPrompt)
 	if err != nil {
 		c.saveProjectContext(ctx, projectID, ruleCompress(dialog))
 		return nil
@@ -275,7 +329,7 @@ func ruleCompress(content string) string {
 // AI 压缩方法
 // ----------------------------------------------------------------
 
-func (c *ContextCompressor) aiCompressTask(ctx context.Context, modelInfo *ModelInfo, taskName string, content string) (string, error) {
+func (c *ContextCompressor) aiCompressTask(ctx context.Context, modelInfo *ModelInfo, taskName string, content string, systemPrompt string) (string, error) {
 	p, err := provider.GetProvider(provider.Config{
 		ProviderType: modelInfo.ProviderType,
 		BaseURL:      modelInfo.BaseURL,
@@ -286,9 +340,9 @@ func (c *ContextCompressor) aiCompressTask(ctx context.Context, modelInfo *Model
 	}
 
 	resp, err := p.Chat(ctx, &provider.ChatRequest{
-		Model:     modelInfo.ModelCode,
-		MaxTokens: 500,
-		SystemPrompt: `将以下任务内容压缩为200字以内的摘要。保留：目标、结果、关键决策、产出物。纯文本输出。`,
+		Model:        modelInfo.ModelCode,
+		MaxTokens:    500,
+		SystemPrompt: systemPrompt,
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Content: fmt.Sprintf("任务：%s\n\n内容：\n%s", taskName, truncate(content, 8000))},
 		},
@@ -299,7 +353,7 @@ func (c *ContextCompressor) aiCompressTask(ctx context.Context, modelInfo *Model
 	return resp.Content, nil
 }
 
-func (c *ContextCompressor) aiCompressProject(ctx context.Context, modelInfo *ModelInfo, projectName string, dialog string) (string, error) {
+func (c *ContextCompressor) aiCompressProject(ctx context.Context, modelInfo *ModelInfo, projectName string, dialog string, systemPrompt string) (string, error) {
 	p, err := provider.GetProvider(provider.Config{
 		ProviderType: modelInfo.ProviderType,
 		BaseURL:      modelInfo.BaseURL,
@@ -310,9 +364,9 @@ func (c *ContextCompressor) aiCompressProject(ctx context.Context, modelInfo *Mo
 	}
 
 	resp, err := p.Chat(ctx, &provider.ChatRequest{
-		Model:     modelInfo.ModelCode,
-		MaxTokens: 2000,
-		SystemPrompt: `将以下项目架构师对话压缩为3000字以内的全局上下文。保留：需求、方案、架构、模块划分、约束、依赖关系。这将作为所有后续任务的背景知识。`,
+		Model:        modelInfo.ModelCode,
+		MaxTokens:    2000,
+		SystemPrompt: systemPrompt,
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Content: fmt.Sprintf("项目：%s\n\n对话：\n%s", projectName, truncate(dialog, 15000))},
 		},
@@ -323,7 +377,7 @@ func (c *ContextCompressor) aiCompressProject(ctx context.Context, modelInfo *Mo
 	return resp.Content, nil
 }
 
-func (c *ContextCompressor) aiMergeGlobal(ctx context.Context, modelInfo *ModelInfo, projectName string, merged string) (string, error) {
+func (c *ContextCompressor) aiMergeGlobal(ctx context.Context, modelInfo *ModelInfo, projectName string, merged string, globalLimit int) (string, error) {
 	p, err := provider.GetProvider(provider.Config{
 		ProviderType: modelInfo.ProviderType,
 		BaseURL:      modelInfo.BaseURL,
@@ -336,7 +390,7 @@ func (c *ContextCompressor) aiMergeGlobal(ctx context.Context, modelInfo *ModelI
 	resp, err := p.Chat(ctx, &provider.ChatRequest{
 		Model:     modelInfo.ModelCode,
 		MaxTokens: 2000,
-		SystemPrompt: `将以下项目全局上下文重新压缩为3000字以内。这是项目的完整知识库，包含需求、方案和所有已完成工作。必须保留所有关键信息，不能丢失任何对后续任务有影响的决策和产出。`,
+		SystemPrompt: fmt.Sprintf(`将以下项目全局上下文重新压缩为%d字以内。这是项目的完整知识库，包含需求、方案和所有已完成工作。必须保留所有关键信息，不能丢失任何对后续任务有影响的决策和产出。`, globalLimit),
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Content: fmt.Sprintf("项目：%s\n\n当前全局上下文：\n%s", projectName, truncate(merged, 15000))},
 		},

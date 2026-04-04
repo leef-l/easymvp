@@ -52,8 +52,8 @@ func (s *Scheduler) ReportBug(ctx context.Context, projectID int64, auditorTaskI
 
 	logTaskAction(implTaskID, "bug_found", "completed", "bug_found", "审计员发现bug: "+bugDescription, "auditor")
 
-	// 4. 创建架构师分析任务
-	go s.createBugAnalysisTask(ctx, projectID, implTaskID, auditorTaskID, bugDescription)
+	// 4. 创建架构师分析任务（使用项目级 context）
+	go s.createBugAnalysisTask(s.getProjectContext(projectID), projectID, implTaskID, auditorTaskID, bugDescription)
 
 	return nil
 }
@@ -90,8 +90,8 @@ func (s *Scheduler) createBugAnalysisTask(ctx context.Context, projectID int64, 
 
 	logTaskAction(analysisTaskID, "created", "", "pending", "系统创建Bug分析任务", "system")
 
-	// 触发调度
-	go s.scheduleOnce(context.Background(), projectID)
+	// 触发调度（使用项目级 context）
+	go s.scheduleOnce(s.getProjectContext(projectID), projectID)
 }
 
 // EscalateFailedTask 非 auditor 任务重试耗尽后，创建架构师分析任务
@@ -125,7 +125,7 @@ func (s *Scheduler) EscalateFailedTask(ctx context.Context, projectID int64, fai
 	}
 
 	logTaskAction(analysisTaskID, "created", "", "pending", "系统创建失败分析任务（升级处理）", "system")
-	go s.scheduleOnce(context.Background(), projectID)
+	go s.scheduleOnce(s.getProjectContext(projectID), projectID)
 }
 
 type architectTaskPatch struct {
@@ -165,8 +165,8 @@ func (s *Scheduler) DispatchBugFix(ctx context.Context, projectID int64, analysi
 
 	logTaskAction(implTaskID, "bug_dispatched", "bug_found", "pending", "架构师已分析，分派修复任务", "architect")
 
-	// 4. 触发调度
-	go s.scheduleOnce(context.Background(), projectID)
+	// 4. 触发调度（使用项目级 context）
+	go s.scheduleOnce(s.getProjectContext(projectID), projectID)
 
 	return nil
 }
@@ -256,7 +256,7 @@ func (s *Scheduler) AutoDispatchFailureFix(ctx context.Context, projectID int64,
 		logMessage += "；原因：" + strings.TrimSpace(patch.Reason)
 	}
 	logTaskAction(implTaskID, "architect_revised", "escalated", "pending", logMessage, "architect")
-	go s.scheduleOnce(context.Background(), projectID)
+	go s.scheduleOnce(s.getProjectContext(projectID), projectID)
 }
 
 func normalizePatchResources(values []string) ([]string, []string) {

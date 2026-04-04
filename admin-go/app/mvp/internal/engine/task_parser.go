@@ -51,7 +51,15 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 	if err != nil {
 		return 0, err
 	}
-	tasks := p.normalizeTasks(ctx, plan.Tasks)
+
+	// 获取项目分类用于分类感知校验
+	projectCategory := ""
+	project, _ := g.DB().Model("mvp_project").Where("id", projectID).Fields("project_category").One()
+	if !project.IsEmpty() {
+		projectCategory = project["project_category"].String()
+	}
+
+	tasks := p.normalizeTasks(ctx, plan.Tasks, projectCategory)
 	if len(tasks) == 0 {
 		return 0, nil // 回复中没有任务清单，正常情况（还在讨论需求）
 	}
@@ -220,12 +228,13 @@ func (p *TaskParser) DryParseTaskCount(aiReply string) int {
 	if err != nil || len(plan.Tasks) == 0 {
 		return 0
 	}
-	return len(p.normalizeTasks(context.Background(), plan.Tasks))
+	return len(p.normalizeTasks(context.Background(), plan.Tasks, ""))
 }
 
-func (p *TaskParser) normalizeTasks(ctx context.Context, tasks []ArchitectTask) []ArchitectTask {
+func (p *TaskParser) normalizeTasks(ctx context.Context, tasks []ArchitectTask, projectCategory string) []ArchitectTask {
 	normalized := make([]ArchitectTask, 0, len(tasks))
 	seenNames := make(map[string]struct{}, len(tasks))
+	family := GetCategoryFamily(projectCategory)
 
 	for _, task := range tasks {
 		task.Name = strings.TrimSpace(task.Name)
@@ -241,6 +250,38 @@ func (p *TaskParser) normalizeTasks(ctx context.Context, tasks []ArchitectTask) 
 		if _, exists := seenNames[task.Name]; exists {
 			g.Log().Warningf(ctx, "[TaskParser] 跳过重复任务名: %s", task.Name)
 			continue
+		}
+
+		// 分类感知校验
+		switch family {
+		case CategoryFamilyCoding:
+			// 编码类：默认角色 implementer，affected_resources 应为代码路径
+			if task.RoleType == "" {
+				task.RoleType = "implementer"
+			}
+		case CategoryFamilyCreative:
+			// 创意类：默认角色 implementer，affected_resources 为内容文件路径
+			if task.RoleType == "" {
+				task.RoleType = "implementer"
+			}
+			// 创意类任务如果没有 affected_resources，自动生成基于任务名的路径
+			if len(task.AffectedResources) == 0 && task.RoleType == "implementer" {
+				task.AffectedResources = []string{fmt.Sprintf("content/%s.md", task.Name)}
+			}
+		case CategoryFamilyAnalysis:
+			// 分析类：默认角色 implementer
+			if task.RoleType == "" {
+				task.RoleType = "implementer"
+			}
+			if len(task.AffectedResources) == 0 && task.RoleType == "implementer" {
+				task.AffectedResources = []string{fmt.Sprintf("output/%s.md", task.Name)}
+			}
+		}
+
+		// RoleLevel 校验
+		validLevels := map[string]bool{"lite": true, "pro": true, "max": true}
+		if !validLevels[task.RoleLevel] {
+			task.RoleLevel = "pro" // 默认 pro
 		}
 
 		seenNames[task.Name] = struct{}{}

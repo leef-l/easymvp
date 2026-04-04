@@ -117,8 +117,22 @@ func (w *Watchdog) checkRunningTasks(ctx context.Context) {
 		return
 	}
 
-	// 心跳超时阈值：检测间隔 × 最大无进展次数
-	heartbeatTimeout := w.checkInterval * time.Duration(w.maxStaleCount)
+	// 默认心跳超时阈值（后续会按项目分类动态调整）
+	defaultHeartbeatTimeout := w.checkInterval * time.Duration(w.maxStaleCount)
+
+	// 锁外收集项目分类信息，用于按分类族调整心跳超时
+	projectCategories := make(map[int64]string)
+	projectIDs := make(map[int64]bool)
+	for _, task := range tasks {
+		pid := task["project_id"].Int64()
+		projectIDs[pid] = true
+	}
+	for pid := range projectIDs {
+		project, err := g.DB().Model("mvp_project").Where("id", pid).Fields("project_category").One()
+		if err == nil && !project.IsEmpty() {
+			projectCategories[pid] = project["project_category"].String()
+		}
+	}
 
 	// 锁外收集信息
 	type taskInfo struct {
@@ -156,7 +170,12 @@ func (w *Watchdog) checkRunningTasks(ctx context.Context) {
 		taskID := info.taskID
 
 		if info.hasHeartbeat {
-			// 心跳模式：检查 heartbeat_at 是否超时
+			// 心跳模式：根据项目分类族动态调整超时时间
+			heartbeatTimeout := defaultHeartbeatTimeout
+			if cat, ok := projectCategories[info.projectID]; ok && cat != "" {
+				timeoutSec := GetHeartbeatTimeout(ctx, cat)
+				heartbeatTimeout = time.Duration(timeoutSec) * time.Second
+			}
 			elapsed := time.Since(info.heartbeatAt.Time)
 			if elapsed > heartbeatTimeout {
 				g.Log().Errorf(ctx, "[Watchdog] 任务 %d 心跳超时 (%.0fs > %.0fs)，标记为失败",
@@ -209,13 +228,27 @@ func (w *Watchdog) checkRunningTasks(ctx context.Context) {
 	}
 	w.mu.Unlock()
 
-	// 锁外执行 DB 更新操作
+	// 锁外执行 DB 更新操作（使用 CAS：只有 status=running 才能标记为 failed，防止与正常完成竞争）
 	for _, st := range staleTasks {
-		g.DB().Model("mvp_task").Where("id", st.taskID).Update(g.Map{
-			"status":        "failed",
-			"error_message": "看门狗检测: " + st.reason,
-			"updated_at":    gtime.Now(),
-		})
+		affected, err := g.DB().Model("mvp_task").
+			Where("id", st.taskID).
+			Where("status", "running"). // CAS: 只有还在 running 的才标记失败
+			Update(g.Map{
+				"status":        "failed",
+				"error_message": "看门狗检测: " + st.reason,
+				"updated_at":    gtime.Now(),
+			})
+		if err != nil {
+			g.Log().Errorf(ctx, "[Watchdog] 更新任务 %d 状态失败: %v", st.taskID, err)
+			continue
+		}
+		rows, _ := affected.RowsAffected()
+		if rows == 0 {
+			// 任务已被正常完成或其他路径处理，跳过
+			g.Log().Infof(ctx, "[Watchdog] 任务 %d 已不是 running 状态，跳过标记失败", st.taskID)
+			continue
+		}
+
 		logTaskAction(st.taskID, "watchdog_timeout", "running", "failed", st.reason, "system")
 
 		// 释放调度器资源
@@ -350,11 +383,11 @@ func (w *Watchdog) checkFailedTasks(ctx context.Context) {
 
 		if item.taskType == "auditor" {
 			// auditor 类型：通过 ReportBug 走 bug 闭环（关联实施员）
-			go scheduler.ReportBug(context.Background(), item.projectID, item.taskID,
+			go scheduler.ReportBug(scheduler.getProjectContext(item.projectID), item.projectID, item.taskID,
 				"审计任务多次重试仍然失败，错误信息：\n"+item.errMsg)
 		} else {
 			// 非 auditor 类型：直接创建架构师分析任务
-			go scheduler.EscalateFailedTask(context.Background(), item.projectID, item.taskID, item.taskType, item.errMsg)
+			go scheduler.EscalateFailedTask(scheduler.getProjectContext(item.projectID), item.projectID, item.taskID, item.taskType, item.errMsg)
 		}
 	}
 

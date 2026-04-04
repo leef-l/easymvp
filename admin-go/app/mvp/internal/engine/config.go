@@ -88,6 +88,50 @@ func GetConfigInt(ctx context.Context, key string, yamlPath string, defaultVal i
 	return defaultVal
 }
 
+// CategoryFamily 项目分类族
+type CategoryFamily string
+
+const (
+	CategoryFamilyCoding   CategoryFamily = "coding"   // 软件开发、游戏开发
+	CategoryFamilyCreative CategoryFamily = "creative" // 小说创作、动漫创作、漫剧创作、大电影创作、动画创作
+	CategoryFamilyAnalysis CategoryFamily = "analysis" // 数据分析、产品设计
+)
+
+// categoryFamilyMap 项目分类 → 分类族映射
+var categoryFamilyMap = map[string]CategoryFamily{
+	"软件开发":  CategoryFamilyCoding,
+	"游戏开发":  CategoryFamilyCoding,
+	"小说创作":  CategoryFamilyCreative,
+	"动漫创作":  CategoryFamilyCreative,
+	"漫剧创作":  CategoryFamilyCreative,
+	"大电影创作": CategoryFamilyCreative,
+	"动画创作":  CategoryFamilyCreative,
+	"数据分析":  CategoryFamilyAnalysis,
+	"产品设计":  CategoryFamilyAnalysis,
+}
+
+// GetCategoryFamily 获取项目分类所属的分类族
+func GetCategoryFamily(projectCategory string) CategoryFamily {
+	if f, ok := categoryFamilyMap[projectCategory]; ok {
+		return f
+	}
+	return CategoryFamilyCoding // 默认按编码类处理
+}
+
+// GetHeartbeatTimeout 根据分类族获取心跳超时时间（秒）
+// coding=120s, creative=300s, analysis=180s
+func GetHeartbeatTimeout(ctx context.Context, projectCategory string) int {
+	family := GetCategoryFamily(projectCategory)
+	switch family {
+	case CategoryFamilyCreative:
+		return GetConfigInt(ctx, "watchdog.heartbeat_timeout.creative", "engine.watchdog.heartbeatTimeout.creative", 300)
+	case CategoryFamilyAnalysis:
+		return GetConfigInt(ctx, "watchdog.heartbeat_timeout.analysis", "engine.watchdog.heartbeatTimeout.analysis", 180)
+	default:
+		return GetConfigInt(ctx, "watchdog.heartbeat_timeout.coding", "engine.watchdog.heartbeatTimeout.coding", 120)
+	}
+}
+
 // GetConfigString 读取字符串配置，三级 fallback
 func GetConfigString(ctx context.Context, key string, yamlPath string, defaultVal string) string {
 	// 0. 缓存

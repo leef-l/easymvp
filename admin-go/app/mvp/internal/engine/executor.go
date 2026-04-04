@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
@@ -27,8 +30,17 @@ func NewExecutor(scheduler *Scheduler) *Executor {
 }
 
 // Execute 执行单个任务
-// implementer 角色使用 Aider 进行真实代码编辑，其他角色使用 ChatStream 对话
+// 根据 execution_mode 分发执行方式：aider/chat/openhands
 func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
+	// 防 panic 兜底：确保资源锁一定会被释放
+	defer func() {
+		if r := recover(); r != nil {
+			g.Log().Errorf(ctx, "[Executor] panic recovered: task=%d, err=%v", taskID, r)
+			e.scheduler.releaseTaskResources(taskID)
+			e.scheduler.OnTaskFailed(projectID, taskID, fmt.Sprintf("内部错误(panic): %v", r))
+		}
+	}()
+
 	// 1. 查询任务信息
 	task, err := g.DB().Model("mvp_task").Where("id", taskID).One()
 	if err != nil || task.IsEmpty() {
@@ -196,9 +208,26 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 		return
 	}
 
-	// 8. 完成消息
+	// 8. 空内容检测：AI 返回空内容视为失败
+	result := fullContent.String()
+	if strings.TrimSpace(result) == "" {
+		if _, dbErr := g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
+			"content":      "AI返回空内容",
+			"message_type": mvpmodel.MessageTypePoison,
+			"status":       "failed",
+			"updated_at":   gtime.Now(),
+		}); dbErr != nil {
+			g.Log().Errorf(ctx, "[Executor] 更新空内容消息失败: msg=%d, err=%v", replyID, dbErr)
+		}
+		hub.Publish(replyID, `{"done":true}`)
+		hub.Done(replyID)
+		e.handleTaskFailure(ctx, projectID, taskID, roleType, taskFailureExecution, "AI返回空内容，可能被模型内容过滤或请求异常")
+		return
+	}
+
+	// 9. 完成消息
 	if _, err := g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
-		"content":    fullContent.String(),
+		"content":    result,
 		"status":     "completed",
 		"updated_at": gtime.Now(),
 	}); err != nil {
@@ -207,9 +236,6 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 
 	hub.Publish(replyID, `{"done":true}`)
 	hub.Done(replyID)
-
-	// 9. 保存任务结果
-	result := fullContent.String()
 	if _, err := g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
 		"result":       result,
 		"status":       "completed",
@@ -468,6 +494,7 @@ func (e *Executor) buildAiderTaskPrompt(task gdb.Record, resources []string) str
 }
 
 // createAuditTask 为实施员任务创建对应的审计任务
+// 使用依赖表的唯一索引（uk_dep）做幂等保护，防止并发重复创建
 func (e *Executor) createAuditTask(ctx context.Context, projectID int64, implTaskID int64, implTask gdb.Record) {
 	// 检查是否已有审计任务（通过依赖关系）
 	count, _ := g.DB().Model("mvp_task_dependency").
@@ -478,7 +505,7 @@ func (e *Executor) createAuditTask(ctx context.Context, projectID int64, implTas
 	}
 
 	auditTaskID := int64(snowflake.Generate())
-	g.DB().Model("mvp_task").Insert(g.Map{
+	if _, err := g.DB().Model("mvp_task").Insert(g.Map{
 		"id":          auditTaskID,
 		"project_id":  projectID,
 		"parent_id":   implTask["parent_id"].Int64(),
@@ -492,13 +519,20 @@ func (e *Executor) createAuditTask(ctx context.Context, projectID int64, implTas
 		"dept_id":     0,
 		"created_at":  gtime.Now(),
 		"updated_at":  gtime.Now(),
-	})
+	}); err != nil {
+		g.Log().Errorf(ctx, "[Executor] 创建审计任务失败: implTask=%d, err=%v", implTaskID, err)
+		return
+	}
 
-	// 添加依赖关系
-	g.DB().Model("mvp_task_dependency").Insert(g.Map{
+	// 添加依赖关系（uk_dep 唯一索引保证幂等，重复插入会静默失败）
+	if _, err := g.DB().Model("mvp_task_dependency").Insert(g.Map{
 		"task_id":       auditTaskID,
 		"depends_on_id": implTaskID,
-	})
+	}); err != nil {
+		// 唯一索引冲突说明已被并发创建，清理多余的审计任务
+		g.Log().Warningf(ctx, "[Executor] 审计任务依赖已存在（并发重复），回滚: implTask=%d, err=%v", implTaskID, err)
+		g.DB().Model("mvp_task").Where("id", auditTaskID).Delete()
+	}
 }
 
 // executeWithAider 使用 Aider 执行实施类任务（真实代码编辑）
@@ -550,13 +584,16 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 		"updated_at":      gtime.Now(),
 	})
 
-	// 5. 调用 Aider（先更新心跳，Aider 执行可能较长）
+	// 5. 文件快照（执行前）：记录 affected_resources 的 mtime+size，用于检测假成功
+	beforeSnap := captureFileSnapshots(workDir, resources)
+
+	// 6. 调用 Aider（先更新心跳，Aider 执行可能较长）
 	TouchHeartbeat(ctx, taskID)
 	g.Log().Infof(ctx, "[Executor] 任务 %d 使用 Aider 执行: model=%s files=%v", taskID, modelInfo.ModelCode, resources)
 
 	result := GetAiderRunner().RunTask(ctx, projectID, taskID, modelInfo, taskPrompt, workDir, resources, nil)
 
-	// 6. 保存 Aider 输出为 AI 回复消息
+	// 7. 保存 Aider 输出为 AI 回复消息
 	replyID := int64(snowflake.Generate())
 	replyStatus := "completed"
 	if result.Error != nil {
@@ -576,7 +613,7 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 		"updated_at":      gtime.Now(),
 	})
 
-	// 7. 判断结果
+	// 8. 判断结果
 	if result.Error != nil {
 		errMsg := result.FailureHint
 		if errMsg == "" {
@@ -590,15 +627,28 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 		return
 	}
 
-	// 8. 更新任务为完成
-	g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
-		"result":       result.Output,
-		"status":       "completed",
-		"completed_at": gtime.Now(),
-		"updated_at":   gtime.Now(),
-	})
+	// 9. 文件变更检测（防假成功）
+	afterSnap := captureFileSnapshots(workDir, resources)
+	if changedCount := diffSnapshots(beforeSnap, afterSnap); changedCount == 0 && len(resources) > 0 {
+		g.Log().Warningf(ctx, "[Executor] Aider 报成功但零文件变更: task=%d, files=%v", taskID, resources)
+		// 标记为 suspicious_success，任务仍完成但审计员会重点关注
+		g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+			"result":       result.Output + "\n\n⚠️ [系统检测] Aider 报告成功但未检测到文件变更，请审计员重点审核。",
+			"status":       "completed",
+			"completed_at": gtime.Now(),
+			"updated_at":   gtime.Now(),
+		})
+	} else {
+		// 10. 正常更新任务为完成
+		g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+			"result":       result.Output,
+			"status":       "completed",
+			"completed_at": gtime.Now(),
+			"updated_at":   gtime.Now(),
+		})
+	}
 
-	// 9. 压缩上下文（同步执行，确保不丢失）
+	// 11. 压缩上下文（同步执行，确保不丢失）
 	if err := GetCompressor().CompressTaskContext(context.Background(), projectID, taskID); err != nil {
 		g.Log().Errorf(ctx, "[Executor] Aider任务压缩上下文失败（非致命）: task=%d, err=%v", taskID, err)
 	}
@@ -701,4 +751,55 @@ func (e *Executor) handleTaskFailure(ctx context.Context, projectID int64, taskI
 	default:
 		e.failTask(ctx, projectID, taskID, errMsg)
 	}
+}
+
+// --- 文件快照：检测 Aider 假成功 ---
+
+type fileSnapshot struct {
+	Path    string
+	ModTime time.Time
+	Size    int64
+	Exists  bool
+}
+
+// captureFileSnapshots 记录文件列表的 mtime 和 size
+func captureFileSnapshots(workDir string, resources []string) []fileSnapshot {
+	snaps := make([]fileSnapshot, 0, len(resources))
+	for _, res := range resources {
+		absPath := res
+		if !filepath.IsAbs(res) {
+			absPath = filepath.Join(workDir, res)
+		}
+		info, err := os.Stat(absPath)
+		if err != nil {
+			snaps = append(snaps, fileSnapshot{Path: absPath, Exists: false})
+		} else {
+			snaps = append(snaps, fileSnapshot{
+				Path:    absPath,
+				ModTime: info.ModTime(),
+				Size:    info.Size(),
+				Exists:  true,
+			})
+		}
+	}
+	return snaps
+}
+
+// diffSnapshots 对比前后快照，返回有变化的文件数
+func diffSnapshots(before, after []fileSnapshot) int {
+	if len(before) != len(after) {
+		return 1 // 长度不同说明有变化
+	}
+	changed := 0
+	for i := range before {
+		b, a := before[i], after[i]
+		if b.Exists != a.Exists {
+			changed++
+		} else if b.Exists && a.Exists {
+			if b.ModTime != a.ModTime || b.Size != a.Size {
+				changed++
+			}
+		}
+	}
+	return changed
 }
