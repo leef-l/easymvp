@@ -91,6 +91,18 @@ func (s *StageService) StartStage(ctx context.Context, workflowRunID int64, stag
 	}
 
 	g.Log().Infof(ctx, "[StageService] StartStage workflowRunID=%d stageType=%s stageRunID=%d", workflowRunID, stageType, stageRunID)
+
+	if s.workflowSvc.publisher != nil {
+		s.workflowSvc.publisher.Emit(ctx, event.Event{
+			WorkflowRunID: workflowRunID,
+			StageRunID:    &stageRunID,
+			EntityType:    event.EntityStageRun,
+			EntityID:      &stageRunID,
+			EventType:     event.EventStageStarted,
+			Payload:       map[string]string{"stage_type": stageType},
+		})
+	}
+
 	return stageRunID, nil
 }
 
@@ -152,6 +164,21 @@ func (s *StageService) FailStage(ctx context.Context, stageRunID int64, reason s
 	}
 
 	g.Log().Infof(ctx, "[StageService] FailStage stageRunID=%d reason=%s", stageRunID, reason)
+
+	// 发射 stage.failed 事件
+	if sr, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).One(); !sr.IsEmpty() {
+		wfID := sr["workflow_run_id"].Int64()
+		if s.workflowSvc.publisher != nil {
+			s.workflowSvc.publisher.Emit(ctx, event.Event{
+				WorkflowRunID: wfID,
+				StageRunID:    &stageRunID,
+				EntityType:    event.EntityStageRun,
+				EntityID:      &stageRunID,
+				EventType:     event.EventStageFailed,
+				Payload:       map[string]string{"reason": reason},
+			})
+		}
+	}
 
 	// 同步 workflow_run 状态为 failed，并终止执行链
 	stageRun, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).One()

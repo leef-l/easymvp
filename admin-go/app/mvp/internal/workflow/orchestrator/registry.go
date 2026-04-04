@@ -16,6 +16,7 @@ import (
 	"easymvp/app/mvp/internal/workflow/runtime"
 	"easymvp/app/mvp/internal/workflow/scheduler"
 	executeStage "easymvp/app/mvp/internal/workflow/stage/execute"
+	reworkStage "easymvp/app/mvp/internal/workflow/stage/rework"
 	reviewStage "easymvp/app/mvp/internal/workflow/stage/review"
 	watchdogV2 "easymvp/app/mvp/internal/workflow/watchdog"
 )
@@ -28,6 +29,7 @@ var (
 	reviewStageSvc  *reviewStage.Service
 	executeStageSvc *executeStage.Service
 	taskScheduler   *scheduler.DomainTaskScheduler
+	reworkStageSvc  *reworkStage.Service
 	domainWatchdog  *watchdogV2.DomainTaskWatchdog
 	runtimeMgr      *runtime.Manager
 	eventBus        *event.Bus
@@ -83,6 +85,10 @@ func Init() {
 		engine.RegisterBlueprintCreator(func(ctx context.Context, projectID, workflowRunID, conversationID, messageID int64, tasks []engine.ArchitectTask) (int64, int, error) {
 			return planVersionSvc.CreateFromArchitectReply(ctx, projectID, workflowRunID, conversationID, messageID, tasks)
 		})
+
+		// 返工阶段服务
+		reworkStageSvc = reworkStage.NewService()
+		reworkStageSvc.SetStageCompleter(stageSvc)
 
 		// 注册阶段失败后的执行链终止回调
 		stageSvc.SetWorkflowFailedCallback(func(ctx context.Context, workflowRunID int64) {
@@ -219,4 +225,27 @@ func GetExecuteStageService() *executeStage.Service {
 func GetTaskScheduler() *scheduler.DomainTaskScheduler {
 	Init()
 	return taskScheduler
+}
+
+// GetReworkStageService 获取返工阶段服务。
+func GetReworkStageService() *reworkStage.Service {
+	Init()
+	return reworkStageSvc
+}
+
+// triggerReworkStage 触发返工阶段：创建 rework stage，启动分析流程。
+func triggerReworkStage(ctx context.Context, workflowRunID int64, failedTaskID int64) error {
+	stageRunID, err := stageSvc.StartStage(ctx, workflowRunID, "rework")
+	if err != nil {
+		return fmt.Errorf("创建 rework stage 失败: %w", err)
+	}
+
+	if err := reworkStageSvc.HandleRework(ctx, stageRunID, failedTaskID); err != nil {
+		_ = stageSvc.FailStage(ctx, stageRunID, err.Error())
+		return fmt.Errorf("返工阶段启动失败: %w", err)
+	}
+
+	g.Log().Infof(ctx, "[triggerReworkStage] 返工阶段已启动 workflowRunID=%d stageRunID=%d failedTask=%d",
+		workflowRunID, stageRunID, failedTaskID)
+	return nil
 }

@@ -168,6 +168,16 @@ func (s *WorkflowService) Pause(ctx context.Context, workflowRunID int64, reason
 		return fmt.Errorf("工作流状态并发冲突，暂停失败")
 	}
 	s.runtimeMgr.Cancel(workflowRunID)
+
+	if s.publisher != nil {
+		s.publisher.Emit(ctx, event.Event{
+			WorkflowRunID: workflowRunID,
+			EntityType:    event.EntityWorkflowRun,
+			EntityID:      &workflowRunID,
+			EventType:     event.EventWorkflowPaused,
+			Payload:       map[string]string{"reason": reason, "from_status": currentStatus},
+		})
+	}
 	return nil
 }
 
@@ -209,6 +219,15 @@ func (s *WorkflowService) Resume(ctx context.Context, workflowRunID int64) error
 	projectID := wfRun["project_id"].Int64()
 	s.runtimeMgr.Create(workflowRunID, projectID)
 
+	if s.publisher != nil {
+		s.publisher.Emit(ctx, event.Event{
+			WorkflowRunID: workflowRunID,
+			EntityType:    event.EntityWorkflowRun,
+			EntityID:      &workflowRunID,
+			EventType:     event.EventWorkflowResumed,
+			Payload:       map[string]string{"resume_status": resumeStatus},
+		})
+	}
 	return nil
 }
 
@@ -243,5 +262,15 @@ func (s *WorkflowService) Cancel(ctx context.Context, workflowRunID int64, reaso
 		return fmt.Errorf("工作流取消失败（并发冲突）")
 	}
 	s.runtimeMgr.Cancel(workflowRunID)
+
+	if s.publisher != nil {
+		s.publisher.Emit(ctx, event.Event{
+			WorkflowRunID: workflowRunID,
+			EntityType:    event.EntityWorkflowRun,
+			EntityID:      &workflowRunID,
+			EventType:     event.EventWorkflowCanceled,
+			Payload:       map[string]string{"reason": reason},
+		})
+	}
 	return nil
 }
