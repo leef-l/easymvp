@@ -12,7 +12,7 @@ import { getRolePresetList, deleteRolePreset, batchDeleteRolePreset, exportRoleP
 import type { RolePresetItem } from '#/api/mvp/role_preset/types';
 import FormModal from './modules/form.vue';
 import DetailDrawer from './modules/detail-drawer.vue';
-import { roleTypeMap, roleLevelMap } from '../consts';
+import { roleTypeMap, roleLevelMap, executionModeMap } from '../consts';
 
 /** 标签颜色池 */
 const TAG_COLORS = ['green', 'red', 'blue', 'orange', 'cyan', 'purple', 'geekblue', 'magenta'];
@@ -88,6 +88,7 @@ const gridOptions: VxeGridProps<RolePresetItem> = {
     { field: 'roleLevel', title: '角色等级', width: 100, slots: { default: 'roleLevel_cell' } },
     { field: 'modelName', title: 'AI模型', minWidth: 160 },
     { field: 'systemPrompt', title: '默认系统提示词', minWidth: 200, showOverflow: 'tooltip', slots: { header: tooltipHeader('默认系统提示词', '角色设定') } },
+    { field: 'executionMode', title: '执行方式', width: 100, slots: { default: 'executionMode_cell' } },
     { field: 'status', title: '状态', width: 80, slots: { default: 'status_cell' } },
     { field: 'sort', title: '排序', width: 70 },
     { title: '操作', width: 180, fixed: 'right', slots: { default: 'action' } },
@@ -285,6 +286,12 @@ function handleBatchUpdateStatus() {
           {{ roleLevelMap[row.roleLevel].label }}
         </Tag>
         <span v-else>{{ row.roleLevel || '-' }}</span>
+      </template>
+      <template #executionMode_cell="{ row }">
+        <Tag v-if="executionModeMap[row.executionMode]" :color="executionModeMap[row.executionMode].color">
+          {{ executionModeMap[row.executionMode].label }}
+        </Tag>
+        <span v-else>{{ row.executionMode || 'Chat' }}</span>
       </template>
       <template #status_cell="{ row }">
         <Tag :color="getStatusColor(row.status)">

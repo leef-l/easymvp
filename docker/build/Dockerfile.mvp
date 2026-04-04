@@ -1,0 +1,49 @@
+# ─────────────────────────────────────────────────────────────
+# EasyMVP - MVP核心引擎 Dockerfile
+# 多阶段构建：builder(golang:1.23-alpine) → runner(alpine)
+# 注意：mvp 服务需要 aider CLI 和 git，运行时镜像稍大
+# ─────────────────────────────────────────────────────────────
+
+# Stage 1: 编译阶段
+FROM golang:1.23-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates tzdata
+
+WORKDIR /build
+
+ENV GOPROXY=https://goproxy.cn,direct
+ENV CGO_ENABLED=0
+ENV GOOS=linux
+ENV GOARCH=amd64
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN go build -ldflags "-s -w" -o /build/mvp ./app/mvp/main.go
+
+# Stage 2: 运行阶段
+# 使用 python 基础镜像，因为 aider 需要 Python 运行时
+FROM python:3.12-alpine
+
+RUN apk add --no-cache ca-certificates tzdata wget curl git openssh-client
+
+# 安装 aider
+RUN pip install --no-cache-dir aider-chat
+
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+WORKDIR /app
+
+COPY --from=builder /build/mvp ./mvp
+COPY --from=builder /build/app/mvp/manifest ./manifest
+
+# mvp 服务需要 root 权限访问工作目录和执行 aider
+EXPOSE 8002
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD wget -qO- http://localhost:8002/health || exit 1
+
+CMD ["./mvp"]

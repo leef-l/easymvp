@@ -46,13 +46,18 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 		return
 	}
 
-	// 3. implementer 角色 → Aider 代码编辑模式
-	if roleType == "implementer" {
+	// 3. 根据 execution_mode 分发执行方式
+	executionMode := e.getExecutionMode(ctx, projectID, roleType, task["role_level"].String())
+	switch executionMode {
+	case "aider":
 		e.executeWithAider(ctx, projectID, taskID, task, modelInfo)
 		return
+	case "openhands":
+		// 未来扩展：OpenHands 沙箱执行
+		g.Log().Infof(ctx, "[Executor] openhands 模式暂未实现，回退到 chat: task=%d", taskID)
 	}
 
-	// 4. 其他角色 → ChatStream 对话模式
+	// 4. 默认 chat 模式 → ChatStream 对话
 	// 查找或创建任务对话
 	conversationID, err := e.ensureConversation(ctx, projectID, taskID, roleType)
 	if err != nil {
@@ -141,6 +146,11 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 			fullContent.WriteString(chunk.Content)
 			chunkIndex++
 
+			// 每 10 个 chunk 更新一次心跳，供看门狗检测
+			if chunkIndex%10 == 0 {
+				TouchHeartbeat(ctx, taskID)
+			}
+
 			if _, insertErr := g.DB().Model("mvp_message_chunk").Insert(g.Map{
 				"message_id":  replyID,
 				"chunk_index": chunkIndex,
@@ -209,19 +219,22 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 		g.Log().Errorf(ctx, "[Executor] 保存任务结果失败: task=%d, err=%v", taskID, err)
 	}
 
-	// 10. 压缩任务上下文为摘要
-	go GetCompressor().CompressTaskContext(context.Background(), projectID, taskID)
+	// 10. 压缩任务上下文为摘要（同步执行，确保不丢失）
+	if err := GetCompressor().CompressTaskContext(context.Background(), projectID, taskID); err != nil {
+		g.Log().Errorf(ctx, "[Executor] 压缩任务上下文失败（非致命）: task=%d, err=%v", taskID, err)
+	}
 
 	// 11. 如果是实施员任务，完成后需要创建对应的审计任务（如果还没有）
+	// 同步执行，确保审计任务一定被创建
 	if roleType == "implementer" {
-		go e.createAuditTask(ctx, projectID, taskID, task)
+		e.createAuditTask(ctx, projectID, taskID, task)
 	} else if roleType == "architect" {
 		name := task["name"].String()
 		switch {
 		case strings.HasPrefix(name, "Bug分析:"):
-			go e.scheduler.AutoDispatchBugFix(context.Background(), projectID, taskID)
+			e.scheduler.AutoDispatchBugFix(context.Background(), projectID, taskID)
 		case strings.HasPrefix(name, "失败分析:"):
-			go e.scheduler.AutoDispatchFailureFix(context.Background(), projectID, taskID)
+			e.scheduler.AutoDispatchFailureFix(context.Background(), projectID, taskID)
 		}
 	}
 
@@ -537,7 +550,8 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 		"updated_at":      gtime.Now(),
 	})
 
-	// 5. 调用 Aider
+	// 5. 调用 Aider（先更新心跳，Aider 执行可能较长）
+	TouchHeartbeat(ctx, taskID)
 	g.Log().Infof(ctx, "[Executor] 任务 %d 使用 Aider 执行: model=%s files=%v", taskID, modelInfo.ModelCode, resources)
 
 	result := GetAiderRunner().RunTask(ctx, projectID, taskID, modelInfo, taskPrompt, workDir, resources, nil)
@@ -584,11 +598,13 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 		"updated_at":   gtime.Now(),
 	})
 
-	// 9. 压缩上下文
-	go GetCompressor().CompressTaskContext(context.Background(), projectID, taskID)
+	// 9. 压缩上下文（同步执行，确保不丢失）
+	if err := GetCompressor().CompressTaskContext(context.Background(), projectID, taskID); err != nil {
+		g.Log().Errorf(ctx, "[Executor] Aider任务压缩上下文失败（非致命）: task=%d, err=%v", taskID, err)
+	}
 
-	// 10. 创建审计任务
-	go e.createAuditTask(ctx, projectID, taskID, task)
+	// 10. 创建审计任务（同步执行，确保一定创建）
+	e.createAuditTask(ctx, projectID, taskID, task)
 
 	// 11. 通知调度器
 	e.scheduler.OnTaskCompleted(projectID, taskID)
@@ -637,6 +653,39 @@ func (e *Executor) failTask(ctx context.Context, projectID int64, taskID int64, 
 		"updated_at":    gtime.Now(),
 	})
 	e.scheduler.OnTaskFailed(projectID, taskID, errMsg)
+}
+
+// getExecutionMode 从项目角色配置中获取执行方式
+func (e *Executor) getExecutionMode(ctx context.Context, projectID int64, roleType string, roleLevel string) string {
+	query := g.DB().Model("mvp_project_role").
+		Where("project_id", projectID).
+		Where("role_type", roleType).
+		Where("status", 1).
+		Where("deleted_at IS NULL")
+	if roleLevel != "" {
+		query = query.Where("role_level", roleLevel)
+	}
+
+	role, err := query.Fields("execution_mode").One()
+	if err != nil || role.IsEmpty() {
+		// 无匹配等级时，忽略等级再查一次
+		role, err = g.DB().Model("mvp_project_role").
+			Where("project_id", projectID).
+			Where("role_type", roleType).
+			Where("status", 1).
+			Where("deleted_at IS NULL").
+			Fields("execution_mode").
+			One()
+		if err != nil || role.IsEmpty() {
+			return "chat"
+		}
+	}
+
+	mode := role["execution_mode"].String()
+	if mode == "" {
+		return "chat"
+	}
+	return mode
 }
 
 func (e *Executor) handleTaskFailure(ctx context.Context, projectID int64, taskID int64, roleType string, category taskFailureCategory, errMsg string) {

@@ -22,6 +22,7 @@ type ProjectRoleCreateReq struct {
 	RoleLevel string `json:"roleLevel" v:"max-length:10" dc:"角色等级"`
 	ModelID snowflake.JsonInt64 `json:"modelID" v:"required" dc:"AI模型ID"`
 	SystemPrompt string `json:"systemPrompt" v:"max-length:65535" dc:"系统提示词（角色设定）"`
+	ExecutionMode string `json:"executionMode" v:"max-length:20" dc:"执行方式: chat/aider/openhands"`
 	Status int `json:"status"  dc:"状态"`
 }
 
@@ -40,6 +41,7 @@ type ProjectRoleUpdateReq struct {
 	RoleLevel string `json:"roleLevel" dc:"角色等级"`
 	ModelID snowflake.JsonInt64 `json:"modelID" dc:"AI模型ID"`
 	SystemPrompt string `json:"systemPrompt" dc:"系统提示词（角色设定）"`
+	ExecutionMode string `json:"executionMode" dc:"执行方式: chat/aider/openhands"`
 	Status int `json:"status" dc:"状态"`
 }
 

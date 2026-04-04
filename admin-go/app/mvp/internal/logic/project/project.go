@@ -101,6 +101,13 @@ func (s *sProject) BatchDelete(ctx context.Context, ids []snowflake.JsonInt64) e
 
 // Detail 获取MVP项目表详情
 func (s *sProject) Detail(ctx context.Context, id snowflake.JsonInt64) (out *model.ProjectDetailOutput, err error) {
+	// 权限校验：只能查看自己创建的项目
+	if err = middleware.CheckOwnership(ctx,
+		dao.MvpProject.Ctx(ctx).Where(dao.MvpProject.Columns().DeletedAt, nil),
+		id, dao.MvpProject.Columns().Id, dao.MvpProject.Columns().CreatedBy); err != nil {
+		return nil, err
+	}
+
 	out = &model.ProjectDetailOutput{}
 	err = dao.MvpProject.Ctx(ctx).Where(dao.MvpProject.Columns().Id, id).Where(dao.MvpProject.Columns().DeletedAt, nil).Scan(out)
 	if err != nil {

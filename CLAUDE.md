@@ -317,3 +317,14 @@ cd admin-go/codegen && go run . -table mvp_xxx -force -menu
 # 前端（需手动执行，AI 环境禁止运行 pnpm/npm/yarn）
 cd vue-vben-admin && pnpm dev
 ```
+
+## 十三、铁律：设计文档生命周期
+
+**大改动前必须先写设计文档，实施完成并 git push 后立即删除设计文档。**
+
+流程：
+1. 分析问题 → 写设计文档到 `docs/` 目录
+2. 按文档实施改动
+3. 编译通过 → git push
+4. **立即删除设计文档**（不留在仓库中）
+5. 如有必要，将关键设计决策更新到本 CLAUDE.md 中

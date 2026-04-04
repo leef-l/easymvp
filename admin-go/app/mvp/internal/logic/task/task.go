@@ -107,6 +107,13 @@ func (s *sTask) BatchDelete(ctx context.Context, ids []snowflake.JsonInt64) erro
 
 // Detail 获取MVP任务表详情
 func (s *sTask) Detail(ctx context.Context, id snowflake.JsonInt64) (out *model.TaskDetailOutput, err error) {
+	// 权限校验
+	if err = middleware.CheckOwnership(ctx,
+		dao.MvpTask.Ctx(ctx).Where(dao.MvpTask.Columns().DeletedAt, nil),
+		id, dao.MvpTask.Columns().Id, dao.MvpTask.Columns().CreatedBy); err != nil {
+		return nil, err
+	}
+
 	out = &model.TaskDetailOutput{}
 	err = dao.MvpTask.Ctx(ctx).Where(dao.MvpTask.Columns().Id, id).Where(dao.MvpTask.Columns().DeletedAt, nil).Scan(out)
 	if err != nil {
@@ -138,6 +145,39 @@ func (s *sTask) Detail(ctx context.Context, id snowflake.JsonInt64) (out *model.
 		out.IsActuallyWorking = snapshot.IsActuallyWorking
 		out.Stalled = snapshot.Stalled
 	}
+
+	// 查询依赖任务（本任务���赖哪些任务）
+	deps, _ := g.DB().Ctx(ctx).Model("mvp_task_dependency d").
+		LeftJoin("mvp_task t", "t.id = d.depends_on_id").
+		Fields("t.id, t.name, t.status").
+		Where("d.task_id", out.ID).
+		Where("t.deleted_at IS NULL").
+		All()
+	out.Dependencies = make([]model.TaskDependencyInfo, 0, len(deps))
+	for _, dep := range deps {
+		out.Dependencies = append(out.Dependencies, model.TaskDependencyInfo{
+			ID:     snowflake.JsonInt64(dep["id"].Int64()),
+			Name:   dep["name"].String(),
+			Status: dep["status"].String(),
+		})
+	}
+
+	// 查询被依赖任务（哪些任务依赖本任务）
+	dependents, _ := g.DB().Ctx(ctx).Model("mvp_task_dependency d").
+		LeftJoin("mvp_task t", "t.id = d.task_id").
+		Fields("t.id, t.name, t.status").
+		Where("d.depends_on_id", out.ID).
+		Where("t.deleted_at IS NULL").
+		All()
+	out.Dependents = make([]model.TaskDependencyInfo, 0, len(dependents))
+	for _, dep := range dependents {
+		out.Dependents = append(out.Dependents, model.TaskDependencyInfo{
+			ID:     snowflake.JsonInt64(dep["id"].Int64()),
+			Name:   dep["name"].String(),
+			Status: dep["status"].String(),
+		})
+	}
+
 	return
 }
 

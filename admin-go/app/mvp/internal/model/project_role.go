@@ -16,6 +16,7 @@ type ProjectRoleCreateInput struct {
 	RoleLevel string `json:"roleLevel"`
 	ModelID snowflake.JsonInt64 `json:"modelID"`
 	SystemPrompt string `json:"systemPrompt"`
+	ExecutionMode string `json:"executionMode"`
 	Status int `json:"status"`
 }
 
@@ -28,6 +29,7 @@ type ProjectRoleUpdateInput struct {
 	RoleLevel string `json:"roleLevel"`
 	ModelID snowflake.JsonInt64 `json:"modelID"`
 	SystemPrompt string `json:"systemPrompt"`
+	ExecutionMode string `json:"executionMode"`
 	Status int `json:"status"`
 }
 
@@ -42,6 +44,7 @@ type ProjectRoleDetailOutput struct {
 	ModelID snowflake.JsonInt64 `json:"modelID"`
 	ModelName string `json:"modelName"`
 	SystemPrompt string `json:"systemPrompt"`
+	ExecutionMode string `json:"executionMode"`
 	Status int `json:"status"`
 	CreatedAt *gtime.Time `json:"createdAt"`
 	UpdatedAt *gtime.Time `json:"updatedAt"`
@@ -58,6 +61,7 @@ type ProjectRoleListOutput struct {
 	ModelID snowflake.JsonInt64 `json:"modelID"`
 	ModelName string `json:"modelName"`
 	SystemPrompt string `json:"systemPrompt"`
+	ExecutionMode string `json:"executionMode"`
 	Status int `json:"status"`
 	CreatedAt *gtime.Time `json:"createdAt"`
 	UpdatedAt *gtime.Time `json:"updatedAt"`

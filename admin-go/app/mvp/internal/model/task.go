@@ -51,6 +51,13 @@ type TaskUpdateInput struct {
 	CompletedAt *gtime.Time `json:"completedAt"`
 }
 
+// TaskDependencyInfo 依赖任务简要信息
+type TaskDependencyInfo struct {
+	ID     snowflake.JsonInt64 `json:"id"`
+	Name   string              `json:"name"`
+	Status string              `json:"status"`
+}
+
 // TaskDetailOutput MVP任务表详情输出
 type TaskDetailOutput struct {
 	ID snowflake.JsonInt64 `json:"id"`
@@ -78,6 +85,8 @@ type TaskDetailOutput struct {
 	LastActiveAt *gtime.Time `json:"lastActiveAt"`
 	IsActuallyWorking bool `json:"isActuallyWorking"`
 	Stalled bool `json:"stalled"`
+	Dependencies []TaskDependencyInfo `json:"dependencies"` // 依赖任务列表（含名��和状态）
+	Dependents   []TaskDependencyInfo `json:"dependents"`   // 被哪些任务依赖
 }
 
 // TaskListOutput MVP任务表列表输出

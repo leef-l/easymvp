@@ -104,66 +104,93 @@ func (w *Watchdog) heartbeatLoop(ctx context.Context) {
 }
 
 // checkRunningTasks 检测所有 running 状态的任务
+// 双重检测机制：优先检查心跳时间戳，其次检查 chunk 增长
 func (w *Watchdog) checkRunningTasks(ctx context.Context) {
 	// 查询所有 running 状态的任务（锁外执行 DB 操作）
 	tasks, err := g.DB().Model("mvp_task").
 		Where("status", "running").
 		Where("deleted_at IS NULL").
+		Fields("id, project_id, heartbeat_at, conversation_id").
 		All()
 	if err != nil {
 		g.Log().Errorf(ctx, "[Watchdog] 查询running任务失败: %v", err)
 		return
 	}
 
-	// 锁外获取所有任务的最新 chunkID（DB 操作不持锁）
+	// 心跳超时阈值：检测间隔 × 最大无进展次数
+	heartbeatTimeout := w.checkInterval * time.Duration(w.maxStaleCount)
+
+	// 锁外收集信息
 	type taskInfo struct {
-		taskID      int64
-		projectID   int64
-		latestChunk int64
+		taskID       int64
+		projectID    int64
+		latestChunk  int64
+		heartbeatAt  *gtime.Time
+		hasHeartbeat bool // 任务是否支持心跳（有 heartbeat_at 字段值）
 	}
 	infos := make([]taskInfo, 0, len(tasks))
 	for _, task := range tasks {
 		tid := task["id"].Int64()
 		pid := task["project_id"].Int64()
-		chunkID := w.getLatestChunkID(ctx, tid)
-		infos = append(infos, taskInfo{tid, pid, chunkID})
+		hb := task["heartbeat_at"].GTime()
+		hasHB := hb != nil && !hb.IsZero()
+
+		chunkID := int64(0)
+		if !hasHB {
+			// 没有心跳的任务，退化到 chunk 检测
+			chunkID = w.getLatestChunkID(ctx, tid)
+		}
+		infos = append(infos, taskInfo{tid, pid, chunkID, hb, hasHB})
 	}
 
-	// 决策阶段：持锁，纯内存操作，确定哪些任务需要被标记为失败
+	// 决策阶段：持锁
 	type staleTask struct {
 		taskID    int64
 		projectID int64
+		reason    string
 	}
 	var staleTasks []staleTask
 
 	w.mu.Lock()
 	for _, info := range infos {
 		taskID := info.taskID
-		latestChunkID := info.latestChunk
 
+		if info.hasHeartbeat {
+			// 心跳模式：检查 heartbeat_at 是否超时
+			elapsed := time.Since(info.heartbeatAt.Time)
+			if elapsed > heartbeatTimeout {
+				g.Log().Errorf(ctx, "[Watchdog] 任务 %d 心跳超时 (%.0fs > %.0fs)，标记为失败",
+					taskID, elapsed.Seconds(), heartbeatTimeout.Seconds())
+				staleTasks = append(staleTasks, staleTask{taskID, info.projectID,
+					"心跳超时：最后心跳 " + info.heartbeatAt.String()})
+				delete(w.staleCount, taskID)
+				delete(w.lastChunkID, taskID)
+			} else {
+				// 心跳正常，重置
+				w.staleCount[taskID] = 0
+			}
+			continue
+		}
+
+		// Chunk 模式：退化检测（兼容无心跳的旧任务）
+		latestChunkID := info.latestChunk
 		lastID, exists := w.lastChunkID[taskID]
 		if !exists {
-			// 首次检测，记录当前状态
 			w.lastChunkID[taskID] = latestChunkID
 			w.staleCount[taskID] = 0
 			continue
 		}
 
 		if latestChunkID == lastID {
-			// 无进展
 			w.staleCount[taskID]++
 			g.Log().Warningf(ctx, "[Watchdog] 任务 %d 无进展 (%d/%d)", taskID, w.staleCount[taskID], w.maxStaleCount)
-
 			if w.staleCount[taskID] >= w.maxStaleCount {
-				// 认为卡死，加入待处理列表
 				g.Log().Errorf(ctx, "[Watchdog] 任务 %d 检测为卡死，标记为失败", taskID)
-				staleTasks = append(staleTasks, staleTask{taskID, info.projectID})
-				// 清理跟踪状态
+				staleTasks = append(staleTasks, staleTask{taskID, info.projectID, "连续无进展，看门狗判定卡死"})
 				delete(w.staleCount, taskID)
 				delete(w.lastChunkID, taskID)
 			}
 		} else {
-			// 有进展，重置计数
 			w.lastChunkID[taskID] = latestChunkID
 			w.staleCount[taskID] = 0
 		}
@@ -186,14 +213,21 @@ func (w *Watchdog) checkRunningTasks(ctx context.Context) {
 	for _, st := range staleTasks {
 		g.DB().Model("mvp_task").Where("id", st.taskID).Update(g.Map{
 			"status":        "failed",
-			"error_message": "看门狗检测到任务无响应，自动标记为失败",
+			"error_message": "看门狗检测: " + st.reason,
 			"updated_at":    gtime.Now(),
 		})
-		logTaskAction(st.taskID, "watchdog_timeout", "running", "failed", "连续无进展，看门狗判定卡死", "system")
+		logTaskAction(st.taskID, "watchdog_timeout", "running", "failed", st.reason, "system")
 
 		// 释放调度器资源
-		GetScheduler().OnTaskFailed(st.projectID, st.taskID, "watchdog timeout")
+		GetScheduler().OnTaskFailed(st.projectID, st.taskID, "watchdog timeout: "+st.reason)
 	}
+}
+
+// TouchHeartbeat 更新任务心跳时间戳（执行器定期调用）
+func TouchHeartbeat(ctx context.Context, taskID int64) {
+	g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+		"heartbeat_at": gtime.Now(),
+	})
 }
 
 // getLatestChunkID 获取任务关联的最新 chunk ID

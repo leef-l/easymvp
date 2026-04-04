@@ -164,6 +164,16 @@ async function connectSSE(replyID: string, targetMessageIndex: number) {
 
     const decoder = new TextDecoder('utf-8');
     let buffer = '';
+    let scrollTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // 防抖滚动：流式输出中最多每 100ms 滚动一次
+    const debouncedScroll = () => {
+      if (scrollTimer) return;
+      scrollTimer = setTimeout(() => {
+        scrollTimer = null;
+        scrollToBottom();
+      }, 100);
+    };
 
     // 逐块读取数据
     while (true) {
@@ -174,9 +184,13 @@ async function connectSSE(replyID: string, targetMessageIndex: number) {
       buffer += decoder.decode(value, { stream: true });
 
       // 按行解析 SSE 格式（data: {...}\n\n）
-      const lines = buffer.split('\n');
-      // 保留最后一行（可能不完整）
-      buffer = lines.pop() || '';
+      // 修复：只有以 \n 结尾的行才是完整行，未结尾的保留到 buffer
+      const lastNewline = buffer.lastIndexOf('\n');
+      if (lastNewline === -1) continue; // 没有完整行，继续读取
+
+      const complete = buffer.substring(0, lastNewline);
+      buffer = buffer.substring(lastNewline + 1);
+      const lines = complete.split('\n');
 
       for (const line of lines) {
         const trimmed = line.trim();
@@ -196,6 +210,9 @@ async function connectSSE(replyID: string, targetMessageIndex: number) {
               msg.content = msg.streamingContent || msg.content;
               msg.streamingContent = undefined;
             }
+            // 最终滚动
+            if (scrollTimer) { clearTimeout(scrollTimer); scrollTimer = null; }
+            await scrollToBottom();
             return;
           }
 
@@ -204,8 +221,7 @@ async function connectSSE(replyID: string, targetMessageIndex: number) {
             const msg = messages.value[targetMessageIndex];
             if (msg) {
               msg.streamingContent = (msg.streamingContent || '') + data.content;
-              // 流式输出时保持滚动到底部
-              await scrollToBottom();
+              debouncedScroll();
             }
           }
         } catch {

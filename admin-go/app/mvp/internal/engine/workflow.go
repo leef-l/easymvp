@@ -57,8 +57,10 @@ func (s *Scheduler) ConfirmPlan(ctx context.Context, projectID int64) error {
 		return err
 	}
 
-	// 4. 压缩架构师对话为全局上下文
-	go GetCompressor().CompressProjectContext(context.Background(), projectID)
+	// 4. 压缩架构师对话为全局上下文（同步执行，确保上下文就绪后再启动调度）
+	if compErr := GetCompressor().CompressProjectContext(context.Background(), projectID); compErr != nil {
+		g.Log().Errorf(ctx, "[Workflow] 压缩项目上下文失败（非致命）: project=%d, err=%v", projectID, compErr)
+	}
 
 	// 5. 启动调度器
 	s.StartProject(projectID)
@@ -183,19 +185,26 @@ func CreateProject(ctx context.Context, name, projectCategory, description, work
 			systemPrompt = p["system_prompt"].String()
 		}
 
+		// 复制执行方式，默认 chat
+		executionMode := p["execution_mode"].String()
+		if executionMode == "" {
+			executionMode = "chat"
+		}
+
 		_, err = g.DB().Model("mvp_project_role").Insert(g.Map{
 			"id":               int64(snowflake.Generate()),
 			"project_id":       projectID,
 			"project_category": projectCategory,
 			"role_type":        roleType,
 			"role_level":       p["role_level"].String(),
-			"model_id":      modelID,
-			"system_prompt": systemPrompt,
-			"status":        1,
-			"created_by":    userID,
-			"dept_id":       deptID,
-			"created_at":    gtime.Now(),
-			"updated_at":    gtime.Now(),
+			"model_id":        modelID,
+			"system_prompt":   systemPrompt,
+			"execution_mode":  executionMode,
+			"status":          1,
+			"created_by":      userID,
+			"dept_id":         deptID,
+			"created_at":      gtime.Now(),
+			"updated_at":      gtime.Now(),
 		})
 		if err != nil {
 			return 0, 0, fmt.Errorf("创建角色配置(%s)失败: %w", roleType, err)

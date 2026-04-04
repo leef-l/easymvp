@@ -16,8 +16,9 @@ type MvpProjectRole struct {
 	RoleType         string      `orm:"role_type"         description:"角色类型：architect/implementer/auditor/coordinator"` // 角色类型：architect/implementer/auditor/coordinator
 	RoleLevel    string      `orm:"role_level"    description:"角色等级：lite/pro/max"`                              // 角色等级：lite/pro/max
 	ModelId      uint64      `orm:"model_id"      description:"AI模型ID"`                                         // AI模型ID
-	SystemPrompt string      `orm:"system_prompt" description:"系统提示词（角色设定）"`                                    // 系统提示词（角色设定）
-	Status       int         `orm:"status"        description:"状态:0=禁用,1=启用"`                                   // 状态:0=禁用,1=启用
+	SystemPrompt  string      `orm:"system_prompt"  description:"系统提示词（角色设定）"`                                    // 系统提示词（角色设定）
+	ExecutionMode string      `orm:"execution_mode" description:"执行方式: chat=对话模式, aider=Aider代码编辑, openhands=OpenHands沙箱"` // 执行方式
+	Status        int         `orm:"status"         description:"状态:0=禁用,1=启用"`                                   // 状态:0=禁用,1=启用
 	CreatedBy    uint64      `orm:"created_by"    description:"创建人ID"`                                          // 创建人ID
 	DeptId       uint64      `orm:"dept_id"       description:"所属部门ID"`                                         // 所属部门ID
 	CreatedAt    *gtime.Time `orm:"created_at"    description:"创建时间"`                                           // 创建时间

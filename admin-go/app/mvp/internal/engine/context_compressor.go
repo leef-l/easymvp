@@ -30,10 +30,13 @@ func GetCompressor() *ContextCompressor {
 // ----------------------------------------------------------------
 
 // CompressTaskContext 压缩单个任务的上下文
-func (c *ContextCompressor) CompressTaskContext(ctx context.Context, projectID int64, taskID int64) {
+func (c *ContextCompressor) CompressTaskContext(ctx context.Context, projectID int64, taskID int64) error {
 	task, err := g.DB().Model("mvp_task").Where("id", taskID).One()
-	if err != nil || task.IsEmpty() {
-		return
+	if err != nil {
+		return fmt.Errorf("查询任务失败: %w", err)
+	}
+	if task.IsEmpty() {
+		return nil
 	}
 
 	// 获取任务结果文本
@@ -43,7 +46,7 @@ func (c *ContextCompressor) CompressTaskContext(ctx context.Context, projectID i
 		content = c.collectTaskDialog(ctx, taskID)
 	}
 	if content == "" {
-		return
+		return nil
 	}
 
 	// 规则压缩：按长度分级
@@ -73,6 +76,7 @@ func (c *ContextCompressor) CompressTaskContext(ctx context.Context, projectID i
 	}
 
 	c.saveSummary(ctx, taskID, summary)
+	return nil
 }
 
 // ----------------------------------------------------------------
@@ -157,7 +161,7 @@ func (c *ContextCompressor) mergeIntoGlobalContext(ctx context.Context, projectI
 }
 
 // CompressProjectContext 压缩架构师对话为初始全局上下文（确认方案时调用）
-func (c *ContextCompressor) CompressProjectContext(ctx context.Context, projectID int64) {
+func (c *ContextCompressor) CompressProjectContext(ctx context.Context, projectID int64) error {
 	messages, err := g.DB().Model("mvp_message m").
 		LeftJoin("mvp_conversation cv", "cv.id = m.conversation_id").
 		Where("cv.project_id", projectID).
@@ -168,8 +172,11 @@ func (c *ContextCompressor) CompressProjectContext(ctx context.Context, projectI
 		Fields("m.role, m.content").
 		Order("m.created_at ASC").
 		All()
-	if err != nil || len(messages) == 0 {
-		return
+	if err != nil {
+		return fmt.Errorf("查询架构师对话失败: %w", err)
+	}
+	if len(messages) == 0 {
+		return nil
 	}
 
 	var dialogText strings.Builder
@@ -180,13 +187,13 @@ func (c *ContextCompressor) CompressProjectContext(ctx context.Context, projectI
 
 	if len(dialog) < 3000 {
 		c.saveProjectContext(ctx, projectID, dialog)
-		return
+		return nil
 	}
 
 	modelInfo, err := c.getCompressModel(ctx, projectID)
 	if err != nil {
 		c.saveProjectContext(ctx, projectID, ruleCompress(dialog))
-		return
+		return nil
 	}
 
 	project, _ := g.DB().Model("mvp_project").Where("id", projectID).Fields("name").One()
@@ -198,9 +205,10 @@ func (c *ContextCompressor) CompressProjectContext(ctx context.Context, projectI
 	summary, err := c.aiCompressProject(ctx, modelInfo, projectName, dialog)
 	if err != nil {
 		c.saveProjectContext(ctx, projectID, ruleCompress(dialog))
-		return
+		return nil
 	}
 	c.saveProjectContext(ctx, projectID, summary)
+	return nil
 }
 
 // ----------------------------------------------------------------

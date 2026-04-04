@@ -9,6 +9,7 @@ export interface RolePresetItem {
   modelID: string;
   modelName?: string;
   systemPrompt?: string;
+  executionMode?: string;
   status?: number;
   sort?: number;
   createdAt?: string;
@@ -33,6 +34,7 @@ export interface RolePresetCreateParams {
   roleLevel?: string;
   modelID: string;
   systemPrompt?: string;
+  executionMode?: string;
   status?: number;
   sort?: number;
 }
@@ -45,6 +47,7 @@ export interface RolePresetUpdateParams {
   roleLevel?: string;
   modelID: string;
   systemPrompt?: string;
+  executionMode?: string;
   status?: number;
   sort?: number;
 }

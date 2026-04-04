@@ -10,6 +10,7 @@ export interface ProjectRoleItem {
   roleLevel?: string;
   modelID: string;
   systemPrompt?: string;
+  executionMode?: string;
   status?: number;
   createdAt?: string;
   updatedAt?: string;
@@ -34,6 +35,7 @@ export interface ProjectRoleCreateParams {
   roleLevel?: string;
   modelID: string;
   systemPrompt?: string;
+  executionMode?: string;
   status?: number;
 }
 
@@ -46,5 +48,6 @@ export interface ProjectRoleUpdateParams {
   roleLevel?: string;
   modelID: string;
   systemPrompt?: string;
+  executionMode?: string;
   status?: number;
 }

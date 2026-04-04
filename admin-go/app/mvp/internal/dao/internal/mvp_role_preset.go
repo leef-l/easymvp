@@ -26,8 +26,9 @@ type MvpRolePresetColumns struct {
 	RoleType        string // 角色类型：architect/implementer/auditor/coordinator
 	RoleLevel    string // 角色等级：lite/pro/max
 	ModelId      string // AI模型ID
-	SystemPrompt string // 默认系统提示词（角色设定）
-	Status       string // 状态:0=禁用,1=启用
+	SystemPrompt  string // 默认系统提示词（角色设定）
+	ExecutionMode string // 执行方式: chat/aider/openhands
+	Status        string // 状态:0=禁用,1=启用
 	Sort         string // 排序
 	CreatedBy    string // 创建人ID
 	DeptId       string // 所属部门ID
@@ -43,8 +44,9 @@ var mvpRolePresetColumns = MvpRolePresetColumns{
 	RoleType:        "role_type",
 	RoleLevel:    "role_level",
 	ModelId:      "model_id",
-	SystemPrompt: "system_prompt",
-	Status:       "status",
+	SystemPrompt:  "system_prompt",
+	ExecutionMode: "execution_mode",
+	Status:        "status",
 	Sort:         "sort",
 	CreatedBy:    "created_by",
 	DeptId:       "dept_id",

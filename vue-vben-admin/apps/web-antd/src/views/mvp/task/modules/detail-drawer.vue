@@ -206,8 +206,44 @@ async function handleRetry() {
           </div>
         </template>
 
-        <!-- 依赖任务 -->
-        <template v-if="detail.dependsOn">
+        <!-- 依赖任务（可视化） -->
+        <template v-if="detail.dependencies && detail.dependencies.length > 0">
+          <Divider orientation="left">前置依赖（本任务依赖的任务）</Divider>
+          <div class="dep-list">
+            <div
+              v-for="dep in detail.dependencies"
+              :key="dep.id"
+              class="dep-item"
+            >
+              <Tag :color="STATUS_MAP[dep.status]?.color || 'default'" size="small">
+                {{ STATUS_MAP[dep.status]?.text || dep.status }}
+              </Tag>
+              <span class="dep-name">{{ dep.name }}</span>
+              <span class="dep-arrow">→ 当前任务</span>
+            </div>
+          </div>
+        </template>
+
+        <!-- 被依赖（下游任务） -->
+        <template v-if="detail.dependents && detail.dependents.length > 0">
+          <Divider orientation="left">下游任务（依赖本任务的任务）</Divider>
+          <div class="dep-list">
+            <div
+              v-for="dep in detail.dependents"
+              :key="dep.id"
+              class="dep-item"
+            >
+              <span class="dep-arrow">当前任务 →</span>
+              <span class="dep-name">{{ dep.name }}</span>
+              <Tag :color="STATUS_MAP[dep.status]?.color || 'default'" size="small">
+                {{ STATUS_MAP[dep.status]?.text || dep.status }}
+              </Tag>
+            </div>
+          </div>
+        </template>
+
+        <!-- 原始依赖数据（兜底） -->
+        <template v-if="detail.dependsOn && (!detail.dependencies || detail.dependencies.length === 0)">
           <Divider orientation="left">依赖任务</Divider>
           <div class="bg-gray-50 rounded p-3 text-sm text-gray-600">
             {{ detail.dependsOn }}
@@ -266,5 +302,36 @@ async function handleRetry() {
 
 .result-block {
   line-height: 1.6;
+}
+
+.dep-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: #fafafa;
+  border-radius: 6px;
+}
+
+.dep-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.dep-name {
+  font-weight: 500;
+  color: #333;
+}
+
+.dep-arrow {
+  color: #999;
+  font-size: 12px;
+  white-space: nowrap;
 }
 </style>

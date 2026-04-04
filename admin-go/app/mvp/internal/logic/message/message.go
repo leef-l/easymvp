@@ -88,6 +88,13 @@ func (s *sMessage) BatchDelete(ctx context.Context, ids []snowflake.JsonInt64) e
 
 // Detail 获取MVP消息表详情
 func (s *sMessage) Detail(ctx context.Context, id snowflake.JsonInt64) (out *model.MessageDetailOutput, err error) {
+	// 权限校验
+	if err = middleware.CheckOwnership(ctx,
+		dao.MvpMessage.Ctx(ctx).Where(dao.MvpMessage.Columns().DeletedAt, nil),
+		id, dao.MvpMessage.Columns().Id, dao.MvpMessage.Columns().CreatedBy); err != nil {
+		return nil, err
+	}
+
 	out = &model.MessageDetailOutput{}
 	err = dao.MvpMessage.Ctx(ctx).Where(dao.MvpMessage.Columns().Id, id).Where(dao.MvpMessage.Columns().DeletedAt, nil).Scan(out)
 	if err != nil {

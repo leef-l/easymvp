@@ -108,11 +108,31 @@ func (r *AiderRunner) Run(ctx context.Context, cfg *AiderConfig) *AiderResult {
 		}
 	}
 
+	// 对非 token-limit 错误进行分类和智能重试
+	if result.Error != nil {
+		category, retryable := r.classifyAiderError(result.Output, result.Error)
+		result.Category = category
+
+		if retryable && maxSteps > 1 {
+			g.Log().Warningf(ctx, "[AiderRunner] 检测到可重试错误（类别=%s），等待 5 秒后重试", category)
+			time.Sleep(5 * time.Second)
+			retryResult := r.runOnce(ctx, cfg)
+			retryResult.Output = strings.TrimSpace(result.Output) + "\n\n[AiderRunner] 检测到网络/超时错误，已自动重试。\n\n" + strings.TrimSpace(retryResult.Output)
+			retryResult.Duration = time.Since(start)
+			if retryResult.Error == nil {
+				return retryResult
+			}
+			retryCategory, _ := r.classifyAiderError(retryResult.Output, retryResult.Error)
+			retryResult.Category = retryCategory
+			result = retryResult
+		}
+	}
+
 	result.Duration = time.Since(start)
 	result.FailureHint = r.buildFailureHint(result.Output, result.Error, cfg)
 
-	g.Log().Infof(ctx, "[AiderRunner] 完成: 耗时=%v output_len=%d",
-		result.Duration, len(result.Output))
+	g.Log().Infof(ctx, "[AiderRunner] 完成: 耗时=%v output_len=%d category=%s",
+		result.Duration, len(result.Output), result.Category)
 
 	return result
 }
@@ -392,6 +412,7 @@ func (r *AiderRunner) RunTask(ctx context.Context, projectID int64, taskID int64
 	cfg.ReadFiles = readFiles
 	cfg.OnActivity = func() {
 		activity.TouchTaskActivity(context.Background(), taskID)
+		TouchHeartbeat(context.Background(), taskID)
 	}
 
 	// 如果有 system prompt，拼到 message 前面
@@ -464,6 +485,57 @@ func (r *AiderRunner) isTokenLimitFailure(output string) bool {
 		}
 	}
 	return false
+}
+
+// classifyAiderError 对 Aider 执行错误进行分类
+// 返回错误类别和是否可重试
+func (r *AiderRunner) classifyAiderError(output string, runErr error) (category taskFailureCategory, retryable bool) {
+	lower := strings.ToLower(output)
+	errStr := ""
+	if runErr != nil {
+		errStr = strings.ToLower(runErr.Error())
+	}
+
+	// Token limit → 不可重试（已在 Run() 中特殊处理过）
+	if r.isTokenLimitFailure(output) {
+		return taskFailureExecution, false
+	}
+
+	// 网络/超时错误 → 可重试
+	networkKeywords := []string{
+		"connection reset", "connection refused", "timeout", "timed out",
+		"eof", "broken pipe", "network unreachable", "dns resolve",
+		"rate limit", "429", "503", "502", "500",
+	}
+	for _, kw := range networkKeywords {
+		if strings.Contains(lower, kw) || strings.Contains(errStr, kw) {
+			return taskFailureExecution, true
+		}
+	}
+
+	// 权限/路径错误 → 不可重试，升级给架构师
+	permKeywords := []string{
+		"permission denied", "no such file", "not found",
+		"access denied", "read-only", "disk full", "no space",
+	}
+	for _, kw := range permKeywords {
+		if strings.Contains(lower, kw) || strings.Contains(errStr, kw) {
+			return taskFailurePlanning, false
+		}
+	}
+
+	// 认证错误 → 不可重试
+	authKeywords := []string{
+		"invalid api key", "authentication", "unauthorized", "401", "403",
+	}
+	for _, kw := range authKeywords {
+		if strings.Contains(lower, kw) || strings.Contains(errStr, kw) {
+			return taskFailurePolicyGuard, false
+		}
+	}
+
+	// 默认：执行失败，不确定是否可重试
+	return taskFailureExecution, false
 }
 
 func (r *AiderRunner) buildFailureHint(output string, runErr error, cfg *AiderConfig) string {

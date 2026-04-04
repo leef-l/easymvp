@@ -11,7 +11,7 @@ import {
 } from '#/api/mvp/project_role';
 import { getProjectList } from '#/api/mvp/project';
 import { getModelList } from '#/api/ai/model';
-import { roleTypeOptions, roleLevelOptions } from '../../consts';
+import { roleTypeOptions, roleLevelOptions, executionModeOptions } from '../../consts';
 
 const projectIDOptions = ref<{ label: string; value: string }[]>([]);
 const modelIDOptions = ref<{ label: string; value: string }[]>([]);
@@ -65,6 +65,13 @@ const [Form, formApi] = useVbenForm({
       fieldName: 'systemPrompt',
       label: tooltipLabel('系统提示词', '角色设定'),
       componentProps: { placeholder: '请输入系统提示词（角色设定）', rows: 4, maxlength: 65535 },
+    },
+    {
+      component: 'Select',
+      fieldName: 'executionMode',
+      label: tooltipLabel('执行方式', '决定该角色用什么方式执行任务：Chat对话、Aider代码编辑、OpenHands沙箱'),
+      componentProps: { options: executionModeOptions, placeholder: '请选择执行方式', allowClear: true, class: 'w-full' },
+      defaultValue: 'chat',
     },
     {
       component: 'Switch',

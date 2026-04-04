@@ -15,6 +15,7 @@ type RolePresetCreateInput struct {
 	RoleLevel string `json:"roleLevel"`
 	ModelID snowflake.JsonInt64 `json:"modelID"`
 	SystemPrompt string `json:"systemPrompt"`
+	ExecutionMode string `json:"executionMode"`
 	Status int `json:"status"`
 	Sort int `json:"sort"`
 }
@@ -27,6 +28,7 @@ type RolePresetUpdateInput struct {
 	RoleLevel string `json:"roleLevel"`
 	ModelID snowflake.JsonInt64 `json:"modelID"`
 	SystemPrompt string `json:"systemPrompt"`
+	ExecutionMode string `json:"executionMode"`
 	Status int `json:"status"`
 	Sort int `json:"sort"`
 }
@@ -40,6 +42,7 @@ type RolePresetDetailOutput struct {
 	ModelID snowflake.JsonInt64 `json:"modelID"`
 	ModelName string `json:"modelName"`
 	SystemPrompt string `json:"systemPrompt"`
+	ExecutionMode string `json:"executionMode"`
 	Status int `json:"status"`
 	Sort int `json:"sort"`
 	CreatedAt *gtime.Time `json:"createdAt"`
@@ -55,6 +58,7 @@ type RolePresetListOutput struct {
 	ModelID snowflake.JsonInt64 `json:"modelID"`
 	ModelName string `json:"modelName"`
 	SystemPrompt string `json:"systemPrompt"`
+	ExecutionMode string `json:"executionMode"`
 	Status int `json:"status"`
 	Sort int `json:"sort"`
 	CreatedAt *gtime.Time `json:"createdAt"`

@@ -55,6 +55,89 @@ services:
       - easymvp_net
 
   # ─────────────────────────────────────────────
+  # ai - GoFrame AI配置服务（后端）
+  # ─────────────────────────────────────────────
+  ai:
+    build:
+      context: ../../admin-go
+      dockerfile: ../docker/build/Dockerfile.ai
+    container_name: easymvp_ai
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - GF_GCFG_FILE=config.yaml
+      - DB_HOST=${DB_HOST:-host.docker.internal}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_USER=${MYSQL_USER:-easymvp}
+      - DB_PASS=${MYSQL_PASSWORD}
+      - DB_NAME=${MYSQL_DATABASE:-easymvp}
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASS=${REDIS_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - GF_SERVER_ADDRESS=:8001
+      - TZ=Asia/Shanghai
+    ports:
+      - "${AI_PORT:-8001}:8001"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - easymvp_net
+
+  # ─────────────────────────────────────────────
+  # mvp - GoFrame MVP核心引擎（后端）
+  # ─────────────────────────────────────────────
+  mvp:
+    build:
+      context: ../../admin-go
+      dockerfile: ../docker/build/Dockerfile.mvp
+    container_name: easymvp_mvp
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - GF_GCFG_FILE=config.yaml
+      - DB_HOST=${DB_HOST:-host.docker.internal}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_USER=${MYSQL_USER:-easymvp}
+      - DB_PASS=${MYSQL_PASSWORD}
+      - DB_NAME=${MYSQL_DATABASE:-easymvp}
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASS=${REDIS_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - GF_SERVER_ADDRESS=:8002
+      - TZ=Asia/Shanghai
+    ports:
+      - "${MVP_PORT:-8002}:8002"
+    volumes:
+      - ${WORK_DIR:-/www/wwwroot/projects}:/www/wwwroot/projects
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - easymvp_net
+
+  # ─────────────────────────────────────────────
+  # nginx - 反向代理
+  # ─────────────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: easymvp_nginx
+    restart: unless-stopped
+    depends_on:
+      - system
+      - ai
+      - mvp
+      - frontend
+    ports:
+      - "${NGINX_PORT:-80}:80"
+    volumes:
+      - ../nginx/prod.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - easymvp_net
+
+  # ─────────────────────────────────────────────
   # frontend - Vben Admin（开发模式）
   # ─────────────────────────────────────────────
   frontend:

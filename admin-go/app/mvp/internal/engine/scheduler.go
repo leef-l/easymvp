@@ -17,15 +17,19 @@ import (
 // 核心职责：扫描待执行任务、批次调度、依赖检查、资源冲突检测、动态推进
 //
 // 批次门控策略：
-//   - 每个项目维护一个"当前活跃批次号"（内存缓存，事件驱动更新）
+//   - 每个项目的活跃批次号持久化到 mvp_project.active_batch_no（进程重启可恢复）
 //   - 只有当前活跃批次的任务 + batch_no=0 的紧急任务可被调度
 //   - 当前批次的所有任务完成后，自动推进到下一个有任务的批次
 //   - failed/bug_found 的任务会阻塞批次推进（看门狗自动重试，或人工 SkipTask 跳过）
+//
+// 资源锁持久化：
+//   - 任务持有的资源锁写入 mvp_task.locked_resources（JSON数组）
+//   - 进程重启后从 DB 恢复 running 任务的资源锁
+//   - 任务完成/失败时清理 DB 和内存中的资源锁
 type Scheduler struct {
 	mu             sync.Mutex
-	running        map[int64]bool               // 正在执行的任务 ID
-	lockedRes      map[string]int64             // 已锁定的资源 -> 占用任务 ID
-	activeBatch    map[int64]int                // 项目 ID -> 当前活跃批次号（0 表示无活跃批次）
+	running        map[int64]bool               // 正在执行的任务 ID（内存缓存，启动时从 DB 恢复）
+	lockedRes      map[string]int64             // 已锁定的资源 -> 占用任务 ID（内存缓存，与 DB 同步）
 	maxConcurrency int                          // 最大并发 goroutine 数
 	executor       *Executor                    // 任务执行器
 	projectCtx     map[int64]context.CancelFunc // 项目级 cancel 函数（暂停用）
@@ -41,12 +45,54 @@ func NewScheduler(maxConcurrency int) *Scheduler {
 	s := &Scheduler{
 		running:        make(map[int64]bool),
 		lockedRes:      make(map[string]int64),
-		activeBatch:    make(map[int64]int),
 		maxConcurrency: maxConcurrency,
 		projectCtx:     make(map[int64]context.CancelFunc),
 	}
 	s.executor = NewExecutor(s)
+
+	// 从 DB 恢复 running 状态任务的资源锁
+	s.recoverResourceLocks()
+
 	return s
+}
+
+// recoverResourceLocks 进程启动时从 DB 恢复 running 任务的资源锁
+func (s *Scheduler) recoverResourceLocks() {
+	tasks, err := g.DB().Model("mvp_task").
+		Where("status", "running").
+		Where("deleted_at IS NULL").
+		Fields("id, locked_resources").
+		All()
+	if err != nil {
+		g.Log().Errorf(context.Background(), "[Scheduler] 恢复资源锁失败: %v", err)
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	recovered := 0
+	for _, t := range tasks {
+		taskID := t["id"].Int64()
+		s.running[taskID] = true
+
+		lockedStr := t["locked_resources"].String()
+		if lockedStr == "" || lockedStr == "null" {
+			continue
+		}
+		var resources []string
+		if err := json.Unmarshal([]byte(lockedStr), &resources); err != nil {
+			continue
+		}
+		for _, res := range resources {
+			s.lockedRes[res] = taskID
+			recovered++
+		}
+	}
+
+	if recovered > 0 {
+		g.Log().Infof(context.Background(), "[Scheduler] 从 DB 恢复了 %d 个资源锁，%d 个 running 任务", recovered, len(tasks))
+	}
 }
 
 // 全局调度器（延迟初始化，等数据库就绪后读取配置）
@@ -67,15 +113,15 @@ func GetScheduler() *Scheduler {
 func (s *Scheduler) StartProject(projectID int64) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// 从 DB 计算初始活跃批次号（进程恢复时也走这里）
+	// 从 DB 计算初始活跃批次号并持久化
 	batchNo := s.calcActiveBatch(projectID)
+	s.persistActiveBatch(projectID, batchNo)
 
 	s.mu.Lock()
 	if oldCancel, ok := s.projectCtx[projectID]; ok {
 		oldCancel()
 	}
 	s.projectCtx[projectID] = cancel
-	s.activeBatch[projectID] = batchNo
 	s.mu.Unlock()
 
 	g.Log().Infof(ctx, "[Scheduler] 项目 %d 启动调度，初始活跃批次: %d", projectID, batchNo)
@@ -90,29 +136,46 @@ func (s *Scheduler) PauseProject(projectID int64) {
 		cancel()
 		delete(s.projectCtx, projectID)
 	}
-	delete(s.activeBatch, projectID)
 	s.mu.Unlock()
 
-	// DB 操作移到锁外，避免持锁期间阻塞
+	// 清理 running 任务的资源锁（DB + 内存）
+	runningTasks, _ := g.DB().Model("mvp_task").
+		Where("project_id", projectID).
+		Where("status", "running").
+		Where("deleted_at IS NULL").
+		Fields("id").
+		All()
+
+	s.mu.Lock()
+	for _, t := range runningTasks {
+		tid := t["id"].Int64()
+		delete(s.running, tid)
+		for res, occupier := range s.lockedRes {
+			if occupier == tid {
+				delete(s.lockedRes, res)
+			}
+		}
+	}
+	s.mu.Unlock()
+
+	// DB 操作移到锁外
 	g.DB().Model("mvp_task").
 		Where("project_id", projectID).
 		Where("status", "running").
 		Update(g.Map{
-			"status":     "pending",
-			"updated_at": gtime.Now(),
+			"status":           "pending",
+			"locked_resources": nil,
+			"heartbeat_at":     nil,
+			"updated_at":       gtime.Now(),
 		})
+
+	// 重置项目活跃批次
+	s.persistActiveBatch(projectID, 0)
 }
 
 // OnTaskCompleted 任务完成回调，触发动态推进
 func (s *Scheduler) OnTaskCompleted(projectID int64, taskID int64) {
-	s.mu.Lock()
-	delete(s.running, taskID)
-	for res, tid := range s.lockedRes {
-		if tid == taskID {
-			delete(s.lockedRes, res)
-		}
-	}
-	s.mu.Unlock()
+	s.releaseTaskResources(taskID)
 
 	logTaskAction(taskID, "completed", "running", "completed", "任务执行完成", "system")
 
@@ -128,15 +191,7 @@ func (s *Scheduler) OnTaskCompleted(projectID int64, taskID int64) {
 
 // OnTaskFailed 任务失败回调
 func (s *Scheduler) OnTaskFailed(projectID int64, taskID int64, errMsg string) {
-	s.mu.Lock()
-	delete(s.running, taskID)
-	for res, tid := range s.lockedRes {
-		if tid == taskID {
-			delete(s.lockedRes, res)
-		}
-	}
-	s.mu.Unlock()
-
+	s.releaseTaskResources(taskID)
 	logTaskAction(taskID, "failed", "running", "failed", errMsg, "system")
 
 	// 释放资源后触发调度，让同批次其他 pending 任务有机会执行
@@ -145,6 +200,13 @@ func (s *Scheduler) OnTaskFailed(projectID int64, taskID int64, errMsg string) {
 
 // OnTaskEscalated 任务升级给架构师后的回调
 func (s *Scheduler) OnTaskEscalated(projectID int64, taskID int64, message string) {
+	s.releaseTaskResources(taskID)
+	logTaskAction(taskID, "escalate_to_architect", "running", "escalated", message, "system")
+	go s.scheduleOnce(context.Background(), projectID)
+}
+
+// releaseTaskResources 释放任务持有的资源锁（内存 + DB）
+func (s *Scheduler) releaseTaskResources(taskID int64) {
 	s.mu.Lock()
 	delete(s.running, taskID)
 	for res, tid := range s.lockedRes {
@@ -154,8 +216,11 @@ func (s *Scheduler) OnTaskEscalated(projectID int64, taskID int64, message strin
 	}
 	s.mu.Unlock()
 
-	logTaskAction(taskID, "escalate_to_architect", "running", "escalated", message, "system")
-	go s.scheduleOnce(context.Background(), projectID)
+	// 清理 DB 中的资源锁和心跳
+	g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+		"locked_resources": nil,
+		"heartbeat_at":     nil,
+	})
 }
 
 // scheduleLoop 调度主循环
@@ -180,15 +245,16 @@ func (s *Scheduler) scheduleLoop(ctx context.Context, projectID int64) {
 // scheduleOnce 执行一次调度扫描
 // 两阶段设计：锁外查 DB，锁内做决策
 func (s *Scheduler) scheduleOnce(ctx context.Context, projectID int64) {
-	// --- 阶段 1：锁外读取内存中的活跃批次号 + 并发度快检 ---
+	// --- 阶段 1：从 DB 读取活跃批次号 + 并发度快检 ---
 	s.mu.Lock()
 	currentRunning := len(s.running)
 	if currentRunning >= s.maxConcurrency {
 		s.mu.Unlock()
 		return
 	}
-	batchNo := s.activeBatch[projectID]
 	s.mu.Unlock()
+
+	batchNo := s.getActiveBatchFromDB(projectID)
 
 	// --- 阶段 2：锁外查 DB，获取候选任务 ---
 	query := g.DB().Model("mvp_task").
@@ -366,6 +432,7 @@ func (s *Scheduler) batchCheckDependencies(ctx context.Context, taskIDs []int64)
 }
 
 // tryLockResources 尝试锁定资源，如果有冲突返回 false
+// 同时将资源锁持久化到 DB（mvp_task.locked_resources）
 func (s *Scheduler) tryLockResources(taskID int64, resources []string) bool {
 	for _, res := range resources {
 		if occupier, exists := s.lockedRes[res]; exists && occupier != taskID {
@@ -375,6 +442,15 @@ func (s *Scheduler) tryLockResources(taskID int64, resources []string) bool {
 	for _, res := range resources {
 		s.lockedRes[res] = taskID
 	}
+
+	// 持久化到 DB
+	if len(resources) > 0 {
+		resJSON, _ := json.Marshal(resources)
+		g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+			"locked_resources": string(resJSON),
+		})
+	}
+
 	return true
 }
 
@@ -411,12 +487,9 @@ func (s *Scheduler) advanceBatchIfDone(projectID int64, taskID int64) {
 	// 触发批次压缩
 	GetCompressor().CompressBatchContext(context.Background(), projectID, batchNo)
 
-	// 计算并推进到下一个活跃批次
+	// 计算并推进到下一个活跃批次（持久化到 DB）
 	nextBatch := s.calcActiveBatch(projectID)
-
-	s.mu.Lock()
-	s.activeBatch[projectID] = nextBatch
-	s.mu.Unlock()
+	s.persistActiveBatch(projectID, nextBatch)
 
 	if nextBatch > 0 {
 		g.Log().Infof(context.Background(),
@@ -457,8 +530,9 @@ func (s *Scheduler) checkProjectDone(projectID int64) {
 
 	if count == 0 {
 		g.DB().Model("mvp_project").Where("id", projectID).Update(g.Map{
-			"status":     "completed",
-			"updated_at": gtime.Now(),
+			"status":          "completed",
+			"active_batch_no": 0,
+			"updated_at":      gtime.Now(),
 		})
 
 		s.mu.Lock()
@@ -466,7 +540,6 @@ func (s *Scheduler) checkProjectDone(projectID int64) {
 			cancel()
 			delete(s.projectCtx, projectID)
 		}
-		delete(s.activeBatch, projectID)
 		s.mu.Unlock()
 	}
 }
@@ -521,11 +594,31 @@ func (s *Scheduler) SkipTask(ctx context.Context, projectID int64, taskID int64,
 	return nil
 }
 
-// GetActiveBatch 获取项目当前活跃批次号（供外部查询）
+// GetActiveBatch 获取项目当前活跃批次号（供外部查询，从 DB 读取）
 func (s *Scheduler) GetActiveBatch(projectID int64) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.activeBatch[projectID]
+	return s.getActiveBatchFromDB(projectID)
+}
+
+// getActiveBatchFromDB 从 DB 读取项目活跃批次号
+func (s *Scheduler) getActiveBatchFromDB(projectID int64) int {
+	project, err := g.DB().Model("mvp_project").
+		Where("id", projectID).
+		Fields("active_batch_no").
+		One()
+	if err != nil || project.IsEmpty() {
+		return 0
+	}
+	return project["active_batch_no"].Int()
+}
+
+// persistActiveBatch 将活跃批次号持久化到 DB
+func (s *Scheduler) persistActiveBatch(projectID int64, batchNo int) {
+	if _, err := g.DB().Model("mvp_project").Where("id", projectID).Update(g.Map{
+		"active_batch_no": batchNo,
+		"updated_at":      gtime.Now(),
+	}); err != nil {
+		g.Log().Errorf(context.Background(), "[Scheduler] 持久化活跃批次失败: project=%d, batch=%d, err=%v", projectID, batchNo, err)
+	}
 }
 
 // --- 辅助函数 ---
