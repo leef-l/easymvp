@@ -320,6 +320,12 @@ func (s *DomainTaskScheduler) GetLockedResources() map[string]int64 {
 	return result
 }
 
+// Wakeup 唤醒一次调度扫描（不重建调度循环，仅触发单次 scheduleOnce）。
+// 用于单任务重试后让调度器拾取，比 Start() 更轻量。
+func (s *DomainTaskScheduler) Wakeup(ctx context.Context, workflowRunID int64) {
+	go s.scheduleOnce(ctx, workflowRunID)
+}
+
 // HasUnfinished 检查是否还有未完成任务（供外部查询）。
 func (s *DomainTaskScheduler) HasUnfinished(ctx context.Context, workflowRunID int64) bool {
 	count, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).

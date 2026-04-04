@@ -249,22 +249,30 @@ func (e *domainTaskExecutor) executeWithChat(ctx context.Context, projectID, tas
 // handleSuccess 任务成功。
 func (e *domainTaskExecutor) handleSuccess(ctx context.Context, taskID int64, result string) {
 	now := gtime.Now()
-	_, _ = g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("id", taskID).Where("status", "running").
+	res, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		Where("id", taskID).Where("status", domainTask.StatusRunning).
 		Update(g.Map{
 			"status":       domainTask.StatusCompleted,
 			"result":       result,
 			"completed_at": now,
 			"updated_at":   now,
 		})
+	if err != nil {
+		g.Log().Errorf(ctx, "[domainTaskExecutor] handleSuccess 更新失败: task=%d err=%v", taskID, err)
+		return
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		// 任务已被并发改状态（failed/canceled/escalated），不推进后续流程
+		g.Log().Warningf(ctx, "[domainTaskExecutor] handleSuccess CAS 失败，任务已不在 running: task=%d", taskID)
+		return
+	}
 
 	// 检查是否为 failure_analysis 任务 → 路由到 rework OnAnalysisCompleted
-	isAnalysis := false
 	if e.onAnalysisCompleted != nil {
 		task, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
 			Where("id", taskID).Fields("task_kind, stage_run_id").One()
 		if !task.IsEmpty() && task["task_kind"].String() == "failure_analysis" {
-			isAnalysis = true
 			stageRunID := task["stage_run_id"].Int64()
 			if err := e.onAnalysisCompleted(ctx, stageRunID, taskID); err != nil {
 				// 回调失败：回滚分析任务为 failed，让 watchdog 后续重试
@@ -283,8 +291,6 @@ func (e *domainTaskExecutor) handleSuccess(ctx context.Context, taskID int64, re
 		}
 	}
 
-	// 非 analysis 任务 或 analysis 回调成功：正常推进调度
-	_ = isAnalysis
 	_ = e.scheduler.OnTaskCompleted(ctx, taskID)
 }
 

@@ -175,12 +175,22 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 		updateData["affected_resources"] = string(resJSON)
 	}
 
-	_, err = g.DB().Model("mvp_domain_task").Ctx(ctx).
+	res, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("id", failedTaskID).
 		Where("status", domainTask.StatusFailed).
 		Update(updateData)
 	if err != nil {
 		return fmt.Errorf("回写原任务失败: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		// 原任务已不在 failed 状态（被手动重试或其他流程改状态），标记 rework 失败
+		reason := fmt.Sprintf("原任务(%d)已不在 failed 状态，回写跳过", failedTaskID)
+		g.Log().Warningf(ctx, "[ReworkStage] %s", reason)
+		if s.stageCompleter != nil {
+			_ = s.stageCompleter.FailStage(ctx, stageRunID, reason)
+		}
+		return nil
 	}
 
 	// 5. 写 handoff_record（分析 → 原任务）

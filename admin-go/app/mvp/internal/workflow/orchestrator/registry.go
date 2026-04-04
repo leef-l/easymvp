@@ -113,10 +113,10 @@ func Init() {
 		domainWatchdog = watchdogV2.New()
 		domainWatchdog.SetScheduler(taskScheduler)
 		domainWatchdog.SetRetryFn(func(ctx context.Context, taskID int64) error {
-			// 重试后显式触发一次调度扫描
+			// 重试后唤醒一次调度扫描（不重建调度循环）
 			wfRunID, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).Where("id", taskID).Value("workflow_run_id")
 			if wfRunID.Int64() > 0 {
-				return taskScheduler.Start(ctx, wfRunID.Int64())
+				taskScheduler.Wakeup(ctx, wfRunID.Int64())
 			}
 			return nil
 		})
