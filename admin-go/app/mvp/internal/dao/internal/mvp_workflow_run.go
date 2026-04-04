@@ -24,11 +24,12 @@ type MvpWorkflowRunColumns struct {
 	Id                  string // 雪花ID
 	ProjectId           string // 所属项目ID
 	RunNo               string // 项目内运行序号(从1递增)
-	Status              string // 状态: pending/running/paused/completed/canceled
+	Status              string // 状态: designing/reviewing/executing/reworking/paused/completed/failed/canceled
 	CurrentStage        string // 当前阶段: design/review/execute/rework/complete
 	CurrentStageRunId   string // 当前阶段运行ID
 	ActivePlanVersionId string // 当前活跃计划版本ID
 	PauseReason         string // 暂停原因
+	StatusBeforePause   string // 暂停前的阶段状态（恢复时回退）
 	CancelReason        string // 取消原因
 	RuntimeToken        string // 运行时令牌(防重入)
 	StartedAt           string // 开始时间
@@ -50,6 +51,7 @@ var mvpWorkflowRunColumns = MvpWorkflowRunColumns{
 	CurrentStageRunId:   "current_stage_run_id",
 	ActivePlanVersionId: "active_plan_version_id",
 	PauseReason:         "pause_reason",
+	StatusBeforePause:   "status_before_pause",
 	CancelReason:        "cancel_reason",
 	RuntimeToken:        "runtime_token",
 	StartedAt:           "started_at",

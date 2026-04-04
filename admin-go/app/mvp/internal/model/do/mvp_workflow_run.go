@@ -15,11 +15,12 @@ type MvpWorkflowRun struct {
 	Id                  any         // 雪花ID
 	ProjectId           any         // 所属项目ID
 	RunNo               any         // 项目内运行序号(从1递增)
-	Status              any         // 状态: pending/running/paused/completed/canceled
+	Status              any         // 状态: designing/reviewing/executing/reworking/paused/completed/failed/canceled
 	CurrentStage        any         // 当前阶段: design/review/execute/rework/complete
 	CurrentStageRunId   any         // 当前阶段运行ID
 	ActivePlanVersionId any         // 当前活跃计划版本ID
 	PauseReason         any         // 暂停原因
+	StatusBeforePause   any         // 暂停前的阶段状态（恢复时回退）
 	CancelReason        any         // 取消原因
 	RuntimeToken        any         // 运行时令牌(防重入)
 	StartedAt           *gtime.Time // 开始时间

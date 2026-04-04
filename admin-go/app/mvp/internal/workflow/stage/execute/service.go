@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	"easymvp/app/mvp/internal/engine"
+	"easymvp/app/mvp/internal/workspace"
 	domainTask "easymvp/app/mvp/internal/workflow/domain/task"
 	"easymvp/app/mvp/internal/workflow/scheduler"
 )
@@ -57,10 +58,15 @@ func (s *Service) InstantiateAndStart(ctx context.Context, stageRunID int64, pla
 	g.Log().Infof(ctx, "[ExecuteStage] 实例化 %d 个领域任务, stageRunID=%d, planVersionID=%d", taskCount, stageRunID, planVersionID)
 
 	// 2. 注册执行器
-	s.scheduler.SetExecutor(&domainTaskExecutor{workflowRunID: workflowRunID, scheduler: s.scheduler})
+	s.scheduler.SetExecutor(&domainTaskExecutor{
+		workflowRunID: workflowRunID,
+		scheduler:     s.scheduler,
+		wsMgr:         workspace.NewGitWorktreeManager(),
+	})
 
 	// 3. 注册完成回调
 	finalStageRunID := stageRunID
+	wsMgr := workspace.NewGitWorktreeManager()
 	s.scheduler.SetCompletionCallback(func(ctx context.Context, wfRunID int64) {
 		g.Log().Infof(ctx, "[ExecuteStage] 所有任务完成, workflowRunID=%d", wfRunID)
 
@@ -70,6 +76,9 @@ func (s *Service) InstantiateAndStart(ctx context.Context, stageRunID int64, pla
 		if projectID.Int64() > 0 {
 			_ = engine.GetCompressor().CompressProjectContext(ctx, projectID.Int64())
 		}
+
+		// 批量清理该 workflow 下所有已完成的 worktree
+		go workspace.RunCleanup(context.Background(), wsMgr, workspace.DefaultCleanupConfig())
 
 		// 完成 execute stage
 		if s.stageCompleter != nil {
@@ -85,6 +94,7 @@ func (s *Service) InstantiateAndStart(ctx context.Context, stageRunID int64, pla
 type domainTaskExecutor struct {
 	workflowRunID int64
 	scheduler     *scheduler.DomainTaskScheduler
+	wsMgr         workspace.Manager
 }
 
 // ExecuteDomainTask 执行单个领域任务。
@@ -118,18 +128,43 @@ func (e *domainTaskExecutor) ExecuteDomainTask(ctx context.Context, workflowRunI
 		return
 	}
 
+	// 如果需要工作空间隔离，准备 worktree
+	var ws *workspace.TaskWorkspace
+	if workspace.NeedsIsolation(executionMode) && e.wsMgr != nil {
+		project, _ := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID.Int64()).One()
+		workDir := project["work_dir"].String()
+		ws, err = e.wsMgr.Prepare(ctx, workspace.PrepareRequest{
+			TaskID:        taskID,
+			WorkflowRunID: workflowRunID,
+			ProjectID:     projectID.Int64(),
+			WorkDir:       workDir,
+		})
+		if err != nil {
+			// 隔离失败不降级，直接中断任务，防止污染主工作区
+			e.handleFailure(ctx, taskID, fmt.Sprintf("workspace 隔离准备失败: %v", err))
+			return
+		}
+	}
+
 	switch executionMode {
 	case "aider":
-		e.executeWithAider(ctx, projectID.Int64(), taskID, taskRecord, modelInfo)
+		e.executeWithAider(ctx, projectID.Int64(), taskID, taskRecord, modelInfo, ws)
 	default:
 		e.executeWithChat(ctx, projectID.Int64(), taskID, taskRecord, modelInfo)
 	}
 }
 
 // executeWithAider Aider 执行。
-func (e *domainTaskExecutor) executeWithAider(ctx context.Context, projectID, taskID int64, task gdb.Record, modelInfo *engine.ModelInfo) {
+func (e *domainTaskExecutor) executeWithAider(ctx context.Context, projectID, taskID int64, task gdb.Record, modelInfo *engine.ModelInfo, ws *workspace.TaskWorkspace) {
 	project, _ := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).One()
 	workDir := project["work_dir"].String()
+
+	// 如果有 workspace 隔离，使用 worktree 路径
+	if ws != nil {
+		workDir = ws.WorkspacePath
+		_ = e.wsMgr.MarkRunning(ctx, taskID)
+		g.Log().Infof(ctx, "[domainTaskExecutor] 使用 worktree 隔离: task=%d path=%s", taskID, workDir)
+	}
 
 	// 解析 affected_resources 作为文件列表
 	var files []string
@@ -141,11 +176,32 @@ func (e *domainTaskExecutor) executeWithAider(ctx context.Context, projectID, ta
 	runner := engine.GetAiderRunner()
 	aiderCfg := runner.BuildConfigFromModel(ctx, modelInfo, workDir)
 	aiderResult := runner.RunTask(ctx, projectID, taskID, modelInfo, task["description"].String(), workDir, files, nil)
+	_ = aiderCfg // 配置已在 RunTask 中使用
+
 	if aiderResult.Error != nil {
+		// workspace finalize: 标记失败
+		if ws != nil && e.wsMgr != nil {
+			_ = e.wsMgr.Finalize(ctx, taskID, workspace.FinalizeRequest{
+				Success: false,
+				Error:   aiderResult.Error.Error(),
+			})
+		}
 		e.handleFailure(ctx, taskID, aiderResult.Error.Error())
 		return
 	}
-	_ = aiderCfg // 配置已在 RunTask 中使用
+
+	// workspace finalize: 标记成功，然后异步清理
+	if ws != nil && e.wsMgr != nil {
+		if err := e.wsMgr.Finalize(ctx, taskID, workspace.FinalizeRequest{Success: true}); err != nil {
+			g.Log().Warningf(ctx, "[domainTaskExecutor] workspace finalize 失败: task=%d err=%v", taskID, err)
+		} else {
+			go func() {
+				if cleanErr := e.wsMgr.Cleanup(context.Background(), taskID); cleanErr != nil {
+					g.Log().Warningf(ctx, "[domainTaskExecutor] workspace cleanup 失败: task=%d err=%v", taskID, cleanErr)
+				}
+			}()
+		}
+	}
 	e.handleSuccess(ctx, taskID, aiderResult.Output)
 }
 

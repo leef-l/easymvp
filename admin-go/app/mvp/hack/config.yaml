@@ -12,7 +12,7 @@ gfcli:
   gen:
     dao:
       - link: "mysql:easymvp:JKcHFJYXnkrB6BXE@tcp(127.0.0.1:3306)/easymvp?charset=utf8mb4"
-        tables: "mvp_config,mvp_conversation,mvp_message,mvp_project,mvp_project_role,mvp_role_preset,mvp_task,mvp_task_log,mvp_workflow_run,mvp_stage_run,mvp_plan_version,mvp_task_blueprint,mvp_review_issue,mvp_stage_task,mvp_workflow_event,mvp_domain_task,mvp_task_resource_lock,mvp_handoff_record"
+        tables: "mvp_config,mvp_conversation,mvp_message,mvp_project,mvp_project_role,mvp_role_preset,mvp_task,mvp_task_log,mvp_workflow_run,mvp_stage_run,mvp_plan_version,mvp_task_blueprint,mvp_review_issue,mvp_stage_task,mvp_workflow_event,mvp_domain_task,mvp_task_resource_lock,mvp_handoff_record,mvp_task_workspace"
         descriptionTag: true
         noJsonTag: true
         noModelComment: false
