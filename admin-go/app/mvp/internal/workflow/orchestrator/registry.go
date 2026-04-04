@@ -17,6 +17,7 @@ import (
 	"easymvp/app/mvp/internal/workflow/scheduler"
 	executeStage "easymvp/app/mvp/internal/workflow/stage/execute"
 	reviewStage "easymvp/app/mvp/internal/workflow/stage/review"
+	watchdogV2 "easymvp/app/mvp/internal/workflow/watchdog"
 )
 
 var (
@@ -27,6 +28,7 @@ var (
 	reviewStageSvc  *reviewStage.Service
 	executeStageSvc *executeStage.Service
 	taskScheduler   *scheduler.DomainTaskScheduler
+	domainWatchdog  *watchdogV2.DomainTaskWatchdog
 	runtimeMgr      *runtime.Manager
 	eventBus        *event.Bus
 	eventPublisher  *event.Publisher
@@ -81,6 +83,26 @@ func Init() {
 		engine.RegisterBlueprintCreator(func(ctx context.Context, projectID, workflowRunID, conversationID, messageID int64, tasks []engine.ArchitectTask) (int64, int, error) {
 			return planVersionSvc.CreateFromArchitectReply(ctx, projectID, workflowRunID, conversationID, messageID, tasks)
 		})
+
+		// 注册阶段失败后的执行链终止回调
+		stageSvc.SetWorkflowFailedCallback(func(ctx context.Context, workflowRunID int64) {
+			g.Log().Infof(ctx, "[Registry] 工作流失败，终止执行链: workflowRunID=%d", workflowRunID)
+			taskScheduler.Stop(workflowRunID)
+			runtimeMgr.Cancel(workflowRunID)
+		})
+
+		// Watchdog V2: 监控 domain_task 心跳
+		domainWatchdog = watchdogV2.New()
+		domainWatchdog.SetScheduler(taskScheduler)
+		domainWatchdog.SetRetryFn(func(ctx context.Context, taskID int64) error {
+			// 重试后显式触发一次调度扫描
+			wfRunID, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).Where("id", taskID).Value("workflow_run_id")
+			if wfRunID.Int64() > 0 {
+				return taskScheduler.Start(ctx, wfRunID.Int64())
+			}
+			return nil
+		})
+		domainWatchdog.Start(context.Background())
 	})
 }
 

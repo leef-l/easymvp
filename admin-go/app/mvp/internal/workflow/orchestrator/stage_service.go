@@ -13,14 +13,23 @@ import (
 	"easymvp/utility/snowflake"
 )
 
+// WorkflowFailedCallback 工作流失败后的清理回调（停调度器、取消 runtime 等）。
+type WorkflowFailedCallback func(ctx context.Context, workflowRunID int64)
+
 // StageService 阶段编排服务。
 type StageService struct {
-	workflowSvc *WorkflowService
+	workflowSvc      *WorkflowService
+	onWorkflowFailed WorkflowFailedCallback
 }
 
 // NewStageService 创建阶段服务。
 func NewStageService(wfSvc *WorkflowService) *StageService {
 	return &StageService{workflowSvc: wfSvc}
+}
+
+// SetWorkflowFailedCallback 注册工作流失败后的清理回调。
+func (s *StageService) SetWorkflowFailedCallback(fn WorkflowFailedCallback) {
+	s.onWorkflowFailed = fn
 }
 
 // StartStage 创建并启动指定类型的阶段。
@@ -143,6 +152,32 @@ func (s *StageService) FailStage(ctx context.Context, stageRunID int64, reason s
 	}
 
 	g.Log().Infof(ctx, "[StageService] FailStage stageRunID=%d reason=%s", stageRunID, reason)
+
+	// 同步 workflow_run 状态为 failed，并终止执行链
+	stageRun, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).One()
+	if !stageRun.IsEmpty() {
+		wfRunID := stageRun["workflow_run_id"].Int64()
+		// CAS 更新：从任何活跃状态 → failed
+		updated := false
+		for _, fromStatus := range []string{
+			consts.WorkflowRunStatusExecuting,
+			consts.WorkflowRunStatusReviewing,
+			consts.WorkflowRunStatusReworking,
+			consts.WorkflowRunStatusDesigning,
+		} {
+			rows, _ := s.workflowSvc.wfRepo.UpdateStatus(ctx, wfRunID, fromStatus, consts.WorkflowRunStatusFailed, g.Map{})
+			if rows > 0 {
+				updated = true
+				break
+			}
+		}
+
+		// 终止执行链：停调度器 + 取消 runtime
+		if updated && s.onWorkflowFailed != nil {
+			s.onWorkflowFailed(ctx, wfRunID)
+		}
+	}
+
 	return nil
 }
 

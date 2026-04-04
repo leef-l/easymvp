@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/workspace"
@@ -173,6 +175,11 @@ func (e *domainTaskExecutor) executeWithAider(ctx context.Context, projectID, ta
 		json.Unmarshal([]byte(resJSON), &files)
 	}
 
+	// 启动心跳 goroutine：定期更新 heartbeat_at，让 watchdog 知道任务还活着
+	hbCtx, hbCancel := context.WithCancel(ctx)
+	go touchHeartbeatLoop(hbCtx, taskID)
+	defer hbCancel()
+
 	runner := engine.GetAiderRunner()
 	aiderCfg := runner.BuildConfigFromModel(ctx, modelInfo, workDir)
 	aiderResult := runner.RunTask(ctx, projectID, taskID, modelInfo, task["description"].String(), workDir, files, nil)
@@ -207,6 +214,11 @@ func (e *domainTaskExecutor) executeWithAider(ctx context.Context, projectID, ta
 
 // executeWithChat ChatStream 执行。
 func (e *domainTaskExecutor) executeWithChat(ctx context.Context, projectID, taskID int64, task gdb.Record, modelInfo *engine.ModelInfo) {
+	// 启动心跳
+	hbCtx, hbCancel := context.WithCancel(ctx)
+	go touchHeartbeatLoop(hbCtx, taskID)
+	defer hbCancel()
+
 	// 创建或获取任务对话
 	convID, err := engine.EnsureDomainTaskConversation(ctx, projectID, taskID, task["role_type"].String(), task["name"].String())
 	_ = modelInfo // chat 模式由 ChatEngine 内部解析模型
@@ -249,4 +261,29 @@ func (e *domainTaskExecutor) handleFailure(ctx context.Context, taskID int64, er
 			"updated_at": g.Map{"updated_at": "NOW()"},
 		})
 	e.scheduler.OnTaskFailed(ctx, taskID, errMsg)
+}
+
+// touchHeartbeatLoop 定期更新 domain_task 的 heartbeat_at。
+// 启动时立即写一次，之后每 30s 更新。
+func touchHeartbeatLoop(ctx context.Context, taskID int64) {
+	// 立即写一次心跳，消除启动空窗期
+	_, _ = g.DB().Model("mvp_domain_task").
+		Where("id", taskID).
+		Where("status", domainTask.StatusRunning).
+		Update(g.Map{"heartbeat_at": gtime.Now()})
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_, _ = g.DB().Model("mvp_domain_task").
+				Where("id", taskID).
+				Where("status", domainTask.StatusRunning).
+				Update(g.Map{"heartbeat_at": gtime.Now()})
+		}
+	}
 }
