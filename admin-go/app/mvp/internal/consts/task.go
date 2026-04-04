@@ -51,6 +51,14 @@ var AllRoleTypes = []string{
 	RoleTypeCoordinator,
 }
 
+// 任务记录类型（task_kind）
+const (
+	TaskKindImplement       = "implement"        // 原始实施任务
+	TaskKindAudit           = "audit"             // 审计任务
+	TaskKindBugAnalysis     = "bug_analysis"      // Bug 分析任务
+	TaskKindFailureAnalysis = "failure_analysis"  // 失败分析任务
+)
+
 // AllRoleLevels 所有角色等级
 var AllRoleLevels = []string{
 	RoleLevelLite,

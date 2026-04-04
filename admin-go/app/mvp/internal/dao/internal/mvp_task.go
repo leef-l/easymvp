@@ -28,12 +28,17 @@ type MvpTaskColumns struct {
 	Description       string // 任务描述
 	RoleType          string // 角色类型：architect/implementer/auditor/coordinator
 	RoleLevel         string // 角色等级：lite/pro/max
+	TaskKind          string // 任务记录类型：implement/audit/bug_analysis/failure_analysis
+	SourceTaskId      string // 直接来源任务ID，原始任务为NULL
+	RootTaskId        string // 所属主链根任务ID
 	ModelId           string // 使用的AI模型ID
 	ConversationId    string // 任务对话ID，用于检测任务状态
-	Status            string // 状态：pending/running/auditing/completed/bug_found/bug_dispatched/submit_error/failed
+	Status            string // 任务状态: draft/pending/running/completed/failed/escalated/auditing/bug_found/bug_dispatched/submit_error
 	Sort              string // 排序
 	BatchNo           string // 执行批次号，同批次内可并行，批次间串行
 	AffectedResources string // 涉及的资源范围（文件/模块），用于并发冲突检测
+	LockedResources   string // 任务持有的资源锁（JSON数组，持久化防泄露）
+	HeartbeatAt       string // 最近心跳时间（执行器定期更新，看门狗检测超时）
 	DependsOn         string // 依赖的任务ID列表
 	Result            string // 任务执行结果
 	ContextSummary    string // 任务完成后的上下文压缩摘要，供后续AI读取
@@ -56,12 +61,17 @@ var mvpTaskColumns = MvpTaskColumns{
 	Description:       "description",
 	RoleType:          "role_type",
 	RoleLevel:         "role_level",
+	TaskKind:          "task_kind",
+	SourceTaskId:      "source_task_id",
+	RootTaskId:        "root_task_id",
 	ModelId:           "model_id",
 	ConversationId:    "conversation_id",
 	Status:            "status",
 	Sort:              "sort",
 	BatchNo:           "batch_no",
 	AffectedResources: "affected_resources",
+	LockedResources:   "locked_resources",
+	HeartbeatAt:       "heartbeat_at",
 	DependsOn:         "depends_on",
 	Result:            "result",
 	ContextSummary:    "context_summary",

@@ -14,6 +14,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"easymvp/app/mvp/internal/activity"
+	"easymvp/app/mvp/internal/consts"
 	mvpmodel "easymvp/app/mvp/internal/model"
 	"easymvp/utility/provider"
 	"easymvp/utility/snowflake"
@@ -236,11 +237,9 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 
 	hub.Publish(replyID, `{"done":true}`)
 	hub.Done(replyID)
-	if _, err := g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+	if _, err := updateTaskStatus(ctx, taskID, "running", "completed", g.Map{
 		"result":       result,
-		"status":       "completed",
 		"completed_at": gtime.Now(),
-		"updated_at":   gtime.Now(),
 	}); err != nil {
 		g.Log().Errorf(ctx, "[Executor] 保存任务结果失败: task=%d, err=%v", taskID, err)
 	}
@@ -255,12 +254,20 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 	if roleType == "implementer" {
 		e.createAuditTask(ctx, projectID, taskID, task)
 	} else if roleType == "architect" {
-		name := task["name"].String()
-		switch {
-		case strings.HasPrefix(name, "Bug分析:"):
+		// 双读：优先 task_kind，兼容旧数据名称前缀
+		switch task["task_kind"].String() {
+		case consts.TaskKindBugAnalysis:
 			e.scheduler.AutoDispatchBugFix(context.Background(), projectID, taskID)
-		case strings.HasPrefix(name, "失败分析:"):
+		case consts.TaskKindFailureAnalysis:
 			e.scheduler.AutoDispatchFailureFix(context.Background(), projectID, taskID)
+		default:
+			name := task["name"].String()
+			switch {
+			case strings.HasPrefix(name, "Bug分析:"):
+				e.scheduler.AutoDispatchBugFix(context.Background(), projectID, taskID)
+			case strings.HasPrefix(name, "失败分析:"):
+				e.scheduler.AutoDispatchFailureFix(context.Background(), projectID, taskID)
+			}
 		}
 	}
 
@@ -505,20 +512,30 @@ func (e *Executor) createAuditTask(ctx context.Context, projectID int64, implTas
 	}
 
 	auditTaskID := int64(snowflake.Generate())
+
+	// 链路字段：root_task_id 继承自实施任务，兼容旧数据
+	rootTaskID := implTask["root_task_id"].Int64()
+	if rootTaskID == 0 {
+		rootTaskID = implTaskID
+	}
+
 	if _, err := g.DB().Model("mvp_task").Insert(g.Map{
-		"id":          auditTaskID,
-		"project_id":  projectID,
-		"parent_id":   implTask["parent_id"].Int64(),
-		"name":        fmt.Sprintf("审计: %s", implTask["name"].String()),
-		"description": fmt.Sprintf("审计实施员任务「%s」的结果，检查是否正确完成，是否有 bug。", implTask["name"].String()),
-		"role_type":   "auditor",
-		"role_level":  implTask["role_level"].String(),
-		"status":      "pending",
-		"batch_no":    implTask["batch_no"].Int() + 1,
-		"created_by":  0,
-		"dept_id":     0,
-		"created_at":  gtime.Now(),
-		"updated_at":  gtime.Now(),
+		"id":             auditTaskID,
+		"project_id":     projectID,
+		"parent_id":      implTask["parent_id"].Int64(),
+		"name":           fmt.Sprintf("审计: %s", implTask["name"].String()),
+		"description":    fmt.Sprintf("审计实施员任务「%s」的结果，检查是否正确完成，是否有 bug。", implTask["name"].String()),
+		"role_type":      "auditor",
+		"role_level":     implTask["role_level"].String(),
+		"task_kind":      consts.TaskKindAudit,
+		"source_task_id": implTaskID,
+		"root_task_id":   rootTaskID,
+		"status":         "pending",
+		"batch_no":       implTask["batch_no"].Int() + 1,
+		"created_by":     0,
+		"dept_id":        0,
+		"created_at":     gtime.Now(),
+		"updated_at":     gtime.Now(),
 	}); err != nil {
 		g.Log().Errorf(ctx, "[Executor] 创建审计任务失败: implTask=%d, err=%v", implTaskID, err)
 		return
@@ -632,19 +649,15 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 	if changedCount := diffSnapshots(beforeSnap, afterSnap); changedCount == 0 && len(resources) > 0 {
 		g.Log().Warningf(ctx, "[Executor] Aider 报成功但零文件变更: task=%d, files=%v", taskID, resources)
 		// 标记为 suspicious_success，任务仍完成但审计员会重点关注
-		g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+		updateTaskStatus(ctx, taskID, "running", "completed", g.Map{
 			"result":       result.Output + "\n\n⚠️ [系统检测] Aider 报告成功但未检测到文件变更，请审计员重点审核。",
-			"status":       "completed",
 			"completed_at": gtime.Now(),
-			"updated_at":   gtime.Now(),
 		})
 	} else {
 		// 10. 正常更新任务为完成
-		g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+		updateTaskStatus(ctx, taskID, "running", "completed", g.Map{
 			"result":       result.Output,
-			"status":       "completed",
 			"completed_at": gtime.Now(),
-			"updated_at":   gtime.Now(),
 		})
 	}
 
@@ -685,10 +698,8 @@ func (e *Executor) escalateImplementerResourceIssue(ctx context.Context, project
 		})
 	}
 
-	_, _ = g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
-		"status":        "escalated",
+	updateTaskStatus(ctx, taskID, "running", "escalated", g.Map{
 		"error_message": errMsg,
-		"updated_at":    gtime.Now(),
 	})
 
 	e.scheduler.OnTaskEscalated(projectID, taskID, errMsg)
@@ -697,10 +708,8 @@ func (e *Executor) escalateImplementerResourceIssue(ctx context.Context, project
 
 // failTask 标记任务失败
 func (e *Executor) failTask(ctx context.Context, projectID int64, taskID int64, errMsg string) {
-	g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
-		"status":        "failed",
+	updateTaskStatus(ctx, taskID, "running", "failed", g.Map{
 		"error_message": errMsg,
-		"updated_at":    gtime.Now(),
 	})
 	e.scheduler.OnTaskFailed(projectID, taskID, errMsg)
 }
@@ -741,10 +750,8 @@ func (e *Executor) getExecutionMode(ctx context.Context, projectID int64, roleTy
 func (e *Executor) handleTaskFailure(ctx context.Context, projectID int64, taskID int64, roleType string, category taskFailureCategory, errMsg string) {
 	switch category {
 	case taskFailurePlanning, taskFailurePolicyGuard:
-		g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
-			"status":        "escalated",
+		updateTaskStatus(ctx, taskID, "running", "escalated", g.Map{
 			"error_message": errMsg,
-			"updated_at":    gtime.Now(),
 		})
 		e.scheduler.OnTaskEscalated(projectID, taskID, errMsg)
 		go e.scheduler.EscalateFailedTask(context.Background(), projectID, taskID, roleType, errMsg)

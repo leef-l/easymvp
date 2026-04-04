@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"easymvp/app/mvp/internal/consts"
 	"easymvp/utility/snowflake"
 )
 
@@ -21,12 +22,12 @@ import (
 // bugDescription: bug 描述
 func (s *Scheduler) ReportBug(ctx context.Context, projectID int64, auditorTaskID int64, bugDescription string) error {
 	// 1. 更新审计任务状态
-	_, err := g.DB().Model("mvp_task").Where("id", auditorTaskID).Update(g.Map{
-		"status":     "bug_found",
-		"updated_at": gtime.Now(),
-	})
+	rows, err := updateTaskStatus(ctx, auditorTaskID, "auditing", "bug_found", nil)
 	if err != nil {
 		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("审计任务状态已变更，无法标记 bug_found")
 	}
 
 	logTaskAction(auditorTaskID, "bug_found", "auditing", "bug_found", bugDescription, "auditor")
@@ -41,10 +42,8 @@ func (s *Scheduler) ReportBug(ctx context.Context, projectID int64, auditorTaskI
 	implTaskID := dep["depends_on_id"].Int64()
 
 	// 3. 更新实施员任务状态为 bug_found
-	_, err = g.DB().Model("mvp_task").Where("id", implTaskID).Update(g.Map{
-		"status":        "bug_found",
+	_, err = updateTaskStatus(ctx, implTaskID, "completed", "bug_found", g.Map{
 		"error_message": bugDescription,
-		"updated_at":    gtime.Now(),
 	})
 	if err != nil {
 		return err
@@ -67,21 +66,30 @@ func (s *Scheduler) createBugAnalysisTask(ctx context.Context, projectID int64, 
 		return
 	}
 
+	// 链路字段：root_task_id 继承自实施任务，兼容旧数据
+	rootTaskID := implTask["root_task_id"].Int64()
+	if rootTaskID == 0 {
+		rootTaskID = implTaskID
+	}
+
 	// 创建架构师分析任务
 	analysisTaskID := int64(snowflake.Generate())
 	_, err = g.DB().Model("mvp_task").Insert(g.Map{
-		"id":          analysisTaskID,
-		"project_id":  projectID,
-		"parent_id":   implTask["parent_id"].Int64(),
-		"name":        fmt.Sprintf("Bug分析: %s", implTask["name"].String()),
-		"description": fmt.Sprintf("审计员在任务「%s」中发现以下问题，请分析原因并给出修复方案：\n\n%s\n\n原任务结果：\n%s", implTask["name"].String(), bugDescription, implTask["result"].String()),
-		"role_type":   "architect",
-		"status":      "pending",
-		"batch_no":    0, // 高优先级，立即可调度
-		"created_by":  0,
-		"dept_id":     0,
-		"created_at":  gtime.Now(),
-		"updated_at":  gtime.Now(),
+		"id":             analysisTaskID,
+		"project_id":     projectID,
+		"parent_id":      implTask["parent_id"].Int64(),
+		"name":           fmt.Sprintf("Bug分析: %s", implTask["name"].String()),
+		"description":    fmt.Sprintf("审计员在任务「%s」中发现以下问题，请分析原因并给出修复方案：\n\n%s\n\n原任务结果：\n%s", implTask["name"].String(), bugDescription, implTask["result"].String()),
+		"role_type":      "architect",
+		"task_kind":      consts.TaskKindBugAnalysis,
+		"source_task_id": auditorTaskID,
+		"root_task_id":   rootTaskID,
+		"status":         "pending",
+		"batch_no":       0, // 高优先级，立即可调度
+		"created_by":     0,
+		"dept_id":        0,
+		"created_at":     gtime.Now(),
+		"updated_at":     gtime.Now(),
 	})
 	if err != nil {
 		g.Log().Errorf(ctx, "创建架构师分析任务失败: %v", err)
@@ -103,6 +111,12 @@ func (s *Scheduler) EscalateFailedTask(ctx context.Context, projectID int64, fai
 		return
 	}
 
+	// 链路字段：root_task_id 继承自失败任务，兼容旧数据
+	rootTaskID := failedTask["root_task_id"].Int64()
+	if rootTaskID == 0 {
+		rootTaskID = failedTaskID
+	}
+
 	analysisTaskID := int64(snowflake.Generate())
 	_, err = g.DB().Model("mvp_task").Insert(g.Map{
 		"id":         analysisTaskID,
@@ -111,13 +125,16 @@ func (s *Scheduler) EscalateFailedTask(ctx context.Context, projectID int64, fai
 		"name":       fmt.Sprintf("失败分析: %s", failedTask["name"].String()),
 		"description": fmt.Sprintf("请分析任务失败原因，并给出可直接回写到原任务的修复方案。\n\n关联任务ID：%d\n角色：%s\n错误信息：\n%s\n\n原任务名称：%s\n原任务描述：\n%s\n\n请严格输出 JSON，格式如下：\n{\"description\":\"修订后的任务描述\",\"affected_resources\":[\"相对路径1\",\"相对路径2\"],\"reason\":\"修订原因\"}",
 			failedTaskID, roleType, errMsg, failedTask["name"].String(), failedTask["description"].String()),
-		"role_type":  "architect",
-		"status":     "pending",
-		"batch_no":   0, // 高优先级
-		"created_by": 0,
-		"dept_id":    0,
-		"created_at": gtime.Now(),
-		"updated_at": gtime.Now(),
+		"role_type":      "architect",
+		"task_kind":      consts.TaskKindFailureAnalysis,
+		"source_task_id": failedTaskID,
+		"root_task_id":   rootTaskID,
+		"status":         "pending",
+		"batch_no":       0, // 高优先级
+		"created_by":     0,
+		"dept_id":        0,
+		"created_at":     gtime.Now(),
+		"updated_at":     gtime.Now(),
 	})
 	if err != nil {
 		g.Log().Errorf(ctx, "[EscalateFailedTask] 创建架构师分析任务失败: %v", err)
@@ -150,14 +167,16 @@ func (s *Scheduler) DispatchBugFix(ctx context.Context, projectID int64, analysi
 		return fmt.Errorf("原实施任务不存在")
 	}
 
-	// 3. 更新原实施任务状态为 bug_dispatched → 自动变为 pending（透传修复）
-	_, err = g.DB().Model("mvp_task").Where("id", implTaskID).Update(g.Map{
-		"status":       "pending",
+	// 3. 先标记 bug_dispatched，再转 pending（两步状态机合规转换）
+	_, err = updateTaskStatus(ctx, implTaskID, "bug_found", "bug_dispatched", nil)
+	if err != nil {
+		return err
+	}
+	_, err = updateTaskStatus(ctx, implTaskID, "bug_dispatched", "pending", g.Map{
 		"description":  fmt.Sprintf("%s\n\n## Bug修复指令\n%s", implTask["description"].String(), analysisTask["result"].String()),
 		"result":       nil, // 清空旧结果
 		"started_at":   nil,
 		"completed_at": nil,
-		"updated_at":   gtime.Now(),
 	})
 	if err != nil {
 		return err
@@ -172,28 +191,54 @@ func (s *Scheduler) DispatchBugFix(ctx context.Context, projectID int64, analysi
 }
 
 // AutoDispatchBugFix 架构师分析任务自动完成后的回调
-// 在 executor.go 中，当角色是 architect 且任务名以 "Bug分析:" 开头时调用
+// 两跳回溯：bug_analysis.source_task_id → audit.source_task_id → implement.id
 func (s *Scheduler) AutoDispatchBugFix(ctx context.Context, projectID int64, analysisTaskID int64) {
-	// 从任务描述中找到原实施任务 ID
-	// 通过分析任务的依赖关系或命名规则来关联
 	analysisTask, err := g.DB().Model("mvp_task").Where("id", analysisTaskID).One()
 	if err != nil || analysisTask.IsEmpty() {
 		return
 	}
 
-	// 查找同父节点下状态为 bug_found 的实施员任务
-	implTask, err := g.DB().Model("mvp_task").
-		Where("project_id", projectID).
-		Where("parent_id", analysisTask["parent_id"].Int64()).
-		Where("role_type", "implementer").
-		Where("status", "bug_found").
-		Where("deleted_at IS NULL").
-		One()
-	if err != nil || implTask.IsEmpty() {
+	// 第一跳：从 bug_analysis 找到审计任务
+	auditTaskID := analysisTask["source_task_id"].Int64()
+	if auditTaskID == 0 {
+		// 旧数据 fallback：查找同父节点下 bug_found 的实施任务
+		implTask, err := g.DB().Model("mvp_task").
+			Where("project_id", projectID).
+			Where("parent_id", analysisTask["parent_id"].Int64()).
+			Where("role_type", "implementer").
+			Where("status", "bug_found").
+			Where("deleted_at IS NULL").
+			One()
+		if err != nil || implTask.IsEmpty() {
+			return
+		}
+		s.DispatchBugFix(ctx, projectID, analysisTaskID, implTask["id"].Int64())
 		return
 	}
 
-	s.DispatchBugFix(ctx, projectID, analysisTaskID, implTask["id"].Int64())
+	// 第二跳：从审计任务找到原实施任务
+	auditTask, err := g.DB().Model("mvp_task").Where("id", auditTaskID).One()
+	if err != nil || auditTask.IsEmpty() {
+		return
+	}
+
+	implTaskID := auditTask["source_task_id"].Int64()
+	if implTaskID == 0 {
+		// 旧数据 fallback：从 mvp_task_dependency 查找
+		dep, _ := g.DB().Model("mvp_task_dependency").
+			Where("task_id", auditTaskID).
+			One()
+		if !dep.IsEmpty() {
+			implTaskID = dep["depends_on_id"].Int64()
+		}
+	}
+
+	if implTaskID == 0 {
+		g.Log().Warningf(ctx, "[AutoDispatchBugFix] 无法回溯到实施任务: analysis=%d audit=%d", analysisTaskID, auditTaskID)
+		return
+	}
+
+	s.DispatchBugFix(ctx, projectID, analysisTaskID, implTaskID)
 }
 
 func (s *Scheduler) AutoDispatchFailureFix(ctx context.Context, projectID int64, analysisTaskID int64) {
@@ -202,7 +247,11 @@ func (s *Scheduler) AutoDispatchFailureFix(ctx context.Context, projectID int64,
 		return
 	}
 
-	implTaskID := parseLinkedTaskID(analysisTask["description"].String())
+	// 优先走显式链路字段，旧数据 fallback 到描述正则
+	implTaskID := analysisTask["source_task_id"].Int64()
+	if implTaskID == 0 {
+		implTaskID = parseLinkedTaskID(analysisTask["description"].String())
+	}
 	if implTaskID == 0 {
 		return
 	}
@@ -231,22 +280,20 @@ func (s *Scheduler) AutoDispatchFailureFix(ctx context.Context, projectID int64,
 		return
 	}
 
-	data := g.Map{
-		"status":       "pending",
+	extra := g.Map{
 		"result":       nil,
 		"started_at":   nil,
 		"completed_at": nil,
-		"updated_at":   gtime.Now(),
 	}
 	if strings.TrimSpace(patch.Description) != "" {
-		data["description"] = patch.Description
+		extra["description"] = patch.Description
 	}
 	if normalized, _ := normalizePatchResources(patch.AffectedResources); len(normalized) > 0 {
 		resourceJSON, _ := json.Marshal(normalized)
-		data["affected_resources"] = string(resourceJSON)
+		extra["affected_resources"] = string(resourceJSON)
 	}
 
-	if _, err = g.DB().Model("mvp_task").Where("id", implTaskID).Data(data).Update(); err != nil {
+	if _, err = updateTaskStatus(ctx, implTaskID, "escalated", "pending", extra); err != nil {
 		g.Log().Errorf(ctx, "[AutoDispatchFailureFix] 回写原任务失败: task=%d err=%v", implTaskID, err)
 		return
 	}

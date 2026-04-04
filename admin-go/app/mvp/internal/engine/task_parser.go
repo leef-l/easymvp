@@ -7,9 +7,11 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"easymvp/app/mvp/internal/consts"
 	"easymvp/app/mvp/internal/model/do"
 	"easymvp/utility/snowflake"
 )
@@ -75,147 +77,165 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 	createdBy := projectInfo["created_by"].Int64()
 	deptID := projectInfo["dept_id"].Int64()
 
-	// 3. 清理该项目所有已有任务、任务日志和依赖关系（重新拆分以最新方案为准）
-	// 2a. 获取所有任务ID，用于清理日志和依赖
-	oldTaskIDs, err := g.DB().Model("mvp_task").
-		Where("project_id", projectID).
-		Where("deleted_at IS NULL").
-		Fields("id").
-		Array()
-	if err != nil {
-		return 0, fmt.Errorf("查询旧任务失败: %w", err)
-	}
-	if len(oldTaskIDs) > 0 {
-		// 2b. 软删除任务日志
-		_, _ = g.DB().Model("mvp_task_log").
-			WhereIn("task_id", oldTaskIDs).
+	// 3. 在事务中执行：清理旧数据 + 创建新任务（保证原子性）
+	nameToID := make(map[string]int64, len(tasks))
+	createdTasks := make([]ArchitectTask, 0, len(tasks))
+
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		// 3a. 获取所有旧任务ID
+		oldTaskIDs, txErr := tx.Model("mvp_task").
+			Where("project_id", projectID).
 			Where("deleted_at IS NULL").
-			Data(do.MvpTaskLog{
+			Fields("id").
+			Array()
+		if txErr != nil {
+			return fmt.Errorf("查询旧任务失败: %w", txErr)
+		}
+		if len(oldTaskIDs) > 0 {
+			// 3b. 软删除任务日志
+			_, _ = tx.Model("mvp_task_log").
+				WhereIn("task_id", oldTaskIDs).
+				Where("deleted_at IS NULL").
+				Data(do.MvpTaskLog{
+					DeletedAt: gtime.Now(),
+					UpdatedAt: gtime.Now(),
+				}).
+				Update()
+			// 3c. 删除任务依赖关系
+			_, _ = tx.Model("mvp_task_dependency").
+				WhereIn("task_id", oldTaskIDs).
+				Delete()
+			_, _ = tx.Model("mvp_task_dependency").
+				WhereIn("depends_on_id", oldTaskIDs).
+				Delete()
+		}
+		// 3d. 软删除所有任务
+		_, txErr = tx.Model("mvp_task").
+			Where("project_id", projectID).
+			Where("deleted_at IS NULL").
+			Data(do.MvpTask{
 				DeletedAt: gtime.Now(),
 				UpdatedAt: gtime.Now(),
 			}).
 			Update()
-		// 2c. 删除任务依赖关系
-		_, _ = g.DB().Model("mvp_task_dependency").
-			WhereIn("task_id", oldTaskIDs).
-			Delete()
-		_, _ = g.DB().Model("mvp_task_dependency").
-			WhereIn("depends_on_id", oldTaskIDs).
-			Delete()
-	}
-	// 2d. 软删除所有任务
-	_, err = g.DB().Model("mvp_task").
-		Where("project_id", projectID).
-		Where("deleted_at IS NULL").
-		Data(do.MvpTask{
-			DeletedAt: gtime.Now(),
-			UpdatedAt: gtime.Now(),
-		}).
-		Update()
-	if err != nil {
-		return 0, fmt.Errorf("清理旧任务失败: %w", err)
-	}
-
-	// 3. 第一遍：创建所有任务，建立 name→id 映射
-	nameToID := make(map[string]int64, len(tasks))
-	createdTasks := make([]ArchitectTask, 0, len(tasks))
-
-	for i, t := range tasks {
-		taskID := int64(snowflake.Generate())
-
-		roleType := t.RoleType
-		if roleType == "" {
-			roleType = "implementer" // 默认角色
+		if txErr != nil {
+			return fmt.Errorf("清理旧任务失败: %w", txErr)
 		}
 
-		sort := t.Sort
-		if sort == 0 {
-			sort = i + 1 // 按输出顺序
-		}
+		// 4. 第一遍：创建所有任务，建立 name→id 映射
+		for i, t := range tasks {
+			taskID := int64(snowflake.Generate())
 
-		// 校验 batch_no >= 1：batch_no=0 保留给系统紧急任务（Bug分析等）
-		if t.BatchNo < 1 {
-			t.BatchNo = 1
-		}
+			roleType := t.RoleType
+			if roleType == "" {
+				roleType = "implementer"
+			}
 
-		// affected_resources 转 JSON
-		resourcesJSON := "[]"
-		if len(t.AffectedResources) > 0 {
-			b, _ := json.Marshal(t.AffectedResources)
-			resourcesJSON = string(b)
-		}
+			sort := t.Sort
+			if sort == 0 {
+				sort = i + 1
+			}
 
-		// depends_on 存名称（后续第二遍转为 ID 关系）
-		dependsJSON := "[]"
-		if len(t.DependsOn) > 0 {
-			b, _ := json.Marshal(t.DependsOn)
-			dependsJSON = string(b)
-		}
+			if t.BatchNo < 1 {
+				t.BatchNo = 1
+			}
 
-		_, err = g.DB().Model("mvp_task").Data(do.MvpTask{
-			Id:                taskID,
-			ProjectId:         projectID,
-			ParentId:          0,
-			Name:              t.Name,
-			Description:       t.Description,
-			RoleType:          roleType,
-			RoleLevel:         t.RoleLevel,
-			Status:            "draft",
-			BatchNo:           t.BatchNo,
-			Sort:              sort,
-			AffectedResources: resourcesJSON,
-			DependsOn:         dependsJSON,
-			CreatedBy:         createdBy,
-			DeptId:            deptID,
-			CreatedAt:         gtime.Now(),
-			UpdatedAt:         gtime.Now(),
-		}).Insert()
-		if err != nil {
-			g.Log().Errorf(ctx, "创建任务失败 [%s]: %v", t.Name, err)
-			continue
-		}
-		nameToID[t.Name] = taskID
-		createdTasks = append(createdTasks, t)
-	}
+			resourcesJSON := "[]"
+			if len(t.AffectedResources) > 0 {
+				b, _ := json.Marshal(t.AffectedResources)
+				resourcesJSON = string(b)
+			}
 
-	// 4. 第二遍：建立父子关系
-	for _, t := range createdTasks {
-		if t.ParentName == "" {
-			continue
-		}
-		parentID, ok := nameToID[t.ParentName]
-		if !ok {
-			continue
-		}
-		taskID, ok := nameToID[t.Name]
-		if !ok {
-			continue
-		}
-		_, _ = g.DB().Model("mvp_task").Where("id", taskID).Data(do.MvpTask{
-			ParentId: parentID,
-		}).Update()
-	}
+			dependsJSON := "[]"
+			if len(t.DependsOn) > 0 {
+				b, _ := json.Marshal(t.DependsOn)
+				dependsJSON = string(b)
+			}
 
-	// 5. 第三遍：建立依赖关系（mvp_task_dependency）
-	for _, t := range createdTasks {
-		if len(t.DependsOn) == 0 {
-			continue
-		}
-		taskID, ok := nameToID[t.Name]
-		if !ok {
-			continue
-		}
-		for _, depName := range t.DependsOn {
-			depID, ok := nameToID[depName]
-			if !ok {
-				g.Log().Warningf(ctx, "任务 [%s] 依赖 [%s] 未找到，跳过", t.Name, depName)
+			// 确定 task_kind：根据 roleType 判断
+			taskKind := consts.TaskKindImplement
+			if roleType == consts.RoleTypeArchitect {
+				taskKind = "" // 架构师拆出来的任务按角色分，原始任务默认 implement
+			}
+			if roleType == consts.RoleTypeAuditor {
+				taskKind = consts.TaskKindAudit
+			}
+			if roleType == consts.RoleTypeImplementer || roleType == "" {
+				taskKind = consts.TaskKindImplement
+			}
+
+			_, txErr = tx.Model("mvp_task").Data(do.MvpTask{
+				Id:                taskID,
+				ProjectId:         projectID,
+				ParentId:          0,
+				Name:              t.Name,
+				Description:       t.Description,
+				RoleType:          roleType,
+				RoleLevel:         t.RoleLevel,
+				TaskKind:          taskKind,
+				RootTaskId:        taskID,
+				Status:            "draft",
+				BatchNo:           t.BatchNo,
+				Sort:              sort,
+				AffectedResources: resourcesJSON,
+				DependsOn:         dependsJSON,
+				CreatedBy:         createdBy,
+				DeptId:            deptID,
+				CreatedAt:         gtime.Now(),
+				UpdatedAt:         gtime.Now(),
+			}).Insert()
+			if txErr != nil {
+				g.Log().Errorf(ctx, "创建任务失败 [%s]: %v", t.Name, txErr)
 				continue
 			}
-			g.DB().Model("mvp_task_dependency").Insert(g.Map{
-				"task_id":       taskID,
-				"depends_on_id": depID,
-			})
+			nameToID[t.Name] = taskID
+			createdTasks = append(createdTasks, t)
 		}
+
+		// 5. 第二遍：建立父子关系
+		for _, t := range createdTasks {
+			if t.ParentName == "" {
+				continue
+			}
+			parentID, ok := nameToID[t.ParentName]
+			if !ok {
+				continue
+			}
+			taskID, ok := nameToID[t.Name]
+			if !ok {
+				continue
+			}
+			_, _ = tx.Model("mvp_task").Where("id", taskID).Data(do.MvpTask{
+				ParentId: parentID,
+			}).Update()
+		}
+
+		// 6. 第三遍：建立依赖关系（mvp_task_dependency）
+		for _, t := range createdTasks {
+			if len(t.DependsOn) == 0 {
+				continue
+			}
+			taskID, ok := nameToID[t.Name]
+			if !ok {
+				continue
+			}
+			for _, depName := range t.DependsOn {
+				depID, ok := nameToID[depName]
+				if !ok {
+					g.Log().Warningf(ctx, "任务 [%s] 依赖 [%s] 未找到，跳过", t.Name, depName)
+					continue
+				}
+				tx.Model("mvp_task_dependency").Insert(g.Map{
+					"task_id":       taskID,
+					"depends_on_id": depID,
+				})
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("任务创建事务失败: %w", err)
 	}
 
 	g.Log().Infof(ctx, "[TaskParser] 项目 %d 解析创建 %d 个任务（draft）", projectID, len(createdTasks))
