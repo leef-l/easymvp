@@ -171,17 +171,25 @@ func (s *Scheduler) PauseProject(projectID int64) {
 	}
 	s.mu.Unlock()
 
-	// 5. 锁外批量更新 DB：running → pending
-	if _, err := g.DB().Model("mvp_task").
-		Where("project_id", projectID).
-		Where("status", "running").
-		Update(g.Map{
-			"status":           "pending",
-			"locked_resources": nil,
-			"heartbeat_at":     nil,
-			"updated_at":       gtime.Now(),
-		}); err != nil {
-		g.Log().Errorf(context.Background(), "[Scheduler] PauseProject DB 批量回退失败: project=%d, err=%v", projectID, err)
+	// 5. 锁外批量更新 DB：running → pending（失败重试一次）
+	pauseUpdate := func() error {
+		_, err := g.DB().Model("mvp_task").
+			Where("project_id", projectID).
+			Where("status", "running").
+			Update(g.Map{
+				"status":           "pending",
+				"locked_resources": nil,
+				"heartbeat_at":     nil,
+				"updated_at":       gtime.Now(),
+			})
+		return err
+	}
+	if err := pauseUpdate(); err != nil {
+		g.Log().Errorf(context.Background(), "[Scheduler] PauseProject DB 批量回退失败，重试一次: project=%d, err=%v", projectID, err)
+		time.Sleep(500 * time.Millisecond)
+		if retryErr := pauseUpdate(); retryErr != nil {
+			g.Log().Errorf(context.Background(), "[Scheduler] PauseProject DB 批量回退重试仍失败: project=%d, err=%v（watchdog 将兜底修正）", projectID, retryErr)
+		}
 	}
 
 	// 6. 重置项目活跃批次

@@ -312,20 +312,30 @@ func (p *TaskParser) normalizeTasks(ctx context.Context, tasks []ArchitectTask, 
 }
 
 // ConfirmDraftTasks 确认草稿任务：draft → pending
+// 通过状态机 CAS 逐条转换，避免绕过合法性校验
 func (p *TaskParser) ConfirmDraftTasks(ctx context.Context, projectID int64) (int, error) {
-	result, err := g.DB().Model("mvp_task").
+	taskIDs, err := g.DB().Model("mvp_task").
 		Where("project_id", projectID).
 		Where("status", "draft").
 		Where("deleted_at IS NULL").
-		Update(g.Map{
-			"status":     "pending",
-			"updated_at": gtime.Now(),
-		})
+		Fields("id").
+		Array()
 	if err != nil {
 		return 0, err
 	}
-	count, _ := result.RowsAffected()
-	return int(count), nil
+
+	confirmed := 0
+	for _, idVal := range taskIDs {
+		rows, err := updateTaskStatus(ctx, idVal.Int64(), "draft", "pending", nil)
+		if err != nil {
+			g.Log().Warningf(ctx, "[ConfirmDraftTasks] task=%d draft→pending 失败: %v", idVal.Int64(), err)
+			continue
+		}
+		if rows > 0 {
+			confirmed++
+		}
+	}
+	return confirmed, nil
 }
 
 // GetDraftCount 获取项目草稿任务数量

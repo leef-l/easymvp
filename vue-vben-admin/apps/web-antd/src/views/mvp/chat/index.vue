@@ -175,8 +175,7 @@ async function connectSSE(replyID: string, targetMessageIndex: number) {
       }, 100);
     };
 
-    // 跟踪最近有效事件的状态，用于 done 时判断最终状态
-    let lastEventType = '';
+    // 跟踪是否收到过失败信号，用于 done 时判断最终状态
     let hasFailed = false;
 
     // 逐块读取数据
@@ -230,7 +229,7 @@ async function connectSSE(replyID: string, targetMessageIndex: number) {
                 msg.status = data.status || 'completed';
                 if (data.status === 'failed') hasFailed = true;
               }
-              lastEventType = 'full';
+
               break;
             }
             case 'error': {
@@ -241,7 +240,7 @@ async function connectSSE(replyID: string, targetMessageIndex: number) {
                 msg.streamingContent = undefined;
               }
               hasFailed = true;
-              lastEventType = 'error';
+
               break;
             }
             case 'done': {
@@ -278,7 +277,7 @@ async function connectSSE(replyID: string, targetMessageIndex: number) {
                 msg.streamingContent = (msg.streamingContent || '') + data.content;
                 debouncedScroll();
               }
-              lastEventType = 'chunk';
+
               break;
             }
           }

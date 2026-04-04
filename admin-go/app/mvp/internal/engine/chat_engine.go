@@ -299,15 +299,9 @@ func (e *ChatEngine) tryParseArchitectTasks(conversationID int64, aiReply string
 	}
 	if count > 0 {
 		g.Log().Infof(ctx, "[ChatEngine] 架构师回复中解析出 %d 个任务（draft），项目 %d", count, projectID)
-
-		// 通过 SSE 推送一个特殊事件通知前端刷新任务列表
-		notifyJSON, _ := json.Marshal(map[string]interface{}{
-			"event":      "tasks_parsed",
-			"taskCount":  count,
-			"projectID":  projectID,
-		})
-		// 用 conversationID 作为 channel 推送通知
-		e.hub.Publish(conversationID, string(notifyJSON))
+		// 注：前端在架构师回复结束后会主动调用 loadProjectStatus() 刷新草稿任务数，
+		// 因此不再通过 SSE 推送 tasks_parsed 事件（之前推到 conversationID channel，
+		// 但前端只订阅 messageID channel，导致这条通知始终无效）。
 	}
 }
 
