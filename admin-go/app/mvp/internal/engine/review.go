@@ -301,15 +301,20 @@ func systemPrecheck(ctx context.Context, projectID int64, tasks gdb.Result, work
 		}
 	}
 
-	// 批量执行 batch_no 自动修正
+	// 批量执行 batch_no 自动修正（事务内）
 	if len(batchFixes) > 0 {
-		for _, fix := range batchFixes {
-			if _, err := g.DB().Model("mvp_task").Where("id", fix.taskID).Update(g.Map{
-				"batch_no":   fix.newBatch,
-				"updated_at": gtime.Now(),
-			}); err != nil {
-				g.Log().Warningf(ctx, "[Review] 自动修正 batch_no 失败: task=%d, err=%v", fix.taskID, err)
+		if txErr := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+			for _, fix := range batchFixes {
+				if _, err := tx.Model("mvp_task").Where("id", fix.taskID).Update(g.Map{
+					"batch_no":   fix.newBatch,
+					"updated_at": gtime.Now(),
+				}); err != nil {
+					return fmt.Errorf("自动修正 batch_no 失败: task=%d, err=%w", fix.taskID, err)
+				}
 			}
+			return nil
+		}); txErr != nil {
+			g.Log().Warningf(ctx, "[Review] batch_no 自动修正事务失败: %v", txErr)
 		}
 	}
 
@@ -450,29 +455,48 @@ func coordinatorOptimize(ctx context.Context, projectID int64, tasks gdb.Result)
 	return &optResult, nil
 }
 
-// applyCoordinatorOptimizations 应用协调员的批次优化建议
+// applyCoordinatorOptimizations 应用协调员的批次优化建议（事务内批量执行）
 func applyCoordinatorOptimizations(ctx context.Context, projectID int64, tasks gdb.Result, opt *CoordinatorOptResult) {
 	if opt == nil || len(opt.OptimizedBatches) == 0 {
 		return
 	}
 
-	applied := 0
+	// 先收集需要更新的任务
+	type batchUpdate struct {
+		taskID   int64
+		newBatch int
+	}
+	var updates []batchUpdate
 	for _, t := range tasks {
 		name := t["name"].String()
 		if batch, ok := opt.OptimizedBatches[name]; ok {
 			if batch.BatchNo > 0 && batch.BatchNo != t["batch_no"].Int() {
-				g.DB().Model("mvp_task").Where("id", t["id"].Int64()).Update(g.Map{
-					"batch_no":   batch.BatchNo,
-					"updated_at": gtime.Now(),
-				})
-				applied++
+				updates = append(updates, batchUpdate{taskID: t["id"].Int64(), newBatch: batch.BatchNo})
 			}
 		}
 	}
 
-	if applied > 0 {
-		g.Log().Infof(ctx, "[Review] 协调员优化：应用了 %d 个批次调整", applied)
+	if len(updates) == 0 {
+		return
 	}
+
+	// 事务内批量更新
+	if err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		for _, u := range updates {
+			if _, err := tx.Model("mvp_task").Where("id", u.taskID).Update(g.Map{
+				"batch_no":   u.newBatch,
+				"updated_at": gtime.Now(),
+			}); err != nil {
+				return fmt.Errorf("更新 task=%d batch_no 失败: %w", u.taskID, err)
+			}
+		}
+		return nil
+	}); err != nil {
+		g.Log().Errorf(ctx, "[Review] 协调员批次优化事务失败: project=%d, err=%v", projectID, err)
+		return
+	}
+
+	g.Log().Infof(ctx, "[Review] 协调员优化：应用了 %d 个批次调整", len(updates))
 }
 
 // getReviewRoleModel 获取审核角色的 AI 模型信息
@@ -571,8 +595,9 @@ func HandleReviewFailure(ctx context.Context, projectID int64, result *ReviewRes
 }
 
 // HandleReviewSuccess 审核通过：draft → pending，项目进入 running
+// 事务边界：确认任务 + 追加 warning + 项目状态改 running 在同一事务中
 func HandleReviewSuccess(ctx context.Context, projectID int64, result *ReviewResult) error {
-	// 1. 确认 draft → pending
+	// 1. 确认 draft → pending（自带全量确认或回滚保证）
 	confirmedCount, err := GetParser().ConfirmDraftTasks(ctx, projectID)
 	if err != nil {
 		return fmt.Errorf("确认草稿任务失败: %w", err)
@@ -581,39 +606,49 @@ func HandleReviewSuccess(ctx context.Context, projectID int64, result *ReviewRes
 		return fmt.Errorf("没有任务可确认")
 	}
 
-	// 2. 附加 warnings 到对应任务的描述中（按任务名聚合，减少 DB 更新次数）
-	warningsByTask := make(map[string][]string)
-	for _, w := range result.Warnings {
-		if w.TaskName != "" {
-			warningsByTask[w.TaskName] = append(warningsByTask[w.TaskName], w.Message)
+	// 2. 事务内：追加 warning + 项目状态改 running
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		// 2a. 附加 warnings 到对应任务的描述中（按任务名聚合）
+		warningsByTask := make(map[string][]string)
+		for _, w := range result.Warnings {
+			if w.TaskName != "" {
+				warningsByTask[w.TaskName] = append(warningsByTask[w.TaskName], w.Message)
+			}
 		}
-	}
-	for taskName, msgs := range warningsByTask {
-		suffix := ""
-		for _, msg := range msgs {
-			suffix += fmt.Sprintf("\n\n⚠️ 审核警告: %s", msg)
+		for taskName, msgs := range warningsByTask {
+			suffix := ""
+			for _, msg := range msgs {
+				suffix += fmt.Sprintf("\n\n⚠️ 审核警告: %s", msg)
+			}
+			if _, err := tx.Model("mvp_task").
+				Where("project_id", projectID).
+				Where("name", taskName).
+				Where("status", "pending").
+				Where("deleted_at IS NULL").
+				Update(g.Map{
+					"description": gdb.Raw(fmt.Sprintf("CONCAT(description, '%s')", strings.ReplaceAll(suffix, "'", "''"))),
+					"updated_at":  gtime.Now(),
+				}); err != nil {
+				return fmt.Errorf("附加审核警告失败: task=%s, err=%w", taskName, err)
+			}
 		}
-		if _, err := g.DB().Model("mvp_task").
-			Where("project_id", projectID).
-			Where("name", taskName).
-			Where("status", "pending").
-			Where("deleted_at IS NULL").
-			Update(g.Map{
-				"description": gdb.Raw(fmt.Sprintf("CONCAT(description, '%s')", strings.ReplaceAll(suffix, "'", "''"))),
-				"updated_at":  gtime.Now(),
-			}); err != nil {
-			g.Log().Warningf(ctx, "[Review] 附加审核警告失败: task=%s, err=%v", taskName, err)
-		}
-	}
 
-	// 3. 更新项目状态为 running
-	_, err = g.DB().Model("mvp_project").Where("id", projectID).Update(g.Map{
-		"status":       "running",
-		"pause_reason": nil,
-		"updated_at":   gtime.Now(),
+		// 2b. 更新项目状态为 running
+		if _, err := tx.Model("mvp_project").Where("id", projectID).Update(g.Map{
+			"status":       "running",
+			"pause_reason": nil,
+			"updated_at":   gtime.Now(),
+		}); err != nil {
+			return fmt.Errorf("项目状态更新失败: %w", err)
+		}
+
+		return nil
 	})
 	if err != nil {
-		return err
+		// 事务失败：回滚已确认的任务（pending → draft）
+		g.Log().Errorf(ctx, "[Review] 事务失败，回滚 %d 个已确认任务: project=%d, err=%v", confirmedCount, projectID, err)
+		rollbackConfirmedTasks(ctx, projectID)
+		return fmt.Errorf("审核通过处理失败: %w", err)
 	}
 
 	// 4. 压缩架构师对话为全局上下文
@@ -646,6 +681,25 @@ func HandleReviewSuccess(ctx context.Context, projectID int64, result *ReviewRes
 	}
 
 	return nil
+}
+
+// rollbackConfirmedTasks 将项目中已确认的 pending 任务回退为 draft
+func rollbackConfirmedTasks(ctx context.Context, projectID int64) {
+	taskIDs, err := g.DB().Model("mvp_task").
+		Where("project_id", projectID).
+		Where("status", "pending").
+		Where("deleted_at IS NULL").
+		Fields("id").
+		Array()
+	if err != nil {
+		g.Log().Errorf(ctx, "[Review] 回滚查询失败: project=%d, err=%v", projectID, err)
+		return
+	}
+	for _, idVal := range taskIDs {
+		if _, err := updateTaskStatus(ctx, idVal.Int64(), "pending", "draft", nil); err != nil {
+			g.Log().Errorf(ctx, "[Review] 回滚 task=%d pending→draft 失败: %v", idVal.Int64(), err)
+		}
+	}
 }
 
 // --- 辅助函数 ---
