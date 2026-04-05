@@ -267,18 +267,51 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 		return &v1.WorkflowParseTasksRes{HasTasks: false, TaskCount: 0}, nil
 	}
 
-	// 查找最新的 assistant 消息
-	msg, err := g.DB().Model("mvp_message").
-		Where("conversation_id", conv["id"].Int64()).
-		Where("role", "assistant").
+	// 查找最新一轮方案：从最后一条 user 消息之后的所有 assistant 回复
+	convID := conv["id"].Int64()
+
+	// 先找最后一条 user 消息的时间，作为"最新一轮"的起点
+	lastUserMsg, err := g.DB().Model("mvp_message").
+		Where("conversation_id", convID).
+		Where("role", "user").
+		Where("status", "completed").
 		Where("deleted_at IS NULL").
 		OrderDesc("created_at").
 		One()
-	if err != nil || msg.IsEmpty() {
+	if err != nil || lastUserMsg.IsEmpty() {
+		return &v1.WorkflowParseTasksRes{HasTasks: false, TaskCount: 0}, nil
+	}
+	lastUserTime := lastUserMsg["created_at"].String()
+
+	// 取该 user 消息之后的所有 assistant 回复（即最新一轮方案）
+	allMsgs, err := g.DB().Model("mvp_message").
+		Where("conversation_id", convID).
+		Where("role", "assistant").
+		Where("status", "completed").
+		Where("deleted_at IS NULL").
+		Where("created_at >= ?", lastUserTime).
+		OrderAsc("created_at").
+		All()
+	if err != nil || len(allMsgs) == 0 {
 		return &v1.WorkflowParseTasksRes{HasTasks: false, TaskCount: 0}, nil
 	}
 
-	aiReply := msg["content"].String()
+	// 拼接最新一轮的 assistant 消息内容
+	var allReplies strings.Builder
+	var lastMsgID int64
+	for i, m := range allMsgs {
+		content := m["content"].String()
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		if i > 0 {
+			allReplies.WriteString("\n\n---\n\n")
+		}
+		allReplies.WriteString(content)
+		lastMsgID = m["id"].Int64()
+	}
+	aiReply := allReplies.String()
+	_ = lastMsgID
 
 	// 判断引擎版本
 	gw := compat.NewLegacyGateway()
@@ -302,7 +335,7 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 	}
 
 	// V2 主路径：解析为蓝图写入 plan_version + task_blueprint
-	count, err := parseAndCreateBlueprints(ctx, projectID, conv["id"].Int64(), msg["id"].Int64(), aiReply)
+	count, err := parseAndCreateBlueprints(ctx, projectID, convID, lastMsgID, aiReply)
 	if err != nil {
 		return nil, err
 	}

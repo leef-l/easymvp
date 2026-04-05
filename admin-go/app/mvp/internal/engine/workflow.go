@@ -349,19 +349,21 @@ func buildCodingArchitectPrompt(projectName, projectDesc string) string {
 4. 确保并行任务之间不冲突（不修改同一个文件/模块）
 5. 为每个任务标注：任务名称、描述、角色等级(lite/pro/max)、执行批次号、涉及的资源范围、依赖关系
 
-输出任务清单时请使用 JSON 格式，便于系统解析：
-{
-  "tasks": [
-    {
-      "name": "任务名称",
-      "description": "详细描述",
-      "role_level": "max/pro/lite",
-      "batch_no": 1,
-      "affected_resources": ["file1.go", "file2.go"],
-      "depends_on": []
-    }
-  ]
-}`, projectName, projectDesc)
+## 分段输出规则（必须严格遵守）
+
+当任务数量较多时（超过 20 个），你**必须**分模块输出任务清单：
+1. **先输出总体方案概要**：列出所有功能模块、技术选型、整体架构
+2. **然后逐模块输出 JSON 任务清单**，每个模块一个独立 JSON 代码块
+3. **最后输出方案总结**：汇总任务数量、批次安排、关键依赖链
+
+JSON 任务清单格式示例：
+{"tasks": [{"name": "模块A-任务1", "description": "详细描述", "role_level": "pro", "batch_no": 1, "affected_resources": ["path/file1.go"], "depends_on": []}]}
+
+重要规则：
+- 每个 JSON 代码块必须是完整的 {"tasks": [...]} 格式，系统会自动合并所有代码块中的任务
+- 任务名称全局唯一，跨模块依赖用完整任务名引用
+- 如果输出被截断，系统会自动请求你继续，请从上次中断处接着输出
+- 不要试图在一个 JSON 块中输出所有任务，分模块输出更安全`, projectName, projectDesc)
 }
 
 func buildCreativeArchitectPrompt(projectName, projectDesc string) string {
@@ -383,19 +385,18 @@ func buildCreativeArchitectPrompt(projectName, projectDesc string) string {
 - 正文创作按剧情线并行，按时间线串行
 - affected_resources 使用相对路径（如 "chapters/ch01.md"）
 
-输出任务清单时请使用 JSON 格式：
-{
-  "tasks": [
-    {
-      "name": "任务名称",
-      "description": "详细描述（含创作要求和风格指南）",
-      "role_level": "max/pro/lite",
-      "batch_no": 1,
-      "affected_resources": ["chapters/ch01.md"],
-      "depends_on": []
-    }
-  ]
-}`, projectName, projectDesc)
+## 分段输出规则（必须严格遵守）
+
+当任务数量较多时（超过 20 个），你**必须**分模块输出任务清单：
+1. 先输出总体方案概要（模块划分、风格方向）
+2. 逐模块输出 JSON 任务清单，每个模块一个独立 JSON 代码块
+3. 最后输出方案总结
+
+JSON 任务清单格式示例：
+{"tasks": [{"name": "模块-任务名", "description": "详细描述", "role_level": "pro", "batch_no": 1, "affected_resources": ["chapters/ch01.md"], "depends_on": []}]}
+
+重要：每个 JSON 块必须是完整的 {"tasks": [...]}，系统会自动合并所有代码块。
+如果输出被截断，系统会自动请求继续，从中断处接着输出即可。`, projectName, projectDesc)
 }
 
 func buildAnalysisArchitectPrompt(projectName, projectDesc string) string {
@@ -417,17 +418,16 @@ func buildAnalysisArchitectPrompt(projectName, projectDesc string) string {
 - 汇总报告和可视化依赖所有分析任务
 - affected_resources 使用相对路径（如 "reports/summary.md", "data/cleaned.csv"）
 
-输出任务清单时请使用 JSON 格式：
-{
-  "tasks": [
-    {
-      "name": "任务名称",
-      "description": "详细描述（含分析方法、数据源、预期输出）",
-      "role_level": "max/pro/lite",
-      "batch_no": 1,
-      "affected_resources": ["reports/summary.md"],
-      "depends_on": []
-    }
-  ]
-}`, projectName, projectDesc)
+## 分段输出规则（必须严格遵守）
+
+当任务数量较多时（超过 20 个），你**必须**分模块输出任务清单：
+1. 先输出总体方案概要（分析框架、数据源）
+2. 逐模块输出 JSON 任务清单，每个模块一个独立 JSON 代码块
+3. 最后输出方案总结
+
+JSON 任务清单格式示例：
+{"tasks": [{"name": "模块-任务名", "description": "详细描述（含分析方法、数据源、预期输出）", "role_level": "pro", "batch_no": 1, "affected_resources": ["reports/summary.md"], "depends_on": []}]}
+
+重要：每个 JSON 块必须是完整的 {"tasks": [...]}，系统会自动合并所有代码块。
+如果输出被截断，系统会自动请求继续，从中断处接着输出即可。`, projectName, projectDesc)
 }

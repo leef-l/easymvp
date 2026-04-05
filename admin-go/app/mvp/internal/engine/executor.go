@@ -153,8 +153,9 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 	var fullContent strings.Builder
 	chunkIndex := 0
 	hub := GetHub()
+	var lastFinishReason string
 
-	err = p.ChatStream(ctx, req, func(chunk *provider.StreamChunk) error {
+	streamHandler := func(chunk *provider.StreamChunk) error {
 		if chunk.Content != "" {
 			fullContent.WriteString(chunk.Content)
 			chunkIndex++
@@ -183,29 +184,82 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 			hub.Publish(replyID, string(chunkJSON))
 		}
 
-		if chunk.FinishReason != "" && chunk.Usage != nil {
-			usageJSON, _ := json.Marshal(chunk.Usage)
-			if _, err := g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
-				"token_usage": string(usageJSON),
-			}); err != nil {
-				g.Log().Errorf(ctx, "[Executor] 更新 token_usage 失败: msg=%d, err=%v", replyID, err)
+		if chunk.FinishReason != "" {
+			lastFinishReason = chunk.FinishReason
+			if chunk.Usage != nil {
+				usageJSON, _ := json.Marshal(chunk.Usage)
+				if _, err := g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
+					"token_usage": string(usageJSON),
+				}); err != nil {
+					g.Log().Errorf(ctx, "[Executor] 更新 token_usage 失败: msg=%d, err=%v", replyID, err)
+				}
 			}
 		}
 
 		return nil
-	})
+	}
 
-	if err != nil {
+	// 带重试 + 自动续写的 AI 调用
+	const maxRetries = 2
+	const maxContinueRounds = 5
+	var callErr error
+
+	for round := 0; round <= maxContinueRounds; round++ {
+		lastFinishReason = ""
+
+		// 瞬时错误重试
+		callErr = nil
+		for attempt := 0; attempt <= maxRetries; attempt++ {
+			if attempt > 0 {
+				g.Log().Warningf(ctx, "[Executor] AI 调用第 %d 次重试 (task=%d): %v", attempt, taskID, callErr)
+				time.Sleep(time.Duration(attempt*2) * time.Second)
+			}
+			callErr = p.ChatStream(ctx, req, streamHandler)
+			if callErr == nil {
+				break
+			}
+			errMsg := callErr.Error()
+			isRetryable := strings.Contains(errMsg, "status 500") ||
+				strings.Contains(errMsg, "EOF") ||
+				strings.Contains(errMsg, "deadline exceeded") ||
+				strings.Contains(errMsg, "connection reset")
+			if !isRetryable {
+				break
+			}
+		}
+
+		if callErr != nil {
+			break
+		}
+
+		// 检查是否被截断
+		isTruncated := lastFinishReason == "length" || lastFinishReason == "max_tokens"
+		if !isTruncated || round == maxContinueRounds {
+			break
+		}
+
+		// 被截断：自动续写
+		g.Log().Infof(ctx, "[Executor] 回复被截断(reason=%s)，自动续写第 %d 轮 (task=%d)",
+			lastFinishReason, round+1, taskID)
+		TouchHeartbeat(ctx, taskID)
+
+		req.Messages = append(req.Messages,
+			provider.Message{Role: provider.RoleAssistant, Content: fullContent.String()},
+			provider.Message{Role: provider.RoleUser, Content: "继续，从上次中断的地方接着输出，不要重复已输出的内容。"},
+		)
+	}
+
+	if callErr != nil {
 		// AI 调用失败
 		if _, dbErr := g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
-			"content":      "AI调用失败: " + err.Error(),
+			"content":      "AI调用失败: " + callErr.Error(),
 			"message_type": mvpmodel.MessageTypePoison,
 			"status":       "failed",
 			"updated_at":   gtime.Now(),
 		}); dbErr != nil {
 			g.Log().Errorf(ctx, "[Executor] 更新失败消息状态失败: msg=%d, err=%v", replyID, dbErr)
 		}
-		e.handleTaskFailure(ctx, projectID, taskID, roleType, taskFailureExecution, err.Error())
+		e.handleTaskFailure(ctx, projectID, taskID, roleType, taskFailureExecution, callErr.Error())
 		return
 	}
 

@@ -402,7 +402,7 @@ async function handleParseTasks() {
       },
     });
   } catch (err: any) {
-    message.error(err?.message || '检查拆分失败');
+    message.error(err?.message || '拆分方案失败');
   } finally {
     parsingTasks.value = false;
   }
@@ -483,6 +483,8 @@ onMounted(async () => {
         pageSize: 1,
         projectID: projectId.value,
         roleType: 'architect',
+        orderBy: 'created_at',
+        orderDir: 'desc',
       } as any);
       if (res?.list?.length) {
         conversationId.value = res.list[0].id;
@@ -562,7 +564,7 @@ onUnmounted(() => {
           <template #icon>
             <SearchOutlined />
           </template>
-          检查拆分
+          拆分方案
         </Button>
         <!-- 设计中/暂停状态 且有草稿任务时显示确认方案按钮 -->
         <Badge :count="draftTaskCount" :offset="[-6, 0]">

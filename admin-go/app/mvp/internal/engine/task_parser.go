@@ -375,29 +375,50 @@ func (p *TaskParser) GetDraftCount(ctx context.Context, projectID int64) int {
 }
 
 // extractTaskPlan 从 AI 回复文本中提取 JSON 任务清单
-// 支持多种格式：
-//  1. 标准 ```json ... ``` 代码块
-//  2. { "tasks": [...] } 直接 JSON
+// 支持多种格式，并自动合并分布在多个 JSON 代码块中的任务：
+//  1. 标准 ```json ... ``` 代码块（支持多个，自动合并）
+//  2. { "tasks": [...] } 直接 JSON（支持多个）
 //  3. 混合文本中的 JSON 片段
+//  4. 独立的 JSON 数组 [{ ... }]
 func (p *TaskParser) extractTaskPlan(text string) (*ArchitectTaskPlan, error) {
-	// 策略1：从 ```json 代码块中提取
+	var allTasks []ArchitectTask
+
+	// 策略1：从所有 ```json 代码块中提取并合并
 	codeBlockRe := regexp.MustCompile("(?s)```(?:json)?\\s*\\n?(\\{[\\s\\S]*?\\})\\s*```")
 	matches := codeBlockRe.FindAllStringSubmatch(text, -1)
 	for _, m := range matches {
 		if plan, err := p.tryParseJSON(m[1]); err == nil && len(plan.Tasks) > 0 {
-			return plan, nil
+			allTasks = append(allTasks, plan.Tasks...)
 		}
 	}
 
-	// 策略2：直接查找最外层的 { "tasks": [...] }
-	tasksRe := regexp.MustCompile(`(?s)\{\s*"tasks"\s*:\s*\[[\s\S]*\]\s*\}`)
-	if m := tasksRe.FindString(text); m != "" {
+	// 如果从代码块中已收集到任务，直接返回（最常见的分段输出场景）
+	if len(allTasks) > 0 {
+		return &ArchitectTaskPlan{Tasks: allTasks}, nil
+	}
+
+	// 策略2：查找所有 { "tasks": [...] } 格式的 JSON 块
+	// 使用非贪婪匹配逐个提取
+	tasksRe := regexp.MustCompile(`(?s)\{\s*"tasks"\s*:\s*\[.*?\]\s*\}`)
+	tasksMatches := tasksRe.FindAllString(text, -1)
+	for _, m := range tasksMatches {
+		if plan, err := p.tryParseJSON(m); err == nil && len(plan.Tasks) > 0 {
+			allTasks = append(allTasks, plan.Tasks...)
+		}
+	}
+	if len(allTasks) > 0 {
+		return &ArchitectTaskPlan{Tasks: allTasks}, nil
+	}
+
+	// 策略3：贪婪匹配单个大 JSON（兼容旧的单块输出）
+	tasksGreedyRe := regexp.MustCompile(`(?s)\{\s*"tasks"\s*:\s*\[[\s\S]*\]\s*\}`)
+	if m := tasksGreedyRe.FindString(text); m != "" {
 		if plan, err := p.tryParseJSON(m); err == nil && len(plan.Tasks) > 0 {
 			return plan, nil
 		}
 	}
 
-	// 策略3：查找独立的 JSON 数组 [{ ... }]（直接就是 tasks 数组）
+	// 策略4：查找独立的 JSON 数组 [{ ... }]（直接就是 tasks 数组）
 	arrayRe := regexp.MustCompile(`(?s)\[\s*\{[\s\S]*\}\s*\]`)
 	if m := arrayRe.FindString(text); m != "" {
 		cleaned := p.cleanJSON(m)

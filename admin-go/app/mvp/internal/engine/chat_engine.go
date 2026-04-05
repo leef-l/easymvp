@@ -199,10 +199,12 @@ func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *M
 		SystemPrompt: modelInfo.SystemPrompt,
 	}
 
-	// 4. 流式调用 AI（带重试：500/EOF/timeout 等瞬时错误最多重试 2 次）
+	// 4. 流式调用 AI（带重试 + 自动续写：截断时自动发"继续"续写，最多 5 轮）
 	const maxRetries = 2
+	const maxContinueRounds = 5 // 自动续写上限
 	var fullContent strings.Builder
 	chunkIndex := 0
+	var lastFinishReason string
 
 	streamHandler := func(chunk *provider.StreamChunk) error {
 		if chunk.Content != "" {
@@ -232,6 +234,7 @@ func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *M
 
 		// 最后一个 chunk（有 finish_reason）
 		if chunk.FinishReason != "" {
+			lastFinishReason = chunk.FinishReason
 			// 更新 token 用量
 			if chunk.Usage != nil {
 				usageJSON, _ := json.Marshal(chunk.Usage)
@@ -246,46 +249,64 @@ func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *M
 		return nil
 	}
 
-	var lastErr error
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		if attempt > 0 {
-			g.Log().Warningf(ctx, "[ChatEngine] AI 调用第 %d 次重试 (messageID=%d): %v", attempt, replyID, lastErr)
-			time.Sleep(time.Duration(attempt*2) * time.Second)
-		}
-		lastErr = p.ChatStream(ctx, req, streamHandler)
-		if lastErr == nil {
-			break
-		}
-		// 仅对瞬时错误重试（500/EOF/timeout），其他错误直接失败
-		errMsg := lastErr.Error()
-		isRetryable := strings.Contains(errMsg, "status 500") ||
-			strings.Contains(errMsg, "EOF") ||
-			strings.Contains(errMsg, "deadline exceeded") ||
-			strings.Contains(errMsg, "connection reset")
-		if !isRetryable {
-			break
-		}
-	}
+	// 外层循环：自动续写（被截断时追加"继续"重新调用）
+	for round := 0; round <= maxContinueRounds; round++ {
+		lastFinishReason = ""
 
-	if lastErr != nil {
-		e.failMessage(ctx, replyID, lastErr.Error())
-		return
+		// 内层循环：瞬时错误重试
+		var lastErr error
+		for attempt := 0; attempt <= maxRetries; attempt++ {
+			if attempt > 0 {
+				g.Log().Warningf(ctx, "[ChatEngine] AI 调用第 %d 次重试 (messageID=%d): %v", attempt, replyID, lastErr)
+				time.Sleep(time.Duration(attempt*2) * time.Second)
+			}
+			lastErr = p.ChatStream(ctx, req, streamHandler)
+			if lastErr == nil {
+				break
+			}
+			errMsg := lastErr.Error()
+			isRetryable := strings.Contains(errMsg, "status 500") ||
+				strings.Contains(errMsg, "EOF") ||
+				strings.Contains(errMsg, "deadline exceeded") ||
+				strings.Contains(errMsg, "connection reset")
+			if !isRetryable {
+				break
+			}
+		}
+
+		if lastErr != nil {
+			e.failMessage(ctx, replyID, lastErr.Error())
+			return
+		}
+
+		// 检查是否被截断（finish_reason=length 或 max_tokens）
+		isTruncated := lastFinishReason == "length" || lastFinishReason == "max_tokens"
+		if !isTruncated || round == maxContinueRounds {
+			break
+		}
+
+		// 被截断：追加当前已有内容为 assistant 消息，再加"继续"指令，重新调用
+		g.Log().Infof(ctx, "[ChatEngine] 回复被截断(reason=%s)，自动续写第 %d 轮 (messageID=%d)",
+			lastFinishReason, round+1, replyID)
+
+		// 更新请求的消息列表：追加已有回复 + "继续"指令
+		req.Messages = append(req.Messages,
+			provider.Message{Role: provider.RoleAssistant, Content: fullContent.String()},
+			provider.Message{Role: provider.RoleUser, Content: "继续，从上次中断的地方接着输出，不要重复已输出的内容。"},
+		)
 	}
 
 	// 5. 更新消息为完成状态
 	_, updateErr := g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
-		"content":      fullContent.String(),
-		"status":       "completed",
-		"updated_at":   gtime.Now(),
+		"content":    fullContent.String(),
+		"status":     "completed",
+		"updated_at": gtime.Now(),
 	})
 	if updateErr != nil {
 		g.Log().Errorf(ctx, "更新消息状态失败: %v", updateErr)
 	}
 
-	// 6. 如果是架构师对话，尝试从回复中解析任务清单
-	go e.tryParseArchitectTasks(conversationID, fullContent.String())
-
-	// 7. 通知 SSE Hub 流式输出完成
+	// 6. 通知 SSE Hub 流式输出完成
 	doneJSON, _ := json.Marshal(map[string]interface{}{
 		"done": true,
 	})
