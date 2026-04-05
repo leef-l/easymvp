@@ -463,7 +463,7 @@ export function acceptRework(projectID: string, reason: string) {
 
 // ==================== 自治管理 ====================
 
-/** 自治决策条目 */
+/** @deprecated 旧自治决策条目，已迁移至 L3.5 自治中台 */
 export interface AutonomyDecisionItem {
   id: string;
   decisionType: string;
@@ -472,6 +472,47 @@ export interface AutonomyDecisionItem {
   recommendation: string;
   decisionMode: string;
   humanAction: string;
+  executedAt?: string;
+  result?: string;
+  createdAt: string;
+}
+
+/** L3.5 自治中台：人工节点条目 */
+export interface AutonomyCheckpointItem {
+  id: string;
+  workflowRunId: string;
+  projectId: string;
+  decisionActionId: string;
+  checkpointType: string;
+  title: string;
+  description?: string;
+  status: string;
+  assignedTo?: string;
+  handledBy?: string;
+  handleAction?: string;
+  handleReason?: string;
+  handledAt?: string;
+  expiresAt?: string;
+  createdAt: string;
+}
+
+/** L3.5 自治中台：决策动作条目 */
+export interface AutonomyActionItem {
+  id: string;
+  workflowRunId: string;
+  projectId: string;
+  decisionType: string;
+  decisionLevel: string;
+  triggerSource: string;
+  triggerContext?: string;
+  matchedRuleId?: string;
+  matchedGateIds?: string;
+  actionType: string;
+  recommendation?: string;
+  finalAction?: string;
+  actionStatus: string;
+  autoExecutable: number;
+  humanRequired: number;
   executedAt?: string;
   result?: string;
   createdAt: string;
@@ -488,7 +529,7 @@ export interface ProjectReportItem {
   createdAt: string;
 }
 
-/** 获取自治决策列表 */
+/** @deprecated 旧接口，已迁移至 getAutonomyCheckpoints */
 export function getAutonomyDecisions(projectID: string, decisionType?: string) {
   return requestClient.get<{ decisions: AutonomyDecisionItem[] }>(
     `${PREFIX}/autonomy-decisions`,
@@ -496,14 +537,34 @@ export function getAutonomyDecisions(projectID: string, decisionType?: string) {
   );
 }
 
-/** 批准自治决策 */
+/** @deprecated 旧接口，已迁移至 autonomyApprove */
 export function approveDecision(projectID: string, decisionID: string) {
   return requestClient.post(`${PREFIX}/approve-decision`, { projectID, decisionID });
 }
 
-/** 拒绝自治决策 */
+/** @deprecated 旧接口，已迁移至 autonomyReject */
 export function rejectDecision(projectID: string, decisionID: string) {
   return requestClient.post(`${PREFIX}/reject-decision`, { projectID, decisionID });
+}
+
+// ==================== L3.5 自治中台 ====================
+
+/** 查询项目待处理人工节点 + 关联决策动作 */
+export function getAutonomyCheckpoints(projectID: string) {
+  return requestClient.get<{ checkpoints: AutonomyCheckpointItem[]; actions: AutonomyActionItem[] }>(
+    `${PREFIX}/autonomy-checkpoints`,
+    { params: { projectID } },
+  );
+}
+
+/** 审批通过决策动作 */
+export function autonomyApprove(actionID: string) {
+  return requestClient.post(`${PREFIX}/autonomy-approve`, { actionID });
+}
+
+/** 驳回决策动作 */
+export function autonomyReject(actionID: string, reason: string) {
+  return requestClient.post(`${PREFIX}/autonomy-reject`, { actionID, reason });
 }
 
 /** 手动触发重规划 */
