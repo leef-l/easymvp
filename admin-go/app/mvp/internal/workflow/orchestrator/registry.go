@@ -62,8 +62,13 @@ func Init() {
 
 		// 执行器注册表
 		execRegistry := executorPkg.NewRegistry()
-		execRegistry.Register(executorPkg.NewAiderExecutor(workspace.NewGitWorktreeManager()))
+		wsMgr := workspace.NewGitWorktreeManager()
+		execRegistry.Register(executorPkg.NewAiderExecutor(wsMgr))
 		execRegistry.Register(executorPkg.NewChatExecutor())
+		execRegistry.Register(executorPkg.NewOpenHandsExecutor(wsMgr))
+		execRegistry.Register(executorPkg.NewClaudeCodeExecutor(wsMgr))
+		execRegistry.Register(executorPkg.NewCodexCLIExecutor(wsMgr))
+		execRegistry.Register(executorPkg.NewGeminiCLIExecutor(wsMgr))
 
 		// 执行阶段服务
 		taskRepo := repo.NewDomainTaskRepo()
