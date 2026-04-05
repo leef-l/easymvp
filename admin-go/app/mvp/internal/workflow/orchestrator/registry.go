@@ -12,6 +12,9 @@ import (
 	"easymvp/app/mvp/internal/consts"
 	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/workflow/acceptance"
+	"easymvp/app/mvp/internal/collab/adapter"
+	collabRepo "easymvp/app/mvp/internal/collab/repo"
+	collabService "easymvp/app/mvp/internal/collab/service"
 	executorPkg "easymvp/app/mvp/internal/workflow/executor"
 	"easymvp/app/mvp/internal/workspace"
 	"easymvp/app/mvp/internal/workflow/domain/plan"
@@ -45,7 +48,8 @@ var (
 	eventBus        *event.Bus
 	eventPublisher  *event.Publisher
 	execRegistry    *executorPkg.Registry
-	decisionCenter  *autonomy.DecisionCenter
+	decisionCenter     *autonomy.DecisionCenter
+	collabBindingRepo  *collabRepo.BindingRepo
 )
 
 // Init 初始化所有工作流服务单例。在应用启动时调用一次。
@@ -461,6 +465,22 @@ func Init() {
 			}
 			return true
 		})
+
+		// ==================== 协作平台通知初始化 ====================
+		collabBindingRepo = collabRepo.NewBindingRepo()
+		if engine.GetConfigInt(context.Background(), "workflow.collab.feishu_enabled", "workflow.collab.feishuEnabled", 0) == 1 {
+			feishuAdapter := adapter.NewFeishuAdapter()
+			cpNotifier := collabService.NewCheckpointNotifier(feishuAdapter, collabBindingRepo)
+			eventBus.Subscribe(event.EventAutonomyCheckpointOpened, cpNotifier.OnCheckpointOpened)
+			eventBus.Subscribe(event.EventAutonomyActionFailed, cpNotifier.OnActionFailed)
+			eventBus.Subscribe(event.EventAutonomyGateBlocked, cpNotifier.OnGateBlocked)
+
+			reportNotifier := collabService.NewReportNotifier(feishuAdapter, collabBindingRepo)
+			eventBus.Subscribe(event.EventStageCompleted, reportNotifier.OnStageCompleted)
+			eventBus.Subscribe(event.EventWorkflowCompleted, reportNotifier.OnWorkflowCompleted)
+
+			g.Log().Info(context.Background(), "[Registry] 飞书协作通知已注册")
+		}
 	})
 }
 
@@ -628,6 +648,12 @@ func GetExecutorRegistry() *executorPkg.Registry {
 func GetDecisionCenter() *autonomy.DecisionCenter {
 	Init()
 	return decisionCenter
+}
+
+// GetCollabBindingRepo 获取协作平台绑定仓储单例。
+func GetCollabBindingRepo() *collabRepo.BindingRepo {
+	Init()
+	return collabBindingRepo
 }
 
 // triggerReworkStage 触发返工阶段：创建 rework stage，启动分析流程。

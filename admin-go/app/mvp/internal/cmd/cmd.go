@@ -17,6 +17,7 @@ import (
 	"easymvp/app/mvp/internal/controller/task_log"
 
 
+	"easymvp/app/mvp/internal/controller/chat"
 	"easymvp/app/mvp/internal/middleware"
 )
 
@@ -29,6 +30,10 @@ var (
 			s := g.Server()
 			s.Group("/", func(group *ghttp.RouterGroup) {
 				group.Middleware(ghttp.MiddlewareHandlerResponse)
+				// 飞书回调路由（不走 JWT 认证，走飞书签名校验）
+				group.Group("/api/mvp/collab", func(group *ghttp.RouterGroup) {
+					group.POST("/feishu/callback", chat.FeishuCallback.Handle)
+				})
 				group.Group("/api/mvp", func(group *ghttp.RouterGroup) {
 					group.Middleware(middleware.Auth)
 					group.Bind(
