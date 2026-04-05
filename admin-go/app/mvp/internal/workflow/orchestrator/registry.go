@@ -114,7 +114,8 @@ func Init() {
 		acceptEvidenceRepo := repo.NewAcceptEvidenceRepo()
 		evidenceCollector := acceptance.NewEvidenceCollector(acceptEvidenceRepo)
 		ruleEngine := acceptance.NewRuleEngine(acceptRuleRepo)
-		decisionReducer := acceptance.NewDecisionReducer(acceptIssueRepo)
+		judge := acceptance.NewJudge()
+		decisionReducer := acceptance.NewDecisionReducer(acceptIssueRepo, judge)
 		acceptStageSvc = acceptStage.NewService(acceptRunRepo, evidenceCollector, ruleEngine, decisionReducer)
 		acceptStageSvc.SetStageCompleter(stageSvc)
 

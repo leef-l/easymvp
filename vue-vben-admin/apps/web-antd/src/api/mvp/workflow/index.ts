@@ -345,3 +345,96 @@ export function getResourceLocks(projectID: string) {
     { params: { projectID } },
   );
 }
+
+// ==================== 验收控制台 ====================
+
+/** 验收问题条目 */
+export interface AcceptIssueItem {
+  id: string;
+  issueType: string;
+  ruleCode: string;
+  severity: string;
+  title: string;
+  detail: string;
+  expectedValue: string;
+  actualValue: string;
+  suggestedAction: string;
+  domainTaskID?: string;
+  resourceRef?: string;
+  status: string;
+  createdAt: string;
+}
+
+/** 验收证据条目 */
+export interface AcceptEvidenceItem {
+  id: string;
+  evidenceType: string;
+  sourceType: string;
+  sourceID?: string;
+  contentRef?: string;
+  summary: string;
+  createdAt: string;
+}
+
+/** 验收状态总览结果 */
+export interface AcceptStatusResult {
+  acceptRunID: string;
+  workflowRunID: string;
+  acceptRound: number;
+  status: string;
+  decision: string;
+  score: number;
+  summary: string;
+  rulesSnapshot?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  blockerCount: number;
+  errorCount: number;
+  warnCount: number;
+  infoCount: number;
+  evidenceCount: number;
+}
+
+/** 获取验收状态总览 */
+export function getAcceptStatus(projectID: string) {
+  return requestClient.get<AcceptStatusResult>(
+    `${PREFIX}/accept-status`,
+    { params: { projectID } },
+  );
+}
+
+/** 获取验收问题列表 */
+export function getAcceptIssues(projectID: string, severity?: string) {
+  return requestClient.get<{ issues: AcceptIssueItem[] }>(
+    `${PREFIX}/accept-issues`,
+    { params: { projectID, ...(severity ? { severity } : {}) } },
+  );
+}
+
+/** 获取验收证据列表 */
+export function getAcceptEvidence(projectID: string) {
+  return requestClient.get<{ evidence: AcceptEvidenceItem[] }>(
+    `${PREFIX}/accept-evidence`,
+    { params: { projectID } },
+  );
+}
+
+/** 人工放行验收 */
+export function acceptApprove(projectID: string, reason?: string) {
+  return requestClient.post(`${PREFIX}/accept-approve`, { projectID, reason });
+}
+
+/** 驳回验收 */
+export function acceptReject(projectID: string, reason: string) {
+  return requestClient.post(`${PREFIX}/accept-reject`, { projectID, reason });
+}
+
+/** 重新验收 */
+export function acceptRerun(projectID: string) {
+  return requestClient.post(`${PREFIX}/accept-rerun`, { projectID });
+}
+
+/** 驳回并返工 */
+export function acceptRework(projectID: string, reason: string) {
+  return requestClient.post(`${PREFIX}/accept-rework`, { projectID, reason });
+}

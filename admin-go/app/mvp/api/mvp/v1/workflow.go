@@ -441,3 +441,131 @@ type WorkflowResourceLocksRes struct {
 	g.Meta `mime:"application/json"`
 	Locks  []ResourceLockItem `json:"locks"`
 }
+
+// ==================== 验收控制台 API ====================
+
+// WorkflowAcceptStatusReq 验收状态总览请求
+type WorkflowAcceptStatusReq struct {
+	g.Meta    `path:"/workflow/accept-status" method:"get" tags:"项目流程" summary:"验收状态总览"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// WorkflowAcceptStatusRes 验收状态总览响应
+type WorkflowAcceptStatusRes struct {
+	g.Meta        `mime:"application/json"`
+	AcceptRunID   snowflake.JsonInt64 `json:"acceptRunID"`
+	WorkflowRunID snowflake.JsonInt64 `json:"workflowRunID"`
+	AcceptRound   int                 `json:"acceptRound"`
+	Status        string              `json:"status"`
+	Decision      string              `json:"decision"`
+	Score         float64             `json:"score"`
+	Summary       string              `json:"summary"`
+	RulesSnapshot string              `json:"rulesSnapshot,omitempty"`
+	StartedAt     *gtime.Time         `json:"startedAt,omitempty"`
+	FinishedAt    *gtime.Time         `json:"finishedAt,omitempty"`
+	BlockerCount  int                 `json:"blockerCount"`
+	ErrorCount    int                 `json:"errorCount"`
+	WarnCount     int                 `json:"warnCount"`
+	InfoCount     int                 `json:"infoCount"`
+	EvidenceCount int                 `json:"evidenceCount"`
+}
+
+// WorkflowAcceptIssuesReq 验收问题列表请求
+type WorkflowAcceptIssuesReq struct {
+	g.Meta    `path:"/workflow/accept-issues" method:"get" tags:"项目流程" summary:"验收问题列表"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	Severity  string              `json:"severity" dc:"按严重级别过滤(blocker/error/warn/info)"`
+}
+
+// AcceptIssueItem 验收问题条目
+type AcceptIssueItem struct {
+	ID              snowflake.JsonInt64 `json:"id"`
+	IssueType       string              `json:"issueType"`
+	RuleCode        string              `json:"ruleCode"`
+	Severity        string              `json:"severity"`
+	Title           string              `json:"title"`
+	Detail          string              `json:"detail"`
+	ExpectedValue   string              `json:"expectedValue"`
+	ActualValue     string              `json:"actualValue"`
+	SuggestedAction string              `json:"suggestedAction"`
+	DomainTaskID    snowflake.JsonInt64  `json:"domainTaskID,omitempty"`
+	ResourceRef     string              `json:"resourceRef,omitempty"`
+	Status          string              `json:"status"`
+	CreatedAt       *gtime.Time         `json:"createdAt"`
+}
+
+// WorkflowAcceptIssuesRes 验收问题列表响应
+type WorkflowAcceptIssuesRes struct {
+	g.Meta `mime:"application/json"`
+	Issues []AcceptIssueItem `json:"issues"`
+}
+
+// WorkflowAcceptEvidenceReq 验收证据列表请求
+type WorkflowAcceptEvidenceReq struct {
+	g.Meta    `path:"/workflow/accept-evidence" method:"get" tags:"项目流程" summary:"验收证据列表"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// AcceptEvidenceItem 验收证据条目
+type AcceptEvidenceItem struct {
+	ID           snowflake.JsonInt64 `json:"id"`
+	EvidenceType string              `json:"evidenceType"`
+	SourceType   string              `json:"sourceType"`
+	SourceID     snowflake.JsonInt64 `json:"sourceID,omitempty"`
+	ContentRef   string              `json:"contentRef,omitempty"`
+	Summary      string              `json:"summary"`
+	CreatedAt    *gtime.Time         `json:"createdAt"`
+}
+
+// WorkflowAcceptEvidenceRes 验收证据列表响应
+type WorkflowAcceptEvidenceRes struct {
+	g.Meta   `mime:"application/json"`
+	Evidence []AcceptEvidenceItem `json:"evidence"`
+}
+
+// WorkflowAcceptApproveReq 人工放行请求
+type WorkflowAcceptApproveReq struct {
+	g.Meta    `path:"/workflow/accept-approve" method:"post" tags:"项目流程" summary:"人工放行验收"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	Reason    string              `json:"reason" dc:"放行原因"`
+}
+
+// WorkflowAcceptApproveRes 人工放行响应
+type WorkflowAcceptApproveRes struct {
+	g.Meta `mime:"application/json"`
+}
+
+// WorkflowAcceptRejectReq 驳回验收请求
+type WorkflowAcceptRejectReq struct {
+	g.Meta    `path:"/workflow/accept-reject" method:"post" tags:"项目流程" summary:"驳回验收"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	Reason    string              `json:"reason" v:"required" dc:"驳回原因"`
+}
+
+// WorkflowAcceptRejectRes 驳回验收响应
+type WorkflowAcceptRejectRes struct {
+	g.Meta `mime:"application/json"`
+}
+
+// WorkflowAcceptRerunReq 重新验收请求
+type WorkflowAcceptRerunReq struct {
+	g.Meta    `path:"/workflow/accept-rerun" method:"post" tags:"项目流程" summary:"重新验收"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// WorkflowAcceptRerunRes 重新验收响应
+type WorkflowAcceptRerunRes struct {
+	g.Meta `mime:"application/json"`
+}
+
+// WorkflowAcceptReworkReq 驳回并返工请求
+type WorkflowAcceptReworkReq struct {
+	g.Meta    `path:"/workflow/accept-rework" method:"post" tags:"项目流程" summary:"驳回并返工"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	Reason    string              `json:"reason" v:"required" dc:"返工原因"`
+}
+
+// WorkflowAcceptReworkRes 驳回并返工响应
+type WorkflowAcceptReworkRes struct {
+	g.Meta `mime:"application/json"`
+}

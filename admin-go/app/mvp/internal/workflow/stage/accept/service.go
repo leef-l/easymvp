@@ -8,6 +8,7 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/gconv"
 
 	"easymvp/app/mvp/internal/workflow/acceptance"
 	"easymvp/app/mvp/internal/workflow/repo"
@@ -118,7 +119,7 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 		workflowRunID, stageRunID, acceptRunID, round, projectType)
 
 	// 4. 收集证据
-	_, evidenceErr := s.collector.Collect(ctx, acceptCtx)
+	evidence, evidenceErr := s.collector.Collect(ctx, acceptCtx)
 	if evidenceErr != nil {
 		g.Log().Warningf(ctx, "[AcceptStage] 证据收集部分失败（不阻塞）: %v", evidenceErr)
 	}
@@ -141,7 +142,7 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 		Update()
 
 	// 6. 裁决归并
-	decision, reduceErr := s.reducer.Reduce(ctx, acceptCtx, hits)
+	decision, reduceErr := s.reducer.Reduce(ctx, acceptCtx, hits, evidence)
 	if reduceErr != nil {
 		s.failAcceptRun(ctx, acceptRunID, reduceErr.Error())
 		if s.stageCompleter != nil {
@@ -238,4 +239,109 @@ func BuildReworkInput(acceptRunID int64, issues []acceptance.RuleHit) string {
 	}
 	data, _ := json.Marshal(input)
 	return string(data)
+}
+
+// ManualApprove 人工放行：将最新 accept_run 标记为 passed，推进到 complete。
+func (s *Service) ManualApprove(ctx context.Context, projectID int64, reason string) error {
+	wfRun, acceptRun, stageRunID, err := s.findActiveAcceptRun(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	acceptRunID := gconv.Int64(acceptRun["id"])
+	workflowRunID := gconv.Int64(wfRun["id"])
+
+	// 更新 accept_run 决策
+	if err := s.acceptRunRepo.UpdateDecision(ctx, acceptRunID, acceptance.DecisionPassed, 100, "人工放行: "+reason); err != nil {
+		return fmt.Errorf("更新决策失败: %w", err)
+	}
+	_, _ = s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "completed", "completed", g.Map{
+		"finished_at": gtime.Now(),
+	})
+
+	g.Log().Infof(ctx, "[AcceptStage] 人工放行: acceptRunID=%d project=%d reason=%s", acceptRunID, projectID, reason)
+
+	// 完成 accept stage → 推进到 complete
+	if s.stageCompleter != nil {
+		if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
+			return fmt.Errorf("CompleteStage 失败: %w", err)
+		}
+	}
+	if s.completeTrigger != nil {
+		return s.completeTrigger(ctx, workflowRunID)
+	}
+	return nil
+}
+
+// ManualReject 人工驳回：标记为 failed 并触发返工。
+func (s *Service) ManualReject(ctx context.Context, projectID int64, reason string) error {
+	return s.ManualRework(ctx, projectID, reason)
+}
+
+// Rerun 重新验收：创建新一轮 accept_run，重新执行完整验收流程。
+func (s *Service) Rerun(ctx context.Context, projectID int64) error {
+	wfRun, _, stageRunID, err := s.findActiveAcceptRun(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	workflowRunID := gconv.Int64(wfRun["id"])
+
+	g.Log().Infof(ctx, "[AcceptStage] 重新验收: project=%d workflowRun=%d", projectID, workflowRunID)
+	return s.Run(ctx, workflowRunID, stageRunID)
+}
+
+// ManualRework 驳回并返工：标记 failed 并触发返工链。
+func (s *Service) ManualRework(ctx context.Context, projectID int64, reason string) error {
+	wfRun, acceptRun, stageRunID, err := s.findActiveAcceptRun(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	acceptRunID := gconv.Int64(acceptRun["id"])
+	workflowRunID := gconv.Int64(wfRun["id"])
+
+	// 更新 accept_run 为 failed
+	if err := s.acceptRunRepo.UpdateDecision(ctx, acceptRunID, acceptance.DecisionFailed, 0, "人工驳回: "+reason); err != nil {
+		return fmt.Errorf("更新决策失败: %w", err)
+	}
+	_, _ = s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "completed", "completed", g.Map{
+		"finished_at": gtime.Now(),
+	})
+
+	g.Log().Infof(ctx, "[AcceptStage] 人工驳回并返工: acceptRunID=%d project=%d reason=%s", acceptRunID, projectID, reason)
+
+	// 完成 accept stage → 触发返工
+	if s.stageCompleter != nil {
+		if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
+			return fmt.Errorf("CompleteStage 失败: %w", err)
+		}
+	}
+	if s.reworkTrigger != nil {
+		issues, _ := s.GetLatestIssues(ctx, acceptRunID)
+		return s.reworkTrigger(ctx, workflowRunID, acceptRunID, issues)
+	}
+	return nil
+}
+
+// findActiveAcceptRun 查找项目当前活跃的验收运行。
+func (s *Service) findActiveAcceptRun(ctx context.Context, projectID int64) (wfRun, acceptRun map[string]interface{}, stageRunID int64, err error) {
+	// 查活跃 workflow_run
+	wfRunRecord, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("project_id", projectID).
+		WhereIn("status", g.Slice{"accepting", "running", "paused"}).
+		WhereNull("deleted_at").
+		OrderDesc("created_at").
+		One()
+	if err != nil || wfRunRecord.IsEmpty() {
+		return nil, nil, 0, fmt.Errorf("项目 %d 无活跃的工作流运行", projectID)
+	}
+
+	workflowRunID := wfRunRecord["id"].Int64()
+
+	// 查最新 accept_run
+	acceptRunRecord, err := s.acceptRunRepo.GetLatestByWorkflow(ctx, workflowRunID)
+	if err != nil || len(acceptRunRecord) == 0 {
+		return nil, nil, 0, fmt.Errorf("工作流 %d 无验收运行记录", workflowRunID)
+	}
+
+	stageRunID = gconv.Int64(acceptRunRecord["stage_run_id"])
+	return wfRunRecord.Map(), acceptRunRecord, stageRunID, nil
 }

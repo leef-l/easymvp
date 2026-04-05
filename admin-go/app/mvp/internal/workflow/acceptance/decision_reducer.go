@@ -12,19 +12,19 @@ import (
 )
 
 // DecisionReducer 统一裁决归并器。
-// 合并硬规则命中结果，产出统一决策。
+// 合并硬规则命中结果与 LLM 质量判断，产出统一决策。
 type DecisionReducer struct {
 	issueRepo *repo.AcceptIssueRepo
+	judge     *Judge // 可选，nil 时退化为纯硬规则裁决
 }
 
-// NewDecisionReducer 创建裁决归并器。
-func NewDecisionReducer(issueRepo *repo.AcceptIssueRepo) *DecisionReducer {
-	return &DecisionReducer{issueRepo: issueRepo}
+// NewDecisionReducer 创建裁决归并器。judge 为 nil 时退化为纯硬规则模式。
+func NewDecisionReducer(issueRepo *repo.AcceptIssueRepo, judge *Judge) *DecisionReducer {
+	return &DecisionReducer{issueRepo: issueRepo, judge: judge}
 }
 
-// Reduce 根据规则命中结果产出最终裁决。
-// 第一批不含 LLM judge，纯硬规则裁决。
-func (r *DecisionReducer) Reduce(ctx context.Context, in *AcceptContext, hits []RuleHit) (*DecisionResult, error) {
+// Reduce 根据规则命中结果和 LLM 评审产出最终裁决。
+func (r *DecisionReducer) Reduce(ctx context.Context, in *AcceptContext, hits []RuleHit, evidence []EvidenceItem) (*DecisionResult, error) {
 	result := &DecisionResult{
 		Decision: DecisionPassed,
 		Score:    100.0,
@@ -67,6 +67,28 @@ func (r *DecisionReducer) Reduce(ctx context.Context, in *AcceptContext, hits []
 		}
 	}
 
+	// LLM 融合（仅在 judge 可用且硬规则未直接 failed 时触发）
+	var llmSummary string
+	if r.judge != nil && result.Decision != DecisionFailed {
+		judgeResult, judgeErr := r.judge.Evaluate(ctx, in, evidence, hits)
+		if judgeErr != nil {
+			g.Log().Warningf(ctx, "[DecisionReducer] LLM Judge 调用异常(降级): %v", judgeErr)
+			if result.Decision == DecisionPassed {
+				result.Decision = DecisionManualReview
+			}
+		} else {
+			result.Score = result.Score*0.4 + judgeResult.QualityScore*0.6
+			llmSummary = judgeResult.Summary
+
+			switch judgeResult.Conclusion {
+			case "failed":
+				result.Decision = DecisionFailed
+			case "uncertain":
+				result.Decision = DecisionManualReview
+			}
+		}
+	}
+
 	// 生成摘要
 	var parts []string
 	if blockers > 0 {
@@ -85,6 +107,10 @@ func (r *DecisionReducer) Reduce(ctx context.Context, in *AcceptContext, hits []
 		result.Summary = "所有验收规则通过"
 	} else {
 		result.Summary = fmt.Sprintf("验收发现 %s", strings.Join(parts, "、"))
+	}
+	// 追加 LLM 评审摘要
+	if llmSummary != "" {
+		result.Summary += "; LLM评审: " + llmSummary
 	}
 
 	// 持久化 issue 到数据库

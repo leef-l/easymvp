@@ -103,6 +103,9 @@ function goToExecution() {
 function goToRework() {
   router.push({ path: '/mvp/workflow/rework', query: { projectId: projectId.value } });
 }
+function goToAccept() {
+  router.push({ path: '/mvp/workflow/accept', query: { projectId: projectId.value } });
+}
 function goToTimeline() {
   router.push({ path: '/mvp/workflow/timeline', query: { projectId: projectId.value } });
 }
@@ -203,6 +206,7 @@ function goToChat() {
               title="返工"
               :status="stageStepStatus('rework')"
             />
+            <Step title="验收" :status="stageStepStatus('accept')" />
             <Step title="完成" :status="stageStepStatus('complete')" />
           </Steps>
 
@@ -253,6 +257,13 @@ function goToChat() {
               @click="goToRework"
             >
               返工记录
+            </Button>
+            <Button
+              v-if="currentStatus === 'accepting' || stages.some((s) => s.stageType === 'accept')"
+              type="primary"
+              @click="goToAccept"
+            >
+              验收控制台
             </Button>
             <Button @click="goToTimeline">
               事件时间线
