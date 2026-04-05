@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
@@ -35,55 +36,63 @@ func NewWorkflowService(rtMgr *runtime.Manager, pub *event.Publisher, wfRepo *re
 }
 
 // CreateRun 为项目创建新的工作流运行实例 + design 阶段。
+// 整个操作在同一事务中完成，保证 workflow_run + stage_run + 回填的原子性。
 // 返回 workflowRunID。
 func (s *WorkflowService) CreateRun(ctx context.Context, projectID int64) (int64, error) {
 	now := time.Now()
-
-	// 1. 获取下一个 run_no
-	runNo, err := s.wfRepo.NextRunNo(ctx, projectID)
-	if err != nil {
-		return 0, fmt.Errorf("获取 run_no 失败: %w", err)
-	}
-
-	// 2. 创建 workflow_run
 	wfRunID := int64(snowflake.Generate())
-	_, err = g.DB().Model("mvp_workflow_run").Ctx(ctx).Insert(g.Map{
-		"id":            wfRunID,
-		"project_id":    projectID,
-		"run_no":        runNo,
-		"status":        consts.WorkflowRunStatusDesigning,
-		"current_stage": consts.StageTypeDesign,
-		"created_at":    now,
-		"updated_at":    now,
-	})
-	if err != nil {
-		return 0, fmt.Errorf("创建 workflow_run 失败: %w", err)
-	}
-
-	// 3. 创建 design stage_run
 	stageRunID := int64(snowflake.Generate())
-	_, err = g.DB().Model("mvp_stage_run").Ctx(ctx).Insert(g.Map{
-		"id":              stageRunID,
-		"workflow_run_id": wfRunID,
-		"stage_type":      consts.StageTypeDesign,
-		"stage_no":        1,
-		"status":          consts.StageStatusPending,
-		"created_at":      now,
-		"updated_at":      now,
+
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		// 1. 获取下一个 run_no
+		runNo, err := s.wfRepo.NextRunNo(ctx, projectID)
+		if err != nil {
+			return fmt.Errorf("获取 run_no 失败: %w", err)
+		}
+
+		// 2. 创建 workflow_run
+		_, err = tx.Model("mvp_workflow_run").Ctx(ctx).Insert(g.Map{
+			"id":            wfRunID,
+			"project_id":    projectID,
+			"run_no":        runNo,
+			"status":        consts.WorkflowRunStatusDesigning,
+			"current_stage": consts.StageTypeDesign,
+			"created_at":    now,
+			"updated_at":    now,
+		})
+		if err != nil {
+			return fmt.Errorf("创建 workflow_run 失败: %w", err)
+		}
+
+		// 3. 创建 design stage_run
+		_, err = tx.Model("mvp_stage_run").Ctx(ctx).Insert(g.Map{
+			"id":              stageRunID,
+			"workflow_run_id": wfRunID,
+			"stage_type":      consts.StageTypeDesign,
+			"stage_no":        1,
+			"status":          consts.StageStatusPending,
+			"created_at":      now,
+			"updated_at":      now,
+		})
+		if err != nil {
+			return fmt.Errorf("创建 design stage_run 失败: %w", err)
+		}
+
+		// 4. 回写 current_stage_run_id
+		_, err = tx.Model("mvp_workflow_run").Ctx(ctx).
+			Where("id", wfRunID).
+			Update(g.Map{"current_stage_run_id": stageRunID, "updated_at": now})
+		if err != nil {
+			return fmt.Errorf("更新 current_stage_run_id 失败: %w", err)
+		}
+
+		return nil
 	})
 	if err != nil {
-		return 0, fmt.Errorf("创建 design stage_run 失败: %w", err)
+		return 0, err
 	}
 
-	// 4. 回写 current_stage_run_id
-	_, err = g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("id", wfRunID).
-		Update(g.Map{"current_stage_run_id": stageRunID, "updated_at": now})
-	if err != nil {
-		return 0, fmt.Errorf("更新 current_stage_run_id 失败: %w", err)
-	}
-
-	// 5. 发布事件
+	// 事务外发布事件（避免事务内做 I/O 拉长事务）
 	if s.publisher != nil {
 		s.publisher.Emit(ctx, event.Event{
 			WorkflowRunID: wfRunID,
@@ -101,8 +110,12 @@ func (s *WorkflowService) CreateRun(ctx context.Context, projectID int64) (int64
 func (s *WorkflowService) StartDesign(ctx context.Context, workflowRunID int64) error {
 	now := gtime.Now()
 
-	// workflow_run 已在 CreateRun 中设为 designing，补 started_at
-	_, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+	// 查 project_id（runtime 需要真实 projectID，不能传 0）
+	projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("id", workflowRunID).Value("project_id")
+
+	// workflow_run 已在 CreateRun 中设为 designing，补 started_at（CAS 校验）
+	wfResult, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 		Where("id", workflowRunID).
 		Where("status", consts.WorkflowRunStatusDesigning).
 		Update(g.Map{
@@ -112,9 +125,12 @@ func (s *WorkflowService) StartDesign(ctx context.Context, workflowRunID int64) 
 	if err != nil {
 		return fmt.Errorf("启动 workflow_run 失败: %w", err)
 	}
+	if rows, _ := wfResult.RowsAffected(); rows == 0 {
+		return fmt.Errorf("workflow_run(%d) 不在 designing 状态，无法启动设计阶段", workflowRunID)
+	}
 
-	// design stage_run: pending → running
-	_, err = g.DB().Model("mvp_stage_run").Ctx(ctx).
+	// design stage_run: pending → running（CAS 校验）
+	stageResult, err := g.DB().Model("mvp_stage_run").Ctx(ctx).
 		Where("workflow_run_id", workflowRunID).
 		Where("stage_type", consts.StageTypeDesign).
 		Where("status", consts.StageStatusPending).
@@ -126,11 +142,14 @@ func (s *WorkflowService) StartDesign(ctx context.Context, workflowRunID int64) 
 	if err != nil {
 		return fmt.Errorf("启动 design stage_run 失败: %w", err)
 	}
+	if rows, _ := stageResult.RowsAffected(); rows == 0 {
+		return fmt.Errorf("workflow_run(%d) 的 design stage_run 不在 pending 状态", workflowRunID)
+	}
 
-	// 创建运行时
-	s.runtimeMgr.Create(workflowRunID, 0)
+	// 创建运行时（传真实 projectID，与 Resume 行为一致）
+	s.runtimeMgr.Create(workflowRunID, projectID.Int64())
 
-	g.Log().Infof(ctx, "[WorkflowService] StartDesign workflowRunID=%d", workflowRunID)
+	g.Log().Infof(ctx, "[WorkflowService] StartDesign workflowRunID=%d projectID=%d", workflowRunID, projectID.Int64())
 	return nil
 }
 

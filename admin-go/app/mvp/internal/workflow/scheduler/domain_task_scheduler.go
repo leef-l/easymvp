@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
@@ -168,14 +169,9 @@ func (s *DomainTaskScheduler) scheduleOnce(ctx context.Context, workflowRunID in
 			continue
 		}
 
-		// 依赖检查：parent_task_id 必须已完成
-		parentID := task["parent_task_id"].Int64()
-		if parentID > 0 {
-			parentStatus, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
-				Where("id", parentID).Value("status")
-			if parentStatus.String() != domainTask.StatusCompleted {
-				continue
-			}
+		// 依赖检查：所有依赖任务必须已完成
+		if !s.allDepsCompleted(ctx, task) {
+			continue
 		}
 
 		// 资源冲突检测
@@ -196,16 +192,9 @@ func (s *DomainTaskScheduler) scheduleOnce(ctx context.Context, workflowRunID in
 			continue
 		}
 
-		// 锁定资源
-		for _, res := range resources {
-			s.lockedRes[res] = taskID
-		}
-		s.running[taskID] = true
-		currentRunning++
-
-		// 更新状态 pending → running
+		// CAS 更新状态 pending → running（必须先确认数据库更新成功再写内存锁）
 		now := gtime.Now()
-		_, _ = g.DB().Model("mvp_domain_task").Ctx(ctx).
+		casResult, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
 			Where("id", taskID).
 			Where("status", domainTask.StatusPending).
 			Update(g.Map{
@@ -213,6 +202,18 @@ func (s *DomainTaskScheduler) scheduleOnce(ctx context.Context, workflowRunID in
 				"started_at": now,
 				"updated_at": now,
 			})
+		casRows, _ := casResult.RowsAffected()
+		if casRows == 0 {
+			// CAS 失败：任务已不在 pending 状态（被并发 Pause/Resume/手动重试改走），跳过
+			continue
+		}
+
+		// CAS 成功，锁定资源
+		for _, res := range resources {
+			s.lockedRes[res] = taskID
+		}
+		s.running[taskID] = true
+		currentRunning++
 
 		// 持久化资源锁
 		if len(resources) > 0 {
@@ -359,6 +360,12 @@ func (s *DomainTaskScheduler) Pause(ctx context.Context, workflowRunID int64) {
 	}
 	s.mu.Unlock()
 
+	// 释放 DB 资源锁 + 回退状态
+	for _, t := range runningTasks {
+		tid := t["id"].Int64()
+		_ = s.lockMgr.ReleaseLocks(ctx, tid)
+	}
+
 	// running → pending
 	_, _ = g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("workflow_run_id", workflowRunID).
@@ -369,6 +376,38 @@ func (s *DomainTaskScheduler) Pause(ctx context.Context, workflowRunID int64) {
 			"heartbeat_at":     nil,
 			"updated_at":       gtime.Now(),
 		})
+}
+
+// allDepsCompleted 检查任务的所有依赖是否已完成。
+// 优先使用 depends_on_task_ids（完整依赖列表），回退到 parent_task_id（单依赖兼容）。
+func (s *DomainTaskScheduler) allDepsCompleted(ctx context.Context, task gdb.Record) bool {
+	// 优先检查多依赖字段
+	depsJSON := task["depends_on_task_ids"].String()
+	if depsJSON != "" && depsJSON != "null" && depsJSON != "[]" {
+		var depIDs []int64
+		if err := json.Unmarshal([]byte(depsJSON), &depIDs); err == nil && len(depIDs) > 0 {
+			for _, depID := range depIDs {
+				status, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+					Where("id", depID).Value("status")
+				st := status.String()
+				if st != domainTask.StatusCompleted && st != "skipped" {
+					return false
+				}
+			}
+			return true
+		}
+	}
+
+	// 回退：单依赖 parent_task_id
+	parentID := task["parent_task_id"].Int64()
+	if parentID > 0 {
+		status, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+			Where("id", parentID).Value("status")
+		st := status.String()
+		return st == domainTask.StatusCompleted || st == "skipped"
+	}
+
+	return true // 无依赖
 }
 
 // ErrorMsg 用于错误追踪的调度失败描述。

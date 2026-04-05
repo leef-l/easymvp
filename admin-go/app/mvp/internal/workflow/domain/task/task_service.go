@@ -143,17 +143,16 @@ func (s *TaskService) InstantiateFromBlueprint(ctx context.Context, planVersionI
 			continue
 		}
 
-		// 简单实现：第一个依赖作为 parent_task_id
+		// 完整依赖列表写入 depends_on_task_ids，parent_task_id 保留第一个（向后兼容）
 		taskID := bpIDToTaskID[bp["id"].Int64()]
 		depJSON2, _ := json.Marshal(depTaskIDs)
 		_, _ = g.DB().Model("mvp_domain_task").Ctx(ctx).
 			Where("id", taskID).
 			Update(g.Map{
-				"parent_task_id": depTaskIDs[0],
-				"updated_at":     now,
+				"parent_task_id":      depTaskIDs[0],
+				"depends_on_task_ids": string(depJSON2),
+				"updated_at":          now,
 			})
-		// 同时在 affected_resources 中追加依赖信息（备用）
-		_ = depJSON2 // 依赖 ID 列表暂存于 parent_task_id，后续调度器通过 batch_no + parent_task_id 判断
 	}
 
 	g.Log().Infof(ctx, "[TaskService] InstantiateFromBlueprint planVersionID=%d created=%d tasks, workflowRunID=%d",

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
@@ -33,65 +34,85 @@ func (s *StageService) SetWorkflowFailedCallback(fn WorkflowFailedCallback) {
 }
 
 // StartStage 创建并启动指定类型的阶段。
+// 整个操作在同一事务中完成，保证 stage_run 创建 + workflow_run 更新的原子性。
 // 返回新创建的 stage_run ID。
 func (s *StageService) StartStage(ctx context.Context, workflowRunID int64, stageType string) (int64, error) {
 	now := time.Now()
-
-	// 获取下一个 stage_no
-	maxNo, err := g.DB().Model("mvp_stage_run").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		Max("stage_no")
-	if err != nil {
-		return 0, fmt.Errorf("查询 stage_no 失败: %w", err)
-	}
-	stageNo := int(maxNo) + 1
-
-	// 创建 stage_run
 	stageRunID := int64(snowflake.Generate())
-	_, err = g.DB().Model("mvp_stage_run").Ctx(ctx).Insert(g.Map{
-		"id":              stageRunID,
-		"workflow_run_id": workflowRunID,
-		"stage_type":      stageType,
-		"stage_no":        stageNo,
-		"status":          consts.StageStatusRunning,
-		"started_at":      now,
-		"created_at":      now,
-		"updated_at":      now,
+
+	targetWfStatus := StageTypeToWorkflowStatus(stageType)
+
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		// 1. 查当前 workflow_run 状态，校验状态迁移合法性
+		wfRun, err := tx.Model("mvp_workflow_run").Ctx(ctx).
+			Where("id", workflowRunID).
+			WhereNull("deleted_at").
+			Fields("id, status").
+			One()
+		if err != nil {
+			return fmt.Errorf("查询 workflow_run 失败: %w", err)
+		}
+		if wfRun.IsEmpty() {
+			return fmt.Errorf("workflow_run(%d) 不存在", workflowRunID)
+		}
+
+		currentStatus := wfRun["status"].String()
+		if targetWfStatus != "" && !IsValidWorkflowTransition(currentStatus, targetWfStatus) {
+			return fmt.Errorf("工作流状态迁移不合法: %s → %s (stage=%s)", currentStatus, targetWfStatus, stageType)
+		}
+
+		// 2. 获取下一个 stage_no
+		maxNo, err := tx.Model("mvp_stage_run").Ctx(ctx).
+			Where("workflow_run_id", workflowRunID).
+			WhereNull("deleted_at").
+			Max("stage_no")
+		if err != nil {
+			return fmt.Errorf("查询 stage_no 失败: %w", err)
+		}
+		stageNo := int(maxNo) + 1
+
+		// 3. 创建 stage_run
+		_, err = tx.Model("mvp_stage_run").Ctx(ctx).Insert(g.Map{
+			"id":              stageRunID,
+			"workflow_run_id": workflowRunID,
+			"stage_type":      stageType,
+			"stage_no":        stageNo,
+			"status":          consts.StageStatusRunning,
+			"started_at":      now,
+			"created_at":      now,
+			"updated_at":      now,
+		})
+		if err != nil {
+			return fmt.Errorf("创建 stage_run 失败: %w", err)
+		}
+
+		// 4. CAS 更新 workflow_run（WHERE status = currentStatus 防并发）
+		wfUpdate := g.Map{
+			"current_stage":        stageType,
+			"current_stage_run_id": stageRunID,
+			"updated_at":           now,
+		}
+		if targetWfStatus != "" {
+			wfUpdate["status"] = targetWfStatus
+		}
+		wfResult, err := tx.Model("mvp_workflow_run").Ctx(ctx).
+			Where("id", workflowRunID).
+			Where("status", currentStatus).
+			Update(wfUpdate)
+		if err != nil {
+			return fmt.Errorf("更新 workflow_run current_stage 失败: %w", err)
+		}
+		if rows, _ := wfResult.RowsAffected(); rows == 0 {
+			return fmt.Errorf("workflow_run(%d) 状态并发冲突（期望 %s），无法创建 %s 阶段", workflowRunID, currentStatus, stageType)
+		}
+
+		return nil
 	})
 	if err != nil {
-		return 0, fmt.Errorf("创建 stage_run 失败: %w", err)
+		return 0, err
 	}
 
-	// 更新 workflow_run 的 current_stage、current_stage_run_id 和 status
-	wfStatus := StageTypeToWorkflowStatus(stageType)
-	wfUpdate := g.Map{
-		"current_stage":        stageType,
-		"current_stage_run_id": stageRunID,
-		"updated_at":           now,
-	}
-	if wfStatus != "" {
-		wfUpdate["status"] = wfStatus
-	}
-	_, err = g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("id", workflowRunID).
-		Update(wfUpdate)
-	if err != nil {
-		return 0, fmt.Errorf("更新 workflow_run current_stage 失败: %w", err)
-	}
-
-	// 发布事件
-	if s.workflowSvc.publisher != nil {
-		s.workflowSvc.publisher.Emit(ctx, event.Event{
-			WorkflowRunID: workflowRunID,
-			EntityType:    event.EntityStageRun,
-			EntityID:      &stageRunID,
-			EventType:     event.EventStageStarted,
-		})
-	}
-
-	g.Log().Infof(ctx, "[StageService] StartStage workflowRunID=%d stageType=%s stageRunID=%d", workflowRunID, stageType, stageRunID)
-
+	// 事务外发布事件（只发一次，带 payload）
 	if s.workflowSvc.publisher != nil {
 		s.workflowSvc.publisher.Emit(ctx, event.Event{
 			WorkflowRunID: workflowRunID,
@@ -103,6 +124,7 @@ func (s *StageService) StartStage(ctx context.Context, workflowRunID int64, stag
 		})
 	}
 
+	g.Log().Infof(ctx, "[StageService] StartStage workflowRunID=%d stageType=%s stageRunID=%d", workflowRunID, stageType, stageRunID)
 	return stageRunID, nil
 }
 
@@ -247,22 +269,31 @@ func (s *StageService) completeWorkflow(ctx context.Context, workflowRunID int64
 	if err != nil {
 		return err
 	}
-	// 立即完成 complete stage
+
+	// 完成 complete stage（先持久化 finished_at，让后续统计能包含 complete 阶段本身）
 	if err := s.CompleteStage(ctx, completeStageID); err != nil {
 		return err
 	}
 
-	// workflow_run → completed（从任何活跃阶段状态完成）
-	_, err = g.DB().Model("mvp_workflow_run").Ctx(ctx).
+	// 写入 finished_at（StartStage("complete") 已将 status 改为 completed，此处只补 finished_at）
+	// 幂等条件：status=completed AND finished_at IS NULL，防止并发重复写入
+	wfResult, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 		Where("id", workflowRunID).
-		WhereNotIn("status", g.Slice{consts.WorkflowRunStatusCompleted, consts.WorkflowRunStatusCanceled}).
+		Where("status", consts.WorkflowRunStatusCompleted).
+		WhereNull("finished_at").
 		Update(g.Map{
-			"status":      consts.WorkflowRunStatusCompleted,
 			"finished_at": now,
 			"updated_at":  now,
 		})
 	if err != nil {
-		return fmt.Errorf("完成 workflow_run 失败: %w", err)
+		return fmt.Errorf("写入 workflow_run finished_at 失败: %w", err)
+	}
+	wfRows, _ := wfResult.RowsAffected()
+	if wfRows == 0 {
+		// finished_at 已被写入或 status 非 completed（被并发取消等），短路退出
+		g.Log().Warningf(ctx, "[StageService] completeWorkflow CAS 失败，workflow_run(%d) 已完成或被取消", workflowRunID)
+		s.workflowSvc.runtimeMgr.Cancel(workflowRunID)
+		return nil
 	}
 
 	// 更新项目状态
@@ -272,6 +303,24 @@ func (s *StageService) completeWorkflow(ctx context.Context, workflowRunID int64
 		_, _ = g.DB().Model("mvp_project").Ctx(ctx).
 			Where("id", projectID.Int64()).
 			Update(g.Map{"status": "completed", "updated_at": now})
+	}
+
+	// 执行收尾逻辑：指标统计 + 总结生成
+	// 放在所有持久化之后，基于 DB 中真实的 finished_at 统计，避免口径偏差
+	if completeStageSvc != nil {
+		if fErr := completeStageSvc.Finalize(ctx, completeStageID, workflowRunID); fErr != nil {
+			g.Log().Warningf(ctx, "[StageService] Complete Finalize 失败（不阻塞）: %v", fErr)
+		}
+	}
+
+	// 发布 workflow.completed 事件
+	if s.workflowSvc.publisher != nil {
+		s.workflowSvc.publisher.Emit(ctx, event.Event{
+			WorkflowRunID: workflowRunID,
+			EntityType:    event.EntityWorkflowRun,
+			EntityID:      &workflowRunID,
+			EventType:     event.EventWorkflowCompleted,
+		})
 	}
 
 	s.workflowSvc.runtimeMgr.Cancel(workflowRunID)

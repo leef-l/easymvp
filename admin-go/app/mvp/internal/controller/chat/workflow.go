@@ -1153,3 +1153,35 @@ func (c *cWorkflow) StageHistory(ctx context.Context, req *v1.WorkflowStageHisto
 
 	return &v1.WorkflowStageHistoryRes{Stages: list}, nil
 }
+
+// CompletionSummary 获取项目完成总结
+func (c *cWorkflow) CompletionSummary(ctx context.Context, req *v1.WorkflowCompletionSummaryReq) (res *v1.WorkflowCompletionSummaryRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	svc := orchestrator.GetCompleteStageService()
+	summary, err := svc.GetSummary(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &v1.WorkflowCompletionSummaryRes{
+		WorkflowRunID:   snowflake.JsonInt64(summary.WorkflowRunID),
+		ProjectID:       snowflake.JsonInt64(summary.ProjectID),
+		TotalTasks:      summary.TotalTasks,
+		CompletedTasks:  summary.CompletedTasks,
+		FailedTasks:     summary.FailedTasks,
+		EscalatedTasks:  summary.EscalatedTasks,
+		SkippedTasks:    summary.SkippedTasks,
+		SuccessRate:     summary.SuccessRate,
+		TotalDuration:   summary.TotalDuration,
+		AvgTaskDuration: summary.AvgTaskDuration,
+		StageDurations:  summary.StageDurations,
+		ReworkRounds:    summary.ReworkRounds,
+		HandoffCount:    summary.HandoffCount,
+		StartedAt:       summary.StartedAt,
+		FinishedAt:      summary.FinishedAt,
+	}, nil
+}

@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	"easymvp/app/mvp/internal/consts"
 	"easymvp/app/mvp/internal/engine"
@@ -15,6 +16,7 @@ import (
 	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/app/mvp/internal/workflow/runtime"
 	"easymvp/app/mvp/internal/workflow/scheduler"
+	completeStage "easymvp/app/mvp/internal/workflow/stage/complete"
 	executeStage "easymvp/app/mvp/internal/workflow/stage/execute"
 	reworkStage "easymvp/app/mvp/internal/workflow/stage/rework"
 	reviewStage "easymvp/app/mvp/internal/workflow/stage/review"
@@ -29,8 +31,9 @@ var (
 	reviewStageSvc  *reviewStage.Service
 	executeStageSvc *executeStage.Service
 	taskScheduler   *scheduler.DomainTaskScheduler
-	reworkStageSvc  *reworkStage.Service
-	domainWatchdog  *watchdogV2.DomainTaskWatchdog
+	reworkStageSvc    *reworkStage.Service
+	completeStageSvc  *completeStage.Service
+	domainWatchdog    *watchdogV2.DomainTaskWatchdog
 	runtimeMgr      *runtime.Manager
 	eventBus        *event.Bus
 	eventPublisher  *event.Publisher
@@ -85,6 +88,9 @@ func Init() {
 		engine.RegisterBlueprintCreator(func(ctx context.Context, projectID, workflowRunID, conversationID, messageID int64, tasks []engine.ArchitectTask) (int64, int, error) {
 			return planVersionSvc.CreateFromArchitectReply(ctx, projectID, workflowRunID, conversationID, messageID, tasks)
 		})
+
+		// 完成阶段服务
+		completeStageSvc = completeStage.NewService()
 
 		// 返工阶段服务
 		reworkStageSvc = reworkStage.NewService()
@@ -184,14 +190,26 @@ func triggerReviewStage(ctx context.Context, projectID, planVersionID int64) err
 	workflowRunID := wfRun["id"].Int64()
 	currentStageRunID := wfRun["current_stage_run_id"].Int64()
 
-	// 完成 design stage
+	// 完成 design stage（必须成功，否则阻止进入 review）
 	if currentStageRunID > 0 {
-		_ = stageSvc.CompleteStage(ctx, currentStageRunID)
+		if err := stageSvc.CompleteStage(ctx, currentStageRunID); err != nil {
+			return fmt.Errorf("完成 design stage 失败，无法进入审核: %w", err)
+		}
 	}
 
 	// 创建并启动 review stage
 	stageRunID, err := stageSvc.StartStage(ctx, workflowRunID, "review")
 	if err != nil {
+		// 回滚 design stage: completed → running（否则下次提审会因 CompleteStage 报错永久卡住）
+		if currentStageRunID > 0 {
+			_, rollbackErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
+				Where("id", currentStageRunID).
+				Where("status", consts.StageStatusCompleted).
+				Update(g.Map{"status": consts.StageStatusRunning, "finished_at": nil, "updated_at": gtime.Now()})
+			if rollbackErr != nil {
+				g.Log().Errorf(ctx, "[triggerReviewStage] 回滚 design stage 失败: %v", rollbackErr)
+			}
+		}
 		return fmt.Errorf("创建 review stage 失败: %w", err)
 	}
 
@@ -246,6 +264,12 @@ func GetTaskScheduler() *scheduler.DomainTaskScheduler {
 func GetReworkStageService() *reworkStage.Service {
 	Init()
 	return reworkStageSvc
+}
+
+// GetCompleteStageService 获取完成阶段服务。
+func GetCompleteStageService() *completeStage.Service {
+	Init()
+	return completeStageSvc
 }
 
 // triggerReworkStage 触发返工阶段：创建 rework stage，启动分析流程。

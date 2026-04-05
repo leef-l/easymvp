@@ -73,7 +73,7 @@ func (s *Service) InstantiateAndStart(ctx context.Context, stageRunID int64, pla
 
 	// 3. 注册完成回调
 	finalStageRunID := stageRunID
-	wsMgr := workspace.NewGitWorktreeManager()
+	cleanupMgr := workspace.NewGitWorktreeManager()
 	s.scheduler.SetCompletionCallback(func(ctx context.Context, wfRunID int64) {
 		g.Log().Infof(ctx, "[ExecuteStage] 所有任务完成, workflowRunID=%d", wfRunID)
 
@@ -84,8 +84,9 @@ func (s *Service) InstantiateAndStart(ctx context.Context, stageRunID int64, pla
 			_ = engine.GetCompressor().CompressProjectContext(ctx, projectID.Int64())
 		}
 
-		// 批量清理该 workflow 下所有已完成的 worktree
-		go workspace.RunCleanup(context.Background(), wsMgr, workspace.DefaultCleanupConfig())
+		// 延时清理：扫描已超过保留期的 workspace（失败/取消态的 worktree 依赖此机制）。
+		// 注意：刚完成的 workspace 不会被清理（尚在保留期内），这是预期行为。
+		go workspace.RunCleanup(context.Background(), cleanupMgr, workspace.DefaultCleanupConfig())
 
 		// 完成 execute stage
 		if s.stageCompleter != nil {
@@ -160,8 +161,13 @@ func (e *domainTaskExecutor) ExecuteDomainTask(ctx context.Context, workflowRunI
 	switch executionMode {
 	case "aider":
 		e.executeWithAider(ctx, projectID.Int64(), taskID, taskRecord, modelInfo, ws)
-	default:
+	case "chat":
 		e.executeWithChat(ctx, projectID.Int64(), taskID, taskRecord, modelInfo)
+	case "openhands", "claude_code", "codex_cli", "gemini_cli":
+		// 已规划但尚未接入的执行器，显式报错而非静默降级
+		e.handleFailure(ctx, taskID, fmt.Sprintf("执行模式 %q 尚未接入，请配置为 aider 或 chat", executionMode))
+	default:
+		e.handleFailure(ctx, taskID, fmt.Sprintf("未知的执行模式: %q", executionMode))
 	}
 }
 

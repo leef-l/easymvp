@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
@@ -39,6 +40,7 @@ func (s *PlanVersionService) SetReviewTrigger(fn ReviewTrigger) {
 // CreateFromArchitectReply 从架构师解析结果创建新的计划版本和任务蓝图。
 // tasks 来自 TaskParser.ExtractAndNormalize。
 // 返回 planVersionID 和蓝图数量。
+// 整个操作在同一事务中完成，保证旧版本废弃与新版本创建的原子性。
 func (s *PlanVersionService) CreateFromArchitectReply(
 	ctx context.Context,
 	projectID, workflowRunID, conversationID, messageID int64,
@@ -48,92 +50,110 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 		return 0, 0, fmt.Errorf("没有可创建的任务蓝图")
 	}
 
-	now := time.Now()
-
-	// 1. 获取下一个 version_no
-	versionNo, err := s.planRepo.NextVersionNo(ctx, projectID)
-	if err != nil {
-		return 0, 0, fmt.Errorf("获取 version_no 失败: %w", err)
-	}
-
-	// 2. 将之前的活跃版本标记为 superseded
-	if err := s.SupersedePreviousVersions(ctx, projectID, 0); err != nil {
-		g.Log().Warningf(ctx, "[PlanVersionService] supersede 旧版本失败: %v", err)
-	}
-
-	// 3. 创建 plan_version
+	// 预生成所有 ID（事务外分配，减少事务持有时间）
 	pvID := int64(snowflake.Generate())
-	_, err = g.DB().Model("mvp_plan_version").Ctx(ctx).Insert(g.Map{
-		"id":                     pvID,
-		"project_id":             projectID,
-		"workflow_run_id":        workflowRunID,
-		"version_no":             versionNo,
-		"source_conversation_id": conversationID,
-		"source_message_id":      messageID,
-		"status":                 consts.PlanVersionStatusDraft,
-		"review_status":          consts.PlanReviewStatusPending,
-		"summary":                fmt.Sprintf("第 %d 版方案，共 %d 个任务蓝图", versionNo, len(tasks)),
-		"created_at":             now,
-		"updated_at":             now,
-	})
-	if err != nil {
-		return 0, 0, fmt.Errorf("创建 plan_version 失败: %w", err)
-	}
-
-	// 4. 创建蓝图，构建 name -> blueprintID 映射
+	blueprintIDs := make([]int64, len(tasks))
 	nameToID := make(map[string]int64, len(tasks))
-	blueprintIDs := make([]int64, 0, len(tasks))
-
 	for i, task := range tasks {
 		bpID := int64(snowflake.Generate())
+		blueprintIDs[i] = bpID
 		nameToID[task.Name] = bpID
-		blueprintIDs = append(blueprintIDs, bpID)
+	}
 
-		affectedJSON, _ := json.Marshal(task.AffectedResources)
+	now := time.Now()
+	var versionNo int
 
-		_, err = g.DB().Model("mvp_task_blueprint").Ctx(ctx).Insert(g.Map{
-			"id":                  bpID,
-			"plan_version_id":     pvID,
-			"name":                task.Name,
-			"description":         task.Description,
-			"role_type":           defaultRoleType(task.RoleType),
-			"role_level":          defaultRoleLevel(task.RoleLevel),
-			"batch_no":            task.BatchNo,
-			"sort":                i + 1,
-			"affected_resources":  string(affectedJSON),
-			"blueprint_status":    consts.BlueprintStatusDraft,
-			"created_at":          now,
-			"updated_at":          now,
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		// 1. 获取下一个 version_no
+		var err error
+		versionNo, err = s.planRepo.NextVersionNo(ctx, projectID)
+		if err != nil {
+			return fmt.Errorf("获取 version_no 失败: %w", err)
+		}
+
+		// 2. 将之前的活跃版本标记为 superseded
+		if err := s.supersedePreviousVersionsInTx(ctx, projectID, 0); err != nil {
+			return fmt.Errorf("supersede 旧版本失败: %w", err)
+		}
+
+		// 3. 创建 plan_version
+		_, err = tx.Model("mvp_plan_version").Ctx(ctx).Insert(g.Map{
+			"id":                     pvID,
+			"project_id":             projectID,
+			"workflow_run_id":        workflowRunID,
+			"version_no":             versionNo,
+			"source_conversation_id": conversationID,
+			"source_message_id":      messageID,
+			"status":                 consts.PlanVersionStatusDraft,
+			"review_status":          consts.PlanReviewStatusPending,
+			"summary":                fmt.Sprintf("第 %d 版方案，共 %d 个任务蓝图", versionNo, len(tasks)),
+			"created_at":             now,
+			"updated_at":             now,
 		})
 		if err != nil {
-			return 0, 0, fmt.Errorf("创建蓝图(%s)失败: %w", task.Name, err)
+			return fmt.Errorf("创建 plan_version 失败: %w", err)
 		}
-	}
 
-	// 5. 第二遍：回写依赖关系 (depends_on_blueprint_ids)
-	for i, task := range tasks {
-		if len(task.DependsOn) == 0 {
-			continue
-		}
-		depIDs := make([]int64, 0, len(task.DependsOn))
-		for _, depName := range task.DependsOn {
-			if depID, ok := nameToID[depName]; ok {
-				depIDs = append(depIDs, depID)
+		// 4. 创建蓝图
+		for i, task := range tasks {
+			affectedJSON, _ := json.Marshal(task.AffectedResources)
+			_, err = tx.Model("mvp_task_blueprint").Ctx(ctx).Insert(g.Map{
+				"id":                 blueprintIDs[i],
+				"plan_version_id":    pvID,
+				"name":               task.Name,
+				"description":        task.Description,
+				"role_type":          defaultRoleType(task.RoleType),
+				"role_level":         defaultRoleLevel(task.RoleLevel),
+				"batch_no":           task.BatchNo,
+				"sort":               i + 1,
+				"affected_resources": string(affectedJSON),
+				"blueprint_status":   consts.BlueprintStatusDraft,
+				"created_at":         now,
+				"updated_at":         now,
+			})
+			if err != nil {
+				return fmt.Errorf("创建蓝图(%s)失败: %w", task.Name, err)
 			}
 		}
-		if len(depIDs) > 0 {
-			depJSON, _ := json.Marshal(depIDs)
-			_, _ = g.DB().Model("mvp_task_blueprint").Ctx(ctx).
-				Where("id", blueprintIDs[i]).
-				Update(g.Map{"depends_on_blueprint_ids": string(depJSON)})
-		}
-	}
 
-	// 6. 更新 workflow_run 的 active_plan_version_id
-	if workflowRunID > 0 {
-		_, _ = g.DB().Model("mvp_workflow_run").Ctx(ctx).
-			Where("id", workflowRunID).
-			Update(g.Map{"active_plan_version_id": pvID, "updated_at": now})
+		// 5. 回写依赖关系
+		for i, task := range tasks {
+			if len(task.DependsOn) == 0 {
+				continue
+			}
+			depIDs := make([]int64, 0, len(task.DependsOn))
+			for _, depName := range task.DependsOn {
+				if depID, ok := nameToID[depName]; ok {
+					depIDs = append(depIDs, depID)
+				}
+			}
+			if len(depIDs) > 0 {
+				depJSON, _ := json.Marshal(depIDs)
+				if _, err := tx.Model("mvp_task_blueprint").Ctx(ctx).
+					Where("id", blueprintIDs[i]).
+					Update(g.Map{"depends_on_blueprint_ids": string(depJSON)}); err != nil {
+					return fmt.Errorf("回写蓝图依赖失败: %w", err)
+				}
+			}
+		}
+
+		// 6. 更新 workflow_run 的 active_plan_version_id（CAS 校验）
+		if workflowRunID > 0 {
+			wfResult, err := tx.Model("mvp_workflow_run").Ctx(ctx).
+				Where("id", workflowRunID).
+				Update(g.Map{"active_plan_version_id": pvID, "updated_at": now})
+			if err != nil {
+				return fmt.Errorf("更新 active_plan_version_id 失败: %w", err)
+			}
+			if rows, _ := wfResult.RowsAffected(); rows == 0 {
+				return fmt.Errorf("workflow_run(%d) 不存在，无法关联 plan_version", workflowRunID)
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return 0, 0, err
 	}
 
 	g.Log().Infof(ctx, "[PlanVersionService] 创建 plan_version=%d (v%d), %d 个蓝图, project=%d",
@@ -141,8 +161,20 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 	return pvID, len(tasks), nil
 }
 
-// SupersedePreviousVersions 将项目之前的活跃/草稿版本标记为 superseded。
+// supersedePreviousVersionsInTx 事务内版本：将项目之前的活跃/草稿版本标记为 superseded。
+// 使用事务传播的 ctx，GoFrame 会自动路由到当前事务。
+func (s *PlanVersionService) supersedePreviousVersionsInTx(ctx context.Context, projectID int64, exceptVersionID int64) error {
+	return s.doSupersede(ctx, projectID, exceptVersionID)
+}
+
+// SupersedePreviousVersions 将项目之前的活跃/草稿版本标记为 superseded（非事务调用入口）。
 func (s *PlanVersionService) SupersedePreviousVersions(ctx context.Context, projectID int64, exceptVersionID int64) error {
+	return s.doSupersede(ctx, projectID, exceptVersionID)
+}
+
+// doSupersede 核心 supersede 逻辑，事务和非事务场景共用。
+// GoFrame 的 ctx 事务传播机制会自动路由到当前事务（如有）。
+func (s *PlanVersionService) doSupersede(ctx context.Context, projectID int64, exceptVersionID int64) error {
 	now := gtime.Now()
 	q := g.DB().Model("mvp_plan_version").Ctx(ctx).
 		Where("project_id", projectID).
@@ -152,13 +184,11 @@ func (s *PlanVersionService) SupersedePreviousVersions(ctx context.Context, proj
 		q = q.WhereNot("id", exceptVersionID)
 	}
 
-	// 获取要 supersede 的版本 ID 列表
 	oldIDs, err := q.Fields("id").Array()
 	if err != nil || len(oldIDs) == 0 {
 		return err
 	}
 
-	// supersede 版本
 	idList := make([]int64, 0, len(oldIDs))
 	for _, v := range oldIDs {
 		idList = append(idList, v.Int64())
@@ -171,7 +201,6 @@ func (s *PlanVersionService) SupersedePreviousVersions(ctx context.Context, proj
 		return err
 	}
 
-	// supersede 对应的蓝图
 	_, err = g.DB().Model("mvp_task_blueprint").Ctx(ctx).
 		WhereIn("plan_version_id", idList).
 		WhereNot("blueprint_status", consts.BlueprintStatusSuperseded).
@@ -180,7 +209,8 @@ func (s *PlanVersionService) SupersedePreviousVersions(ctx context.Context, proj
 }
 
 // SubmitForReview 提交当前草稿版本进入审核。
-// 流程：plan_version draft→active, blueprints draft→confirmed, project status→reviewing。
+// 流程：plan_version draft→active, blueprints draft→confirmed, project status→reviewing, 触发 review stage。
+// 状态变更在事务中完成；reviewTrigger 同步调用，失败则回滚全部状态。
 func (s *PlanVersionService) SubmitForReview(ctx context.Context, projectID int64) error {
 	now := gtime.Now()
 
@@ -205,41 +235,67 @@ func (s *PlanVersionService) SubmitForReview(ctx context.Context, projectID int6
 		return fmt.Errorf("方案版本没有任务蓝图")
 	}
 
-	// 3. plan_version: draft → active
-	_, err = g.DB().Model("mvp_plan_version").Ctx(ctx).
-		Where("id", pvID).
-		Where("status", consts.PlanVersionStatusDraft).
-		Update(g.Map{"status": consts.PlanVersionStatusActive, "updated_at": now})
-	if err != nil {
-		return fmt.Errorf("更新 plan_version 状态失败: %w", err)
-	}
+	// 3. 事务内完成所有状态迁移
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		// plan_version: draft → active（CAS）
+		pvResult, err := tx.Model("mvp_plan_version").Ctx(ctx).
+			Where("id", pvID).
+			Where("status", consts.PlanVersionStatusDraft).
+			Update(g.Map{"status": consts.PlanVersionStatusActive, "updated_at": now})
+		if err != nil {
+			return fmt.Errorf("更新 plan_version 状态失败: %w", err)
+		}
+		if rows, _ := pvResult.RowsAffected(); rows == 0 {
+			return fmt.Errorf("plan_version(%d) 已不在 draft 状态，无法提交审核", pvID)
+		}
 
-	// 4. blueprints: draft → confirmed
-	_, err = g.DB().Model("mvp_task_blueprint").Ctx(ctx).
-		Where("plan_version_id", pvID).
-		Where("blueprint_status", consts.BlueprintStatusDraft).
-		Update(g.Map{"blueprint_status": consts.BlueprintStatusConfirmed, "updated_at": now})
-	if err != nil {
-		return fmt.Errorf("确认蓝图状态失败: %w", err)
-	}
+		// blueprints: draft → confirmed
+		bpResult, err := tx.Model("mvp_task_blueprint").Ctx(ctx).
+			Where("plan_version_id", pvID).
+			Where("blueprint_status", consts.BlueprintStatusDraft).
+			Update(g.Map{"blueprint_status": consts.BlueprintStatusConfirmed, "updated_at": now})
+		if err != nil {
+			return fmt.Errorf("确认蓝图状态失败: %w", err)
+		}
+		if rows, _ := bpResult.RowsAffected(); rows == 0 {
+			return fmt.Errorf("plan_version(%d) 下没有 draft 蓝图可确认", pvID)
+		}
 
-	// 5. project status → reviewing
-	_, err = g.DB().Model("mvp_project").Ctx(ctx).
-		Where("id", projectID).
-		Update(g.Map{"status": "reviewing", "pause_reason": nil, "updated_at": now})
+		// project status → reviewing
+		projResult, err := tx.Model("mvp_project").Ctx(ctx).
+			Where("id", projectID).
+			Update(g.Map{"status": "reviewing", "pause_reason": nil, "updated_at": now})
+		if err != nil {
+			return fmt.Errorf("更新项目状态失败: %w", err)
+		}
+		if rows, _ := projResult.RowsAffected(); rows == 0 {
+			return fmt.Errorf("项目(%d) 不存在或状态更新失败", projectID)
+		}
+
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("更新项目状态失败: %w", err)
+		return err
 	}
 
 	g.Log().Infof(ctx, "[PlanVersionService] SubmitForReview projectID=%d pvID=%d bpCount=%d", projectID, pvID, bpCount)
 
-	// 触发 review stage（异步，不阻塞 API 响应）
+	// 4. 同步触发 review stage——失败则回滚业务状态
 	if s.reviewTrigger != nil {
-		go func() {
-			if err := s.reviewTrigger(context.Background(), projectID, pvID); err != nil {
-				g.Log().Errorf(ctx, "[PlanVersionService] 触发审核失败: projectID=%d pvID=%d err=%v", projectID, pvID, err)
-			}
-		}()
+		if triggerErr := s.reviewTrigger(ctx, projectID, pvID); triggerErr != nil {
+			g.Log().Errorf(ctx, "[PlanVersionService] 触发审核失败，回滚状态: projectID=%d pvID=%d err=%v", projectID, pvID, triggerErr)
+			// 回滚：active → draft, confirmed → draft, reviewing → designing
+			_, _ = g.DB().Model("mvp_plan_version").Ctx(ctx).
+				Where("id", pvID).Where("status", consts.PlanVersionStatusActive).
+				Update(g.Map{"status": consts.PlanVersionStatusDraft, "updated_at": gtime.Now()})
+			_, _ = g.DB().Model("mvp_task_blueprint").Ctx(ctx).
+				Where("plan_version_id", pvID).Where("blueprint_status", consts.BlueprintStatusConfirmed).
+				Update(g.Map{"blueprint_status": consts.BlueprintStatusDraft, "updated_at": gtime.Now()})
+			_, _ = g.DB().Model("mvp_project").Ctx(ctx).
+				Where("id", projectID).Where("status", "reviewing").
+				Update(g.Map{"status": "designing", "updated_at": gtime.Now()})
+			return fmt.Errorf("提交审核失败: %w", triggerErr)
+		}
 	}
 	return nil
 }

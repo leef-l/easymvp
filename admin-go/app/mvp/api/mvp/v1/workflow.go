@@ -335,3 +335,31 @@ type StageHistoryItem struct {
 	FinishedAt *gtime.Time         `json:"finishedAt,omitempty"`
 	Error      string              `json:"error,omitempty"`
 }
+
+// ==================== 完成总结 ====================
+
+// WorkflowCompletionSummaryReq 获取完成总结请求
+type WorkflowCompletionSummaryReq struct {
+	g.Meta    `path:"/workflow/completion-summary" method:"get" tags:"项目流程" summary:"获取完成总结"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// WorkflowCompletionSummaryRes 获取完成总结响应
+type WorkflowCompletionSummaryRes struct {
+	g.Meta          `mime:"application/json"`
+	WorkflowRunID   snowflake.JsonInt64 `json:"workflowRunID"`
+	ProjectID       snowflake.JsonInt64 `json:"projectID"`
+	TotalTasks      int                 `json:"totalTasks"`
+	CompletedTasks  int                 `json:"completedTasks"`
+	FailedTasks     int                 `json:"failedTasks"`
+	EscalatedTasks  int                 `json:"escalatedTasks"`
+	SkippedTasks    int                 `json:"skippedTasks"`
+	SuccessRate     float64             `json:"successRate"`
+	TotalDuration   string              `json:"totalDuration"`
+	AvgTaskDuration string              `json:"avgTaskDuration"`
+	StageDurations  map[string]string   `json:"stageDurations"`
+	ReworkRounds    int                 `json:"reworkRounds"`
+	HandoffCount    int                 `json:"handoffCount"`
+	StartedAt       string              `json:"startedAt"`
+	FinishedAt      string              `json:"finishedAt"`
+}

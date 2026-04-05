@@ -248,3 +248,32 @@ export function manualApprove(projectID: string) {
 export function manualReject(projectID: string, reason: string) {
   return requestClient.post(`${PREFIX}/manual-reject`, { projectID, reason });
 }
+
+// ==================== 完成总结 ====================
+
+/** 完成总结 */
+export interface CompletionSummaryResult {
+  workflowRunID: string;
+  projectID: string;
+  totalTasks: number;
+  completedTasks: number;
+  failedTasks: number;
+  escalatedTasks: number;
+  skippedTasks: number;
+  successRate: number;
+  totalDuration: string;
+  avgTaskDuration: string;
+  stageDurations: Record<string, string>;
+  reworkRounds: number;
+  handoffCount: number;
+  startedAt: string;
+  finishedAt: string;
+}
+
+/** 获取项目完成总结 */
+export function getCompletionSummary(projectID: string) {
+  return requestClient.get<CompletionSummaryResult>(
+    `${PREFIX}/completion-summary`,
+    { params: { projectID } },
+  );
+}
