@@ -35,10 +35,10 @@ var validWorkflowTransitions = map[string][]string{
 	WorkflowDesigning: {WorkflowReviewing, WorkflowPaused, WorkflowCanceled},
 	WorkflowReviewing: {WorkflowExecuting, WorkflowDesigning, WorkflowPaused, WorkflowCanceled}, // 驳回可回 designing
 	WorkflowExecuting: {WorkflowCompleted, WorkflowReworking, WorkflowPaused, WorkflowFailed, WorkflowCanceled},
-	WorkflowReworking: {WorkflowReviewing, WorkflowPaused, WorkflowCanceled},
+	WorkflowReworking: {WorkflowExecuting, WorkflowReviewing, WorkflowPaused, WorkflowCanceled}, // 返工完成可回执行
 	WorkflowPaused:    {WorkflowDesigning, WorkflowReviewing, WorkflowExecuting, WorkflowReworking, WorkflowCanceled}, // 恢复到暂停前的阶段
 	WorkflowCompleted: {},
-	WorkflowFailed:    {WorkflowReworking, WorkflowCanceled}, // 失败后可返工或取消
+	WorkflowFailed:    {WorkflowDesigning, WorkflowReworking, WorkflowCanceled}, // 失败后可回设计（审核驳回）、返工或取消
 	WorkflowCanceled:  {},
 }
 

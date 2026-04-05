@@ -98,8 +98,32 @@ func Init() {
 
 		// 注册 rework 完成后推回 execute 的回调
 		reworkStageSvc.SetExecuteTrigger(func(ctx context.Context, workflowRunID, planVersionID int64) error {
-			// rework 完成后，原失败任务已被回写为 pending，重启调度即可
-			g.Log().Infof(ctx, "[Registry] rework 完成，重启调度: workflowRunID=%d", workflowRunID)
+			g.Log().Infof(ctx, "[Registry] rework 完成，恢复执行状态: workflowRunID=%d", workflowRunID)
+
+			// CAS: reworking → executing（CompleteStage(rework) 不改 workflow_run 状态，需显式恢复）
+			rows, err := workflowSvc.wfRepo.UpdateStatus(ctx, workflowRunID,
+				consts.WorkflowRunStatusReworking, consts.WorkflowRunStatusExecuting, g.Map{
+					"current_stage": "execute",
+					"updated_at":    gtime.Now(),
+				})
+			if err != nil {
+				return fmt.Errorf("rework→executing 状态恢复失败: %w", err)
+			}
+			if rows == 0 {
+				g.Log().Warningf(ctx, "[Registry] rework→executing CAS 失败，workflow_run(%d) 可能已被取消/暂停", workflowRunID)
+				return nil
+			}
+
+			// 同步 project.status
+			projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+				Where("id", workflowRunID).Value("project_id")
+			if projectID.Int64() > 0 {
+				_, _ = g.DB().Model("mvp_project").Ctx(ctx).
+					Where("id", projectID.Int64()).
+					Update(g.Map{"status": consts.WorkflowRunStatusExecuting, "updated_at": gtime.Now()})
+			}
+
+			// 重启调度器拾取 pending 任务
 			return taskScheduler.Start(ctx, workflowRunID)
 		})
 
