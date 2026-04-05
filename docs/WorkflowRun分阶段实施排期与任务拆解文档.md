@@ -233,18 +233,9 @@
 - watchdog v2（当前复用旧 watchdog 逻辑）
 - review → execute 的失败语义仍未完全原子化，当前已从“静默吞掉”提升为“显式报错/日志”，但还不是强一致事务阶段
 
-### 6.5 当前判断：M4 已进入“主链可用收口期”
+### 6.5 实际进度：✅ 已完成（2026-04-05）
 
-截至 `1b0b0a5`：
-
-1. WorkflowRun 主链已经不再是“骨架状态”，而是进入了可运行主链收口阶段。
-2. Claude 两轮 code review 修正（`07b0662`、`7f3dcdd`）以及后续补尾巴提交（`1b0b0a5`）已经把大部分 P0/P1 主链问题补掉。
-3. 当前 M4 剩余工作已从“大块建模”转向“执行控制台、可观测、失败一致性、隔离能力”。
-
-因此，从排期上不再建议继续把 M4 看成“尚未成型阶段”，而应视为：
-
-- 主链已成型
-- 工程化能力待补齐
+M4 主链已完全闭环，所有 CR 收口项已完成。Execution Console 前端页面已落地（M6 阶段实现）。watchdog v2 已独立实现。
 
 ---
 
@@ -394,6 +385,31 @@ P0 校准已完成：
 2. 事件流可驱动页面实时刷新
 3. 返工轮次可统计
 
+### 7.4 实际进度：✅ 已完成（2026-04-05）
+
+后端已落地：
+- ReworkStageService（HandleRework + OnAnalysisCompleted）
+- failure_analysis 任务自动创建与回写
+- handoff_record 记录返工交接
+- rework 完成后 CAS(reworking→executing) 状态恢复 + 调度器重启
+- Workflow Event Bus（event.Publisher + event.Bus + mvp_workflow_event 持久化）
+- stage.started / stage.completed / stage.failed / workflow.* 全链路事件发射
+- Watchdog V2（心跳检测 + 自动重试 + 升级到 rework）
+- Complete Stage 收尾闭环（指标统计 + 总结生成）
+
+前端已落地：
+- Timeline 事件时间线页面
+- Stage History API + 页面
+- Rework Workspace 路由
+
+稳定性修复（M5→M6.5 CR 轮次）：
+- completeWorkflow 幂等性修复（WHERE status=completed AND finished_at IS NULL）
+- triggerReviewStage 失败回滚 design stage
+- execute 完成后 TransitionNext 推进到 complete（不走 rework 主链）
+- review→execute 启动失败原子回滚（FailStageOnly + 四表回滚）
+- stageOrder 移除 rework（旁路化）
+- validWorkflowTransitions 补全 failed→designing 和 reworking→executing
+
 ---
 
 ## 九、M5.5：默认组织模型收敛
@@ -478,6 +494,22 @@ M5.5 不插入当前 M5 主线，原因是：
 1. 新项目默认使用 Workflow V2
 2. 旧项目仍可查看
 3. 新旧项目混合列表稳定
+
+### 10.4 实际进度：✅ 已完成（2026-04-05）
+
+后端已落地：
+- 新项目默认 engine_version=workflow_v2
+- controller 6 个 handler 全部重构为 `if !isV2 { legacy; return } // V2 主路径`
+- ExecutionStatus / DomainTasks / ResourceLocks API
+- project.status 全链路同步（StartStage/Pause/Resume/FailStage/completeWorkflow）
+
+前端已落地：
+- Execution Console 独立页面（批次分组、资源锁面板、重试/跳过操作、5s 轮询）
+- Workflow Dashboard 完整版（Steps 流程图、阶段详情、快速操作、完成总结）
+- 项目列表扩展 V2 状态（executing/reworking/failed/canceled）
+- 项目列表新增执行控制台入口
+- engineVersion 选项 V2 标为推荐、legacy 标为不推荐
+- 创建表单默认选择 workflow_v2
 
 ---
 
