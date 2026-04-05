@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
@@ -456,11 +457,32 @@ func Init() {
 		})
 		actionDispatcher.SetCallback(consts.ActionTypeNotifyHuman, func(ctx context.Context, req *autonomy.DecisionRequest) error {
 			g.Log().Infof(ctx, "[DecisionCenter] notify_human: wfRun=%d trigger=%s", req.WorkflowRunID, req.TriggerSource)
-			return nil // 目前仅记录，后续接入通知系统
+			// 通过事件系统触发飞书/协作平台通知（CheckpointNotifier 订阅此事件）
+			eventPublisher.Emit(ctx, event.Event{
+				WorkflowRunID: req.WorkflowRunID,
+				EntityType:    event.EntityDecisionAction,
+				EventType:     event.EventAutonomyActionFailed, // 复用告警事件
+				Payload: g.Map{
+					"trigger_source": req.TriggerSource,
+					"project_id":     req.ProjectID,
+					"error":          fmt.Sprintf("人工通知: trigger=%s wfRun=%d", req.TriggerSource, req.WorkflowRunID),
+				},
+			})
+			return nil
 		})
 		actionDispatcher.SetCallback(consts.ActionTypeReplanWorkflow, func(ctx context.Context, req *autonomy.DecisionRequest) error {
-			g.Log().Infof(ctx, "[DecisionCenter] replan_workflow: wfRun=%d", req.WorkflowRunID)
-			return nil // 后续对接 replanner
+			g.Log().Infof(ctx, "[DecisionCenter] replan_workflow: wfRun=%d project=%d", req.WorkflowRunID, req.ProjectID)
+			replannerInst := autonomy.NewReplanner(repo.NewAutonomyDecisionRepo())
+			rec, err := replannerInst.Evaluate(ctx, &autonomy.ReplanInput{
+				WorkflowRunID: req.WorkflowRunID,
+				ProjectID:     req.ProjectID,
+				TriggerSource: req.TriggerSource,
+			})
+			if err != nil {
+				return fmt.Errorf("重规划评估失败: %w", err)
+			}
+			g.Log().Infof(ctx, "[DecisionCenter] replan result: action=%s reasoning=%s", rec.Action, rec.Reasoning)
+			return nil
 		})
 
 		// Legacy → V2 执行器桥接：注入 V2ExecutorFn 到旧引擎，使 legacy 任务也能走 V2 执行器
@@ -507,7 +529,70 @@ func Init() {
 
 			g.Log().Info(context.Background(), "[Registry] 飞书协作通知已注册")
 		}
+
+		// ==================== Phase D: 元认知定时评估任务 ====================
+		go startMetaAssessmentLoop(metaAssessor, metaTuner, metaObserver)
 	})
+}
+
+// startMetaAssessmentLoop 元认知评估定时循环。
+// 每 24 小时执行一次，扫描所有活跃项目，生成评估 + 调参建议。
+func startMetaAssessmentLoop(assessor *autonomy.MetaAssessor, tuner *autonomy.MetaTuner, observer *autonomy.MetaObserver) {
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		func() {
+			ctx := context.Background()
+			defer func() {
+				if r := recover(); r != nil {
+					g.Log().Errorf(ctx, "[MetaAssessment] 定时评估 panic: %v", r)
+				}
+			}()
+
+			// 灰度检查
+			if !observer.IsEnabled(ctx) {
+				return
+			}
+
+			g.Log().Info(ctx, "[MetaAssessment] 开始定时评估...")
+
+			// 扫描有观测记录的项目
+			projectIDs, err := g.DB().Model("mvp_observation_record").Ctx(ctx).
+				WhereNull("deleted_at").
+				Fields("DISTINCT project_id").
+				All()
+			if err != nil {
+				g.Log().Warningf(ctx, "[MetaAssessment] 查询项目列表失败: %v", err)
+				return
+			}
+
+			now := gtime.Now()
+			periodStart := gtime.New(now.AddDate(0, 0, -7))
+
+			for _, row := range projectIDs {
+				pid := row["project_id"].Int64()
+				if pid == 0 {
+					continue
+				}
+
+				result, err := assessor.Assess(ctx, pid, periodStart, now)
+				if err != nil {
+					g.Log().Warningf(ctx, "[MetaAssessment] 评估失败: project=%d err=%v", pid, err)
+					continue
+				}
+
+				// 生成调参建议
+				recommendations := tuner.GenerateRecommendations(ctx, result)
+				if len(recommendations) > 0 {
+					_ = tuner.SaveAndApply(ctx, recommendations)
+					g.Log().Infof(ctx, "[MetaAssessment] project=%d: %d 条建议已生成", pid, len(recommendations))
+				}
+			}
+
+			g.Log().Info(ctx, "[MetaAssessment] 定时评估完成")
+		}()
+	}
 }
 
 // GetWorkflowService 获取工作流服务单例。
