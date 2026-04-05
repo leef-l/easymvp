@@ -1,14 +1,23 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { h, ref } from 'vue';
 import { useVbenModal } from '@vben/common-ui';
 import { useVbenForm } from '#/adapter/form';
-import { message } from 'ant-design-vue';
+import { message, Tooltip } from 'ant-design-vue';
+import { QuestionCircleOutlined } from '@ant-design/icons-vue';
 import {
   getProviderDetail,
   createProvider,
   updateProvider,
 } from '#/api/ai/provider';
 
+function tooltipLabel(label: string, tip: string) {
+  return () => h('span', {}, [
+    label + ' ',
+    h(Tooltip, { title: tip }, {
+      default: () => h(QuestionCircleOutlined, { style: { color: '#999', marginLeft: '4px' } }),
+    }),
+  ]);
+}
 
 const emit = defineEmits<{ success: [] }>();
 const isEdit = ref(false);
@@ -68,9 +77,9 @@ const [Form, formApi] = useVbenForm({
     {
       component: 'Input',
       fieldName: 'baseURL',
-      label: 'API基础地址',
+      label: tooltipLabel('API基础地址', '系统自动从地址识别协议：包含 /anthropic/ 或 api.anthropic.com → Anthropic 协议；其他地址 → OpenAI 兼容协议（适用于 DeepSeek、Qwen、GLM、Moonshot 等绝大多数供应商）'),
       rules: 'required',
-      componentProps: { placeholder: '请输入URL地址', maxlength: 500, addonBefore: 'https://' },
+      componentProps: { placeholder: '例：https://api.deepseek.com/v1', maxlength: 500 },
     },
     {
       component: 'IconPicker',
