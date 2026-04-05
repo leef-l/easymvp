@@ -117,7 +117,7 @@ func Init() {
 		acceptEvidenceRepo := repo.NewAcceptEvidenceRepo()
 		evidenceCollector := acceptance.NewEvidenceCollector(acceptEvidenceRepo)
 		ruleEngine := acceptance.NewRuleEngine(acceptRuleRepo)
-		// 灰度：按 mvp_config 决定是否启用 LLM Judge
+		// LLM Judge：总开关控制是否注入，项目类型灰度在 Judge.Evaluate 内部运行时判断
 		var judge *acceptance.Judge
 		if engine.GetConfigInt(context.Background(), "accept.llm_judge_enabled", "accept.llmJudgeEnabled", 1) == 1 {
 			judge = acceptance.NewJudge()

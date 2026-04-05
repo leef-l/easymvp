@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -166,6 +168,32 @@ func GetReviewTimeout(ctx context.Context) int {
 // GetReviewAutoFixBatch 审核预检时是否自动修正 batch_no 不合理的问题
 func GetReviewAutoFixBatch(ctx context.Context) bool {
 	return GetConfigInt(ctx, "review.auto_fix_batch", "engine.review.autoFixBatch", 1) == 1
+}
+
+// IsFeatureEnabledForProjectType 判断某功能是否对指定项目类型启用。
+// configKey 指向一个 JSON 数组配置（如 accept.llm_judge_project_types），值为 ["software_dev","game_dev"]。
+// 空字符串、"*"、"[]" 均视为"对所有项目类型启用"。
+func IsFeatureEnabledForProjectType(ctx context.Context, configKey, yamlPath, projectType string) bool {
+	raw := GetConfigString(ctx, configKey, yamlPath, "")
+	raw = strings.TrimSpace(raw)
+	// 空值或通配符 → 全部启用
+	if raw == "" || raw == "*" || raw == "[]" {
+		return true
+	}
+	var types []string
+	if err := json.Unmarshal([]byte(raw), &types); err != nil {
+		// 解析失败 → 兜底全部启用（不因配置错误阻塞业务）
+		return true
+	}
+	if len(types) == 0 {
+		return true
+	}
+	for _, t := range types {
+		if t == projectType || t == "*" {
+			return true
+		}
+	}
+	return false
 }
 
 // GetConfigString 读取字符串配置，三级 fallback

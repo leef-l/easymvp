@@ -114,12 +114,14 @@ func (r *DecisionReducer) Reduce(ctx context.Context, in *AcceptContext, hits []
 		result.Summary += "; LLM评审: " + llmSummary
 	}
 
-	// 灰度：manual_review 未启用时，uncertain 自动降级为 passed
+	// 灰度：manual_review 未启用或该项目类型未在白名单时，uncertain 自动降级为 passed
 	if result.Decision == DecisionManualReview {
-		if engine.GetConfigInt(ctx, "accept.manual_review_enabled", "accept.manualReviewEnabled", 1) == 0 {
+		globalDisabled := engine.GetConfigInt(ctx, "accept.manual_review_enabled", "accept.manualReviewEnabled", 1) == 0
+		typeDisabled := !engine.IsFeatureEnabledForProjectType(ctx, "accept.manual_review_project_types", "accept.manualReviewProjectTypes", in.ProjectType)
+		if globalDisabled || typeDisabled {
 			result.Decision = DecisionPassed
 			result.Summary += " (人工审核已禁用，自动放行)"
-			g.Log().Infof(ctx, "[DecisionReducer] manual_review 已禁用，uncertain→passed")
+			g.Log().Infof(ctx, "[DecisionReducer] manual_review 已禁用(global=%v type=%v)，uncertain→passed", globalDisabled, typeDisabled)
 		}
 	}
 

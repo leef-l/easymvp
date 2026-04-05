@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/gconv"
 
+	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/workflow"
 	"easymvp/app/mvp/internal/workflow/acceptance"
 	"easymvp/app/mvp/internal/workflow/repo"
@@ -97,6 +98,18 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 	}
 	projectType := catInfo.CategoryCode
 	familyCode := catInfo.FamilyCode
+
+	// 1.5 项目类型灰度：该项目类型未启用 Accept 则直接通过
+	if !engine.IsFeatureEnabledForProjectType(ctx, "accept.project_types", "accept.projectTypes", projectType) {
+		g.Log().Infof(ctx, "[AcceptStage] 项目类型 %s 未启用验收，直接通过: workflowRunID=%d", projectType, workflowRunID)
+		if s.stageCompleter != nil {
+			_ = s.stageCompleter.CompleteStage(ctx, stageRunID)
+		}
+		if s.completeTrigger != nil {
+			return s.completeTrigger(ctx, workflowRunID)
+		}
+		return nil
+	}
 
 	// 2. 幂等检查：同一 stageRun 不重复创建 accept_run
 	existing, _ := g.DB().Model("mvp_accept_run").Ctx(ctx).

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 
+	"easymvp/app/mvp/internal/engine"
 	"easymvp/utility/provider"
 )
 
@@ -32,6 +33,12 @@ func NewJudge() *Judge {
 // 复用项目 architect 角色的 AI 模型配置。
 // 容错：LLM 调用失败时返回 uncertain（降级为人工审核）。
 func (j *Judge) Evaluate(ctx context.Context, in *AcceptContext, evidence []EvidenceItem, hits []RuleHit) (*JudgeResult, error) {
+	// 0. 按项目类型灰度：该项目类型未启用 LLM Judge 则跳过
+	if !engine.IsFeatureEnabledForProjectType(ctx, "accept.llm_judge_project_types", "accept.llmJudgeProjectTypes", in.ProjectType) {
+		g.Log().Infof(ctx, "[Judge] 项目类型 %s 未启用 LLM Judge，跳过", in.ProjectType)
+		return &JudgeResult{Conclusion: "uncertain", Summary: "该项目类型未启用 LLM 评审"}, nil
+	}
+
 	// 1. 获取项目 architect 角色的模型配置
 	modelInfo, err := resolveProjectModel(ctx, in.ProjectID, "architect")
 	if err != nil {
