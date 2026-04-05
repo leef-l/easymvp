@@ -567,6 +567,62 @@ export function autonomyReject(actionID: string, reason: string) {
   return requestClient.post(`${PREFIX}/autonomy-reject`, { actionID, reason });
 }
 
+/** 查询全量决策记录（审计历史） */
+export function getAutonomyActions(projectID: string, actionStatus?: string, decisionType?: string) {
+  return requestClient.get<{ actions: AutonomyActionItem[] }>(
+    `${PREFIX}/autonomy-actions`,
+    { params: { projectID, ...(actionStatus ? { actionStatus } : {}), ...(decisionType ? { decisionType } : {}) } },
+  );
+}
+
+/** 风险闸门规则条目 */
+export interface RiskGateRuleItem {
+  id: string;
+  gateCode: string;
+  gateName: string;
+  gateType: string;
+  projectFamily?: string;
+  projectCategoryCode?: string;
+  triggerExpression?: string;
+  blockAction: string;
+  fallbackAction?: string;
+  enabled: number;
+  priority: number;
+  createdAt: string;
+}
+
+/** 策略规则条目 */
+export interface PolicyRuleItem {
+  id: string;
+  ruleCode: string;
+  ruleName: string;
+  decisionType: string;
+  decisionLevel: string;
+  triggerSource: string;
+  projectFamily?: string;
+  projectCategoryCode?: string;
+  configJson?: string;
+  enabled: number;
+  priority: number;
+  createdAt: string;
+}
+
+/** 查询风险闸门规则 */
+export function getAutonomyGateRules(projectID: string) {
+  return requestClient.get<{ rules: RiskGateRuleItem[] }>(
+    `${PREFIX}/autonomy-gate-rules`,
+    { params: { projectID } },
+  );
+}
+
+/** 查询策略规则 */
+export function getAutonomyPolicyRules(projectID: string) {
+  return requestClient.get<{ rules: PolicyRuleItem[] }>(
+    `${PREFIX}/autonomy-policy-rules`,
+    { params: { projectID } },
+  );
+}
+
 /** 手动触发重规划 */
 export function triggerReplan(projectID: string) {
   return requestClient.post(`${PREFIX}/trigger-replan`, { projectID });

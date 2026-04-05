@@ -344,6 +344,23 @@ func (dc *DecisionCenter) ListPendingActions(ctx context.Context, projectID int6
 	return dc.actionRepo.ListPending(ctx, projectID)
 }
 
+// ListAllActions 查询项目全量决策记录（支持可选的状态和类型过滤）。
+func (dc *DecisionCenter) ListAllActions(ctx context.Context, projectID int64, actionStatus, decisionType string) ([]g.Map, error) {
+	return dc.actionRepo.ListByProjectFiltered(ctx, projectID, actionStatus, decisionType)
+}
+
+// ListGateRules 查询项目适用的风险闸门规则。
+func (dc *DecisionCenter) ListGateRules(ctx context.Context, projectID int64) ([]g.Map, error) {
+	family, categoryCode, _, _ := dc.resolveProjectScope(ctx, projectID)
+	return dc.riskGate.ListRules(ctx, family, categoryCode)
+}
+
+// ListPolicyRules 查询项目适用的策略规则。
+func (dc *DecisionCenter) ListPolicyRules(ctx context.Context, projectID int64) ([]g.Map, error) {
+	family, categoryCode, _, _ := dc.resolveProjectScope(ctx, projectID)
+	return dc.policyEngine.ListRules(ctx, family, categoryCode)
+}
+
 // emitEvent 发布事件的便捷方法。
 func (dc *DecisionCenter) emitEvent(ctx context.Context, eventType, entityType string, wfRunID, entityID int64, payload interface{}) {
 	if dc.eventPublisher == nil {

@@ -66,6 +66,25 @@ func (r *PolicyRuleRepo) ListByTriggerAndScope(ctx context.Context, triggerSourc
 	return result, nil
 }
 
+// ListByScope 按项目作用域查询全部启用的策略规则（不限触发源）。
+func (r *PolicyRuleRepo) ListByScope(ctx context.Context, family, categoryCode string) ([]g.Map, error) {
+	records, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("enabled", 1).
+		WhereNull("deleted_at").
+		Where(g.DB().Raw("(project_family IS NULL OR project_family = ? OR project_family = '')", family)).
+		Where(g.DB().Raw("(project_category_code IS NULL OR project_category_code = ? OR project_category_code = '')", categoryCode)).
+		OrderAsc("priority").
+		All()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]g.Map, 0, len(records))
+	for _, rec := range records {
+		result = append(result, rec.Map())
+	}
+	return result, nil
+}
+
 // Update 更新策略规则。
 func (r *PolicyRuleRepo) Update(ctx context.Context, id int64, data g.Map) error {
 	data["updated_at"] = gtime.Now()

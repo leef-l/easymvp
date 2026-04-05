@@ -47,6 +47,11 @@ func (pe *PolicyEngine) Match(ctx context.Context, triggerSource, family, catego
 	}
 }
 
+// ListRules 查询项目作用域内的全部启用策略规则。
+func (pe *PolicyEngine) ListRules(ctx context.Context, family, categoryCode string) ([]g.Map, error) {
+	return pe.ruleRepo.ListByScope(ctx, family, categoryCode)
+}
+
 // resolveActionType 从规则中解析动作类型。
 // 优先使用 config_json.action_type，回退到按 decision_type 推导默认值。
 func (pe *PolicyEngine) resolveActionType(rule *PolicyRule) string {

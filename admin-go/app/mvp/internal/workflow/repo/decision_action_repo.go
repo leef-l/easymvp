@@ -99,6 +99,28 @@ func (r *DecisionActionRepo) ListPending(ctx context.Context, projectID int64) (
 	return result, nil
 }
 
+// ListByProjectFiltered 按项目查询决策记录，支持可选的状态和类型过滤。
+func (r *DecisionActionRepo) ListByProjectFiltered(ctx context.Context, projectID int64, actionStatus, decisionType string) ([]g.Map, error) {
+	q := g.DB().Model(r.table()).Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at")
+	if actionStatus != "" {
+		q = q.Where("action_status", actionStatus)
+	}
+	if decisionType != "" {
+		q = q.Where("decision_type", decisionType)
+	}
+	records, err := q.OrderDesc("created_at").All()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]g.Map, 0, len(records))
+	for _, rec := range records {
+		result = append(result, rec.Map())
+	}
+	return result, nil
+}
+
 // CountByType 按类型统计。
 func (r *DecisionActionRepo) CountByType(ctx context.Context, workflowRunID int64, actionType string) (int, error) {
 	return g.DB().Model(r.table()).Ctx(ctx).

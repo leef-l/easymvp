@@ -50,6 +50,11 @@ func (rg *RiskGate) Check(ctx context.Context, req *DecisionRequest, family, cat
 	return result
 }
 
+// ListRules 查询项目作用域内的全部启用闸门规则。
+func (rg *RiskGate) ListRules(ctx context.Context, family, categoryCode string) ([]g.Map, error) {
+	return rg.gateRepo.ListEnabled(ctx, family, categoryCode)
+}
+
 // evaluate 评估单条闸门规则是否命中。
 // trigger_expression 是一个简单的条件 map：
 //

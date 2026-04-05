@@ -821,3 +821,75 @@ type WorkflowAutonomyRejectReq struct {
 type WorkflowAutonomyRejectRes struct {
 	g.Meta `mime:"application/json"`
 }
+
+// ==================== 自治中台：控制面查询 ====================
+
+// WorkflowAutonomyActionsReq 查询项目全量决策记录
+type WorkflowAutonomyActionsReq struct {
+	g.Meta       `path:"/workflow/autonomy-actions" method:"get" tags:"自治中台" summary:"查询全量决策记录"`
+	ProjectID    snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	ActionStatus string              `json:"actionStatus" dc:"状态过滤(可选)"`
+	DecisionType string              `json:"decisionType" dc:"决策类型过滤(可选)"`
+}
+
+// WorkflowAutonomyActionsRes 全量决策记录响应
+type WorkflowAutonomyActionsRes struct {
+	g.Meta  `mime:"application/json"`
+	Actions []DecisionActionDTO `json:"actions"`
+}
+
+// WorkflowAutonomyGateRulesReq 查询项目适用的风险闸门规则
+type WorkflowAutonomyGateRulesReq struct {
+	g.Meta    `path:"/workflow/autonomy-gate-rules" method:"get" tags:"自治中台" summary:"查询风险闸门规则"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// RiskGateRuleDTO 风险闸门规则 DTO
+type RiskGateRuleDTO struct {
+	ID                  snowflake.JsonInt64 `json:"id"`
+	GateCode            string              `json:"gateCode"`
+	GateName            string              `json:"gateName"`
+	GateType            string              `json:"gateType"`
+	ProjectFamily       string              `json:"projectFamily,omitempty"`
+	ProjectCategoryCode string              `json:"projectCategoryCode,omitempty"`
+	TriggerExpression   string              `json:"triggerExpression,omitempty"`
+	BlockAction         string              `json:"blockAction"`
+	FallbackAction      string              `json:"fallbackAction,omitempty"`
+	Enabled             int                 `json:"enabled"`
+	Priority            int                 `json:"priority"`
+	CreatedAt           *gtime.Time         `json:"createdAt"`
+}
+
+// WorkflowAutonomyGateRulesRes 风险闸门规则响应
+type WorkflowAutonomyGateRulesRes struct {
+	g.Meta `mime:"application/json"`
+	Rules  []RiskGateRuleDTO `json:"rules"`
+}
+
+// WorkflowAutonomyPolicyRulesReq 查询项目适用的策略规则
+type WorkflowAutonomyPolicyRulesReq struct {
+	g.Meta    `path:"/workflow/autonomy-policy-rules" method:"get" tags:"自治中台" summary:"查询策略规则"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// PolicyRuleDTO 策略规则 DTO
+type PolicyRuleDTO struct {
+	ID                  snowflake.JsonInt64 `json:"id"`
+	RuleCode            string              `json:"ruleCode"`
+	RuleName            string              `json:"ruleName"`
+	DecisionType        string              `json:"decisionType"`
+	DecisionLevel       string              `json:"decisionLevel"`
+	TriggerSource       string              `json:"triggerSource"`
+	ProjectFamily       string              `json:"projectFamily,omitempty"`
+	ProjectCategoryCode string              `json:"projectCategoryCode,omitempty"`
+	ConfigJSON          string              `json:"configJson,omitempty"`
+	Enabled             int                 `json:"enabled"`
+	Priority            int                 `json:"priority"`
+	CreatedAt           *gtime.Time         `json:"createdAt"`
+}
+
+// WorkflowAutonomyPolicyRulesRes 策略规则响应
+type WorkflowAutonomyPolicyRulesRes struct {
+	g.Meta `mime:"application/json"`
+	Rules  []PolicyRuleDTO `json:"rules"`
+}

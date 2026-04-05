@@ -2182,6 +2182,102 @@ func autonomyActionProjectID(ctx context.Context, actionID int64) (int64, error)
 	return val.Int64(), nil
 }
 
+// AutonomyActions 查询项目全量决策记录。
+func (c *cWorkflow) AutonomyActions(ctx context.Context, req *v1.WorkflowAutonomyActionsReq) (res *v1.WorkflowAutonomyActionsRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	dc := orchestrator.GetDecisionCenter()
+	rawActions, queryErr := dc.ListAllActions(ctx, projectID, req.ActionStatus, req.DecisionType)
+	if queryErr != nil {
+		return nil, queryErr
+	}
+
+	actions := make([]v1.DecisionActionDTO, 0, len(rawActions))
+	for _, m := range rawActions {
+		actions = append(actions, mapToDecisionActionDTO(m))
+	}
+	return &v1.WorkflowAutonomyActionsRes{Actions: actions}, nil
+}
+
+// AutonomyGateRules 查询项目适用的风险闸门规则。
+func (c *cWorkflow) AutonomyGateRules(ctx context.Context, req *v1.WorkflowAutonomyGateRulesReq) (res *v1.WorkflowAutonomyGateRulesRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	dc := orchestrator.GetDecisionCenter()
+	rawRules, queryErr := dc.ListGateRules(ctx, projectID)
+	if queryErr != nil {
+		return nil, queryErr
+	}
+
+	rules := make([]v1.RiskGateRuleDTO, 0, len(rawRules))
+	for _, m := range rawRules {
+		rules = append(rules, mapToRiskGateRuleDTO(m))
+	}
+	return &v1.WorkflowAutonomyGateRulesRes{Rules: rules}, nil
+}
+
+// AutonomyPolicyRules 查询项目适用的策略规则。
+func (c *cWorkflow) AutonomyPolicyRules(ctx context.Context, req *v1.WorkflowAutonomyPolicyRulesReq) (res *v1.WorkflowAutonomyPolicyRulesRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	dc := orchestrator.GetDecisionCenter()
+	rawRules, queryErr := dc.ListPolicyRules(ctx, projectID)
+	if queryErr != nil {
+		return nil, queryErr
+	}
+
+	rules := make([]v1.PolicyRuleDTO, 0, len(rawRules))
+	for _, m := range rawRules {
+		rules = append(rules, mapToPolicyRuleDTO(m))
+	}
+	return &v1.WorkflowAutonomyPolicyRulesRes{Rules: rules}, nil
+}
+
+// mapToRiskGateRuleDTO 将 g.Map (snake_case) 映射到 RiskGateRuleDTO (camelCase)。
+func mapToRiskGateRuleDTO(m g.Map) v1.RiskGateRuleDTO {
+	return v1.RiskGateRuleDTO{
+		ID:                  mapJsonInt64(m, "id"),
+		GateCode:            mapString(m, "gate_code"),
+		GateName:            mapString(m, "gate_name"),
+		GateType:            mapString(m, "gate_type"),
+		ProjectFamily:       mapString(m, "project_family"),
+		ProjectCategoryCode: mapString(m, "project_category_code"),
+		TriggerExpression:   mapJSONString(m, "trigger_expression"),
+		BlockAction:         mapString(m, "block_action"),
+		FallbackAction:      mapString(m, "fallback_action"),
+		Enabled:             mapInt(m, "enabled"),
+		Priority:            mapInt(m, "priority"),
+		CreatedAt:           mapGTime(m, "created_at"),
+	}
+}
+
+// mapToPolicyRuleDTO 将 g.Map (snake_case) 映射到 PolicyRuleDTO (camelCase)。
+func mapToPolicyRuleDTO(m g.Map) v1.PolicyRuleDTO {
+	return v1.PolicyRuleDTO{
+		ID:                  mapJsonInt64(m, "id"),
+		RuleCode:            mapString(m, "rule_code"),
+		RuleName:            mapString(m, "rule_name"),
+		DecisionType:        mapString(m, "decision_type"),
+		DecisionLevel:       mapString(m, "decision_level"),
+		TriggerSource:       mapString(m, "trigger_source"),
+		ProjectFamily:       mapString(m, "project_family"),
+		ProjectCategoryCode: mapString(m, "project_category_code"),
+		ConfigJSON:          mapJSONString(m, "config_json"),
+		Enabled:             mapInt(m, "enabled"),
+		Priority:            mapInt(m, "priority"),
+		CreatedAt:           mapGTime(m, "created_at"),
+	}
+}
+
 // ---- g.Map → DTO 映射辅助函数 ----
 
 func mapString(m g.Map, key string) string {
