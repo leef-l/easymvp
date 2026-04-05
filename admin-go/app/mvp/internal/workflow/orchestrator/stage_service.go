@@ -17,12 +17,19 @@ import (
 // WorkflowFailedCallback 工作流失败后的清理回调（停调度器、取消 runtime 等）。
 type WorkflowFailedCallback func(ctx context.Context, workflowRunID int64)
 
+// StageReportFn 阶段完成后生成报告的回调。
+type StageReportFn func(ctx context.Context, workflowRunID int64, stageType string)
+
 // StageService 阶段编排服务。
 type StageService struct {
 	workflowSvc      *WorkflowService
 	onWorkflowFailed WorkflowFailedCallback
 	onAcceptTrigger  AcceptTriggerFn
+	onStageReport    StageReportFn
 }
+
+// SetStageReportFn 注册阶段报告回调。
+func (s *StageService) SetStageReportFn(fn StageReportFn) { s.onStageReport = fn }
 
 // NewStageService 创建阶段服务。
 func NewStageService(wfSvc *WorkflowService) *StageService {
@@ -173,6 +180,19 @@ func (s *StageService) CompleteStage(ctx context.Context, stageRunID int64) erro
 	}
 
 	g.Log().Infof(ctx, "[StageService] CompleteStage stageRunID=%d", stageRunID)
+
+	// 异步生成阶段报告
+	if s.onStageReport != nil && wfRunID.Int64() > 0 {
+		stageType, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).
+			Where("id", stageRunID).Value("stage_type")
+		if st := stageType.String(); st != "" {
+			wfID := wfRunID.Int64()
+			go func() {
+				s.onStageReport(context.Background(), wfID, st)
+			}()
+		}
+	}
+
 	return nil
 }
 

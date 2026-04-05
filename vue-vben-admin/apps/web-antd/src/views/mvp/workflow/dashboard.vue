@@ -106,6 +106,9 @@ function goToRework() {
 function goToAccept() {
   router.push({ path: '/mvp/workflow/accept', query: { projectId: projectId.value } });
 }
+function goToAutonomy() {
+  router.push({ path: '/mvp/workflow/autonomy', query: { projectId: projectId.value } });
+}
 function goToTimeline() {
   router.push({ path: '/mvp/workflow/timeline', query: { projectId: projectId.value } });
 }
@@ -264,6 +267,9 @@ function goToChat() {
               @click="goToAccept"
             >
               验收控制台
+            </Button>
+            <Button @click="goToAutonomy">
+              自治控制台
             </Button>
             <Button @click="goToTimeline">
               事件时间线

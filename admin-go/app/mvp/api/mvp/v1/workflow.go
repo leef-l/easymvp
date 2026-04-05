@@ -569,3 +569,103 @@ type WorkflowAcceptReworkReq struct {
 type WorkflowAcceptReworkRes struct {
 	g.Meta `mime:"application/json"`
 }
+
+// ==================== 自治管理 API ====================
+
+// WorkflowAutonomyDecisionsReq 自治决策列表请求
+type WorkflowAutonomyDecisionsReq struct {
+	g.Meta       `path:"/workflow/autonomy-decisions" method:"get" tags:"项目流程" summary:"自治决策列表"`
+	ProjectID    snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	DecisionType string              `json:"decisionType" dc:"决策类型过滤"`
+}
+
+// AutonomyDecisionItem 自治决策条目
+type AutonomyDecisionItem struct {
+	ID             snowflake.JsonInt64 `json:"id"`
+	DecisionType   string              `json:"decisionType"`
+	TriggerSource  string              `json:"triggerSource"`
+	TriggerContext string              `json:"triggerContext,omitempty"`
+	Recommendation string              `json:"recommendation"`
+	DecisionMode   string              `json:"decisionMode"`
+	HumanAction    string              `json:"humanAction"`
+	ExecutedAt     *gtime.Time         `json:"executedAt,omitempty"`
+	Result         string              `json:"result,omitempty"`
+	CreatedAt      *gtime.Time         `json:"createdAt"`
+}
+
+// WorkflowAutonomyDecisionsRes 自治决策列表响应
+type WorkflowAutonomyDecisionsRes struct {
+	g.Meta    `mime:"application/json"`
+	Decisions []AutonomyDecisionItem `json:"decisions"`
+}
+
+// WorkflowApproveDecisionReq 批准自治决策请求
+type WorkflowApproveDecisionReq struct {
+	g.Meta     `path:"/workflow/approve-decision" method:"post" tags:"项目流程" summary:"批准自治决策"`
+	ProjectID  snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	DecisionID snowflake.JsonInt64 `json:"decisionID" v:"required" dc:"决策ID"`
+}
+
+// WorkflowApproveDecisionRes 批准自治决策响应
+type WorkflowApproveDecisionRes struct {
+	g.Meta `mime:"application/json"`
+}
+
+// WorkflowRejectDecisionReq 拒绝自治决策请求
+type WorkflowRejectDecisionReq struct {
+	g.Meta     `path:"/workflow/reject-decision" method:"post" tags:"项目流程" summary:"拒绝自治决策"`
+	ProjectID  snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	DecisionID snowflake.JsonInt64 `json:"decisionID" v:"required" dc:"决策ID"`
+}
+
+// WorkflowRejectDecisionRes 拒绝自治决策响应
+type WorkflowRejectDecisionRes struct {
+	g.Meta `mime:"application/json"`
+}
+
+// WorkflowTriggerReplanReq 手动触发重规划请求
+type WorkflowTriggerReplanReq struct {
+	g.Meta    `path:"/workflow/trigger-replan" method:"post" tags:"项目流程" summary:"手动触发重规划"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// WorkflowTriggerReplanRes 手动触发重规划响应
+type WorkflowTriggerReplanRes struct {
+	g.Meta `mime:"application/json"`
+}
+
+// WorkflowProjectReportsReq 项目报告列表请求
+type WorkflowProjectReportsReq struct {
+	g.Meta     `path:"/workflow/project-reports" method:"get" tags:"项目流程" summary:"项目报告列表"`
+	ProjectID  snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	ReportType string              `json:"reportType" dc:"报告类型过滤(stage/daily/weekly/summary)"`
+}
+
+// ProjectReportItem 项目报告条目
+type ProjectReportItem struct {
+	ID            snowflake.JsonInt64 `json:"id"`
+	ReportType    string              `json:"reportType"`
+	StageType     string              `json:"stageType,omitempty"`
+	Title         string              `json:"title"`
+	Content       string              `json:"content"`
+	Metrics       string              `json:"metrics,omitempty"`
+	CreatedAt     *gtime.Time         `json:"createdAt"`
+}
+
+// WorkflowProjectReportsRes 项目报告列表响应
+type WorkflowProjectReportsRes struct {
+	g.Meta  `mime:"application/json"`
+	Reports []ProjectReportItem `json:"reports"`
+}
+
+// WorkflowTriggerReportReq 手动生成报告请求
+type WorkflowTriggerReportReq struct {
+	g.Meta    `path:"/workflow/trigger-report" method:"post" tags:"项目流程" summary:"手动生成报告"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	StageType string              `json:"stageType" dc:"阶段类型（不填则生成总结报告）"`
+}
+
+// WorkflowTriggerReportRes 手动生成报告响应
+type WorkflowTriggerReportRes struct {
+	g.Meta `mime:"application/json"`
+}

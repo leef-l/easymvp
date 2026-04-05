@@ -15,6 +15,7 @@ import (
 	"easymvp/app/mvp/internal/workspace"
 	"easymvp/app/mvp/internal/workflow/domain/plan"
 	domainTask "easymvp/app/mvp/internal/workflow/domain/task"
+	"easymvp/app/mvp/internal/workflow/autonomy"
 	"easymvp/app/mvp/internal/workflow/event"
 	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/app/mvp/internal/workflow/runtime"
@@ -222,7 +223,23 @@ func Init() {
 		domainWatchdog.SetEscalateFn(func(ctx context.Context, workflowRunID, taskID int64) error {
 			return triggerReworkStage(ctx, workflowRunID, taskID)
 		})
+		// 熔断器：项目级异常检测
+		decisionRepo := repo.NewAutonomyDecisionRepo()
+		circuitBreaker := autonomy.NewCircuitBreaker(decisionRepo, nil)
+		domainWatchdog.SetCircuitBreaker(circuitBreaker)
+		domainWatchdog.SetPauseFn(func(ctx context.Context, workflowRunID int64, reason string) error {
+			return workflowSvc.Pause(ctx, workflowRunID, reason)
+		})
 		domainWatchdog.Start(context.Background())
+
+		// 阶段报告回调：每个阶段完成时自动生成报告
+		reportRepo := repo.NewProjectReportRepo()
+		reporter := autonomy.NewReporter(reportRepo)
+		stageSvc.SetStageReportFn(func(ctx context.Context, workflowRunID int64, stageType string) {
+			if err := reporter.GenerateStageReport(ctx, workflowRunID, stageType); err != nil {
+				g.Log().Warningf(ctx, "[Registry] 阶段报告生成失败: wfRun=%d stage=%s err=%v", workflowRunID, stageType, err)
+			}
+		})
 	})
 }
 

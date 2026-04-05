@@ -438,3 +438,66 @@ export function acceptRerun(projectID: string) {
 export function acceptRework(projectID: string, reason: string) {
   return requestClient.post(`${PREFIX}/accept-rework`, { projectID, reason });
 }
+
+// ==================== 自治管理 ====================
+
+/** 自治决策条目 */
+export interface AutonomyDecisionItem {
+  id: string;
+  decisionType: string;
+  triggerSource: string;
+  triggerContext?: string;
+  recommendation: string;
+  decisionMode: string;
+  humanAction: string;
+  executedAt?: string;
+  result?: string;
+  createdAt: string;
+}
+
+/** 项目报告条目 */
+export interface ProjectReportItem {
+  id: string;
+  reportType: string;
+  stageType?: string;
+  title: string;
+  content: string;
+  metrics?: string;
+  createdAt: string;
+}
+
+/** 获取自治决策列表 */
+export function getAutonomyDecisions(projectID: string, decisionType?: string) {
+  return requestClient.get<{ decisions: AutonomyDecisionItem[] }>(
+    `${PREFIX}/autonomy-decisions`,
+    { params: { projectID, ...(decisionType ? { decisionType } : {}) } },
+  );
+}
+
+/** 批准自治决策 */
+export function approveDecision(projectID: string, decisionID: string) {
+  return requestClient.post(`${PREFIX}/approve-decision`, { projectID, decisionID });
+}
+
+/** 拒绝自治决策 */
+export function rejectDecision(projectID: string, decisionID: string) {
+  return requestClient.post(`${PREFIX}/reject-decision`, { projectID, decisionID });
+}
+
+/** 手动触发重规划 */
+export function triggerReplan(projectID: string) {
+  return requestClient.post(`${PREFIX}/trigger-replan`, { projectID });
+}
+
+/** 获取项目报告列表 */
+export function getProjectReports(projectID: string, reportType?: string) {
+  return requestClient.get<{ reports: ProjectReportItem[] }>(
+    `${PREFIX}/project-reports`,
+    { params: { projectID, ...(reportType ? { reportType } : {}) } },
+  );
+}
+
+/** 手动生成报告 */
+export function triggerReport(projectID: string, stageType?: string) {
+  return requestClient.post(`${PREFIX}/trigger-report`, { projectID, ...(stageType ? { stageType } : {}) });
+}

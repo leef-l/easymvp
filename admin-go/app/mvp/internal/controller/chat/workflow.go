@@ -14,6 +14,7 @@ import (
 	"easymvp/app/mvp/internal/activity"
 	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/middleware"
+	"easymvp/app/mvp/internal/workflow/autonomy"
 	"easymvp/app/mvp/internal/workflow/compat"
 	"easymvp/app/mvp/internal/workflow/orchestrator"
 	"easymvp/app/mvp/internal/workflow/repo"
@@ -1661,4 +1662,177 @@ func (c *cWorkflow) AcceptRework(ctx context.Context, req *v1.WorkflowAcceptRewo
 		return nil, err
 	}
 	return &v1.WorkflowAcceptReworkRes{}, nil
+}
+
+// ==================== 自治管理 Controller ====================
+
+// AutonomyDecisions 自治决策列表
+func (c *cWorkflow) AutonomyDecisions(ctx context.Context, req *v1.WorkflowAutonomyDecisionsReq) (res *v1.WorkflowAutonomyDecisionsRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	decisionRepo := repo.NewAutonomyDecisionRepo()
+	records, err := decisionRepo.ListByProject(ctx, projectID, req.DecisionType)
+	if err != nil {
+		return nil, err
+	}
+
+	var items []v1.AutonomyDecisionItem
+	for _, r := range records {
+		items = append(items, v1.AutonomyDecisionItem{
+			ID:             snowflake.JsonInt64(g.NewVar(r["id"]).Int64()),
+			DecisionType:   g.NewVar(r["decision_type"]).String(),
+			TriggerSource:  g.NewVar(r["trigger_source"]).String(),
+			TriggerContext: g.NewVar(r["trigger_context"]).String(),
+			Recommendation: g.NewVar(r["recommendation"]).String(),
+			DecisionMode:   g.NewVar(r["decision_mode"]).String(),
+			HumanAction:    g.NewVar(r["human_action"]).String(),
+			ExecutedAt:     g.NewVar(r["executed_at"]).GTime(),
+			Result:         g.NewVar(r["result"]).String(),
+			CreatedAt:      g.NewVar(r["created_at"]).GTime(),
+		})
+	}
+	if items == nil {
+		items = []v1.AutonomyDecisionItem{}
+	}
+	return &v1.WorkflowAutonomyDecisionsRes{Decisions: items}, nil
+}
+
+// ApproveDecision 批准自治决策
+func (c *cWorkflow) ApproveDecision(ctx context.Context, req *v1.WorkflowApproveDecisionReq) (res *v1.WorkflowApproveDecisionRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	decisionRepo := repo.NewAutonomyDecisionRepo()
+	if err := decisionRepo.UpdateHumanAction(ctx, int64(req.DecisionID), "approved"); err != nil {
+		return nil, err
+	}
+	return &v1.WorkflowApproveDecisionRes{}, nil
+}
+
+// RejectDecision 拒绝自治决策
+func (c *cWorkflow) RejectDecision(ctx context.Context, req *v1.WorkflowRejectDecisionReq) (res *v1.WorkflowRejectDecisionRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	decisionRepo := repo.NewAutonomyDecisionRepo()
+	if err := decisionRepo.UpdateHumanAction(ctx, int64(req.DecisionID), "rejected"); err != nil {
+		return nil, err
+	}
+	return &v1.WorkflowRejectDecisionRes{}, nil
+}
+
+// TriggerReplan 手动触发重规划
+func (c *cWorkflow) TriggerReplan(ctx context.Context, req *v1.WorkflowTriggerReplanReq) (res *v1.WorkflowTriggerReplanRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	// 查活跃 workflow_run
+	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("project_id", projectID).
+		WhereIn("status", g.Slice{"executing", "reworking", "accepting", "paused"}).
+		WhereNull("deleted_at").
+		OrderDesc("created_at").One()
+	if err != nil || wfRun.IsEmpty() {
+		return nil, fmt.Errorf("无活跃的工作流运行")
+	}
+
+	decisionRepo := repo.NewAutonomyDecisionRepo()
+	replanner := autonomy.NewReplanner(decisionRepo)
+
+	// 收集失败任务信息
+	failedTasks, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		Where("workflow_run_id", wfRun["id"].Int64()).
+		WhereIn("status", g.Slice{"failed", "escalated"}).
+		WhereNull("deleted_at").
+		Fields("id, name, result, retry_count").All()
+
+	var failed []autonomy.FailedTaskInfo
+	for _, t := range failedTasks {
+		failed = append(failed, autonomy.FailedTaskInfo{
+			TaskID:       t["id"].Int64(),
+			TaskName:     t["name"].String(),
+			ErrorMessage: t["result"].String(),
+			RetryCount:   t["retry_count"].Int(),
+		})
+	}
+
+	_, replanErr := replanner.Evaluate(ctx, &autonomy.ReplanInput{
+		WorkflowRunID: wfRun["id"].Int64(),
+		ProjectID:     projectID,
+		TriggerSource: "manual",
+		FailedTasks:   failed,
+	})
+	if replanErr != nil {
+		return nil, replanErr
+	}
+	return &v1.WorkflowTriggerReplanRes{}, nil
+}
+
+// ProjectReports 项目报告列表
+func (c *cWorkflow) ProjectReports(ctx context.Context, req *v1.WorkflowProjectReportsReq) (res *v1.WorkflowProjectReportsRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	reportRepo := repo.NewProjectReportRepo()
+	records, err := reportRepo.ListByProject(ctx, projectID, req.ReportType)
+	if err != nil {
+		return nil, err
+	}
+
+	var items []v1.ProjectReportItem
+	for _, r := range records {
+		items = append(items, v1.ProjectReportItem{
+			ID:         snowflake.JsonInt64(g.NewVar(r["id"]).Int64()),
+			ReportType: g.NewVar(r["report_type"]).String(),
+			StageType:  g.NewVar(r["stage_type"]).String(),
+			Title:      g.NewVar(r["title"]).String(),
+			Content:    g.NewVar(r["content"]).String(),
+			Metrics:    g.NewVar(r["metrics"]).String(),
+			CreatedAt:  g.NewVar(r["created_at"]).GTime(),
+		})
+	}
+	if items == nil {
+		items = []v1.ProjectReportItem{}
+	}
+	return &v1.WorkflowProjectReportsRes{Reports: items}, nil
+}
+
+// TriggerReport 手动生成报告
+func (c *cWorkflow) TriggerReport(ctx context.Context, req *v1.WorkflowTriggerReportReq) (res *v1.WorkflowTriggerReportRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at").
+		OrderDesc("created_at").One()
+	if err != nil || wfRun.IsEmpty() {
+		return nil, fmt.Errorf("无工作流运行记录")
+	}
+
+	reportRepo := repo.NewProjectReportRepo()
+	reporter := autonomy.NewReporter(reportRepo)
+
+	stageType := req.StageType
+	if stageType == "" {
+		stageType = "complete"
+	}
+
+	if err := reporter.GenerateStageReport(ctx, wfRun["id"].Int64(), stageType); err != nil {
+		return nil, err
+	}
+	return &v1.WorkflowTriggerReportRes{}, nil
 }

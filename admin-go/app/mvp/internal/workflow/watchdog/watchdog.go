@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"easymvp/app/mvp/internal/engine"
+	"easymvp/app/mvp/internal/workflow/autonomy"
 	domainTask "easymvp/app/mvp/internal/workflow/domain/task"
 )
 
@@ -24,6 +25,9 @@ type RetryCallback func(ctx context.Context, taskID int64) error
 // EscalateCallback 升级回调（触发 rework stage）。
 type EscalateCallback func(ctx context.Context, workflowRunID, taskID int64) error
 
+// PauseCallback 暂停项目回调（熔断时使用）。
+type PauseCallback func(ctx context.Context, workflowRunID int64, reason string) error
+
 // DomainTaskWatchdog V2 链路任务看门狗。
 type DomainTaskWatchdog struct {
 	checkInterval time.Duration
@@ -35,9 +39,11 @@ type DomainTaskWatchdog struct {
 	retryCount map[int64]int // taskID → 已重试次数
 	cancel     context.CancelFunc
 
-	scheduler   SchedulerCallback
-	retryFn     RetryCallback
-	escalateFn  EscalateCallback
+	scheduler      SchedulerCallback
+	retryFn        RetryCallback
+	escalateFn     EscalateCallback
+	pauseFn        PauseCallback
+	circuitBreaker *autonomy.CircuitBreaker
 }
 
 // New 创建 V2 看门狗。
@@ -64,6 +70,12 @@ func (w *DomainTaskWatchdog) SetRetryFn(fn RetryCallback) { w.retryFn = fn }
 
 // SetEscalateFn 注册升级回调（触发 rework）。
 func (w *DomainTaskWatchdog) SetEscalateFn(fn EscalateCallback) { w.escalateFn = fn }
+
+// SetPauseFn 注册暂停回调（熔断时使用）。
+func (w *DomainTaskWatchdog) SetPauseFn(fn PauseCallback) { w.pauseFn = fn }
+
+// SetCircuitBreaker 注册熔断器。
+func (w *DomainTaskWatchdog) SetCircuitBreaker(cb *autonomy.CircuitBreaker) { w.circuitBreaker = cb }
 
 // Start 启动看门狗。
 func (w *DomainTaskWatchdog) Start(ctx context.Context) {
@@ -330,6 +342,43 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 		if w.escalateFn != nil {
 			if err := w.escalateFn(ctx, item.workflowRunID, item.taskID); err != nil {
 				g.Log().Errorf(ctx, "[WatchdogV2] 触发 rework 失败: task=%d err=%v", item.taskID, err)
+			}
+		}
+	}
+
+	// 熔断检查：对所有活跃 workflow 做项目级异常检测
+	if w.circuitBreaker != nil {
+		wfIDs := make(map[int64]bool)
+		for _, c := range candidates {
+			wfIDs[c.workflowRunID] = true
+		}
+		w.checkCircuitBreaker(ctx, wfIDs)
+	}
+}
+
+// checkCircuitBreaker 对活跃 workflow 执行熔断检查。
+func (w *DomainTaskWatchdog) checkCircuitBreaker(ctx context.Context, wfIDs map[int64]bool) {
+	seen := wfIDs
+
+	for wfRunID := range seen {
+		result := w.circuitBreaker.Check(ctx, wfRunID)
+		if !result.ShouldBreak {
+			continue
+		}
+
+		g.Log().Errorf(ctx, "[WatchdogV2] 熔断触发: workflowRun=%d reason=%s", wfRunID, result.Reason)
+
+		// 查 projectID
+		projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+			Where("id", wfRunID).Value("project_id")
+
+		// 记录熔断决策
+		_, _ = w.circuitBreaker.RecordBreak(ctx, wfRunID, projectID.Int64(), result)
+
+		// 暂停项目
+		if w.pauseFn != nil {
+			if err := w.pauseFn(ctx, wfRunID, "熔断器触发: "+result.Reason); err != nil {
+				g.Log().Errorf(ctx, "[WatchdogV2] 熔断暂停失败: workflowRun=%d err=%v", wfRunID, err)
 			}
 		}
 	}
