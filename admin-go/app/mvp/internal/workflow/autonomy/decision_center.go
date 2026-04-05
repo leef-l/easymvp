@@ -290,6 +290,15 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 	}
 
 	// 7. 分流执行
+	// 将 Planner 策略的 Parameters 注入 TriggerContext，供 ActionDispatcher 回调使用
+	if plan != nil && len(plan.Parameters) > 0 {
+		if req.TriggerContext == nil {
+			req.TriggerContext = make(map[string]interface{})
+		}
+		for k, v := range plan.Parameters {
+			req.TriggerContext[k] = v
+		}
+	}
 	if resp.AutoExecutable && !resp.HumanRequired {
 		// Actuator: 记录执行前态势
 		var outcomeID int64

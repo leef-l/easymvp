@@ -484,6 +484,32 @@ func Init() {
 			g.Log().Infof(ctx, "[DecisionCenter] replan result: action=%s reasoning=%s", rec.Action, rec.Reasoning)
 			return nil
 		})
+		actionDispatcher.SetCallback(consts.ActionTypeSwitchExecutor, func(ctx context.Context, req *autonomy.DecisionRequest) error {
+			if req.DomainTaskID == 0 {
+				return fmt.Errorf("switch_executor: 缺少 domain_task_id")
+			}
+			// 从 TriggerContext 获取目标引擎类型
+			engineType := ""
+			if req.TriggerContext != nil {
+				if v, ok := req.TriggerContext["engine_type"].(string); ok {
+					engineType = v
+				}
+			}
+			if engineType == "" {
+				return fmt.Errorf("switch_executor: 缺少 engine_type")
+			}
+			g.Log().Infof(ctx, "[DecisionCenter] switch_executor: task=%d → %s", req.DomainTaskID, engineType)
+			// 更新任务的执行模式
+			_, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
+				Where("id", req.DomainTaskID).
+				Update(g.Map{"execution_mode": engineType})
+			if err != nil {
+				return fmt.Errorf("更新执行模式失败: %w", err)
+			}
+			// 唤醒调度器重新执行
+			taskScheduler.Wakeup(ctx, req.WorkflowRunID)
+			return nil
+		})
 
 		// Legacy → V2 执行器桥接：注入 V2ExecutorFn 到旧引擎，使 legacy 任务也能走 V2 执行器
 		legacyScheduler := engine.GetScheduler()
