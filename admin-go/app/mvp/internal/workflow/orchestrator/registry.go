@@ -240,7 +240,10 @@ func triggerExecuteStage(ctx context.Context, workflowRunID, planVersionID int64
 
 	// 实例化蓝图为领域任务并启动调度
 	if err := executeStageSvc.InstantiateAndStart(ctx, stageRunID, planVersionID); err != nil {
-		_ = stageSvc.FailStage(ctx, stageRunID, err.Error())
+		// 只标记 execute stage_run 自身为 failed，不级联到 workflow_run。
+		// 调用方（review concludeReview）负责完整回滚工作流状态。
+		// 使用 FailStageOnly 避免 FailStage 将 workflow_run 也打成 failed 导致回滚困难。
+		stageSvc.FailStageOnly(ctx, stageRunID, err.Error())
 		return fmt.Errorf("执行阶段启动失败: %w", err)
 	}
 

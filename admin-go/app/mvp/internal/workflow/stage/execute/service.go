@@ -21,6 +21,7 @@ import (
 type StageCompleter interface {
 	CompleteStage(ctx context.Context, stageRunID int64) error
 	FailStage(ctx context.Context, stageRunID int64, reason string) error
+	TransitionNext(ctx context.Context, workflowRunID int64) error
 }
 
 // Service 执行阶段服务。
@@ -88,9 +89,15 @@ func (s *Service) InstantiateAndStart(ctx context.Context, stageRunID int64, pla
 		// 注意：刚完成的 workspace 不会被清理（尚在保留期内），这是预期行为。
 		go workspace.RunCleanup(context.Background(), cleanupMgr, workspace.DefaultCleanupConfig())
 
-		// 完成 execute stage
+		// 完成 execute stage 并推进工作流到下一阶段（complete）
 		if s.stageCompleter != nil {
-			_ = s.stageCompleter.CompleteStage(ctx, finalStageRunID)
+			if err := s.stageCompleter.CompleteStage(ctx, finalStageRunID); err != nil {
+				g.Log().Errorf(ctx, "[ExecuteStage] CompleteStage 失败: stageRunID=%d err=%v", finalStageRunID, err)
+				return
+			}
+			if err := s.stageCompleter.TransitionNext(ctx, wfRunID); err != nil {
+				g.Log().Errorf(ctx, "[ExecuteStage] TransitionNext 失败: workflowRunID=%d err=%v", wfRunID, err)
+			}
 		}
 	})
 

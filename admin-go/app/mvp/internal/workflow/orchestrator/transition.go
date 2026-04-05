@@ -51,12 +51,12 @@ var validStageTransitions = map[string][]string{
 	StageSkipped:   {},
 }
 
-// stageOrder 阶段执行顺序。
+// stageOrder 主链阶段执行顺序。
+// rework 不在主链中——它是旁路分支，仅由 triggerReworkStage 在失败/升级场景中单独触发。
 var stageOrder = []string{
 	StageDesign,
 	StageReview,
 	StageExecute,
-	StageRework,
 	StageComplete,
 }
 

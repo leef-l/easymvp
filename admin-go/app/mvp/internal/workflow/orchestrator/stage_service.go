@@ -175,6 +175,22 @@ func (s *StageService) CompleteStage(ctx context.Context, stageRunID int64) erro
 	return nil
 }
 
+// FailStageOnly 仅标记 stage_run 自身为 failed，不级联到 workflow_run。
+// 用于调用方需要自行控制 workflow_run 状态的场景（如 review→execute 启动失败后由 review 侧统一回滚）。
+func (s *StageService) FailStageOnly(ctx context.Context, stageRunID int64, reason string) {
+	now := gtime.Now()
+	_, _ = g.DB().Model("mvp_stage_run").Ctx(ctx).
+		Where("id", stageRunID).
+		Where("status", consts.StageStatusRunning).
+		Data(g.Map{
+			"status":        consts.StageStatusFailed,
+			"error_message": reason,
+			"finished_at":   now,
+			"updated_at":    now,
+		}).Update()
+	g.Log().Infof(ctx, "[StageService] FailStageOnly stageRunID=%d reason=%s", stageRunID, reason)
+}
+
 // FailStage 标记阶段失败（CAS: running→failed）。
 func (s *StageService) FailStage(ctx context.Context, stageRunID int64, reason string) error {
 	now := gtime.Now()

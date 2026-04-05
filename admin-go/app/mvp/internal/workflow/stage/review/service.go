@@ -350,25 +350,62 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 			Update(g.Map{"review_status": consts.PlanReviewStatusApproved, "approved_at": now, "updated_at": now})
 
 		// 完成 review stage
-		_ = s.stageCompleter.CompleteStage(ctx, stageRunID)
+		if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
+			g.Log().Errorf(ctx, "[ReviewStage] CompleteStage 失败，回滚 review_status: %v", err)
+			_, _ = g.DB().Model("mvp_plan_version").Ctx(ctx).
+				Where("id", planVersionID).
+				Update(g.Map{"review_status": consts.PlanReviewStatusPending, "approved_at": nil, "updated_at": gtime.Now()})
+			return fmt.Errorf("完成审核阶段失败: %w", err)
+		}
 
 		// 推进到 execute stage
 		executeStarted := false
 		if s.executeTriggerFn != nil {
 			if err := s.executeTriggerFn(ctx, workflowRunID, planVersionID); err != nil {
-				g.Log().Errorf(ctx, "[ReviewStage] 推进执行阶段失败: %v", err)
+				g.Log().Errorf(ctx, "[ReviewStage] 推进执行阶段失败，回滚审核状态: %v", err)
+
+				// 回滚 plan_version review_status → pending
+				_, _ = g.DB().Model("mvp_plan_version").Ctx(ctx).
+					Where("id", planVersionID).
+					Update(g.Map{"review_status": consts.PlanReviewStatusPending, "approved_at": nil, "updated_at": gtime.Now()})
+
+				// 回滚 review stage: completed → running（CAS 防并发）
+				_, _ = g.DB().Model("mvp_stage_run").Ctx(ctx).
+					Where("id", stageRunID).
+					Where("status", consts.StageStatusCompleted).
+					Update(g.Map{"status": consts.StageStatusRunning, "finished_at": nil, "updated_at": gtime.Now()})
+
+				// 回滚 workflow_run 状态 → reviewing
+				// StartStage("execute") 会将状态推到 executing；若 InstantiateAndStart 失败后
+				// FailStageOnly 不级联 workflow，状态仍为 executing。覆盖两种可能。
+				wfRollback := g.Map{
+					"status":               consts.WorkflowRunStatusReviewing,
+					"current_stage":        "review",
+					"current_stage_run_id": stageRunID,
+					"updated_at":           gtime.Now(),
+				}
+				_, _ = g.DB().Model("mvp_workflow_run").Ctx(ctx).
+					Where("id", workflowRunID).
+					WhereIn("status", g.Slice{consts.WorkflowRunStatusExecuting, consts.WorkflowRunStatusFailed}).
+					Update(wfRollback)
+
+				// 同步 mvp_project.status 回 reviewing（清除可能被写入的 pause_reason）
+				_, _ = g.DB().Model("mvp_project").Ctx(ctx).
+					Where("id", projectID).
+					Update(g.Map{"status": consts.WorkflowRunStatusReviewing, "pause_reason": nil, "updated_at": gtime.Now()})
+
+				engine.NotifyProjectArchitectConversation(ctx, projectID,
+					fmt.Sprintf("## 方案审核通过但执行启动失败\n\n错误: %d，警告: %d\n\n⚠️ 执行阶段启动失败，已自动回滚到审核状态。请检查日志后重新确认方案。\n\n失败原因: %v", errorCount, warningCount, err))
+				return fmt.Errorf("执行阶段启动失败（已回滚审核状态）: %w", err)
 			} else {
 				executeStarted = true
 			}
 		}
 
-		// 通知架构师对话（反映真实状态）
+		// 通知架构师对话
 		if executeStarted {
 			engine.NotifyProjectArchitectConversation(ctx, projectID,
 				fmt.Sprintf("## 方案审核通过\n\n错误: %d，警告: %d\n\n项目已进入执行阶段。", errorCount, warningCount))
-		} else {
-			engine.NotifyProjectArchitectConversation(ctx, projectID,
-				fmt.Sprintf("## 方案审核通过\n\n错误: %d，警告: %d\n\n⚠️ 执行阶段启动失败，请手动触发或检查日志。", errorCount, warningCount))
 		}
 
 		g.Log().Infof(ctx, "[ReviewStage] 审核通过 planVersionID=%d errors=%d warnings=%d", planVersionID, errorCount, warningCount)
