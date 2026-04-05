@@ -23,8 +23,12 @@ const STATUS_LABELS: Record<string, string> = {
   designing: '设计中',
   reviewing: '方案审核中',
   running: '执行中',
+  executing: '执行中',
+  reworking: '返工中',
   paused: '已暂停',
   completed: '已完成',
+  failed: '已失败',
+  canceled: '已取消',
 };
 
 /** 状态 Tag 颜色映射 */
@@ -32,8 +36,12 @@ const STATUS_COLORS: Record<string, string> = {
   designing: 'blue',
   reviewing: 'cyan',
   running: 'green',
+  executing: 'green',
+  reworking: 'orange',
   paused: 'orange',
   completed: 'default',
+  failed: 'red',
+  canceled: 'default',
 };
 
 /** 新建项目弹窗 */
@@ -186,6 +194,11 @@ function handleViewStatus(row: ProjectItem) {
   statusPanelApi.setData({ project: row }).open();
 }
 
+/** 打开执行控制台 */
+function handleExecution(row: ProjectItem) {
+  router.push({ path: '/mvp/workflow/execution', query: { projectId: row.id } });
+}
+
 /** 确认方案（设计阶段 -> 执行阶段） */
 function handleConfirmPlan(row: ProjectItem) {
   Modal.confirm({
@@ -301,9 +314,17 @@ function handleDelete(row: ProjectItem) {
           <Tag color="cyan" class="ml-1">审核中...</Tag>
         </template>
 
-        <!-- 执行中：查看详情 + 暂停 -->
-        <template v-else-if="row.status === 'running'">
+        <!-- 执行中：查看详情 + 执行控制台 + 暂停 -->
+        <template v-else-if="row.status === 'running' || row.status === 'executing'">
           <Button type="link" size="small" @click="handleViewStatus(row)">查看详情</Button>
+          <Button v-if="row.engineVersion === 'workflow_v2'" type="link" size="small" @click="handleExecution(row)">执行控制台</Button>
+          <Button type="link" size="small" class="text-orange-500" @click="handlePause(row)">暂停</Button>
+        </template>
+
+        <!-- 返工中：查看详情 + 执行控制台 + 暂停 -->
+        <template v-else-if="row.status === 'reworking'">
+          <Button type="link" size="small" @click="handleViewStatus(row)">查看详情</Button>
+          <Button type="link" size="small" @click="handleExecution(row)">执行控制台</Button>
           <Button type="link" size="small" class="text-orange-500" @click="handlePause(row)">暂停</Button>
         </template>
 

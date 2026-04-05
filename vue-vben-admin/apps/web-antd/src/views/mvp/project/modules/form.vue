@@ -111,9 +111,9 @@ const createSchema = [
   {
     component: 'Select',
     fieldName: 'engineVersion',
-    label: tooltipLabel('引擎版本', '旧版（Legacy）直接写 mvp_task；新版（WorkflowV2）使用 plan_version + 蓝图，支持阶段化流程'),
+    label: tooltipLabel('引擎版本', '新版（WorkflowV2）使用 plan_version + 蓝图，支持阶段化流程；旧版（Legacy）仅用于兼容历史项目'),
     componentProps: { options: engineVersionOptions, placeholder: '请选择引擎版本' },
-    defaultValue: 'legacy',
+    defaultValue: 'workflow_v2',
   },
 ];
 
@@ -194,7 +194,7 @@ const [Modal, modalApi] = useVbenModal({
           description: values.description || '',
           workDir: values.workDir,
           architectModelID: values.architectModelID,
-          engineVersion: values.engineVersion || 'legacy',
+          engineVersion: values.engineVersion || 'workflow_v2',
         });
         message.success('项目创建成功，正在跳转到对话页面...');
         emit('success');

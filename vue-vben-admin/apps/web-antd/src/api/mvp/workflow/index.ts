@@ -277,3 +277,71 @@ export function getCompletionSummary(projectID: string) {
     { params: { projectID } },
   );
 }
+
+// ==================== 执行控制台 ====================
+
+/** 领域任务详情 */
+export interface DomainTaskItem {
+  id: string;
+  name: string;
+  description?: string;
+  status: string;
+  roleType: string;
+  roleLevel: string;
+  batchNo: number;
+  sort: number;
+  executionMode: string;
+  affectedResources: string[];
+  startedAt?: string;
+  completedAt?: string;
+  errorMessage?: string;
+  result?: string;
+  retryCount: number;
+}
+
+/** 资源锁详情 */
+export interface ResourceLockItem {
+  resource: string;
+  taskID: string;
+  taskName: string;
+}
+
+/** 执行状态结果 */
+export interface ExecutionStatusResult {
+  workflowRunID: string;
+  stageRunID: string;
+  stageStatus: string;
+  activeBatch: number;
+  totalTasks: number;
+  completedTasks: number;
+  runningTasks: number;
+  failedTasks: number;
+  pendingTasks: number;
+  escalatedTasks: number;
+  tasks: DomainTaskItem[];
+  resourceLocks: ResourceLockItem[];
+}
+
+/** 获取执行阶段实时状态 */
+export function getExecutionStatus(projectID: string) {
+  return requestClient.get<ExecutionStatusResult>(
+    `${PREFIX}/execution-status`,
+    { params: { projectID } },
+  );
+}
+
+/** 获取领域任务列表 */
+export function getDomainTasks(projectID: string, status?: string, batchNo?: number) {
+  return requestClient.get<{ tasks: DomainTaskItem[]; total: number }>(
+    `${PREFIX}/domain-tasks`,
+    { params: { projectID, ...(status ? { status } : {}), ...(batchNo ? { batchNo } : {}) } },
+  );
+}
+
+/** 获取资源锁列表 */
+export function getResourceLocks(projectID: string) {
+  return requestClient.get<{ locks: ResourceLockItem[] }>(
+    `${PREFIX}/resource-locks`,
+    { params: { projectID } },
+  );
+}

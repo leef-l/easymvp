@@ -50,15 +50,15 @@ func (c *cWorkflow) CreateProject(ctx context.Context, req *v1.WorkflowCreatePro
 	}
 
 	var wfRunID int64
-	// V2：额外创建 WorkflowRun + 启动 design 阶段
-	if req.EngineVersion == "workflow_v2" {
+	// 创建 WorkflowRun + 启动 design 阶段（默认 V2，仅显式 legacy 跳过）
+	if req.EngineVersion != "legacy" {
 		wfSvc := orchestrator.GetWorkflowService()
 		wfRunID, err = wfSvc.CreateRun(ctx, projectID)
 		if err != nil {
-			g.Log().Warningf(ctx, "[CreateProject] V2 CreateRun 失败: %v", err)
+			g.Log().Warningf(ctx, "[CreateProject] CreateRun 失败: %v", err)
 		} else {
 			if err2 := wfSvc.StartDesign(ctx, wfRunID); err2 != nil {
-				g.Log().Warningf(ctx, "[CreateProject] V2 StartDesign 失败: %v", err2)
+				g.Log().Warningf(ctx, "[CreateProject] StartDesign 失败: %v", err2)
 			}
 		}
 	}
@@ -80,14 +80,16 @@ func (c *cWorkflow) ConfirmPlan(ctx context.Context, req *v1.WorkflowConfirmPlan
 	gw := compat.NewLegacyGateway()
 	isV2, _ := gw.IsWorkflowV2(ctx, projectID)
 
-	if isV2 {
-		// V2：走 PlanVersionService.SubmitForReview
-		err = orchestrator.GetPlanVersionService().SubmitForReview(ctx, projectID)
-	} else {
-		// Legacy：走旧调度器
-		err = engine.GetScheduler().ConfirmPlan(ctx, projectID)
+	// Legacy 兼容分支
+	if !isV2 {
+		if err := engine.GetScheduler().ConfirmPlan(ctx, projectID); err != nil {
+			return nil, err
+		}
+		return &v1.WorkflowConfirmPlanRes{}, nil
 	}
-	if err != nil {
+
+	// V2 主路径
+	if err := orchestrator.GetPlanVersionService().SubmitForReview(ctx, projectID); err != nil {
 		return nil, err
 	}
 	return &v1.WorkflowConfirmPlanRes{}, nil
@@ -103,30 +105,29 @@ func (c *cWorkflow) Pause(ctx context.Context, req *v1.WorkflowPauseReq) (res *v
 	gw := compat.NewLegacyGateway()
 	isV2, _ := gw.IsWorkflowV2(ctx, projectID)
 
-	if isV2 {
-		// V2：暂停 WorkflowRun + DomainTaskScheduler
-		wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-			Where("project_id", projectID).
-			WhereNotIn("status", g.Slice{"completed", "canceled", "paused"}).
-			WhereNull("deleted_at").OrderDesc("run_no").One()
-		if wfRun.IsEmpty() {
-			return nil, fmt.Errorf("没有活跃的工作流运行")
-		}
-		wfRunID := wfRun["id"].Int64()
-
-		wfSvc := orchestrator.GetWorkflowService()
-		if err := wfSvc.Pause(ctx, wfRunID, req.PauseReason); err != nil {
-			return nil, err
-		}
-		// 暂停调度器
-		orchestrator.GetTaskScheduler().Pause(ctx, wfRunID)
-	} else {
-		// Legacy：走旧调度器
+	// Legacy 兼容分支
+	if !isV2 {
 		if err := engine.GetScheduler().Pause(ctx, projectID, req.PauseReason); err != nil {
 			return nil, err
 		}
+		return &v1.WorkflowPauseRes{}, nil
 	}
 
+	// V2 主路径
+	wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNotIn("status", g.Slice{"completed", "canceled", "paused"}).
+		WhereNull("deleted_at").OrderDesc("run_no").One()
+	if wfRun.IsEmpty() {
+		return nil, fmt.Errorf("没有活跃的工作流运行")
+	}
+	wfRunID := wfRun["id"].Int64()
+
+	wfSvc := orchestrator.GetWorkflowService()
+	if err := wfSvc.Pause(ctx, wfRunID, req.PauseReason); err != nil {
+		return nil, err
+	}
+	orchestrator.GetTaskScheduler().Pause(ctx, wfRunID)
 	return &v1.WorkflowPauseRes{}, nil
 }
 
@@ -140,33 +141,31 @@ func (c *cWorkflow) Resume(ctx context.Context, req *v1.WorkflowResumeReq) (res 
 	gw := compat.NewLegacyGateway()
 	isV2, _ := gw.IsWorkflowV2(ctx, projectID)
 
-	if isV2 {
-		// V2：恢复 WorkflowRun + 重启调度器
-		wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-			Where("project_id", projectID).
-			Where("status", "paused").
-			WhereNull("deleted_at").OrderDesc("run_no").One()
-		if wfRun.IsEmpty() {
-			return nil, fmt.Errorf("没有暂停的工作流运行")
-		}
-		wfRunID := wfRun["id"].Int64()
-
-		wfSvc := orchestrator.GetWorkflowService()
-		if err := wfSvc.Resume(ctx, wfRunID); err != nil {
-			return nil, err
-		}
-		// 如果 workflow 当前阶段是 executing，重启调度器
-		currentStage := wfRun["current_stage"].String()
-		if currentStage == "execute" {
-			_ = orchestrator.GetTaskScheduler().Start(ctx, wfRunID)
-		}
-	} else {
-		// Legacy：走旧调度器
+	// Legacy 兼容分支
+	if !isV2 {
 		if err := engine.GetScheduler().Resume(ctx, projectID); err != nil {
 			return nil, err
 		}
+		return &v1.WorkflowResumeRes{}, nil
 	}
 
+	// V2 主路径
+	wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("project_id", projectID).
+		Where("status", "paused").
+		WhereNull("deleted_at").OrderDesc("run_no").One()
+	if wfRun.IsEmpty() {
+		return nil, fmt.Errorf("没有暂停的工作流运行")
+	}
+	wfRunID := wfRun["id"].Int64()
+
+	wfSvc := orchestrator.GetWorkflowService()
+	if err := wfSvc.Resume(ctx, wfRunID); err != nil {
+		return nil, err
+	}
+	if wfRun["current_stage"].String() == "execute" {
+		_ = orchestrator.GetTaskScheduler().Start(ctx, wfRunID)
+	}
 	return &v1.WorkflowResumeRes{}, nil
 }
 
@@ -181,32 +180,31 @@ func (c *cWorkflow) RetryTask(ctx context.Context, req *v1.WorkflowRetryTaskReq)
 	gw := compat.NewLegacyGateway()
 	isV2, _ := gw.IsWorkflowV2(ctx, projectID)
 
-	if isV2 {
-		// V2：domain_task failed → pending
-		result, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-			Where("id", taskID).Where("status", "failed").
-			Update(g.Map{
-				"status":      "pending",
-				"retry_count": g.Map{"retry_count": "retry_count + 1"},
-				"result":      nil,
-				"updated_at":  g.Map{"updated_at": "NOW()"},
-			})
-		if err != nil {
-			return nil, err
-		}
-		rows, _ := result.RowsAffected()
-		if rows == 0 {
-			return nil, fmt.Errorf("任务(%d)不在 failed 状态，无法重试", taskID)
-		}
-		// 调度器下一个 poll 会自动拾取
-	} else {
-		// Legacy
+	// Legacy 兼容分支
+	if !isV2 {
 		engine.GetWatchdog().ResetRetryCount(taskID)
 		if err := engine.GetScheduler().RetryTask(projectID, taskID); err != nil {
 			return nil, err
 		}
+		return &v1.WorkflowRetryTaskRes{}, nil
 	}
 
+	// V2 主路径：domain_task failed → pending
+	result, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		Where("id", taskID).Where("status", "failed").
+		Update(g.Map{
+			"status":      "pending",
+			"retry_count": g.Map{"retry_count": "retry_count + 1"},
+			"result":      nil,
+			"updated_at":  g.Map{"updated_at": "NOW()"},
+		})
+	if err != nil {
+		return nil, err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return nil, fmt.Errorf("任务(%d)不在 failed 状态，无法重试", taskID)
+	}
 	return &v1.WorkflowRetryTaskRes{}, nil
 }
 
@@ -221,33 +219,32 @@ func (c *cWorkflow) SkipTask(ctx context.Context, req *v1.WorkflowSkipTaskReq) (
 	gw := compat.NewLegacyGateway()
 	isV2, _ := gw.IsWorkflowV2(ctx, projectID)
 
-	if isV2 {
-		// V2：跳过领域任务 (pending/failed → completed, result=skipped)
-		result, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-			Where("id", taskID).
-			WhereIn("status", g.Slice{"pending", "failed"}).
-			Update(g.Map{
-				"status":       "completed",
-				"result":       "skipped",
-				"completed_at": g.Map{"completed_at": "NOW()"},
-				"updated_at":   g.Map{"updated_at": "NOW()"},
-			})
-		if err != nil {
-			return nil, err
-		}
-		rows, _ := result.RowsAffected()
-		if rows == 0 {
-			return nil, fmt.Errorf("任务不在可跳过的状态")
-		}
-		// 通知调度器重新调度（可能解锁后续批次）
-		_ = orchestrator.GetTaskScheduler().OnTaskCompleted(ctx, taskID)
-	} else {
-		// Legacy
+	// Legacy 兼容分支
+	if !isV2 {
 		if err := engine.GetScheduler().SkipTask(ctx, projectID, taskID, req.Reason); err != nil {
 			return nil, err
 		}
+		return &v1.WorkflowSkipTaskRes{}, nil
 	}
 
+	// V2 主路径：跳过领域任务 (pending/failed → completed, result=skipped)
+	result, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		Where("id", taskID).
+		WhereIn("status", g.Slice{"pending", "failed"}).
+		Update(g.Map{
+			"status":       "completed",
+			"result":       "skipped",
+			"completed_at": g.Map{"completed_at": "NOW()"},
+			"updated_at":   g.Map{"updated_at": "NOW()"},
+		})
+	if err != nil {
+		return nil, err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return nil, fmt.Errorf("任务不在可跳过的状态")
+	}
+	_ = orchestrator.GetTaskScheduler().OnTaskCompleted(ctx, taskID)
 	return &v1.WorkflowSkipTaskRes{}, nil
 }
 
@@ -295,17 +292,17 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 		}, nil
 	}
 
-	if isV2 {
-		// V2：解析为蓝图写入 plan_version + task_blueprint
-		count, err := parseAndCreateBlueprints(ctx, projectID, conv["id"].Int64(), msg["id"].Int64(), aiReply)
+	// Legacy 兼容分支
+	if !isV2 {
+		count, err := engine.GetParser().ParseAndCreateTasks(ctx, projectID, aiReply)
 		if err != nil {
 			return nil, err
 		}
 		return &v1.WorkflowParseTasksRes{HasTasks: count > 0, TaskCount: count}, nil
 	}
 
-	// Legacy：写入 mvp_task
-	count, err := engine.GetParser().ParseAndCreateTasks(ctx, projectID, aiReply)
+	// V2 主路径：解析为蓝图写入 plan_version + task_blueprint
+	count, err := parseAndCreateBlueprints(ctx, projectID, conv["id"].Int64(), msg["id"].Int64(), aiReply)
 	if err != nil {
 		return nil, err
 	}
@@ -365,49 +362,49 @@ func (c *cWorkflow) ProjectStatus(ctx context.Context, req *v1.WorkflowProjectSt
 	gw := compat.NewLegacyGateway()
 	isV2, _ := gw.IsWorkflowV2(ctx, projectID)
 
-	if isV2 {
-		// V2：从新表聚合状态
-		return projectStatusV2(ctx, project)
+	// Legacy 兼容分支
+	if !isV2 {
+		type StatusCount struct {
+			Status string `json:"status"`
+			Count  int    `json:"count"`
+		}
+		var counts []StatusCount
+		if err := g.DB().Model("mvp_task").
+			Where("project_id", projectID).
+			Where("deleted_at IS NULL").
+			Fields("status, COUNT(*) as count").
+			Group("status").
+			Scan(&counts); err != nil {
+			return nil, err
+		}
+
+		statusCounts := make(map[string]int)
+		total := 0
+		for _, sc := range counts {
+			statusCounts[sc.Status] = sc.Count
+			total += sc.Count
+		}
+
+		activitySummary, err := activity.LoadProjectSummary(ctx, projectID)
+		if err != nil {
+			return nil, err
+		}
+
+		return &v1.WorkflowProjectStatusRes{
+			Status:             project["status"].String(),
+			PauseReason:        project["pause_reason"].String(),
+			ActiveBatch:        engine.GetScheduler().GetActiveBatch(projectID),
+			TotalTasks:         total,
+			StatusCounts:       statusCounts,
+			LastActiveAt:       activitySummary.LastActiveAt,
+			IsActuallyWorking:  activitySummary.IsActuallyWorking,
+			ActiveRunningTasks: activitySummary.ActiveRunningTasks,
+			StalledTaskCount:   activitySummary.StalledTaskCount,
+		}, nil
 	}
 
-	// Legacy：从 mvp_task 统计
-	type StatusCount struct {
-		Status string `json:"status"`
-		Count  int    `json:"count"`
-	}
-	var counts []StatusCount
-	if err := g.DB().Model("mvp_task").
-		Where("project_id", projectID).
-		Where("deleted_at IS NULL").
-		Fields("status, COUNT(*) as count").
-		Group("status").
-		Scan(&counts); err != nil {
-		return nil, err
-	}
-
-	statusCounts := make(map[string]int)
-	total := 0
-	for _, sc := range counts {
-		statusCounts[sc.Status] = sc.Count
-		total += sc.Count
-	}
-
-	activitySummary, err := activity.LoadProjectSummary(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
-
-	return &v1.WorkflowProjectStatusRes{
-		Status:             project["status"].String(),
-		PauseReason:        project["pause_reason"].String(),
-		ActiveBatch:        engine.GetScheduler().GetActiveBatch(projectID),
-		TotalTasks:         total,
-		StatusCounts:       statusCounts,
-		LastActiveAt:       activitySummary.LastActiveAt,
-		IsActuallyWorking:  activitySummary.IsActuallyWorking,
-		ActiveRunningTasks: activitySummary.ActiveRunningTasks,
-		StalledTaskCount:   activitySummary.StalledTaskCount,
-	}, nil
+	// V2 主路径
+	return projectStatusV2(ctx, project)
 }
 
 // projectStatusV2 V2 引擎的项目状态聚合。
@@ -1184,4 +1181,212 @@ func (c *cWorkflow) CompletionSummary(ctx context.Context, req *v1.WorkflowCompl
 		StartedAt:       summary.StartedAt,
 		FinishedAt:      summary.FinishedAt,
 	}, nil
+}
+
+// ==================== 执行控制台 ====================
+
+// ExecutionStatus 执行阶段实时状态
+func (c *cWorkflow) ExecutionStatus(ctx context.Context, req *v1.WorkflowExecutionStatusReq) (res *v1.WorkflowExecutionStatusRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	res = &v1.WorkflowExecutionStatusRes{
+		Tasks:         []v1.DomainTaskItem{},
+		ResourceLocks: []v1.ResourceLockItem{},
+	}
+
+	// 查活跃 workflow_run
+	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at").
+		OrderDesc("run_no").
+		One()
+	if err != nil || wfRun.IsEmpty() {
+		return res, nil
+	}
+	wfRunID := wfRun["id"].Int64()
+	res.WorkflowRunID = snowflake.JsonInt64(wfRunID)
+
+	// 查 execute stage_run
+	stageRun, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).
+		Where("workflow_run_id", wfRunID).
+		Where("stage_type", "execute").
+		WhereNull("deleted_at").
+		OrderDesc("stage_no").
+		One()
+	if !stageRun.IsEmpty() {
+		res.StageRunID = snowflake.JsonInt64(stageRun["id"].Int64())
+		res.StageStatus = stageRun["status"].String()
+	}
+
+	// 查领域任务
+	tasks, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		Where("workflow_run_id", wfRunID).
+		WhereNull("deleted_at").
+		OrderAsc("batch_no").
+		OrderAsc("sort").
+		All()
+
+	for _, t := range tasks {
+		res.Tasks = append(res.Tasks, buildDomainTaskItem(t))
+	}
+
+	// 统计
+	for _, t := range res.Tasks {
+		res.TotalTasks++
+		switch t.Status {
+		case "completed":
+			res.CompletedTasks++
+		case "running":
+			res.RunningTasks++
+		case "failed":
+			res.FailedTasks++
+		case "pending":
+			res.PendingTasks++
+		case "escalated":
+			res.EscalatedTasks++
+		}
+	}
+
+	// 活跃批次
+	scheduler := orchestrator.GetTaskScheduler()
+	if scheduler != nil {
+		lockedRes := scheduler.GetLockedResources()
+		for resource, taskID := range lockedRes {
+			taskName := ""
+			for _, t := range res.Tasks {
+				if int64(t.ID) == taskID {
+					taskName = t.Name
+					break
+				}
+			}
+			res.ResourceLocks = append(res.ResourceLocks, v1.ResourceLockItem{
+				Resource: resource,
+				TaskID:   snowflake.JsonInt64(taskID),
+				TaskName: taskName,
+			})
+		}
+	}
+
+	// 计算活跃批次号
+	for _, t := range res.Tasks {
+		if t.Status == "running" || t.Status == "pending" {
+			if t.BatchNo > 0 && (res.ActiveBatch == 0 || t.BatchNo < res.ActiveBatch) {
+				res.ActiveBatch = t.BatchNo
+			}
+		}
+	}
+
+	return res, nil
+}
+
+// DomainTasks 领域任务列表
+func (c *cWorkflow) DomainTasks(ctx context.Context, req *v1.WorkflowDomainTasksReq) (res *v1.WorkflowDomainTasksRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	// 查 workflow_run
+	wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at").
+		OrderDesc("run_no").
+		One()
+	if wfRun.IsEmpty() {
+		return &v1.WorkflowDomainTasksRes{Tasks: []v1.DomainTaskItem{}}, nil
+	}
+
+	query := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		Where("workflow_run_id", wfRun["id"].Int64()).
+		WhereNull("deleted_at")
+
+	if req.Status != "" {
+		query = query.Where("status", req.Status)
+	}
+	if req.BatchNo > 0 {
+		query = query.Where("batch_no", req.BatchNo)
+	}
+
+	tasks, err := query.OrderAsc("batch_no").OrderAsc("sort").All()
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]v1.DomainTaskItem, 0, len(tasks))
+	for _, t := range tasks {
+		items = append(items, buildDomainTaskItem(t))
+	}
+
+	return &v1.WorkflowDomainTasksRes{Tasks: items, Total: len(items)}, nil
+}
+
+// ResourceLocks 资源锁列表
+func (c *cWorkflow) ResourceLocks(ctx context.Context, req *v1.WorkflowResourceLocksReq) (res *v1.WorkflowResourceLocksRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	res = &v1.WorkflowResourceLocksRes{Locks: []v1.ResourceLockItem{}}
+
+	scheduler := orchestrator.GetTaskScheduler()
+	if scheduler == nil {
+		return res, nil
+	}
+
+	lockedRes := scheduler.GetLockedResources()
+	if len(lockedRes) == 0 {
+		return res, nil
+	}
+
+	// 查任务名称
+	taskIDs := make([]int64, 0, len(lockedRes))
+	for _, tid := range lockedRes {
+		taskIDs = append(taskIDs, tid)
+	}
+	taskNames := make(map[int64]string)
+	tasks, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		WhereIn("id", taskIDs).Fields("id, name").All()
+	for _, t := range tasks {
+		taskNames[t["id"].Int64()] = t["name"].String()
+	}
+
+	for resource, taskID := range lockedRes {
+		res.Locks = append(res.Locks, v1.ResourceLockItem{
+			Resource: resource,
+			TaskID:   snowflake.JsonInt64(taskID),
+			TaskName: taskNames[taskID],
+		})
+	}
+
+	return res, nil
+}
+
+// buildDomainTaskItem 构建领域任务响应项。
+func buildDomainTaskItem(t gdb.Record) v1.DomainTaskItem {
+	var resources []string
+	resJSON := t["affected_resources"].String()
+	if resJSON != "" && resJSON != "[]" && resJSON != "null" {
+		_ = json.Unmarshal([]byte(resJSON), &resources)
+	}
+	return v1.DomainTaskItem{
+		ID:                snowflake.JsonInt64(t["id"].Int64()),
+		Name:              t["name"].String(),
+		Description:       t["description"].String(),
+		Status:            t["status"].String(),
+		RoleType:          t["role_type"].String(),
+		RoleLevel:         t["role_level"].String(),
+		BatchNo:           t["batch_no"].Int(),
+		Sort:              t["sort"].Int(),
+		ExecutionMode:     t["execution_mode"].String(),
+		AffectedResources: resources,
+		StartedAt:         t["started_at"].GTime(),
+		CompletedAt:       t["completed_at"].GTime(),
+		ErrorMessage:      t["error_message"].String(),
+		Result:            t["result"].String(),
+		RetryCount:        t["retry_count"].Int(),
+	}
 }

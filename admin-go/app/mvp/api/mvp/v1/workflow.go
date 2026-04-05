@@ -363,3 +363,81 @@ type WorkflowCompletionSummaryRes struct {
 	StartedAt       string              `json:"startedAt"`
 	FinishedAt      string              `json:"finishedAt"`
 }
+
+// ==================== 执行控制台 ====================
+
+// WorkflowExecutionStatusReq 执行阶段实时状态请求
+type WorkflowExecutionStatusReq struct {
+	g.Meta    `path:"/workflow/execution-status" method:"get" tags:"项目流程" summary:"执行阶段实时状态"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// WorkflowExecutionStatusRes 执行阶段实时状态响应
+type WorkflowExecutionStatusRes struct {
+	g.Meta         `mime:"application/json"`
+	WorkflowRunID  snowflake.JsonInt64 `json:"workflowRunID"`
+	StageRunID     snowflake.JsonInt64 `json:"stageRunID"`
+	StageStatus    string              `json:"stageStatus"`
+	ActiveBatch    int                 `json:"activeBatch"`
+	TotalTasks     int                 `json:"totalTasks"`
+	CompletedTasks int                 `json:"completedTasks"`
+	RunningTasks   int                 `json:"runningTasks"`
+	FailedTasks    int                 `json:"failedTasks"`
+	PendingTasks   int                 `json:"pendingTasks"`
+	EscalatedTasks int                 `json:"escalatedTasks"`
+	Tasks          []DomainTaskItem    `json:"tasks"`
+	ResourceLocks  []ResourceLockItem  `json:"resourceLocks"`
+}
+
+// DomainTaskItem 领域任务详情
+type DomainTaskItem struct {
+	ID                snowflake.JsonInt64 `json:"id"`
+	Name              string              `json:"name"`
+	Description       string              `json:"description,omitempty"`
+	Status            string              `json:"status"`
+	RoleType          string              `json:"roleType"`
+	RoleLevel         string              `json:"roleLevel"`
+	BatchNo           int                 `json:"batchNo"`
+	Sort              int                 `json:"sort"`
+	ExecutionMode     string              `json:"executionMode"`
+	AffectedResources []string            `json:"affectedResources"`
+	StartedAt         *gtime.Time         `json:"startedAt,omitempty"`
+	CompletedAt       *gtime.Time         `json:"completedAt,omitempty"`
+	ErrorMessage      string              `json:"errorMessage,omitempty"`
+	Result            string              `json:"result,omitempty"`
+	RetryCount        int                 `json:"retryCount"`
+}
+
+// ResourceLockItem 资源锁详情
+type ResourceLockItem struct {
+	Resource string              `json:"resource"`
+	TaskID   snowflake.JsonInt64 `json:"taskID"`
+	TaskName string              `json:"taskName"`
+}
+
+// WorkflowDomainTasksReq 领域任务列表请求
+type WorkflowDomainTasksReq struct {
+	g.Meta    `path:"/workflow/domain-tasks" method:"get" tags:"项目流程" summary:"领域任务列表"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	Status    string              `json:"status" dc:"状态筛选"`
+	BatchNo   int                 `json:"batchNo" dc:"批次筛选"`
+}
+
+// WorkflowDomainTasksRes 领域任务列表响应
+type WorkflowDomainTasksRes struct {
+	g.Meta `mime:"application/json"`
+	Tasks  []DomainTaskItem `json:"tasks"`
+	Total  int              `json:"total"`
+}
+
+// WorkflowResourceLocksReq 资源锁列表请求
+type WorkflowResourceLocksReq struct {
+	g.Meta    `path:"/workflow/resource-locks" method:"get" tags:"项目流程" summary:"资源锁列表"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// WorkflowResourceLocksRes 资源锁列表响应
+type WorkflowResourceLocksRes struct {
+	g.Meta `mime:"application/json"`
+	Locks  []ResourceLockItem `json:"locks"`
+}

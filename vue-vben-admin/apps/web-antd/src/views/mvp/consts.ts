@@ -119,13 +119,13 @@ export const EngineVersion = {
 /** 引擎版本映射 */
 export const engineVersionMap: Record<string, { label: string; color: string }> = {
   legacy: { label: 'Legacy', color: 'default' },
-  workflow_v2: { label: 'Workflow V2', color: 'purple' },
+  workflow_v2: { label: 'Workflow V2', color: 'green' },
 };
 
 /** 引擎版本选项 */
 export const engineVersionOptions = [
-  { label: 'Legacy (旧引擎)', value: 'legacy' },
-  { label: 'Workflow V2 (新引擎)', value: 'workflow_v2' },
+  { label: 'Workflow V2 (推荐)', value: 'workflow_v2' },
+  { label: 'Legacy (旧引擎，不推荐)', value: 'legacy' },
 ];
 
 // ==================== 工作流状态 ====================

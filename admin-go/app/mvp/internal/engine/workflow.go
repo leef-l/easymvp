@@ -175,10 +175,10 @@ func CreateProject(ctx context.Context, name, projectCategory, description, work
 		}
 	}
 
-	// 解析引擎版本
-	ev := "legacy"
-	if len(engineVersion) > 0 && engineVersion[0] == "workflow_v2" {
-		ev = "workflow_v2"
+	// 解析引擎版本（默认 workflow_v2，仅显式指定 legacy 时走旧链）
+	ev := "workflow_v2"
+	if len(engineVersion) > 0 && engineVersion[0] == "legacy" {
+		ev = "legacy"
 	}
 
 	// 2. 创建项目
