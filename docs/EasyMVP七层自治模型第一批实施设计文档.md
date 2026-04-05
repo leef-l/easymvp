@@ -62,9 +62,16 @@
 7. `decision_center.go` 前置 `AdmissionControl`
 8. `registry.go` 中七层 Phase A 初始化
 
-所以当前最准确的状态是：
+**实施完成状态（2026-04-06 更新）：**
 
-`Phase A 的库表准备了一半，运行时主链还没接。`
+| 阶段 | 内容 | 状态 |
+|------|------|------|
+| Phase A（L6 目标层 + 态势感知） | Sensor/Situation/Objective/AdmissionControl | ✅ 代码完成 |
+| Phase B（L5 策略层） | Planner + 6 策略函数 + Actuator 效果跟踪 | ✅ 代码完成 |
+| Phase C（L5 补全） | 8/8 ActionDispatcher 回调 + Parameters 注入 | ✅ 代码完成 |
+| Phase D（L7 元认知层） | MetaObserver + Learner + MetaAssessor + MetaTuner | ✅ 代码完成 |
+
+七层自治模型 L1~L7 全部代码完成，14 个灰度开关当前全部关闭，等待真实环境逐级验证。
 
 ---
 
@@ -511,11 +518,18 @@ const RoleTypeOperator = "operator"
 
 ---
 
-## 12. 本批后的下一步
+## 12. 实施完成记录
 
-第一批结束后，下一份实施稿直接进入：
+全部四批均已完成：
 
-- `Phase B：Planner + 6 个策略函数`
+| 批次 | 完成日期 | 关键产出 |
+|------|----------|----------|
+| Phase A | 2026-04-04 | L6 Sensor/Situation/Objective + AdmissionControl + 3 个灰度开关 |
+| Phase B | 2026-04-04 | L5 Planner + 6 策略 + Actuator + 6 个灰度开关 |
+| Phase C | 2026-04-05 | 8/8 回调补全 + Parameters 注入 + switch_executor |
+| Phase D | 2026-04-05 | L7 MetaObserver/Learner/MetaAssessor/MetaTuner + 4 张表 + 3 个灰度开关 |
+
+数据库：55 张表。灰度开关：14 个，全部关闭。前端：11 个 workflow 页面 + 元认知面板。
 
 也就是从：
 

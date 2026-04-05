@@ -6,6 +6,24 @@
 
 ---
 
+## 实施现状（2026-04-06 更新）
+
+| 层级 | 模块 | 状态 | 关键组件 |
+|------|------|------|----------|
+| L1 证据层 | Evidence | ✅ 已上线 | 决策日志、审计记录 |
+| L2 执行层 | Execution | ✅ 已上线 | ActionDispatcher（8/8 回调）、6 种执行器 |
+| L3 能力层 | Capability | ✅ 已上线 | PolicyEngine / RiskGate / CircuitBreaker |
+| L3.5 协作层 | Collaboration | ✅ 已上线 | 飞书审批卡片、少人值守 |
+| L4 契约层 | Contract | ✅ 已上线 | DecisionCenter 决策中台 |
+| L5 策略层 | Strategy | ✅ 代码完成 | Planner + 6 策略 + Actuator 效果跟踪 |
+| L6 目标层 | Objective | ✅ 代码完成 | Sensor 态势感知 + Situation + ObjectiveService |
+| L7 元认知层 | Meta-Cognition | ✅ 代码完成 | MetaObserver + Learner + MetaAssessor + MetaTuner |
+
+**执行器：** aider / openhands / claude_code / codex_cli / gemini_cli / chat（6 种，全部注册 + 入库）
+**数据库：** 55 张表 | **灰度开关：** 14 个（全部关闭）| **前端：** 11 个 workflow 页面
+
+---
+
 ## 0. 三方合并说明
 
 | 来源 | 采纳内容 |

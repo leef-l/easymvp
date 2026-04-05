@@ -6,6 +6,9 @@
 - `EasyMVP对接OpenHands与Aider引擎设计实现文档.md`
 - `EasyMVP架构设计文档.md`
 - `EasyMVP七层自治模型第一批实施设计文档.md`
+- `EasyMVP自治系统终极基线：七层自治模型.md`
+- `EasyMVP自治系统终极架构：六层自治模型设计方案.md`
+- `EasyMVP七层自治模型第一批实施设计文档.md`
 - `Docker开发环境说明.md`
 - `Docker生产环境变量说明.md`
 - `流水线架构重构设计文档.md`
