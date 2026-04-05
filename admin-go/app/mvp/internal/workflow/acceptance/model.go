@@ -9,6 +9,8 @@ type AcceptContext struct {
 	StageRunID    int64
 	ProjectType   string // 项目分类（software_dev/document/creative/analysis）
 	WorkDir       string // 项目工作目录
+	CreatedBy     int64  // 继承自 project.created_by
+	DeptID        int64  // 继承自 project.dept_id
 }
 
 // RuleHit 规则命中结果。

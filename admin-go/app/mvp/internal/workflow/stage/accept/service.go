@@ -4,6 +4,7 @@ package accept
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -13,6 +14,10 @@ import (
 	"easymvp/app/mvp/internal/workflow/acceptance"
 	"easymvp/app/mvp/internal/workflow/repo"
 )
+
+// ErrManualReviewRequired reworkTrigger 无法自动返工时返回此错误，
+// 通知 accept service 保持 accept stage running 等待人工介入。
+var ErrManualReviewRequired = errors.New("manual review required: no task to rework")
 
 // StageCompleter 阶段操作回调（避免循环依赖）。
 type StageCompleter interface {
@@ -81,6 +86,8 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 	}
 	projectType := project["project_category"].String()
 	workDir := project["work_dir"].String()
+	createdBy := project["created_by"].Int64()
+	deptID := project["dept_id"].Int64()
 
 	// 2. 幂等检查：同一 stageRun 不重复创建 accept_run
 	existing, _ := g.DB().Model("mvp_accept_run").Ctx(ctx).
@@ -107,8 +114,8 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 		"accept_round":    round,
 		"status":          "running",
 		"rules_version":   "v1.0.0",
-		"created_by":      0,
-		"dept_id":         0,
+		"created_by":      createdBy,
+		"dept_id":         deptID,
 		"started_at":      now,
 		"created_at":      now,
 		"updated_at":      now,
@@ -124,6 +131,8 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 		StageRunID:    stageRunID,
 		ProjectType:   projectType,
 		WorkDir:       workDir,
+		CreatedBy:     createdBy,
+		DeptID:        deptID,
 	}
 
 	g.Log().Infof(ctx, "[AcceptStage] 开始验收: workflowRunID=%d stageRunID=%d acceptRunID=%d round=%d projectType=%s",
@@ -190,16 +199,22 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 		}
 
 	case acceptance.DecisionFailed:
-		// 完成 accept stage → 触发 rework
-		if s.stageCompleter != nil {
-			if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
-				g.Log().Errorf(ctx, "[AcceptStage] CompleteStage 失败: %v", err)
+		// 先尝试触发 rework
+		if s.reworkTrigger != nil {
+			if err := s.reworkTrigger(ctx, workflowRunID, acceptRunID, decision.Issues); err != nil {
+				if errors.Is(err, ErrManualReviewRequired) {
+					// 无法自动返工 → 保持 accept stage running，等待人工介入
+					g.Log().Infof(ctx, "[AcceptStage] 无法自动返工，保持 accept running 等待人工: acceptRunID=%d", acceptRunID)
+					return nil
+				}
+				g.Log().Errorf(ctx, "[AcceptStage] 触发返工失败: %v", err)
 				return err
 			}
 		}
-		if s.reworkTrigger != nil {
-			if err := s.reworkTrigger(ctx, workflowRunID, acceptRunID, decision.Issues); err != nil {
-				g.Log().Errorf(ctx, "[AcceptStage] 触发返工失败: %v", err)
+		// rework 已成功触发 → 完成 accept stage
+		if s.stageCompleter != nil {
+			if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
+				g.Log().Errorf(ctx, "[AcceptStage] CompleteStage 失败: %v", err)
 				return err
 			}
 		}

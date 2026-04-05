@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/gogf/gf/v2/frame/g"
 
@@ -167,46 +170,85 @@ func (e *RuleEngine) checkOutputNotEmpty(ctx context.Context, in *AcceptContext,
 
 // checkRequiredFiles 检查关键文件是否存在（基于 domain_task.affected_resources）。
 func (e *RuleEngine) checkRequiredFiles(_ context.Context, in *AcceptContext, ruleCode, ruleName, ruleType, scopeType string, cfg *ruleConfig) []RuleHit {
-	// 第一版基于工作目录文件检查（简化实现）
-	// TODO: 后续可增强为读 git diff 或 workspace 产物
 	if in.WorkDir == "" || len(cfg.RequiredFiles) == 0 {
 		return nil
 	}
 
 	var hits []RuleHit
 	for _, f := range cfg.RequiredFiles {
-		// 简单检查：文件是否在工作目录中存在
-		// 注意：此处不做实际文件系统检查（Accept 可能运行在非宿主机），
-		// 而是检查 domain_task 的 affected_resources 中是否涵盖该文��
-		hits = append(hits, RuleHit{
-			RuleCode:        ruleCode,
-			RuleName:        ruleName,
-			RuleType:        ruleType,
-			ScopeType:       scopeType,
-			Severity:        SeverityWarn,
-			Title:           fmt.Sprintf("需验证文件 %s 是否存在", f),
-			Detail:          "当前版本基于元数据检查，建议人工确认",
-			ExpectedValue:   fmt.Sprintf("文件 %s 存在", f),
-			ActualValue:     "待人工确认",
-			SuggestedAction: "确认文件已生成后可忽略此条",
-		})
+		fullPath := filepath.Join(in.WorkDir, f)
+		if _, statErr := os.Stat(fullPath); os.IsNotExist(statErr) {
+			hits = append(hits, RuleHit{
+				RuleCode:        ruleCode,
+				RuleName:        ruleName,
+				RuleType:        ruleType,
+				ScopeType:       scopeType,
+				Severity:        SeverityError,
+				Title:           fmt.Sprintf("必需文件 %s 不存在", f),
+				Detail:          fmt.Sprintf("在工作目录 %s 下未找到文件 %s", in.WorkDir, f),
+				ExpectedValue:   fmt.Sprintf("文件 %s 存在", f),
+				ActualValue:     "文件不存在",
+				SuggestedAction: "确保相关任务已生成该文件",
+			})
+		} else if statErr != nil {
+			hits = append(hits, RuleHit{
+				RuleCode:        ruleCode,
+				RuleName:        ruleName,
+				RuleType:        ruleType,
+				ScopeType:       scopeType,
+				Severity:        SeverityWarn,
+				Title:           fmt.Sprintf("无法访问文件 %s", f),
+				Detail:          fmt.Sprintf("文件系统检查异常: %v", statErr),
+				ExpectedValue:   fmt.Sprintf("文件 %s 可访问", f),
+				ActualValue:     "访问异常",
+				SuggestedAction: "人工确认文件是否存在",
+			})
+		}
+		// 文件存在 → 不产生 hit
 	}
 	return hits
 }
 
-// checkRequiredExtensions 检查文档产物扩展名。
-func (e *RuleEngine) checkRequiredExtensions(_ context.Context, _ *AcceptContext, ruleCode, ruleName, ruleType, scopeType string, _ *ruleConfig) []RuleHit {
-	// 第一版简化：记录 info 级提示，不阻塞
-	return []RuleHit{{
-		RuleCode:        ruleCode,
-		RuleName:        ruleName,
-		RuleType:        ruleType,
-		ScopeType:       scopeType,
-		Severity:        SeverityInfo,
-		Title:           "文档产物格式检查",
-		Detail:          "第一版基于元数据检查，建议人工确认产出文件格式",
-		SuggestedAction: "确认文档产物已生成",
-	}}
+// checkRequiredExtensions 检查工作目录下是否存在指定扩展名的文件。
+func (e *RuleEngine) checkRequiredExtensions(_ context.Context, in *AcceptContext, ruleCode, ruleName, ruleType, scopeType string, cfg *ruleConfig) []RuleHit {
+	if in.WorkDir == "" || len(cfg.RequiredExtensions) == 0 {
+		return nil
+	}
+
+	var hits []RuleHit
+	for _, ext := range cfg.RequiredExtensions {
+		found := false
+		// 扫描工作目录一级文件（不递归，避免性能问题）
+		entries, err := os.ReadDir(in.WorkDir)
+		if err != nil {
+			hits = append(hits, RuleHit{
+				RuleCode: ruleCode, RuleName: ruleName, RuleType: ruleType, ScopeType: scopeType,
+				Severity:        SeverityWarn,
+				Title:           fmt.Sprintf("无法扫描工作目录检查 %s 文件", ext),
+				Detail:          fmt.Sprintf("ReadDir 异常: %v", err),
+				SuggestedAction: "人工确认文档产物是否存在",
+			})
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ext) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			hits = append(hits, RuleHit{
+				RuleCode: ruleCode, RuleName: ruleName, RuleType: ruleType, ScopeType: scopeType,
+				Severity:        SeverityError,
+				Title:           fmt.Sprintf("未找到 %s 格式的文档产物", ext),
+				Detail:          fmt.Sprintf("工作目录 %s 下未找到扩展名为 %s 的文件", in.WorkDir, ext),
+				ExpectedValue:   fmt.Sprintf("至少一个 %s 文件", ext),
+				ActualValue:     "未找到",
+				SuggestedAction: "确保文档生成任务已输出对应格式文件",
+			})
+		}
+	}
+	return hits
 }
 
 // checkRequiredStageOutputs 检查必需阶段是否已完成。

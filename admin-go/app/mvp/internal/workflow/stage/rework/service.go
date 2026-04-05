@@ -50,7 +50,13 @@ func (s *Service) SetAcceptTrigger(fn AcceptTriggerFn) { s.acceptTrigger = fn }
 
 // HandleRework 处理返工流程。
 // 接收失败的 domain_task，创建架构师分析任务，分析完成后回写原任务。
+// sourceStage 标记返工来源阶段（"execute"/"accept"），决定返工完成后回流目标。
 func (s *Service) HandleRework(ctx context.Context, stageRunID int64, failedTaskID int64) error {
+	return s.HandleReworkWithSource(ctx, stageRunID, failedTaskID, "execute")
+}
+
+// HandleReworkWithSource 处理返工流程（指定来源阶段）。
+func (s *Service) HandleReworkWithSource(ctx context.Context, stageRunID int64, failedTaskID int64, sourceStage string) error {
 	// 1. 查询 stage_run 和 workflow_run 信息
 	stageRun, err := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).One()
 	if err != nil || stageRun.IsEmpty() {
@@ -123,8 +129,9 @@ func (s *Service) HandleRework(ctx context.Context, stageRunID int64, failedTask
 		return fmt.Errorf("创建分析任务失败: %w", err)
 	}
 
-	// 6. 写 handoff_record
+	// 6. 写 handoff_record（payload 中记录来源阶段，用于返工完成后决定回流目标）
 	handoffID := int64(snowflake.Generate())
+	payloadJSON, _ := json.Marshal(map[string]string{"source_stage": sourceStage})
 	_, _ = g.DB().Model("mvp_handoff_record").Ctx(ctx).Insert(g.Map{
 		"id":              handoffID,
 		"workflow_run_id": workflowRunID,
@@ -132,6 +139,7 @@ func (s *Service) HandleRework(ctx context.Context, stageRunID int64, failedTask
 		"to_task_id":      analysisTaskID,
 		"handoff_type":    "failure_escalation",
 		"reason":          failedTask["result"].String(),
+		"payload":         string(payloadJSON),
 		"created_at":      now,
 	})
 
@@ -220,15 +228,45 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 		_ = s.stageCompleter.CompleteStage(ctx, stageRunID)
 	}
 
-	// 7. 推回 execute：原任务已 pending，重启调度器拾取
+	// 7. 按来源阶段决定回流目标
 	workflowRunID := analysisTask["workflow_run_id"].Int64()
-	if s.executeTrigger != nil && workflowRunID > 0 {
+	sourceStage := s.resolveSourceStage(ctx, workflowRunID, failedTaskID)
+
+	if sourceStage == "accept" && s.acceptTrigger != nil && workflowRunID > 0 {
+		// 来自 accept 阶段的返工 → 回 accept 重新验收
+		g.Log().Infof(ctx, "[ReworkStage] 返工完成，回流 accept: workflowRunID=%d", workflowRunID)
+		if err := s.acceptTrigger(ctx, workflowRunID); err != nil {
+			g.Log().Errorf(ctx, "[ReworkStage] 回流 accept 失败: workflowRunID=%d err=%v", workflowRunID, err)
+		}
+	} else if s.executeTrigger != nil && workflowRunID > 0 {
+		// 默认（来自 execute 阶段的返工）→ 回 execute 重启调度
+		g.Log().Infof(ctx, "[ReworkStage] 返工完成，回流 execute: workflowRunID=%d", workflowRunID)
 		if err := s.executeTrigger(ctx, workflowRunID, 0); err != nil {
 			g.Log().Errorf(ctx, "[ReworkStage] 重启调度失败: workflowRunID=%d err=%v", workflowRunID, err)
 		}
 	}
 
 	return nil
+}
+
+// resolveSourceStage 从 handoff_record payload 中解析返工来源阶段。
+func (s *Service) resolveSourceStage(ctx context.Context, workflowRunID, failedTaskID int64) string {
+	payload, err := g.DB().Model("mvp_handoff_record").Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		Where("from_task_id", failedTaskID).
+		Where("handoff_type", "failure_escalation").
+		OrderDesc("created_at").
+		Value("payload")
+	if err != nil || payload.IsEmpty() {
+		return "execute" // 默认回 execute
+	}
+	var data map[string]string
+	if json.Unmarshal([]byte(payload.String()), &data) == nil {
+		if stage, ok := data["source_stage"]; ok && stage != "" {
+			return stage
+		}
+	}
+	return "execute"
 }
 
 // taskPatch 架构师修复方案。

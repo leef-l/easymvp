@@ -180,11 +180,15 @@ func Init() {
 				}
 			}
 			if failedTaskID == 0 {
-				// 没有关联具体任务的 issue，用 0 表示项目级返工
-				g.Log().Warningf(ctx, "[Registry] 验收失败但无关联任务，跳过自动返工: workflowRunID=%d", workflowRunID)
-				return nil
+				// 没有关联具体任务的 issue → 返回 ErrManualReviewRequired，
+				// accept service 会保持 accept stage running，等待人工介入
+				g.Log().Warningf(ctx, "[Registry] 验收失败但无关联任务，转 manual_review: workflowRunID=%d", workflowRunID)
+				acceptRunRepoLocal := repo.NewAcceptRunRepo()
+				_ = acceptRunRepoLocal.UpdateDecision(ctx, acceptRunID, acceptance.DecisionManualReview, 0,
+					"自动返工失败：验收问题未关联具体任务，需人工决策")
+				return acceptStage.ErrManualReviewRequired
 			}
-			return triggerReworkStage(ctx, workflowRunID, failedTaskID)
+			return triggerReworkStage(ctx, workflowRunID, failedTaskID, "accept")
 		})
 
 		// 注册 rework → accept 回调（返工完成后回验收）
@@ -466,13 +470,19 @@ func GetExecutorRegistry() *executorPkg.Registry {
 }
 
 // triggerReworkStage 触发返工阶段：创建 rework stage，启动分析流程。
-func triggerReworkStage(ctx context.Context, workflowRunID int64, failedTaskID int64) error {
+// sourceStage 默认 "execute"，从 accept 触发时传 "accept"。
+func triggerReworkStage(ctx context.Context, workflowRunID int64, failedTaskID int64, sourceStages ...string) error {
+	sourceStage := "execute"
+	if len(sourceStages) > 0 && sourceStages[0] != "" {
+		sourceStage = sourceStages[0]
+	}
+
 	stageRunID, err := stageSvc.StartStage(ctx, workflowRunID, "rework")
 	if err != nil {
 		return fmt.Errorf("创建 rework stage 失败: %w", err)
 	}
 
-	if err := reworkStageSvc.HandleRework(ctx, stageRunID, failedTaskID); err != nil {
+	if err := reworkStageSvc.HandleReworkWithSource(ctx, stageRunID, failedTaskID, sourceStage); err != nil {
 		_ = stageSvc.FailStage(ctx, stageRunID, err.Error())
 		return fmt.Errorf("返工阶段启动失败: %w", err)
 	}
