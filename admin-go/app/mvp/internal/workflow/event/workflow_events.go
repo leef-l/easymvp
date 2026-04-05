@@ -42,6 +42,14 @@ const (
 	EventResourceLocked     = "resource.locked"
 	EventResourceReleased   = "resource.released"
 	EventResourceLockLeaked = "resource.lock_leaked"
+
+	// Autonomy 级
+	EventAutonomyDecisionCreated   = "autonomy.decision_created"
+	EventAutonomyActionExecuted    = "autonomy.action_executed"
+	EventAutonomyActionFailed      = "autonomy.action_failed"
+	EventAutonomyGateBlocked       = "autonomy.gate_blocked"
+	EventAutonomyCheckpointOpened  = "autonomy.checkpoint_opened"
+	EventAutonomyCheckpointHandled = "autonomy.checkpoint_handled"
 )
 
 // EntityType 实体类型常量。
@@ -50,6 +58,8 @@ const (
 	EntityStageRun    = "stage_run"
 	EntityPlanVersion = "plan_version"
 	EntityDomainTask  = "domain_task"
-	EntityReviewIssue = "review_issue"
-	EntityBlueprint   = "task_blueprint"
+	EntityReviewIssue     = "review_issue"
+	EntityBlueprint       = "task_blueprint"
+	EntityDecisionAction  = "decision_action"
+	EntityHumanCheckpoint = "human_checkpoint"
 )

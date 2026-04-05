@@ -45,6 +45,7 @@ var (
 	eventBus        *event.Bus
 	eventPublisher  *event.Publisher
 	execRegistry    *executorPkg.Registry
+	decisionCenter  *autonomy.DecisionCenter
 )
 
 // Init 初始化所有工作流服务单例。在应用启动时调用一次。
@@ -126,8 +127,19 @@ func Init() {
 		acceptStageSvc = acceptStage.NewService(acceptRunRepo, evidenceCollector, ruleEngine, decisionReducer)
 		acceptStageSvc.SetStageCompleter(stageSvc)
 
-		// 注册 accept → complete 回调
+		// 注册 accept → complete 回调（决策点 4: accept.passed）
 		acceptStageSvc.SetCompleteTrigger(func(ctx context.Context, workflowRunID int64) error {
+			if decisionCenter.IsEnabled(ctx) {
+				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id")
+				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
+					WorkflowRunID: workflowRunID,
+					ProjectID:     projectID.Int64(),
+					TriggerSource: consts.TriggerAcceptPassed,
+				})
+				if resp.Handled {
+					return nil
+				}
+			}
 			return stageSvc.completeWorkflow(ctx, workflowRunID)
 		})
 
@@ -171,11 +183,11 @@ func Init() {
 			return taskScheduler.Start(ctx, workflowRunID)
 		})
 
-		// 注册 accept failed → rework 回调
+		// 注册 accept failed → rework 回调（决策点 5: accept.failed, 6: accept.manual_review）
 		acceptStageSvc.SetReworkTrigger(func(ctx context.Context, workflowRunID int64, acceptRunID int64, issues []acceptance.RuleHit) error {
 			g.Log().Infof(ctx, "[Registry] 验收失败，触发返工: workflowRunID=%d acceptRunID=%d issues=%d",
 				workflowRunID, acceptRunID, len(issues))
-			// 找到第一个 blocker/error issue 关联的 taskID 作为返工入口
+			// 找到第一个 blocker/error issue 关联的 taskID 作���返工入口
 			var failedTaskID int64
 			for _, issue := range issues {
 				if issue.DomainTaskID > 0 {
@@ -184,20 +196,60 @@ func Init() {
 				}
 			}
 			if failedTaskID == 0 {
-				// 没有关联具体任务的 issue → 返回 ErrManualReviewRequired，
-				// accept service 会保持 accept stage running，等待人工介入
+				// 决策点 6: accept.manual_review
+				if decisionCenter.IsEnabled(ctx) {
+					projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id")
+					resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
+						WorkflowRunID: workflowRunID,
+						ProjectID:     projectID.Int64(),
+						TriggerSource: consts.TriggerAcceptManualReview,
+						TriggerContext: map[string]interface{}{"accept_run_id": acceptRunID},
+					})
+					if resp.Handled {
+						return acceptStage.ErrManualReviewRequired
+					}
+				}
 				g.Log().Warningf(ctx, "[Registry] 验收失败但无关联任务，转 manual_review: workflowRunID=%d", workflowRunID)
 				acceptRunRepoLocal := repo.NewAcceptRunRepo()
 				_ = acceptRunRepoLocal.UpdateDecision(ctx, acceptRunID, acceptance.DecisionManualReview, 0,
-					"自动返工失败：验收问题未关联具体任务，需人工决策")
+					"自动返工���败：验收问题未关联具体任务，需人工决策")
 				return acceptStage.ErrManualReviewRequired
+			}
+			// 决策��� 5: accept.failed
+			if decisionCenter.IsEnabled(ctx) {
+				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id")
+				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
+					WorkflowRunID: workflowRunID,
+					ProjectID:     projectID.Int64(),
+					DomainTaskID:  failedTaskID,
+					TriggerSource: consts.TriggerAcceptFailed,
+					TriggerContext: map[string]interface{}{
+						"accept_run_id": acceptRunID,
+						"task_id":       failedTaskID,
+					},
+				})
+				if resp.Handled {
+					return nil
+				}
 			}
 			return triggerReworkStage(ctx, workflowRunID, failedTaskID, "accept")
 		})
 
-		// 注册 rework → accept 回调（返工完成后回验收）
+		// ��册 rework → accept 回调（决策点 7: rework.completed）
 		reworkStageSvc.SetAcceptTrigger(func(ctx context.Context, workflowRunID int64) error {
 			g.Log().Infof(ctx, "[Registry] rework 完成，恢复验收状态: workflowRunID=%d", workflowRunID)
+
+			if decisionCenter.IsEnabled(ctx) {
+				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id")
+				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
+					WorkflowRunID: workflowRunID,
+					ProjectID:     projectID.Int64(),
+					TriggerSource: consts.TriggerReworkCompleted,
+				})
+				if resp.Handled {
+					return nil
+				}
+			}
 
 			// StartStage("accept") 会自动 CAS: reworking→accepting + 同步 project.status
 			stageRunID, stageErr := stageSvc.StartStage(ctx, workflowRunID, "accept")
@@ -223,14 +275,42 @@ func Init() {
 		domainWatchdog = watchdogV2.New()
 		domainWatchdog.SetScheduler(taskScheduler)
 		domainWatchdog.SetRetryFn(func(ctx context.Context, taskID int64) error {
-			// 重试后唤醒一次调度扫描（不重建调度循环）
 			wfRunID, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).Where("id", taskID).Value("workflow_run_id")
-			if wfRunID.Int64() > 0 {
-				taskScheduler.Wakeup(ctx, wfRunID.Int64())
+			if wfRunID.Int64() == 0 {
+				return nil
 			}
+			// 自治中台包裹
+			if decisionCenter.IsEnabled(ctx) {
+				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", wfRunID.Int64()).Value("project_id")
+				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
+					WorkflowRunID: wfRunID.Int64(),
+					ProjectID:     projectID.Int64(),
+					DomainTaskID:  taskID,
+					TriggerSource: consts.TriggerTaskFailed,
+					TriggerContext: map[string]interface{}{"task_id": taskID},
+				})
+				if resp.Handled {
+					return nil // 中台已接管
+				}
+				// 降级到原逻辑
+			}
+			taskScheduler.Wakeup(ctx, wfRunID.Int64())
 			return nil
 		})
 		domainWatchdog.SetEscalateFn(func(ctx context.Context, workflowRunID, taskID int64) error {
+			if decisionCenter.IsEnabled(ctx) {
+				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id")
+				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
+					WorkflowRunID: workflowRunID,
+					ProjectID:     projectID.Int64(),
+					DomainTaskID:  taskID,
+					TriggerSource: consts.TriggerTaskRetryExhausted,
+					TriggerContext: map[string]interface{}{"task_id": taskID},
+				})
+				if resp.Handled {
+					return nil
+				}
+			}
 			return triggerReworkStage(ctx, workflowRunID, taskID)
 		})
 		// 熔断器：项目级异常检测
@@ -238,12 +318,36 @@ func Init() {
 		circuitBreaker := autonomy.NewCircuitBreaker(decisionRepo, nil)
 		domainWatchdog.SetCircuitBreaker(circuitBreaker)
 		domainWatchdog.SetPauseFn(func(ctx context.Context, workflowRunID int64, reason string) error {
+			if decisionCenter.IsEnabled(ctx) {
+				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id")
+				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
+					WorkflowRunID: workflowRunID,
+					ProjectID:     projectID.Int64(),
+					TriggerSource: consts.TriggerCircuitBreak,
+					TriggerContext: map[string]interface{}{"reason": reason},
+				})
+				if resp.Handled {
+					return nil
+				}
+			}
 			return workflowSvc.Pause(ctx, workflowRunID, reason)
 		})
 		// 熔断后自动重规划评估
 		replanner := autonomy.NewReplanner(decisionRepo)
 		domainWatchdog.SetReplanFn(func(ctx context.Context, workflowRunID, projectID int64, breakReason string) {
-			// 收集失败任务信息（ctx 由 watchdog goroutine 传入，已带超时）
+			// 决策点 8: replan.suggested — 自治中台包裹
+			if decisionCenter.IsEnabled(ctx) {
+				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
+					WorkflowRunID: workflowRunID,
+					ProjectID:     projectID,
+					TriggerSource: consts.TriggerReplanSuggested,
+					TriggerContext: map[string]interface{}{"break_reason": breakReason},
+				})
+				if resp.Handled {
+					return
+				}
+			}
+			// 降级到原逻辑
 			failedTasks, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
 				Where("workflow_run_id", workflowRunID).
 				WhereIn("status", g.Slice{"failed", "escalated"}).
@@ -280,6 +384,53 @@ func Init() {
 			if err := reporter.GenerateStageReport(ctx, workflowRunID, stageType); err != nil {
 				g.Log().Warningf(ctx, "[Registry] 阶段报告生成失败: wfRun=%d stage=%s err=%v", workflowRunID, stageType, err)
 			}
+		})
+
+		// ==================== 自治决策中台初始化 ====================
+		policyRuleRepo := repo.NewPolicyRuleRepo()
+		riskGateRuleRepo := repo.NewRiskGateRuleRepo()
+		decisionActionRepo := repo.NewDecisionActionRepo()
+		humanCheckpointRepo := repo.NewHumanCheckpointRepo()
+
+		policyEngine := autonomy.NewPolicyEngine(policyRuleRepo)
+		riskGate := autonomy.NewRiskGate(riskGateRuleRepo)
+		actionDispatcher := autonomy.NewActionDispatcher(decisionActionRepo)
+		decisionCenter = autonomy.NewDecisionCenter(
+			policyEngine, riskGate, actionDispatcher,
+			decisionActionRepo, humanCheckpointRepo, eventPublisher,
+		)
+
+		// 注册 ActionDispatcher 回调（通过回调注入避免循环依赖）
+		actionDispatcher.SetCallback(consts.ActionTypeRetryTask, func(ctx context.Context, req *autonomy.DecisionRequest) error {
+			if req.DomainTaskID == 0 {
+				return fmt.Errorf("retry_task: 缺少 domain_task_id")
+			}
+			taskScheduler.Wakeup(ctx, req.WorkflowRunID)
+			return nil
+		})
+		actionDispatcher.SetCallback(consts.ActionTypeTriggerRework, func(ctx context.Context, req *autonomy.DecisionRequest) error {
+			return triggerReworkStage(ctx, req.WorkflowRunID, req.DomainTaskID)
+		})
+		actionDispatcher.SetCallback(consts.ActionTypeRerunAccept, func(ctx context.Context, req *autonomy.DecisionRequest) error {
+			stageRunID, err := stageSvc.StartStage(ctx, req.WorkflowRunID, "accept")
+			if err != nil {
+				return err
+			}
+			return acceptStageSvc.Run(ctx, req.WorkflowRunID, stageRunID)
+		})
+		actionDispatcher.SetCallback(consts.ActionTypePauseWorkflow, func(ctx context.Context, req *autonomy.DecisionRequest) error {
+			return workflowSvc.Pause(ctx, req.WorkflowRunID, "自治中台: 暂停")
+		})
+		actionDispatcher.SetCallback(consts.ActionTypeApproveComplete, func(ctx context.Context, req *autonomy.DecisionRequest) error {
+			return stageSvc.completeWorkflow(ctx, req.WorkflowRunID)
+		})
+		actionDispatcher.SetCallback(consts.ActionTypeNotifyHuman, func(ctx context.Context, req *autonomy.DecisionRequest) error {
+			g.Log().Infof(ctx, "[DecisionCenter] notify_human: wfRun=%d trigger=%s", req.WorkflowRunID, req.TriggerSource)
+			return nil // 目前仅记录，后续接入通知系统
+		})
+		actionDispatcher.SetCallback(consts.ActionTypeReplanWorkflow, func(ctx context.Context, req *autonomy.DecisionRequest) error {
+			g.Log().Infof(ctx, "[DecisionCenter] replan_workflow: wfRun=%d", req.WorkflowRunID)
+			return nil // 后续对接 replanner
 		})
 
 		// Legacy → V2 执行器桥接：注入 V2ExecutorFn 到旧引擎，使 legacy 任务也能走 V2 执行器
@@ -471,6 +622,12 @@ func GetCompleteStageService() *completeStage.Service {
 func GetExecutorRegistry() *executorPkg.Registry {
 	Init()
 	return execRegistry
+}
+
+// GetDecisionCenter 获取自治决策中台单例。
+func GetDecisionCenter() *autonomy.DecisionCenter {
+	Init()
+	return decisionCenter
 }
 
 // triggerReworkStage 触发返工阶段：创建 rework stage，启动分析流程。

@@ -740,3 +740,41 @@ type WorkflowBatchProjectStatsRes struct {
 	g.Meta `mime:"application/json"`
 	Stats  []ProjectRuntimeStat `json:"stats"`
 }
+
+// ==================== 自治中台 API ====================
+
+// WorkflowAutonomyCheckpointsReq 查询项目待处理的人工节点
+type WorkflowAutonomyCheckpointsReq struct {
+	g.Meta    `path:"/workflow/autonomy-checkpoints" method:"get" tags:"自治中台" summary:"查询待处理人工节点"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// WorkflowAutonomyCheckpointsRes 查询待处理人工节点响应
+type WorkflowAutonomyCheckpointsRes struct {
+	g.Meta      `mime:"application/json"`
+	Checkpoints []g.Map `json:"checkpoints"`
+	Actions     []g.Map `json:"actions"`
+}
+
+// WorkflowAutonomyApproveReq 审批通过决策动作
+type WorkflowAutonomyApproveReq struct {
+	g.Meta   `path:"/workflow/autonomy-approve" method:"post" tags:"自治中台" summary:"审批通过"`
+	ActionID snowflake.JsonInt64 `json:"actionID" v:"required" dc:"决策动作ID"`
+}
+
+// WorkflowAutonomyApproveRes 审批通过响应
+type WorkflowAutonomyApproveRes struct {
+	g.Meta `mime:"application/json"`
+}
+
+// WorkflowAutonomyRejectReq 驳回决策动作
+type WorkflowAutonomyRejectReq struct {
+	g.Meta   `path:"/workflow/autonomy-reject" method:"post" tags:"自治中台" summary:"驳回决策动作"`
+	ActionID snowflake.JsonInt64 `json:"actionID" v:"required" dc:"决策动作ID"`
+	Reason   string              `json:"reason" v:"required" dc:"驳回理由"`
+}
+
+// WorkflowAutonomyRejectRes 驳回决策动作响应
+type WorkflowAutonomyRejectRes struct {
+	g.Meta `mime:"application/json"`
+}

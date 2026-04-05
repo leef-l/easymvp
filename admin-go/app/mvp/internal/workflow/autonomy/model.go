@@ -177,3 +177,81 @@ func GetAutonomyMode(ctx context.Context) string {
 func IsAutoMode(ctx context.Context) bool {
 	return GetAutonomyMode(ctx) == ModeAuto
 }
+
+// ==================== 自治中台类型（DecisionCenter）====================
+
+// DecisionRequest 统一决策请求。
+type DecisionRequest struct {
+	WorkflowRunID  int64
+	ProjectID      int64
+	StageRunID     int64 // 可选
+	DomainTaskID   int64 // 可选
+	TriggerSource  string
+	TriggerContext map[string]interface{}
+}
+
+// DecisionResponse 统一决策结果。
+type DecisionResponse struct {
+	ActionID       int64
+	DecisionLevel  string
+	ActionType     string
+	AutoExecutable bool
+	HumanRequired  bool
+	Executed       bool
+	Handled        bool  // 是否已被中台接管（audit_only=true 时为 false，原逻辑应继续执行）
+	Error          error
+}
+
+// PolicyMatch 策略匹配结果。
+type PolicyMatch struct {
+	Rule           *PolicyRule
+	DecisionLevel  string
+	ActionType     string
+	AutoExecutable bool
+}
+
+// PolicyRule 策略规则（DB 行映射）。
+type PolicyRule struct {
+	ID                  int64
+	RuleCode            string
+	RuleName            string
+	DecisionType        string
+	DecisionLevel       string
+	TriggerSource       string
+	ProjectFamily       string
+	ProjectCategoryCode string
+	ConfigJSON          map[string]interface{}
+	Enabled             bool
+	Priority            int
+}
+
+// GateCheckResult 闸门检查结果。
+type GateCheckResult struct {
+	Blocked      bool
+	BlockedGates []BlockedGate
+}
+
+// BlockedGate 被命中的闸门。
+type BlockedGate struct {
+	GateID         int64
+	GateCode       string
+	GateType       string
+	BlockAction    string
+	FallbackAction string
+	Reason         string
+}
+
+// RiskGateRule 闸门规则（DB 行映射）。
+type RiskGateRule struct {
+	ID                  int64
+	GateCode            string
+	GateName            string
+	GateType            string
+	ProjectFamily       string
+	ProjectCategoryCode string
+	TriggerExpression   map[string]interface{}
+	BlockAction         string
+	FallbackAction      string
+	Enabled             bool
+	Priority            int
+}

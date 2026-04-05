@@ -2048,3 +2048,77 @@ func (c *cWorkflow) BatchProjectStats(ctx context.Context, req *v1.WorkflowBatch
 
 	return &v1.WorkflowBatchProjectStatsRes{Stats: stats}, nil
 }
+
+// AutonomyCheckpoints 查询项目待处理的人工节点和决策动作。
+func (c *cWorkflow) AutonomyCheckpoints(ctx context.Context, req *v1.WorkflowAutonomyCheckpointsReq) (res *v1.WorkflowAutonomyCheckpointsRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	dc := orchestrator.GetDecisionCenter()
+	checkpoints, cpErr := dc.ListOpenCheckpoints(ctx, projectID)
+	if cpErr != nil {
+		return nil, cpErr
+	}
+	actions, acErr := dc.ListPendingActions(ctx, projectID)
+	if acErr != nil {
+		return nil, acErr
+	}
+
+	return &v1.WorkflowAutonomyCheckpointsRes{
+		Checkpoints: checkpoints,
+		Actions:     actions,
+	}, nil
+}
+
+// AutonomyApprove 审批通过决策动作。
+func (c *cWorkflow) AutonomyApprove(ctx context.Context, req *v1.WorkflowAutonomyApproveReq) (res *v1.WorkflowAutonomyApproveRes, err error) {
+	actionID := int64(req.ActionID)
+	// 从 action 记录中获取 project_id 做权限校验
+	projectID, lookupErr := autonomyActionProjectID(ctx, actionID)
+	if lookupErr != nil {
+		return nil, lookupErr
+	}
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	dc := orchestrator.GetDecisionCenter()
+	if err := dc.ApproveAction(ctx, actionID); err != nil {
+		return nil, err
+	}
+	return &v1.WorkflowAutonomyApproveRes{}, nil
+}
+
+// AutonomyReject 驳回决策动作。
+func (c *cWorkflow) AutonomyReject(ctx context.Context, req *v1.WorkflowAutonomyRejectReq) (res *v1.WorkflowAutonomyRejectRes, err error) {
+	actionID := int64(req.ActionID)
+	projectID, lookupErr := autonomyActionProjectID(ctx, actionID)
+	if lookupErr != nil {
+		return nil, lookupErr
+	}
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	dc := orchestrator.GetDecisionCenter()
+	if err := dc.RejectAction(ctx, actionID, req.Reason); err != nil {
+		return nil, err
+	}
+	return &v1.WorkflowAutonomyRejectRes{}, nil
+}
+
+// autonomyActionProjectID 从决策动作记录中查找关联的项目ID。
+func autonomyActionProjectID(ctx context.Context, actionID int64) (int64, error) {
+	val, err := g.DB().Model("mvp_decision_action").Ctx(ctx).
+		Where("id", actionID).WhereNull("deleted_at").
+		Value("project_id")
+	if err != nil {
+		return 0, fmt.Errorf("查询决策记录失败: %w", err)
+	}
+	if val.Int64() == 0 {
+		return 0, fmt.Errorf("决策记录不存在: %d", actionID)
+	}
+	return val.Int64(), nil
+}
