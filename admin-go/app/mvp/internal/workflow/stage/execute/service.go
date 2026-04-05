@@ -3,17 +3,16 @@ package execute
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/workspace"
 	domainTask "easymvp/app/mvp/internal/workflow/domain/task"
+	"easymvp/app/mvp/internal/workflow/executor"
 	"easymvp/app/mvp/internal/workflow/scheduler"
 )
 
@@ -29,15 +28,17 @@ type Service struct {
 	taskSvc             *domainTask.TaskService
 	scheduler           *scheduler.DomainTaskScheduler
 	stageCompleter      StageCompleter
+	executorRegistry    *executor.Registry
 	onAnalysisCompleted AnalysisCompletedFn
 }
 
 // NewService 创建执行阶段服务。
-func NewService(ts *domainTask.TaskService, sched *scheduler.DomainTaskScheduler, sc StageCompleter) *Service {
+func NewService(ts *domainTask.TaskService, sched *scheduler.DomainTaskScheduler, sc StageCompleter, reg *executor.Registry) *Service {
 	return &Service{
-		taskSvc:        ts,
-		scheduler:      sched,
-		stageCompleter: sc,
+		taskSvc:          ts,
+		scheduler:        sched,
+		stageCompleter:   sc,
+		executorRegistry: reg,
 	}
 }
 
@@ -69,6 +70,7 @@ func (s *Service) InstantiateAndStart(ctx context.Context, stageRunID int64, pla
 		workflowRunID:       workflowRunID,
 		scheduler:           s.scheduler,
 		wsMgr:               workspace.NewGitWorktreeManager(),
+		registry:            s.executorRegistry,
 		onAnalysisCompleted: s.onAnalysisCompleted,
 	})
 
@@ -108,11 +110,12 @@ func (s *Service) InstantiateAndStart(ctx context.Context, stageRunID int64, pla
 // AnalysisCompletedFn 分析任务完成回调（路由到 rework service）。
 type AnalysisCompletedFn func(ctx context.Context, stageRunID, analysisTaskID int64) error
 
-// domainTaskExecutor 领域任务执行器，桥接旧 engine.Executor。
+// domainTaskExecutor 领域任务执行器，通过 executor.Registry 分发到具体执行器实现。
 type domainTaskExecutor struct {
 	workflowRunID       int64
 	scheduler           *scheduler.DomainTaskScheduler
 	wsMgr               workspace.Manager
+	registry            *executor.Registry
 	onAnalysisCompleted AnalysisCompletedFn
 }
 
@@ -140,6 +143,13 @@ func (e *domainTaskExecutor) ExecuteDomainTask(ctx context.Context, workflowRunI
 	executionMode := taskRecord["execution_mode"].String()
 	modelID := taskRecord["model_id"].Int64()
 
+	// 从注册表获取执行器
+	exec, err := e.registry.MustGet(executionMode)
+	if err != nil {
+		e.handleFailure(ctx, taskID, err.Error())
+		return
+	}
+
 	// 获取模型信息
 	modelInfo, err := engine.ResolveModelInfo(ctx, projectID.Int64(), roleType, modelID)
 	if err != nil {
@@ -147,9 +157,9 @@ func (e *domainTaskExecutor) ExecuteDomainTask(ctx context.Context, workflowRunI
 		return
 	}
 
-	// 如果需要工作空间隔离，准备 worktree
+	// 如果执行器需要工作空间隔离，准备 worktree
 	var ws *workspace.TaskWorkspace
-	if workspace.NeedsIsolation(executionMode) && e.wsMgr != nil {
+	if exec.NeedsWorkspace() && e.wsMgr != nil {
 		project, _ := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID.Int64()).One()
 		workDir := project["work_dir"].String()
 		ws, err = e.wsMgr.Prepare(ctx, workspace.PrepareRequest{
@@ -159,104 +169,31 @@ func (e *domainTaskExecutor) ExecuteDomainTask(ctx context.Context, workflowRunI
 			WorkDir:       workDir,
 		})
 		if err != nil {
-			// 隔离失败不降级，直接中断任务，防止污染主工作区
 			e.handleFailure(ctx, taskID, fmt.Sprintf("workspace 隔离准备失败: %v", err))
 			return
 		}
 	}
 
-	switch executionMode {
-	case "aider":
-		e.executeWithAider(ctx, projectID.Int64(), taskID, taskRecord, modelInfo, ws)
-	case "chat":
-		e.executeWithChat(ctx, projectID.Int64(), taskID, taskRecord, modelInfo)
-	case "openhands", "claude_code", "codex_cli", "gemini_cli":
-		// 已规划但尚未接入的执行器，显式报错而非静默降级
-		e.handleFailure(ctx, taskID, fmt.Sprintf("执行模式 %q 尚未接入，请配置为 aider 或 chat", executionMode))
-	default:
-		e.handleFailure(ctx, taskID, fmt.Sprintf("未知的执行模式: %q", executionMode))
-	}
-}
-
-// executeWithAider Aider 执行。
-func (e *domainTaskExecutor) executeWithAider(ctx context.Context, projectID, taskID int64, task gdb.Record, modelInfo *engine.ModelInfo, ws *workspace.TaskWorkspace) {
-	project, _ := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).One()
-	workDir := project["work_dir"].String()
-
-	// 如果有 workspace 隔离，使用 worktree 路径
-	if ws != nil {
-		workDir = ws.WorkspacePath
-		_ = e.wsMgr.MarkRunning(ctx, taskID)
-		g.Log().Infof(ctx, "[domainTaskExecutor] 使用 worktree 隔离: task=%d path=%s", taskID, workDir)
-	}
-
-	// 解析 affected_resources 作为文件列表
-	var files []string
-	resJSON := task["affected_resources"].String()
-	if resJSON != "" && resJSON != "[]" && resJSON != "null" {
-		json.Unmarshal([]byte(resJSON), &files)
-	}
-
-	// 启动心跳 goroutine：定期更新 heartbeat_at，让 watchdog 知道任务还活着
-	hbCtx, hbCancel := context.WithCancel(ctx)
-	go touchHeartbeatLoop(hbCtx, taskID)
-	defer hbCancel()
-
-	runner := engine.GetAiderRunner()
-	aiderCfg := runner.BuildConfigFromModel(ctx, modelInfo, workDir)
-	aiderResult := runner.RunTask(ctx, projectID, taskID, modelInfo, task["description"].String(), workDir, files, nil)
-	_ = aiderCfg // 配置已在 RunTask 中使用
-
-	if aiderResult.Error != nil {
-		// workspace finalize: 标记失败
-		if ws != nil && e.wsMgr != nil {
-			_ = e.wsMgr.Finalize(ctx, taskID, workspace.FinalizeRequest{
-				Success: false,
-				Error:   aiderResult.Error.Error(),
-			})
-		}
-		e.handleFailure(ctx, taskID, aiderResult.Error.Error())
-		return
-	}
-
-	// workspace finalize: 标记成功，然后异步清理
-	if ws != nil && e.wsMgr != nil {
-		if err := e.wsMgr.Finalize(ctx, taskID, workspace.FinalizeRequest{Success: true}); err != nil {
-			g.Log().Warningf(ctx, "[domainTaskExecutor] workspace finalize 失败: task=%d err=%v", taskID, err)
-		} else {
-			go func() {
-				if cleanErr := e.wsMgr.Cleanup(context.Background(), taskID); cleanErr != nil {
-					g.Log().Warningf(ctx, "[domainTaskExecutor] workspace cleanup 失败: task=%d err=%v", taskID, cleanErr)
-				}
-			}()
-		}
-	}
-	e.handleSuccess(ctx, taskID, aiderResult.Output)
-}
-
-// executeWithChat ChatStream 执行。
-func (e *domainTaskExecutor) executeWithChat(ctx context.Context, projectID, taskID int64, task gdb.Record, modelInfo *engine.ModelInfo) {
 	// 启动心跳
 	hbCtx, hbCancel := context.WithCancel(ctx)
 	go touchHeartbeatLoop(hbCtx, taskID)
 	defer hbCancel()
 
-	// 创建或获取任务对话
-	convID, err := engine.EnsureDomainTaskConversation(ctx, projectID, taskID, task["role_type"].String(), task["name"].String())
-	_ = modelInfo // chat 模式由 ChatEngine 内部解析模型
-	if err != nil {
-		e.handleFailure(ctx, taskID, err.Error())
-		return
-	}
+	// 统一调用执行器
+	result := exec.Execute(ctx, &executor.Request{
+		ProjectID:     projectID.Int64(),
+		WorkflowRunID: workflowRunID,
+		TaskID:        taskID,
+		TaskRecord:    taskRecord,
+		ModelInfo:     modelInfo,
+		Workspace:     ws,
+	})
 
-	// 发送任务描述到对话
-	_, _, err = engine.GetEngine().SendMessage(ctx, convID, task["description"].String(), 0, 0)
-	if err != nil {
-		e.handleFailure(ctx, taskID, err.Error())
-		return
+	if result.Success {
+		e.handleSuccess(ctx, taskID, result.Output)
+	} else {
+		e.handleFailure(ctx, taskID, result.Error.Error())
 	}
-
-	e.handleSuccess(ctx, taskID, "chat execution completed")
 }
 
 // handleSuccess 任务成功。

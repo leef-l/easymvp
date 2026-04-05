@@ -10,6 +10,8 @@ import (
 
 	"easymvp/app/mvp/internal/consts"
 	"easymvp/app/mvp/internal/engine"
+	executorPkg "easymvp/app/mvp/internal/workflow/executor"
+	"easymvp/app/mvp/internal/workspace"
 	"easymvp/app/mvp/internal/workflow/domain/plan"
 	domainTask "easymvp/app/mvp/internal/workflow/domain/task"
 	"easymvp/app/mvp/internal/workflow/event"
@@ -58,11 +60,16 @@ func Init() {
 		stageSvc = NewStageService(workflowSvc)
 		planVersionSvc = plan.NewPlanVersionService(planRepo, bpRepo)
 
+		// 执行器注册表
+		execRegistry := executorPkg.NewRegistry()
+		execRegistry.Register(executorPkg.NewAiderExecutor(workspace.NewGitWorktreeManager()))
+		execRegistry.Register(executorPkg.NewChatExecutor())
+
 		// 执行阶段服务
 		taskRepo := repo.NewDomainTaskRepo()
 		taskSvc := domainTask.NewTaskService(taskRepo)
 		taskScheduler = scheduler.NewDomainTaskScheduler()
-		executeStageSvc = executeStage.NewService(taskSvc, taskScheduler, stageSvc)
+		executeStageSvc = executeStage.NewService(taskSvc, taskScheduler, stageSvc, execRegistry)
 
 		// 审核阶段服务
 		issueRepo := repo.NewReviewIssueRepo()
