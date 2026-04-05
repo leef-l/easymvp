@@ -19,6 +19,7 @@ const (
 	RoleTypeArchitect    = "architect"    // 架构师
 	RoleTypeImplementer  = "implementer"  // 实现者
 	RoleTypeAuditor      = "auditor"      // 审计员
+	RoleTypeOperator     = "operator"     // 运维/恢复
 	RoleTypeCoordinator  = "coordinator"  // 协调者
 )
 
@@ -48,6 +49,7 @@ var AllRoleTypes = []string{
 	RoleTypeArchitect,
 	RoleTypeImplementer,
 	RoleTypeAuditor,
+	RoleTypeOperator,
 	RoleTypeCoordinator,
 }
 

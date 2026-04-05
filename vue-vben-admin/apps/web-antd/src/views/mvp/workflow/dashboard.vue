@@ -48,7 +48,7 @@ const isCompleted = computed(() => currentStatus.value === 'completed');
 // 阶段进度 Steps 的 current index
 const stageStepCurrent = computed(() => {
   if (!stages.value.length) return 0;
-  const order = ['design', 'review', 'execute', 'rework', 'complete'];
+  const order = ['design', 'review', 'execute', 'rework', 'accept', 'complete'];
   const currentStage = statusData.value?.currentStage || '';
   const idx = order.indexOf(currentStage);
   return idx >= 0 ? idx : stages.value.length - 1;
@@ -111,6 +111,9 @@ function goToAutonomy() {
 }
 function goToTimeline() {
   router.push({ path: '/mvp/workflow/timeline', query: { projectId: projectId.value } });
+}
+function goToFeishu() {
+  router.push({ path: '/mvp/workflow/feishu' });
 }
 function goToChat() {
   router.push({ path: '/mvp/chat', query: { projectId: projectId.value } });
@@ -270,6 +273,9 @@ function goToChat() {
             </Button>
             <Button @click="goToAutonomy">
               自治控制台
+            </Button>
+            <Button @click="goToFeishu">
+              飞书协作
             </Button>
             <Button @click="goToTimeline">
               事件时间线

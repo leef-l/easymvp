@@ -441,7 +441,7 @@ func (r *AiderRunner) RunTask(ctx context.Context, projectID int64, taskID int64
 			summary = "检测到异常文件变更"
 		}
 		result.Output = strings.TrimSpace(result.Output + "\n\n[guard] " + summary)
-		result.Error = fmt.Errorf(summary)
+		result.Error = fmt.Errorf("%s", summary)
 		result.Category = taskFailurePolicyGuard
 	}
 	return result

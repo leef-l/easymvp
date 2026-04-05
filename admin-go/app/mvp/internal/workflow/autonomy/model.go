@@ -199,6 +199,7 @@ type DecisionResponse struct {
 	HumanRequired  bool
 	Executed       bool
 	Handled        bool  // 是否已被中台接管（audit_only=true 时为 false，原逻辑应继续执行）
+	DenyReason     string
 	Error          error
 }
 

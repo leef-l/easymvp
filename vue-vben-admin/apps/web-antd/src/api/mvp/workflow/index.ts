@@ -623,6 +623,58 @@ export function getAutonomyPolicyRules(projectID: string) {
   );
 }
 
+// ==================== 飞书协作管理 ====================
+
+export interface FeishuConfigItem {
+  enabled: number;
+  appId: string;
+  appSecret: string;
+  verificationToken: string;
+  encryptKey: string;
+  defaultNotifyUserIds: string;
+  callbackPath: string;
+}
+
+export interface FeishuBindingItem {
+  id: string;
+  userId: string;
+  platform: string;
+  platformUserId: string;
+  platformName?: string;
+  createdBy: string;
+  deptId: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export function getFeishuConfig() {
+  return requestClient.get<{ config: FeishuConfigItem }>(`${PREFIX}/feishu-config`);
+}
+
+export function saveFeishuConfig(data: FeishuConfigItem) {
+  return requestClient.post(`${PREFIX}/save-feishu-config`, data);
+}
+
+export function getFeishuBindings() {
+  return requestClient.get<{ bindings: FeishuBindingItem[] }>(`${PREFIX}/feishu-bindings`);
+}
+
+export function bindFeishuUser(data: {
+  userId: string;
+  platformUserId: string;
+  platformName?: string;
+}) {
+  return requestClient.post<{ id: string }>(`${PREFIX}/bind-feishu-user`, data);
+}
+
+export function unbindFeishuUser(bindingId: string) {
+  return requestClient.post(`${PREFIX}/unbind-feishu-user`, { bindingId });
+}
+
+export function testFeishuMessage(data: { bindingId: string; content?: string }) {
+  return requestClient.post(`${PREFIX}/test-feishu-message`, data);
+}
+
 /** 手动触发重规划 */
 export function triggerReplan(projectID: string) {
   return requestClient.post(`${PREFIX}/trigger-replan`, { projectID });
@@ -670,4 +722,131 @@ export function batchProjectStats(projectIDs: string[]) {
     `${PREFIX}/batch-project-stats`,
     { projectIDs },
   );
+}
+
+// ==================== 态势感知（Phase A）====================
+
+export interface ProgressMetrics {
+  totalTasks: number;
+  completedTasks: number;
+  runningTasks: number;
+  failedTasks: number;
+  pendingTasks: number;
+  completionRate: number;
+  currentBatchNo: number;
+  totalBatches: number;
+  batchProgress: number;
+}
+
+export interface HealthMetrics {
+  consecutiveFailures: number;
+  recentFailureRate: number;
+  avgTaskDuration: number;
+  medianTaskDuration: number;
+  retryCount: number;
+  escalationCount: number;
+  reworkRounds: number;
+  acceptRounds: number;
+  replanCount: number;
+  staleTaskCount: number;
+}
+
+export interface ResourceMetrics {
+  runningConcurrency: number;
+  maxConcurrency: number;
+  resourceUtilization: number;
+  lockedResourceCount: number;
+  conflictCount: number;
+  tokensConsumed: number;
+  estimatedTokensLeft: number;
+}
+
+export interface TrendMetrics {
+  failureRateTrend: string; // rising / falling / stable
+  durationTrend: string;
+  throughputTrend: string;
+}
+
+export interface AnomalySignal {
+  type: string;
+  severity: string; // critical / warning / info
+  message: string;
+  confidence: number;
+}
+
+export interface SituationData {
+  workflowRunId: string;
+  projectId: string;
+  activeStage: string;
+  workflowStatus: string;
+  workflowStartedAt?: string;
+  snapshotAt: string;
+  progress?: ProgressMetrics;
+  health?: HealthMetrics;
+  resource?: ResourceMetrics;
+  trend?: TrendMetrics;
+  anomalySignals?: AnomalySignal[];
+}
+
+export interface SituationSnapshot {
+  id: string;
+  projectId: string;
+  workflowRunId: string;
+  snapshotAt: string;
+  progress?: ProgressMetrics;
+  health?: HealthMetrics;
+  resource?: ResourceMetrics;
+  trend?: TrendMetrics;
+}
+
+/** 查询当前态势 */
+export function getSituation(workflowRunID: string) {
+  return requestClient.get<{ situation: SituationData }>(
+    `${PREFIX}/situation`,
+    { params: { workflowRunID } },
+  );
+}
+
+/** 查询态势快照历史 */
+export function getSituationHistory(params: {
+  projectID: string;
+  workflowRunID?: string;
+  limit?: number;
+}) {
+  return requestClient.get<{ snapshots: SituationSnapshot[] }>(
+    `${PREFIX}/situation-history`,
+    { params },
+  );
+}
+
+// ==================== 目标层管理（Phase A）====================
+
+export interface ObjectiveData {
+  projectId: string;
+  deliveryGoal: string;
+  qualityFloor: number;
+  tokenBudget: number;
+  timeBudgetHours: number;
+  costBudgetCents: number;
+  riskTolerance: string;   // low / medium / high
+  maxAutoRetries: number;
+  maxAutoReworks: number;
+  maxAutoReplans: number;
+  deadlineAt?: string;
+  maxStallMinutes: number;
+  autonomyLevel: string;   // supervised / assisted / full_auto
+  maxSideEffectLevel: string; // none / reversible / irreversible
+}
+
+/** 查询项目目标约束 */
+export function getObjective(projectID: string) {
+  return requestClient.get<{ objective: ObjectiveData }>(
+    `${PREFIX}/objective`,
+    { params: { projectID } },
+  );
+}
+
+/** 保存项目目标约束 */
+export function saveObjective(data: { projectID: string } & Partial<ObjectiveData>) {
+  return requestClient.post(`${PREFIX}/save-objective`, data);
 }

@@ -42,7 +42,7 @@ func (d *ActionDispatcher) Execute(ctx context.Context, actionID int64, actionTy
 		_ = d.actionRepo.UpdateStatus(ctx, actionID, consts.ActionStatusFailed, g.Map{
 			"result": errMsg,
 		})
-		return fmt.Errorf(errMsg)
+		return fmt.Errorf("%s", errMsg)
 	}
 
 	g.Log().Infof(ctx, "[ActionDispatcher] 开始执行动作: actionID=%d type=%s wfRun=%d",

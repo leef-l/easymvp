@@ -1,6 +1,7 @@
 package autonomy
 
 import (
+	"context"
 	"encoding/json"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -43,11 +44,18 @@ func mapString(m g.Map, key string) string {
 	}
 }
 
-// parseJSONMap 将 JSON 字符串解析为 map。
+// parseJSONMap 将 JSON 字符串解析为 map。空串或解析失败返回空 map（非 nil）。
 func parseJSONMap(s string) map[string]interface{} {
+	if s == "" || s == "null" {
+		return make(map[string]interface{})
+	}
 	var m map[string]interface{}
 	if err := json.Unmarshal([]byte(s), &m); err != nil {
-		return nil
+		g.Log().Debugf(context.Background(), "[autonomy] parseJSONMap failed: %v, input: %.100s", err, s)
+		return make(map[string]interface{})
+	}
+	if m == nil {
+		return make(map[string]interface{})
 	}
 	return m
 }

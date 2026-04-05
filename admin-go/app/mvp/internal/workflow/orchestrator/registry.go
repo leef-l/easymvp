@@ -395,6 +395,7 @@ func Init() {
 		riskGateRuleRepo := repo.NewRiskGateRuleRepo()
 		decisionActionRepo := repo.NewDecisionActionRepo()
 		humanCheckpointRepo := repo.NewHumanCheckpointRepo()
+		situationSnapshotRepo := repo.NewSituationSnapshotRepo()
 
 		policyEngine := autonomy.NewPolicyEngine(policyRuleRepo)
 		riskGate := autonomy.NewRiskGate(riskGateRuleRepo)
@@ -403,6 +404,20 @@ func Init() {
 			policyEngine, riskGate, actionDispatcher,
 			decisionActionRepo, humanCheckpointRepo, eventPublisher,
 		)
+		sensor := autonomy.NewSensor(situationSnapshotRepo)
+		objectiveSvc := autonomy.NewObjectiveService()
+		decisionCenter.SetPhaseADeps(sensor, objectiveSvc)
+
+		// ==================== Phase B: 策略函数 + Planner + Actuator ====================
+		planner := autonomy.NewPlanner()
+		planner.Register(autonomy.NewCostGuardStrategy())           // 优先级 100：成本最优先
+		planner.Register(autonomy.NewAdaptiveRetryStrategy())       // 优先级 90：失败处理
+		planner.Register(autonomy.NewProactiveReplanStrategy())     // 优先级 70：主动重规划
+		planner.Register(autonomy.NewEngineSelectionStrategy())     // 优先级 70：执行器选择
+		planner.Register(autonomy.NewBatchAdjustStrategy())         // 优先级 60：批次调整
+		planner.Register(autonomy.NewQualityGateStrategy())         // 优先级 50：质量门
+		actuator := autonomy.NewActuator()
+		decisionCenter.SetPhaseBDeps(planner, actuator)
 
 		// 注册 ActionDispatcher 回调（通过回调注入避免循环依赖）
 		actionDispatcher.SetCallback(consts.ActionTypeRetryTask, func(ctx context.Context, req *autonomy.DecisionRequest) error {

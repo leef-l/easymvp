@@ -723,6 +723,24 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 			fmt.Sprintf("全部 %d 项核心配置已就绪", len(requiredKeys)))
 	}
 
+	// 13. 飞书协作配置
+	feishuEnabled := engine.GetConfigInt(ctx, "workflow.collab.feishu_enabled", "workflow.collab.feishuEnabled", 0)
+	feishuAppID := strings.TrimSpace(engine.GetConfigString(ctx, "workflow.collab.feishu_app_id", "workflow.collab.feishuAppId", ""))
+	feishuAppSecret := strings.TrimSpace(engine.GetConfigString(ctx, "workflow.collab.feishu_app_secret", "workflow.collab.feishuAppSecret", ""))
+	feishuEncryptKey := strings.TrimSpace(engine.GetConfigString(ctx, "workflow.collab.feishu_encrypt_key", "workflow.collab.feishuEncryptKey", ""))
+	feishuBindings, _ := g.DB().Model("mvp_user_collab_binding").Ctx(ctx).Where("platform", "feishu").WhereNull("deleted_at").Count()
+	switch {
+	case feishuEnabled != 1:
+		addItem("feishu_collab", "飞书协作", "/mvp/workflow/feishu", "warning", "飞书协作未启用")
+	case feishuAppID == "" || feishuAppSecret == "":
+		addItem("feishu_collab", "飞书协作", "/mvp/workflow/feishu", "warning", "已启用但缺少 App ID / App Secret")
+	case feishuEncryptKey == "":
+		addItem("feishu_collab", "飞书协作", "/mvp/workflow/feishu", "warning", "已启用但缺少 Encrypt Key")
+	default:
+		addItem("feishu_collab", "飞书协作", "/mvp/workflow/feishu", "ok",
+			fmt.Sprintf("飞书配置已就绪，当前有效绑定 %d 条", feishuBindings))
+	}
+
 	return &v1.SystemCheckRes{Items: items, AllPass: allPass}, nil
 }
 

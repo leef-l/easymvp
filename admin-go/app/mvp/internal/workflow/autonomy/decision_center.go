@@ -7,6 +7,7 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/gconv"
 
 	"easymvp/app/mvp/internal/consts"
 	"easymvp/app/mvp/internal/engine"
@@ -22,6 +23,10 @@ type DecisionCenter struct {
 	actionRepo       *repo.DecisionActionRepo
 	checkpointRepo   *repo.HumanCheckpointRepo
 	eventPublisher   *event.Publisher
+	sensor           *Sensor
+	objectiveSvc     *ObjectiveService
+	planner          *Planner
+	actuator         *Actuator
 }
 
 // NewDecisionCenter 创建决策中台。
@@ -41,6 +46,18 @@ func NewDecisionCenter(
 		checkpointRepo:   checkpointRepo,
 		eventPublisher:   eventPublisher,
 	}
+}
+
+// SetPhaseADeps 注入 Phase A 的地基组件。
+func (dc *DecisionCenter) SetPhaseADeps(sensor *Sensor, objectiveSvc *ObjectiveService) {
+	dc.sensor = sensor
+	dc.objectiveSvc = objectiveSvc
+}
+
+// SetPhaseBDeps 注入 Phase B 的策略组件。
+func (dc *DecisionCenter) SetPhaseBDeps(planner *Planner, actuator *Actuator) {
+	dc.planner = planner
+	dc.actuator = actuator
 }
 
 // IsEnabled 灰度检查：workflow.autonomy.enabled 是否开启。
@@ -63,6 +80,16 @@ func (dc *DecisionCenter) isRiskGateEnabled(ctx context.Context) bool {
 	return engine.GetConfigInt(ctx, "workflow.autonomy.risk_gate_enabled", "workflow.autonomy.riskGateEnabled", 1) == 1
 }
 
+// isPatrolEnabled 态势采集灰度。
+func (dc *DecisionCenter) isPatrolEnabled(ctx context.Context) bool {
+	return engine.GetConfigInt(ctx, "workflow.autonomy.patrol_enabled", "workflow.autonomy.patrolEnabled", 0) == 1
+}
+
+// isObjectiveEnabled 目标层灰度。
+func (dc *DecisionCenter) isObjectiveEnabled(ctx context.Context) bool {
+	return engine.GetConfigInt(ctx, "workflow.autonomy.objective_enabled", "workflow.autonomy.objectiveEnabled", 0) == 1
+}
+
 // Decide 统一决策入口。
 //
 // 流程：策略匹配 → 闸门检查 → 写审计记录 → 分流（自动执行 / 等待人工）。
@@ -76,9 +103,46 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 	// 1. 获取项目作用域信息（family, category_code）+ 数据权限归属
 	family, categoryCode, createdBy, deptID := dc.resolveProjectScope(ctx, req.ProjectID)
 
-	// 2. 策略匹配（受 policy_engine_enabled 灰度控制）
+	// 2. Phase A：统一态势感知 + 目标层准入
+	var sit *Situation
+	if dc.sensor != nil && req.WorkflowRunID > 0 && (dc.isPatrolEnabled(ctx) || dc.isObjectiveEnabled(ctx)) {
+		if perceived, err := dc.sensor.Perceive(ctx, req.WorkflowRunID); err != nil {
+			g.Log().Warningf(ctx, "[DecisionCenter] Situation 感知失败: wfRun=%d err=%v", req.WorkflowRunID, err)
+		} else {
+			sit = perceived
+			_ = dc.sensor.RecordSnapshot(ctx, sit)
+		}
+	}
+	if dc.objectiveSvc != nil && dc.isObjectiveEnabled(ctx) && sit != nil && req.ProjectID > 0 {
+		obj, err := dc.objectiveSvc.Load(ctx, req.ProjectID)
+		if err != nil {
+			g.Log().Warningf(ctx, "[DecisionCenter] Objective 加载失败: project=%d err=%v", req.ProjectID, err)
+		} else if admission, _ := dc.objectiveSvc.Check(ctx, sit, obj, req.TriggerSource); admission != nil && !admission.Allowed {
+			return dc.handleAdmissionDenied(ctx, req, admission, sit, createdBy, deptID)
+		}
+	}
+
+	// 3. Phase B：Planner 策略函数评估（受 strategy_enabled 灰度控制）
+	var plan *ActionPlan
+	if dc.planner != nil && dc.planner.IsEnabled(ctx) && sit != nil {
+		plan = dc.planner.Plan(ctx, sit, req)
+		if plan != nil {
+			g.Log().Infof(ctx, "[DecisionCenter] Planner 输出计划: strategy=%s action=%s level=%s",
+				plan.StrategyName, plan.ActionType, plan.DecisionLevel)
+		}
+	}
+
+	// 4. 策略规则匹配（受 policy_engine_enabled 灰度控制）
+	// Planner 有结果时优先使用，否则走 PolicyEngine
 	var match *PolicyMatch
-	if dc.isPolicyEngineEnabled(ctx) {
+	if plan != nil {
+		// Planner 结果转为 PolicyMatch 格式，统一后续流程
+		match = &PolicyMatch{
+			DecisionLevel:  plan.DecisionLevel,
+			ActionType:     plan.ActionType,
+			AutoExecutable: plan.DecisionLevel == consts.DecisionLevelA,
+		}
+	} else if dc.isPolicyEngineEnabled(ctx) {
 		match = dc.policyEngine.Match(ctx, req.TriggerSource, family, categoryCode)
 	}
 	if match == nil {
@@ -91,7 +155,7 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 	resp.ActionType = match.ActionType
 	resp.AutoExecutable = match.AutoExecutable
 
-	// 3. 闸门检查（受 risk_gate_enabled 灰度控制）
+	// 4. 闸门检查（受 risk_gate_enabled 灰度控制）
 	var gateResult *GateCheckResult
 	if dc.isRiskGateEnabled(ctx) {
 		gateResult = dc.riskGate.Check(ctx, req, family, categoryCode)
@@ -121,7 +185,7 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 			})
 	}
 
-	// 4. 写审计记录 (mvp_decision_action)
+	// 5. 写审计记录 (mvp_decision_action)
 	triggerJSON, _ := json.Marshal(req.TriggerContext)
 	// 闸门命中时把原动作写入 recommendation，gate ID 列表写入 matched_gate_ids
 	var recommendationJSON string
@@ -142,16 +206,26 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 		matchedGateIDsJSON = string(gateIDBytes)
 	}
 
+	// 来源判断：Planner 策略 vs PolicyEngine 规则
+	var decisionType string
+	var matchedRuleID int64
+	if plan != nil {
+		decisionType = "strategy:" + plan.StrategyName
+	} else if match.Rule != nil {
+		decisionType = match.Rule.DecisionType
+		matchedRuleID = match.Rule.ID
+	}
+
 	actionData := g.Map{
 		"workflow_run_id":  req.WorkflowRunID,
 		"project_id":       req.ProjectID,
 		"stage_run_id":     req.StageRunID,
 		"domain_task_id":   req.DomainTaskID,
-		"decision_type":    match.Rule.DecisionType,
+		"decision_type":    decisionType,
 		"decision_level":   resp.DecisionLevel,
 		"trigger_source":   req.TriggerSource,
 		"trigger_context":  string(triggerJSON),
-		"matched_rule_id":  match.Rule.ID,
+		"matched_rule_id":  matchedRuleID,
 		"action_type":      resp.ActionType,
 		"auto_executable":  resp.AutoExecutable,
 		"human_required":   resp.HumanRequired,
@@ -163,6 +237,20 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 	}
 	if recommendationJSON != "" {
 		actionData["recommendation"] = recommendationJSON
+	} else if plan != nil {
+		// Planner 策略的 reasoning 写入 recommendation
+		recMap := map[string]interface{}{
+			"strategy":        plan.StrategyName,
+			"reasoning":       plan.Reasoning,
+			"expected_outcome": plan.ExpectedOutcome,
+			"rollback_action": plan.RollbackAction,
+		}
+		if plan.Meta != nil {
+			recMap["confidence"] = plan.Meta.Confidence
+			recMap["blast_radius"] = plan.Meta.BlastRadius
+		}
+		recBytes, _ := json.Marshal(recMap)
+		actionData["recommendation"] = string(recBytes)
 	}
 	if matchedGateIDsJSON != "" {
 		actionData["matched_gate_ids"] = matchedGateIDsJSON
@@ -183,7 +271,7 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 			"auto_executable": resp.AutoExecutable,
 		})
 
-	// 5. 审计模式：只写记录，不执行，不接管
+	// 6. 审计模式：只写记录，不执行，不接管
 	if dc.isAuditOnly(ctx) {
 		g.Log().Infof(ctx, "[DecisionCenter] audit_only 模式，仅记录: actionID=%d type=%s",
 			actionID, resp.ActionType)
@@ -191,8 +279,19 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 		return resp
 	}
 
-	// 6. 分流执行
+	// 7. 分流执行
 	if resp.AutoExecutable && !resp.HumanRequired {
+		// Actuator: 记录执行前态势
+		var outcomeID int64
+		strategyName := ""
+		if plan != nil {
+			strategyName = plan.StrategyName
+		}
+		if dc.actuator != nil && sit != nil && strategyName != "" {
+			outcomeID = dc.actuator.RecordBefore(ctx, actionID, req.WorkflowRunID, req.ProjectID,
+				strategyName, resp.ActionType, resp.DecisionLevel, sit, createdBy, deptID)
+		}
+
 		// A 级：自动执行
 		execErr := dc.actionDispatcher.Execute(ctx, actionID, resp.ActionType, req)
 		resp.Executed = execErr == nil
@@ -211,6 +310,13 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 			})
 			dc.emitEvent(ctx, event.EventAutonomyActionExecuted, event.EntityDecisionAction,
 				req.WorkflowRunID, actionID, g.Map{"action_type": resp.ActionType})
+
+			// Actuator: 延迟评估效果（执行后重新采集态势）
+			if dc.actuator != nil && dc.sensor != nil && outcomeID > 0 {
+				if sitAfter, err := dc.sensor.Perceive(ctx, req.WorkflowRunID); err == nil {
+					dc.actuator.EvaluateAfter(ctx, outcomeID, sitAfter)
+				}
+			}
 		}
 	} else {
 		// B/C 级：等待人工
@@ -385,13 +491,94 @@ func (dc *DecisionCenter) resolveProjectScope(ctx context.Context, projectID int
 	}
 	record, err := g.DB().Model("mvp_project").Ctx(ctx).
 		Where("id", projectID).
-		Fields("project_family, project_category, created_by, dept_id").
+		Fields("category_code, project_category, created_by, dept_id").
 		One()
 	if err != nil || record.IsEmpty() {
 		return "", "", 0, 0
 	}
-	return record["project_family"].String(), record["project_category"].String(),
-		record["created_by"].Int64(), record["dept_id"].Int64()
+	categoryCode = record["category_code"].String()
+	if categoryCode == "" {
+		categoryCode = record["project_category"].String()
+	}
+	family = dc.resolveProjectFamily(ctx, categoryCode)
+	return family, categoryCode, record["created_by"].Int64(), record["dept_id"].Int64()
+}
+
+func (dc *DecisionCenter) resolveProjectFamily(ctx context.Context, categoryCode string) string {
+	if categoryCode == "" {
+		return ""
+	}
+	row, err := repo.NewProjectCategoryRepo().GetByCode(ctx, categoryCode)
+	if err == nil && row != nil {
+		return gconv.String(row["family_code"])
+	}
+	row, err = repo.NewProjectCategoryRepo().GetByDisplayName(ctx, categoryCode)
+	if err == nil && row != nil {
+		return gconv.String(row["family_code"])
+	}
+	return ""
+}
+
+func (dc *DecisionCenter) handleAdmissionDenied(
+	ctx context.Context,
+	req *DecisionRequest,
+	admission *AdmissionResult,
+	sit *Situation,
+	createdBy, deptID int64,
+) *DecisionResponse {
+	resp := &DecisionResponse{
+		DecisionLevel: consts.DecisionLevelC,
+		ActionType:    consts.ActionTypeNotifyHuman,
+		HumanRequired: true,
+		Handled:       true,
+		DenyReason:    admission.DenyReason,
+	}
+	triggerJSON, _ := json.Marshal(g.Map{
+		"trigger_context": req.TriggerContext,
+		"admission":       admission,
+		"situation":       sit,
+	})
+	actionID, err := dc.actionRepo.Create(ctx, g.Map{
+		"workflow_run_id": req.WorkflowRunID,
+		"project_id":      req.ProjectID,
+		"stage_run_id":    req.StageRunID,
+		"domain_task_id":  req.DomainTaskID,
+		"decision_type":   "objective_guard",
+		"decision_level":  consts.DecisionLevelC,
+		"trigger_source":  req.TriggerSource,
+		"trigger_context": string(triggerJSON),
+		"action_type":     admission.SuggestedAction,
+		"auto_executable": 0,
+		"human_required":  1,
+		"action_status":   consts.ActionStatusWaitingHuman,
+		"result":          admission.DenyReason,
+		"created_by":      createdBy,
+		"dept_id":         deptID,
+		"created_at":      gtime.Now(),
+		"updated_at":      gtime.Now(),
+	})
+	if err != nil {
+		g.Log().Errorf(ctx, "[DecisionCenter] 准入拒绝记录失败: err=%v", err)
+		resp.Error = err
+		return resp
+	}
+	resp.ActionID = actionID
+	_, _ = dc.checkpointRepo.Create(ctx, g.Map{
+		"decision_action_id": actionID,
+		"project_id":         req.ProjectID,
+		"workflow_run_id":    req.WorkflowRunID,
+		"checkpoint_type":    consts.CheckpointEscalation,
+		"status":             consts.CheckpointStatusOpen,
+		"title":              "[C] objective_guard",
+		"description":        admission.DenyReason,
+		"created_by":         createdBy,
+		"dept_id":            deptID,
+		"created_at":         gtime.Now(),
+		"updated_at":         gtime.Now(),
+	})
+	dc.emitEvent(ctx, event.EventAutonomyCheckpointOpened, event.EntityHumanCheckpoint,
+		req.WorkflowRunID, 0, g.Map{"action_id": actionID, "reason": admission.DenyReason})
+	return resp
 }
 
 // rebuildRequest 从审计记录重建 DecisionRequest（用于人工审批后执行）。

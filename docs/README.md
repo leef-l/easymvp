@@ -5,6 +5,7 @@
 - `EasyMVP对接Aider实现文档.md`
 - `EasyMVP对接OpenHands与Aider引擎设计实现文档.md`
 - `EasyMVP架构设计文档.md`
+- `EasyMVP七层自治模型第一批实施设计文档.md`
 - `Docker开发环境说明.md`
 - `Docker生产环境变量说明.md`
 - `流水线架构重构设计文档.md`
@@ -38,5 +39,9 @@
 - `执行器生产部署与容量规划文档.md`
 - `飞书机器人接入与移动端控制设计文档.md`
 - `腾讯云CodingPlan模型测试报告.md`
+- `超前理念文档/`
+  - `EasyMVP目标驱动自治控制操作系统方案-架构师B.md`
+  - `EasyMVP七层自治操作系统终极基线方案-架构师A.md`
+  - `EasyMVP自治宪法操作系统终版方案-架构师B.md`
 
 本地 Docker 开发配置位于 `../docker/dev/`。
