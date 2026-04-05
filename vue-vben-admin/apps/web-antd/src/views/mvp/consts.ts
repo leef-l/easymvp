@@ -65,7 +65,7 @@ export const taskStatusOptions = Object.entries(taskStatusMap).map(([value, { la
 
 // ==================== 项目分类 ====================
 
-/** 项目分类选项（与数据库 mvp_role_preset 保持一致） */
+/** 项目分类静态选项（兜底，新建项目表单已改为从 API 动态加载） */
 export const projectCategoryOptions = [
   { label: '软件开发', value: '软件开发' },
   { label: '游戏开发', value: '游戏开发' },
@@ -77,6 +77,9 @@ export const projectCategoryOptions = [
   { label: '数据分析', value: '数据分析' },
   { label: '产品设计', value: '产品设计' },
 ];
+
+/** 编码类分类的 familyCode */
+export const CODING_FAMILY = 'coding';
 
 /** 角色类型选项 */
 export const roleTypeOptions = [

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, ref, computed } from 'vue';
+import { h, ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useVbenModal } from '@vben/common-ui';
 import { useVbenForm } from '#/adapter/form';
@@ -9,9 +9,9 @@ import {
   getProjectDetail,
   updateProject,
 } from '#/api/mvp/project';
-import { createProject as workflowCreateProject, getRolePresets, type RolePresetItem } from '#/api/mvp/workflow';
+import { createProject as workflowCreateProject, getRolePresets, getCategories, type RolePresetItem, type CategoryItem } from '#/api/mvp/workflow';
 import { getModelList } from '#/api/ai/model';
-import { projectCategoryOptions, engineVersionOptions, roleTypeMap, roleLevelMap, executionModeMap } from '#/views/mvp/consts';
+import { projectCategoryOptions, engineVersionOptions, roleTypeMap, roleLevelMap, executionModeMap, CODING_FAMILY } from '#/views/mvp/consts';
 
 const router = useRouter();
 
@@ -21,23 +21,48 @@ const architectModelOptions = ref<{ label: string; value: string }[]>([]);
 const allModelOptions = ref<{ label: string; value: string }[]>([]);
 /** 预设中的架构师默认模型ID */
 const presetArchitectModelID = ref<string>('');
-/** 当前选择的项目分类 */
-const selectedCategory = ref<string>('软件开发');
+/** 当前选择的项目分类 categoryCode */
+const selectedCategoryCode = ref<string>('software_dev');
 /** 当前分类的默认角色预设（用于只读展示） */
 const defaultPresets = ref<RolePresetItem[]>([]);
 
-/** 编码类分类（workDir 必填） */
-const codingCategories = ['软件开发', '游戏开发'];
+/** 动态分类选项（从 API 加载，value=categoryCode, label=displayName） */
+const dynamicCategoryOptions = ref<{ label: string; value: string; familyCode: string }[]>([]);
+/** 分类配置缓存 */
+const categoryMap = ref<Map<string, CategoryItem>>(new Map());
 
-/** workDir 是否必填（编码类必填，其他可选） */
-const isWorkDirRequired = computed(() => codingCategories.includes(selectedCategory.value));
+/** workDir 是否必填（编码类 family 必填，其他可选） */
+const isWorkDirRequired = computed(() => {
+  const cat = categoryMap.value.get(selectedCategoryCode.value);
+  return cat ? cat.familyCode === CODING_FAMILY : selectedCategoryCode.value === 'software_dev';
+});
 
-/** 根据项目分类加载角色预设，更新架构师模型选项 */
-async function loadPresetsForCategory(category: string) {
-  if (!category) return;
-  selectedCategory.value = category;
+/** 加载分类列表（从后端 API） */
+async function loadCategories() {
   try {
-    const presetRes = await getRolePresets(category);
+    const res = await getCategories();
+    const list = res?.list ?? [];
+    dynamicCategoryOptions.value = list.map((c) => ({
+      label: c.displayName,
+      value: c.categoryCode,
+      familyCode: c.familyCode,
+    }));
+    categoryMap.value = new Map(list.map((c) => [c.categoryCode, c]));
+  } catch {
+    // 兜底使用静态选项（value 仍为中文展示名）
+    dynamicCategoryOptions.value = projectCategoryOptions.map((o) => ({
+      ...o,
+      familyCode: 'coding',
+    }));
+  }
+}
+
+/** 根据 categoryCode 加载角色预设，更新架构师模型选项 */
+async function loadPresetsForCategory(categoryCode: string) {
+  if (!categoryCode) return;
+  selectedCategoryCode.value = categoryCode;
+  try {
+    const presetRes = await getRolePresets(categoryCode);
     const presets = presetRes?.list ?? [];
     defaultPresets.value = presets;
     // 从预设中提取架构师模型
@@ -82,11 +107,11 @@ const createSchema = [
   },
   {
     component: 'Select',
-    fieldName: 'projectCategory',
+    fieldName: 'categoryCode',
     label: '项目分类',
     rules: 'selectRequired',
-    componentProps: { options: projectCategoryOptions, placeholder: '请选择项目分类', allowClear: true, onChange: (val: string) => loadPresetsForCategory(val) },
-    defaultValue: '软件开发',
+    componentProps: { options: dynamicCategoryOptions, placeholder: '请选择项目分类', allowClear: true, onChange: (val: string) => loadPresetsForCategory(val) },
+    defaultValue: 'software_dev',
   },
   {
     component: 'Textarea',
@@ -187,10 +212,10 @@ const [Modal, modalApi] = useVbenModal({
         emit('success');
         modalApi.close();
       } else {
-        // 调用工作流 API 创建项目（会自动根据预设创建全部角色配置）
+        // 调用工作流 API 创建项目（发送 categoryCode，后端自动映射 displayName）
         const res = await workflowCreateProject({
           name: values.name,
-          projectCategory: values.projectCategory || '软件开发',
+          categoryCode: values.categoryCode || 'software_dev',
           description: values.description || '',
           workDir: values.workDir,
           architectModelID: values.architectModelID,
@@ -237,17 +262,18 @@ const [Modal, modalApi] = useVbenModal({
           message.error('获取详情失败');
         }
       } else {
-        // 新建模式：只加载架构师模型 + 读取预设默认值
+        // 新建模式：加载分类列表 + 架构师模型 + 预设
         isEdit.value = false;
         editId.value = '';
         modalApi.setState({ title: '新建项目' });
         formApi.setState({ schema: createSchema });
         formApi.resetForm();
         try {
-          // 并行加载架构师模型列表和预设
-          const [modelRes, presetRes] = await Promise.all([
+          // 并行加载：分类列表、架构师模型列表、默认预设
+          const [, modelRes, presetRes] = await Promise.all([
+            loadCategories(),
             getModelList({ pageNum: 1, pageSize: 1000, capability: 'architect' }),
-            getRolePresets('软件开发'),
+            getRolePresets('software_dev'),
           ]);
           // 架构师模型下拉选项
           architectModelOptions.value = (modelRes?.list ?? []).map((item: any) => ({

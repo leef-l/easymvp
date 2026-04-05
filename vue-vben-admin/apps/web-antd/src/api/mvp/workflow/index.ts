@@ -3,10 +3,24 @@ import { requestClient } from '#/api/request';
 /** API 前缀 */
 const PREFIX = '/mvp/workflow';
 
+/** 分类列表项 */
+export interface CategoryItem {
+  categoryCode: string;
+  displayName: string;
+  familyCode: string;
+  description: string;
+}
+
+/** 获取项目��类列表 */
+export function getCategories() {
+  return requestClient.get<{ list: CategoryItem[] }>(`${PREFIX}/categories`);
+}
+
 /** 创建项目（通过工作流，返回项目ID和对话ID） */
 export function createProject(data: {
   name: string;
-  projectCategory: string;
+  projectCategory?: string;
+  categoryCode?: string;
   description: string;
   workDir: string;
   architectModelID: string;
@@ -70,11 +84,19 @@ export interface RolePresetItem {
   isDefault: boolean;
 }
 
-/** 获取角色预设列表（可按项目分类过滤） */
-export function getRolePresets(projectCategory?: string) {
+/** 获取角色预设列表（可按项目分类过滤，优先 categoryCode） */
+export function getRolePresets(categoryCodeOrDisplayName?: string) {
+  if (!categoryCodeOrDisplayName) {
+    return requestClient.get<{ list: RolePresetItem[] }>(`${PREFIX}/role-presets`);
+  }
+  // 判断是 categoryCode（英文下划线）还是 displayName（中文）
+  const isCategoryCode = /^[a-z_]+$/.test(categoryCodeOrDisplayName);
+  const params = isCategoryCode
+    ? { categoryCode: categoryCodeOrDisplayName }
+    : { projectCategory: categoryCodeOrDisplayName };
   return requestClient.get<{ list: RolePresetItem[] }>(
     `${PREFIX}/role-presets`,
-    { params: projectCategory ? { projectCategory } : {} },
+    { params },
   );
 }
 

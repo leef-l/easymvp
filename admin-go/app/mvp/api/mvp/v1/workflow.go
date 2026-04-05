@@ -13,7 +13,8 @@ import (
 type WorkflowCreateProjectReq struct {
 	g.Meta           `path:"/workflow/create-project" method:"post" tags:"项目流程" summary:"创建项目"`
 	Name             string              `json:"name" v:"required" dc:"项目名称"`
-	ProjectCategory  string              `json:"projectCategory" v:"required|max-length:50" dc:"项目分类"`
+	ProjectCategory  string              `json:"projectCategory" v:"max-length:50" dc:"项目分类（展示名，兼容旧版）"`
+	CategoryCode     string              `json:"categoryCode" v:"max-length:64" dc:"项目分类编码（优先使用）"`
 	Description      string              `json:"description" dc:"项目简介"`
 	WorkDir          string              `json:"workDir" v:"max-length:500" dc:"代码工作目录（编码类项目必填，非编码类可留空由系统自动生成）"`
 	ArchitectModelID snowflake.JsonInt64  `json:"architectModelID" v:"required" dc:"架构师AI模型ID"`
@@ -129,7 +130,8 @@ type WorkflowParseTasksRes struct {
 // WorkflowRolePresetsReq 获取角色预设列表请求
 type WorkflowRolePresetsReq struct {
 	g.Meta          `path:"/workflow/role-presets" method:"get" tags:"项目流程" summary:"获取角色预设列表"`
-	ProjectCategory string `json:"projectCategory" dc:"项目分类，为空则返回全部"`
+	ProjectCategory string `json:"projectCategory" dc:"项目分类展示名（兼容旧版），为空则返回全部"`
+	CategoryCode    string `json:"categoryCode" dc:"项目分类编码（优先使用）"`
 	All             bool   `json:"all" dc:"是否返回全部预设（含扩展），默认只返回默认模板"`
 }
 

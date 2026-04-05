@@ -38,7 +38,20 @@ func (c *cWorkflow) CreateProject(ctx context.Context, req *v1.WorkflowCreatePro
 	userID := middleware.GetUserID(ctx)
 	deptID := middleware.GetDeptID(ctx)
 
-	projectID, convID, err := engine.CreateProject(ctx, req.Name, req.ProjectCategory, req.Description, req.WorkDir, int64(req.ArchitectModelID), userID, deptID, req.EngineVersion)
+	// 优先使用 categoryCode，通过 CategoryResolver 获取展示名
+	projectCategory := req.ProjectCategory
+	if req.CategoryCode != "" {
+		resolver := engine.GetCategoryResolver()
+		catInfo, _ := resolver.ResolveByCode(ctx, req.CategoryCode)
+		if catInfo != nil {
+			projectCategory = catInfo.DisplayName
+		}
+	}
+	if projectCategory == "" {
+		projectCategory = "软件开发"
+	}
+
+	projectID, convID, err := engine.CreateProject(ctx, req.Name, projectCategory, req.Description, req.WorkDir, int64(req.ArchitectModelID), userID, deptID, req.EngineVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -338,13 +351,23 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 
 // RolePresets 获取角色预设列表（前端创建项目时读取默认模型）
 func (c *cWorkflow) RolePresets(ctx context.Context, req *v1.WorkflowRolePresetsReq) (res *v1.WorkflowRolePresetsRes, err error) {
+	// 解析分类过滤条件：优先 categoryCode → 转为 displayName 查预设
+	filterCategory := req.ProjectCategory
+	if req.CategoryCode != "" {
+		resolver := engine.GetCategoryResolver()
+		catInfo, _ := resolver.ResolveByCode(ctx, req.CategoryCode)
+		if catInfo != nil {
+			filterCategory = catInfo.DisplayName
+		}
+	}
+
 	m := g.DB().Model("mvp_role_preset AS p").
 		LeftJoin("ai_model AS m", "m.id = p.model_id").
 		Fields("p.role_type, p.role_level, p.model_id, m.name AS model_name, p.system_prompt, p.execution_mode, p.is_default").
 		Where("p.status", 1).
 		Where("p.deleted_at IS NULL")
-	if req.ProjectCategory != "" {
-		m = m.Where("p.project_category", req.ProjectCategory)
+	if filterCategory != "" {
+		m = m.Where("p.project_category", filterCategory)
 	}
 	if !req.All {
 		m = m.Where("p.is_default", 1)
