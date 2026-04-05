@@ -497,9 +497,12 @@ M5.5 不插入当前 M5 主线，原因是：
 
 ### 10.4 实际进度：✅ 已完成（2026-04-05）
 
+**验收结论：新项目默认 Workflow V2，legacy 降为兼容模式。旧链未物理删除，仍可正常运行旧项目。**
+
 后端已落地：
 - 新项目默认 engine_version=workflow_v2
 - controller 6 个 handler 全部重构为 `if !isV2 { legacy; return } // V2 主路径`
+- legacy 链路完整保留，旧项目走原有 engine 逻辑不受影响
 - ExecutionStatus / DomainTasks / ResourceLocks API
 - project.status 全链路同步（StartStage/Pause/Resume/FailStage/completeWorkflow）
 
@@ -510,6 +513,11 @@ M5.5 不插入当前 M5 主线，原因是：
 - 项目列表新增执行控制台入口
 - engineVersion 选项 V2 标为推荐、legacy 标为不推荐
 - 创建表单默认选择 workflow_v2
+
+**边界说明**：
+- legacy 链路未删除，旧项目可继续正常使用
+- 新旧项目在同一列表混合展示，状态互不干扰
+- 未来若需彻底移除 legacy，需额外排期（数据迁移 + 旧 API 下线）
 
 ---
 
@@ -677,37 +685,51 @@ M5/M5.5/M6 可稍后补齐。
 
 ---
 
-## 十六、当前剩余工作建议排序（2026-04-04 校准后）
+## 十六、阶段关闭评审（2026-04-05）
 
-### P0：M4 收口
+### 评审结论
 
-1. execute 启动失败语义进一步收紧
-2. Execution Console 最小版
-3. watchdog v2 与 domain_task 对齐
+M1-M6 + M4.5/M5.5 共 8 个里程碑，**主链基本完成，进入阶段关闭**。
 
-### P1：M4.5 地基
+| 里程碑 | 结论 | 说明 |
+|--------|------|------|
+| M1 | ✅ 关闭 | 核心地基、表结构、编排骨架已落地 |
+| M2 | ✅ 关闭 | plan_version + task_blueprint 版本链已成立 |
+| M3 | ✅ 关闭 | 审核阶段任务化、驳回回退设计已成立 |
+| M4 | ✅ 关闭 | domain_task + scheduler + execute 替代新项目执行主链 |
+| M4.5 | ✅ 关闭 | workflow_v2 + aider 的 worktree 隔离已成立 |
+| M5 | ✅ 关闭 | rework 旁路化，返工后可回执行链，事件总线全链路覆盖 |
+| M5.5 | ✅ 关闭 | 默认 4 角色模板收敛（建议后续单独补一轮组织模型核验） |
+| M6 | ✅ 关闭 | **新项目默认 Workflow V2，legacy 降为兼容模式** |
 
-1. `mvp_task_workspace`
-2. `workspace/` 模块
-3. worktree create/cleanup 原型
+### M6 边界说明
 
-### P1：M4.5 Aider 接入
+M6 的验收口径是"旧链退为兼容模式"，**不是**"legacy 已彻底删除"：
 
-1. `workflow_v2 + aider` 切到 worktree
-2. 真实项目验证
+- legacy 链路完整保留，旧项目可继续正常使用
+- 新旧项目在同一列表混合展示，状态互不干扰
+- controller 按 `engine_version` 分流，V2 走新编排、legacy 走旧引擎
+- 若需彻底移除 legacy，需额外排期（数据迁移 + 旧 API 下线 + 回归验证）
 
-### P2：M5
+### 稳定性修复清单（M5→M6.5 CR 轮次）
 
-1. rework stage
-2. event stream
-3. timeline
+以下问题在多轮代码审计中发现并修复：
 
-### P2.5：M5.5
+1. completeWorkflow 幂等性：`WHERE status=completed AND finished_at IS NULL`
+2. triggerReviewStage 失败回滚 design stage
+3. execute 完成后 TransitionNext 推进到 complete（不走 rework 主链）
+4. review→execute 启动失败原子回滚（FailStageOnly + 四表回滚）
+5. stageOrder 移除 rework（旁路化，仅 triggerReworkStage 触发）
+6. validWorkflowTransitions 补全 `failed→designing` 和 `reworking→executing`
+7. rework 完成后 CAS(reworking→executing) + project.status 同步
 
-1. 默认 4 角色模板
-2. 默认模型绑定
-3. 扩展预设库保留策略
-4. 前后端角色文案统一
+### 后续建议
+
+1. **集成测试**：主链端到端测试（design→review→execute→complete 全流程）
+2. **M5.5 核验**：单独补一轮默认组织模型/角色配置验证
+3. **Plan Design 可视化**：M2 遗留的版本 diff 面板和蓝图可视化页面
+4. **执行器扩展**：openhands / claude_code / codex_cli / gemini_cli 接入
+5. **灰度上线**：按下方上线策略逐步放量
 
 ---
 
@@ -734,20 +756,14 @@ M5/M5.5/M6 可稍后补齐。
 
 ## 十八、结论
 
-实施上最重要的是克制，不要一边重构所有层，一边全量切流量。
+WorkflowRun 阶段化工作流引擎重构已完成全部 8 个里程碑的主链建设。
 
-正确方式是：
+实施过程遵循了既定原则：
 
-- 架构上一步到位
-- 实施上分阶段达成
-- 每阶段都可交付、可验证、可回滚
+- 架构上一步到位（阶段化状态机 + 事件总线 + 领域任务调度）
+- 实施上分阶段达成（M1→M6 逐步递进，每阶段可独立验证）
+- 新旧双轨运行（legacy 降为兼容模式，不做一次性全切）
 
-在当前代码进度下，建议正式采用下面的推进顺序：
+当前状态：**主链已闭环，新项目默认走 Workflow V2，legacy 保持兼容。**
 
-1. WorkflowRun 主链继续收口到稳定
-2. 插入 Git Worktree 任务级隔离
-3. 再继续返工链和事件总线
-4. 然后收敛默认组织模型
-5. 最后再推进执行器扩展和旧链退役
-
-这样才能把一次大重构真正落地。
+下一阶段重点应转向：集成测试验证、灰度上线、执行器扩展。
