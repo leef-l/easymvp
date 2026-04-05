@@ -9,6 +9,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	v1 "easymvp/app/mvp/api/mvp/v1"
+	"easymvp/app/mvp/internal/collab"
 	"easymvp/app/mvp/internal/collab/adapter"
 	collabRepo "easymvp/app/mvp/internal/collab/repo"
 	"easymvp/app/mvp/internal/engine"
@@ -21,6 +22,7 @@ const feishuCallbackPath = "/api/mvp/collab/feishu/callback"
 
 // FeishuConfig 查询飞书协作配置。
 func (c *cWorkflow) FeishuConfig(ctx context.Context, req *v1.WorkflowFeishuConfigReq) (res *v1.WorkflowFeishuConfigRes, err error) {
+	mode := engine.GetConfigString(ctx, "workflow.collab.feishu_connection_mode", "", "webhook")
 	return &v1.WorkflowFeishuConfigRes{
 		Config: v1.FeishuConfigDTO{
 			Enabled:              engine.GetConfigInt(ctx, "workflow.collab.feishu_enabled", "workflow.collab.feishuEnabled", 0),
@@ -29,13 +31,19 @@ func (c *cWorkflow) FeishuConfig(ctx context.Context, req *v1.WorkflowFeishuConf
 			VerificationToken:    engine.GetConfigString(ctx, "workflow.collab.feishu_verification_token", "workflow.collab.feishuVerificationToken", ""),
 			EncryptKey:           engine.GetConfigString(ctx, "workflow.collab.feishu_encrypt_key", "workflow.collab.feishuEncryptKey", ""),
 			DefaultNotifyUserIDs: engine.GetConfigString(ctx, "workflow.collab.feishu_default_notify_user_ids", "workflow.collab.feishuDefaultNotifyUserIds", ""),
+			ConnectionMode:       mode,
 			CallbackPath:         feishuCallbackPath,
+			WSRunning:            collab.GetWSManager().IsRunning(),
 		},
 	}, nil
 }
 
 // SaveFeishuConfig 保存飞书协作配置。
 func (c *cWorkflow) SaveFeishuConfig(ctx context.Context, req *v1.WorkflowSaveFeishuConfigReq) (res *v1.WorkflowSaveFeishuConfigRes, err error) {
+	mode := strings.TrimSpace(req.ConnectionMode)
+	if mode != "websocket" {
+		mode = "webhook"
+	}
 	configs := []struct {
 		key         string
 		value       string
@@ -48,12 +56,24 @@ func (c *cWorkflow) SaveFeishuConfig(ctx context.Context, req *v1.WorkflowSaveFe
 		{"workflow.collab.feishu_verification_token", strings.TrimSpace(req.VerificationToken), "string", "飞书 Verification Token"},
 		{"workflow.collab.feishu_encrypt_key", strings.TrimSpace(req.EncryptKey), "string", "飞书事件回调加密 Key(签名验证)"},
 		{"workflow.collab.feishu_default_notify_user_ids", strings.TrimSpace(req.DefaultNotifyUserIDs), "string", "降级通知的系统用户ID列表(逗号分隔)"},
+		{"workflow.collab.feishu_connection_mode", mode, "string", "飞书连接模式：webhook|websocket"},
 	}
 	for _, item := range configs {
 		if err := saveMvpConfig(ctx, item.key, item.value, item.configType, "collab", item.description); err != nil {
 			return nil, err
 		}
 	}
+
+	// 联动 WebSocket 长连接
+	appID := strings.TrimSpace(req.AppID)
+	appSecret := strings.TrimSpace(req.AppSecret)
+	wsMgr := collab.GetWSManager()
+	if req.Enabled == 1 && mode == "websocket" && appID != "" && appSecret != "" {
+		wsMgr.StartWS(appID, appSecret, feishuWSEventHandler)
+	} else {
+		wsMgr.StopWS()
+	}
+
 	return &v1.WorkflowSaveFeishuConfigRes{}, nil
 }
 
@@ -198,4 +218,33 @@ func boolToInt(ok bool) int {
 		return 1
 	}
 	return 0
+}
+
+// feishuWSEventHandler WebSocket 模式的事件处理器（与 Webhook 模式共用逻辑）。
+func feishuWSEventHandler(ctx context.Context, header map[string]interface{}, event map[string]interface{}) {
+	if header == nil || event == nil {
+		return
+	}
+	eventType, _ := header["event_type"].(string)
+	if eventType != "im.message.receive_v1" {
+		return
+	}
+
+	sender, _ := event["sender"].(map[string]interface{})
+	messageMap, _ := event["message"].(map[string]interface{})
+	if sender == nil || messageMap == nil {
+		return
+	}
+
+	senderID, _ := sender["sender_id"].(map[string]interface{})
+	openID := ""
+	if senderID != nil {
+		openID, _ = senderID["open_id"].(string)
+	}
+	messageID, _ := messageMap["message_id"].(string)
+	chatID, _ := messageMap["chat_id"].(string)
+	contentStr, _ := messageMap["content"].(string)
+
+	g.Log().Infof(ctx, "[FeishuWSBot] 收到消息: openID=%s messageID=%s", openID, messageID)
+	DispatchFeishuCommand(ctx, openID, messageID, chatID, contentStr)
 }

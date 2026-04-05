@@ -100,6 +100,60 @@ func (a *FeishuAdapter) SendCardMessage(ctx context.Context, openID string, card
 	return nil
 }
 
+// ReplyMessage 回复一条飞书消息（reply to message_id）。
+func (a *FeishuAdapter) ReplyMessage(ctx context.Context, messageID string, text string) error {
+	token, err := a.getTenantAccessToken(ctx)
+	if err != nil {
+		return fmt.Errorf("获取飞书 token 失败: %w", err)
+	}
+	body := g.Map{
+		"msg_type": "text",
+		"content":  fmt.Sprintf(`{"text":%q}`, text),
+	}
+	url := fmt.Sprintf("https://open.feishu.cn/open-apis/im/v1/messages/%s/reply", messageID)
+	resp, err := g.Client().
+		SetHeaderMap(map[string]string{
+			"Authorization": "Bearer " + token,
+			"Content-Type":  "application/json; charset=utf-8",
+		}).
+		Post(ctx, url, body)
+	if err != nil {
+		return fmt.Errorf("飞书回复消息失败: %w", err)
+	}
+	defer resp.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("飞书 API 返回 %d: %s", resp.StatusCode, resp.ReadAllString())
+	}
+	return nil
+}
+
+// SendTextToChat 向群/会话发送文本消息（receive_id 为 chat_id）。
+func (a *FeishuAdapter) SendTextToChat(ctx context.Context, chatID string, text string) error {
+	token, err := a.getTenantAccessToken(ctx)
+	if err != nil {
+		return fmt.Errorf("获取飞书 token 失败: %w", err)
+	}
+	body := g.Map{
+		"receive_id": chatID,
+		"msg_type":   "text",
+		"content":    fmt.Sprintf(`{"text":%q}`, text),
+	}
+	resp, err := g.Client().
+		SetHeaderMap(map[string]string{
+			"Authorization": "Bearer " + token,
+			"Content-Type":  "application/json; charset=utf-8",
+		}).
+		Post(ctx, "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id", body)
+	if err != nil {
+		return fmt.Errorf("飞书发送群消息失败: %w", err)
+	}
+	defer resp.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("飞书 API 返回 %d: %s", resp.StatusCode, resp.ReadAllString())
+	}
+	return nil
+}
+
 // getTenantAccessToken 获取 tenant_access_token，内存缓存 110 分钟。
 func (a *FeishuAdapter) getTenantAccessToken(ctx context.Context) (string, error) {
 	a.mu.Lock()

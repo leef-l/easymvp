@@ -37,15 +37,16 @@ const bindingsLoading = ref(false);
 const saving = ref(false);
 const bindingSubmitting = ref(false);
 
-const config = reactive<FeishuConfigItem & { connectionMode: string }>({
+const config = reactive<FeishuConfigItem>({
   enabled: 0,
   appId: '',
   appSecret: '',
   verificationToken: '',
   encryptKey: '',
   defaultNotifyUserIds: '',
-  callbackPath: '/api/mvp/collab/feishu/callback',
   connectionMode: 'webhook',
+  callbackPath: '/api/mvp/collab/feishu/callback',
+  wsRunning: false,
 });
 
 const bindForm = reactive({
@@ -312,6 +313,21 @@ const columns = [
                 <span>回调签名参数</span>
                 <Tag :color="config.encryptKey ? 'green' : 'orange'">
                   {{ config.encryptKey ? '已配置' : '待补齐' }}
+                </Tag>
+              </div>
+              <div class="flex items-center justify-between rounded-lg border p-3">
+                <span>连接模式</span>
+                <Tag :color="config.connectionMode === 'websocket' ? 'purple' : 'blue'">
+                  {{ config.connectionMode === 'websocket' ? 'WebSocket 长连接' : 'Webhook 回调' }}
+                </Tag>
+              </div>
+              <div
+                v-if="config.connectionMode === 'websocket'"
+                class="flex items-center justify-between rounded-lg border p-3"
+              >
+                <span>WebSocket 长连接状态</span>
+                <Tag :color="config.wsRunning ? 'green' : 'orange'">
+                  {{ config.wsRunning ? '在线' : '未连接' }}
                 </Tag>
               </div>
               <div class="flex items-center justify-between rounded-lg border p-3">

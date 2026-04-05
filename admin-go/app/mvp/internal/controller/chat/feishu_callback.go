@@ -56,7 +56,20 @@ func (c *cFeishuCallback) Handle(r *ghttp.Request) {
 		return
 	}
 
-	// 2b. 交互卡片回调 (v2 schema: action 在顶层)
+	// 2b. 消息事件（im.message.receive_v1）
+	if header, ok := raw["header"].(map[string]interface{}); ok {
+		eventType, _ := header["event_type"].(string)
+		if eventType == "im.message.receive_v1" {
+			if event, ok := raw["event"].(map[string]interface{}); ok {
+				handleFeishuMessageEvent(r, event)
+			} else {
+				r.Response.WriteJson(g.Map{"msg": "ok"})
+			}
+			return
+		}
+	}
+
+	// 2c. 交互卡片回调 (v2 schema: action 在顶层)
 	actionMap, _ := raw["action"].(map[string]interface{})
 	if actionMap == nil {
 		r.Response.WriteJson(g.Map{"msg": "ok"})
@@ -132,6 +145,33 @@ func (c *cFeishuCallback) Handle(r *ghttp.Request) {
 		return
 	}
 
+	r.Response.WriteJson(g.Map{"msg": "ok"})
+}
+
+// handleFeishuMessageEvent 将消息事件路由到 Bot 指令处理器。
+func handleFeishuMessageEvent(r *ghttp.Request, event map[string]interface{}) {
+	ctx := r.GetCtx()
+	sender, _ := event["sender"].(map[string]interface{})
+	messageMap, _ := event["message"].(map[string]interface{})
+
+	if sender == nil || messageMap == nil {
+		r.Response.WriteJson(g.Map{"msg": "ok"})
+		return
+	}
+
+	senderID, _ := sender["sender_id"].(map[string]interface{})
+	openID := ""
+	if senderID != nil {
+		openID, _ = senderID["open_id"].(string)
+	}
+
+	messageID, _ := messageMap["message_id"].(string)
+	chatID, _ := messageMap["chat_id"].(string)
+	contentStr, _ := messageMap["content"].(string)
+
+	g.Log().Infof(ctx, "[FeishuBot] 收到消息: openID=%s messageID=%s chatID=%s", openID, messageID, chatID)
+
+	DispatchFeishuCommand(ctx, openID, messageID, chatID, contentStr)
 	r.Response.WriteJson(g.Map{"msg": "ok"})
 }
 

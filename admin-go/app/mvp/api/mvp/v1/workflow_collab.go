@@ -22,7 +22,9 @@ type FeishuConfigDTO struct {
 	VerificationToken    string `json:"verificationToken"`
 	EncryptKey           string `json:"encryptKey"`
 	DefaultNotifyUserIDs string `json:"defaultNotifyUserIds"`
+	ConnectionMode       string `json:"connectionMode"` // webhook | websocket
 	CallbackPath         string `json:"callbackPath"`
+	WSRunning            bool   `json:"wsRunning"` // WebSocket 长连接是否在线
 }
 
 // WorkflowFeishuConfigRes 查询飞书配置响应。
@@ -40,6 +42,7 @@ type WorkflowSaveFeishuConfigReq struct {
 	VerificationToken    string `json:"verificationToken" dc:"飞书 Verification Token"`
 	EncryptKey           string `json:"encryptKey" dc:"飞书 Encrypt Key"`
 	DefaultNotifyUserIDs string `json:"defaultNotifyUserIds" dc:"默认通知系统用户ID列表(逗号分隔)"`
+	ConnectionMode       string `json:"connectionMode" dc:"连接模式：webhook(默认)|websocket"`
 }
 
 // WorkflowSaveFeishuConfigRes 保存飞书配置响应。

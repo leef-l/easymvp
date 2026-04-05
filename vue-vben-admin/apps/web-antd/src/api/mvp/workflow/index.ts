@@ -632,7 +632,9 @@ export interface FeishuConfigItem {
   verificationToken: string;
   encryptKey: string;
   defaultNotifyUserIds: string;
+  connectionMode: string; // webhook | websocket
   callbackPath: string;
+  wsRunning?: boolean; // WebSocket 长连接是否在线
 }
 
 export interface FeishuBindingItem {

@@ -12,4 +12,7 @@ func registerCustomRoutes(group *ghttp.RouterGroup) {
 		chat.Chat,
 		chat.Workflow,
 	)
+
+	// 飞书回调：不走 JWT 认证，飞书服务器直接调用
+	group.POST("/collab/feishu/callback", chat.FeishuCallback.Handle)
 }
