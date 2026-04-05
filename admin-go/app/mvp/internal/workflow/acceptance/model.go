@@ -7,7 +7,8 @@ type AcceptContext struct {
 	ProjectID     int64
 	AcceptRunID   int64
 	StageRunID    int64
-	ProjectType   string // 项目分类（software_dev/document/creative/analysis）
+	ProjectType   string // 项目分类编码（category_code，如 software_dev）
+	FamilyCode    string // 能力家族编码（如 coding/creative/analysis）
 	WorkDir       string // 项目工作目录
 	CreatedBy     int64  // 继承自 project.created_by
 	DeptID        int64  // 继承自 project.dept_id

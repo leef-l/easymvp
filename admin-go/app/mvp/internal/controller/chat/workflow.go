@@ -370,6 +370,30 @@ func (c *cWorkflow) RolePresets(ctx context.Context, req *v1.WorkflowRolePresets
 	return &v1.WorkflowRolePresetsRes{List: list}, nil
 }
 
+// Categories 获取项目分类列表（前端创建项目时选择分类）
+func (c *cWorkflow) Categories(ctx context.Context, req *v1.WorkflowCategoriesReq) (res *v1.WorkflowCategoriesRes, err error) {
+	records, err := g.DB().Model("mvp_project_category").Ctx(ctx).
+		Where("status", 1).
+		WhereNull("deleted_at").
+		Fields("category_code, display_name, family_code, description").
+		OrderAsc("sort").
+		All()
+	if err != nil {
+		return nil, err
+	}
+
+	list := make([]v1.CategoryItem, 0, len(records))
+	for _, r := range records {
+		list = append(list, v1.CategoryItem{
+			CategoryCode: r["category_code"].String(),
+			DisplayName:  r["display_name"].String(),
+			FamilyCode:   r["family_code"].String(),
+			Description:  r["description"].String(),
+		})
+	}
+	return &v1.WorkflowCategoriesRes{List: list}, nil
+}
+
 // ProjectStatus 获取项目状态
 func (c *cWorkflow) ProjectStatus(ctx context.Context, req *v1.WorkflowProjectStatusReq) (res *v1.WorkflowProjectStatusRes, err error) {
 	projectID := int64(req.ProjectID)

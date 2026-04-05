@@ -24,6 +24,7 @@ type MvpProjectColumns struct {
 	Id                  string // 雪花ID
 	Name                string // 项目名称
 	ProjectCategory     string // 项目分类
+	CategoryCode        string // 项目分类编码
 	Description         string // 项目简介
 	Status              string // 项目状态: designing/reviewing/running/paused/completed
 	PauseReason         string // 暂停原因
@@ -45,6 +46,7 @@ var mvpProjectColumns = MvpProjectColumns{
 	Id:                  "id",
 	Name:                "name",
 	ProjectCategory:     "project_category",
+	CategoryCode:        "category_code",
 	Description:         "description",
 	Status:              "status",
 	PauseReason:         "pause_reason",

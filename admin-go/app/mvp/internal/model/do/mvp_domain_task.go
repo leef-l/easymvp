@@ -18,6 +18,7 @@ type MvpDomainTask struct {
 	PlanVersionId     any         // 来源计划版本ID
 	BlueprintId       any         // 来源蓝图ID
 	ParentTaskId      any         // 父任务ID
+	DependsOnTaskIds  any         // 依赖任务ID列表(JSON数组)
 	SourceTaskId      any         // 来源任务ID(链路追踪)
 	RootTaskId        any         // 根任务ID(链路追踪)
 	TaskKind          any         // 任务种类: implement/audit/bug_analysis/failure_analysis

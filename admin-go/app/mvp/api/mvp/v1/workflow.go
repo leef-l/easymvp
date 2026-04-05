@@ -171,6 +171,27 @@ type SystemCheckItem struct {
 	Link    string `json:"link"`    // 前端跳转路径
 }
 
+// ==================== 项目分类 API ====================
+
+// WorkflowCategoriesReq 获取项目分类列表请求
+type WorkflowCategoriesReq struct {
+	g.Meta `path:"/workflow/categories" method:"get" tags:"项目流程" summary:"获取项目分类列表"`
+}
+
+// WorkflowCategoriesRes 获取项目分类列表响应
+type WorkflowCategoriesRes struct {
+	g.Meta `mime:"application/json"`
+	List   []CategoryItem `json:"list"`
+}
+
+// CategoryItem 分类列表项
+type CategoryItem struct {
+	CategoryCode string `json:"categoryCode"` // 稳定编码
+	DisplayName  string `json:"displayName"`  // 展示名称
+	FamilyCode   string `json:"familyCode"`   // 能力家族
+	Description  string `json:"description"`  // 说明
+}
+
 // ==================== 审核相关 API ====================
 
 // WorkflowReviewStatusReq 获取审核状态请求

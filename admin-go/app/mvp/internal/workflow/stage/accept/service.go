@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/gconv"
 
+	"easymvp/app/mvp/internal/workflow"
 	"easymvp/app/mvp/internal/workflow/acceptance"
 	"easymvp/app/mvp/internal/workflow/repo"
 )
@@ -84,10 +85,18 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 	if err != nil || project.IsEmpty() {
 		return fmt.Errorf("project(%d) 不存在", projectID)
 	}
-	projectType := project["project_category"].String()
 	workDir := project["work_dir"].String()
 	createdBy := project["created_by"].Int64()
 	deptID := project["dept_id"].Int64()
+
+	// 解析分类：优先 category_code，兼容 project_category
+	resolver := workflow.NewCategoryResolver()
+	catInfo, _ := resolver.ResolveByProject(ctx, projectID)
+	if catInfo == nil {
+		catInfo = &workflow.CategoryInfo{CategoryCode: "software_dev", DisplayName: "软件开发", FamilyCode: "coding"}
+	}
+	projectType := catInfo.CategoryCode
+	familyCode := catInfo.FamilyCode
 
 	// 2. 幂等检查：同一 stageRun 不重复创建 accept_run
 	existing, _ := g.DB().Model("mvp_accept_run").Ctx(ctx).
@@ -130,6 +139,7 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 		AcceptRunID:   acceptRunID,
 		StageRunID:    stageRunID,
 		ProjectType:   projectType,
+		FamilyCode:    familyCode,
 		WorkDir:       workDir,
 		CreatedBy:     createdBy,
 		DeptID:        deptID,

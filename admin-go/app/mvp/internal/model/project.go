@@ -12,6 +12,7 @@ import (
 type ProjectCreateInput struct {
 	Name string `json:"name"`
 	ProjectCategory string `json:"projectCategory"`
+	CategoryCode string `json:"categoryCode"`
 	Description string `json:"description"`
 	Status string `json:"status"`
 	PauseReason string `json:"pauseReason"`
@@ -25,6 +26,7 @@ type ProjectUpdateInput struct {
 	ID snowflake.JsonInt64 `json:"id"`
 	Name string `json:"name"`
 	ProjectCategory string `json:"projectCategory"`
+	CategoryCode string `json:"categoryCode"`
 	Description string `json:"description"`
 	PauseReason string `json:"pauseReason"`
 	GlobalContext string `json:"globalContext"`
@@ -37,6 +39,7 @@ type ProjectDetailOutput struct {
 	ID snowflake.JsonInt64 `json:"id"`
 	Name string `json:"name"`
 	ProjectCategory string `json:"projectCategory"`
+	CategoryCode string `json:"categoryCode"`
 	Description string `json:"description"`
 	Status string `json:"status"`
 	PauseReason string `json:"pauseReason"`
@@ -54,6 +57,7 @@ type ProjectListOutput struct {
 	ID snowflake.JsonInt64 `json:"id"`
 	Name string `json:"name"`
 	ProjectCategory string `json:"projectCategory"`
+	CategoryCode string `json:"categoryCode"`
 	Description string `json:"description"`
 	Status string `json:"status"`
 	PauseReason string `json:"pauseReason"`

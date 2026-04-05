@@ -141,6 +141,13 @@ func CreateProject(ctx context.Context, name, projectCategory, description, work
 
 	projectID := int64(snowflake.Generate())
 
+	// 解析 category_code（通过 CategoryResolver 将中文展示名映射为稳定编码）
+	catInfo, _ := GetCategoryResolver().ResolveByDisplayName(ctx, projectCategory)
+	categoryCode := ""
+	if catInfo != nil {
+		categoryCode = catInfo.CategoryCode
+	}
+
 	// 非编码类项目如果未指定工作目录，自动生成
 	if workDir == "" {
 		workDir = GenerateWorkDir(projectCategory, projectID)
@@ -186,6 +193,7 @@ func CreateProject(ctx context.Context, name, projectCategory, description, work
 		"id":                 projectID,
 		"name":               name,
 		"project_category":   projectCategory,
+		"category_code":      categoryCode,
 		"description":        description,
 		"status":             "designing",
 		"engine_version":     ev,

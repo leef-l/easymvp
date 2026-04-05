@@ -39,3 +39,21 @@ func (r *AcceptRuleRepo) GetByCode(ctx context.Context, projectType, ruleCode st
 	}
 	return record.Map(), nil
 }
+
+// ListByProjectTypeWithFallback 先按 categoryCode 精确匹配规则，若无结果则按 familyCode 回退。
+func (r *AcceptRuleRepo) ListByProjectTypeWithFallback(ctx context.Context, categoryCode, familyCode string) ([]g.Map, error) {
+	// 先按 category_code 精确匹配
+	rules, err := r.ListByProjectType(ctx, categoryCode)
+	if err != nil {
+		return nil, err
+	}
+	if len(rules) > 0 {
+		return rules, nil
+	}
+
+	// 回退到 family_code
+	if familyCode != "" && familyCode != categoryCode {
+		return r.ListByProjectType(ctx, familyCode)
+	}
+	return nil, nil
+}

@@ -326,7 +326,7 @@ CREATE TABLE `mvp_config` (
   UNIQUE KEY `uk_config_key` (`config_key`),
   KEY `idx_category` (`category`),
   KEY `idx_deleted_at` (`deleted_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='MVP配置表';
+) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='MVP配置表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `mvp_conversation`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -446,7 +446,7 @@ CREATE TABLE `mvp_message_chunk` (
   PRIMARY KEY (`id`),
   KEY `idx_message_chunk` (`message_id`,`chunk_index`),
   KEY `idx_chunk_created` (`created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='消息分片表（流式输出）';
+) ENGINE=InnoDB AUTO_INCREMENT=22630 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='消息分片表（流式输出）';
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `mvp_plan_version`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -479,6 +479,7 @@ CREATE TABLE `mvp_project` (
   `id` bigint unsigned NOT NULL COMMENT '雪花ID',
   `name` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '项目名称',
   `project_category` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '项目分类',
+  `category_code` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '项目分类编码',
   `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '项目简介',
   `status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'designing' COMMENT '项目状态: designing/reviewing/running/paused/completed',
   `pause_reason` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '暂停原因',
@@ -495,8 +496,31 @@ CREATE TABLE `mvp_project` (
   `deleted_at` datetime DEFAULT NULL COMMENT '软删除时间',
   PRIMARY KEY (`id`),
   KEY `idx_status` (`status`),
-  KEY `idx_deleted_at` (`deleted_at`)
+  KEY `idx_deleted_at` (`deleted_at`),
+  KEY `idx_category_code` (`category_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='MVP项目表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `mvp_project_category`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `mvp_project_category` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `category_code` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '稳定分类编码',
+  `display_name` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '展示名称',
+  `family_code` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '能力家族编码',
+  `description` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '分类说明',
+  `status` tinyint NOT NULL DEFAULT '1' COMMENT '1启用 0停用',
+  `sort` int NOT NULL DEFAULT '100' COMMENT '排序',
+  `created_by` bigint NOT NULL DEFAULT '0' COMMENT '创建人',
+  `dept_id` bigint NOT NULL DEFAULT '0' COMMENT '部门ID',
+  `created_at` datetime NOT NULL COMMENT '创建时间',
+  `updated_at` datetime NOT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '软删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_category_code` (`category_code`),
+  KEY `idx_family_code` (`family_code`),
+  KEY `idx_status_sort` (`status`,`sort`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='项目分类配置表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `mvp_project_report`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -719,7 +743,7 @@ CREATE TABLE `mvp_task_dependency` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_dep` (`task_id`,`depends_on_id`),
   KEY `idx_depends` (`depends_on_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='任务依赖关系表';
+) ENGINE=InnoDB AUTO_INCREMENT=215 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='任务依赖关系表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `mvp_task_log`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -738,7 +762,7 @@ CREATE TABLE `mvp_task_log` (
   PRIMARY KEY (`id`),
   KEY `idx_task` (`task_id`),
   KEY `idx_deleted_at` (`deleted_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='任务日志表';
+) ENGINE=InnoDB AUTO_INCREMENT=134 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='任务日志表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `mvp_task_resource_lock`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;

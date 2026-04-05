@@ -15,6 +15,7 @@ type MvpProject struct {
 	Id                  any         // 雪花ID
 	Name                any         // 项目名称
 	ProjectCategory     any         // 项目分类
+	CategoryCode        any         // 项目分类编码
 	Description         any         // 项目简介
 	Status              any         // 项目状态: designing/reviewing/running/paused/completed
 	PauseReason         any         // 暂停原因

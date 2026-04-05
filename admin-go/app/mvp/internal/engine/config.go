@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
+
+	"easymvp/app/mvp/internal/workflow"
 )
 
 // configCache 配置缓存（内存 + TTL）
@@ -97,25 +99,49 @@ const (
 	CategoryFamilyAnalysis CategoryFamily = "analysis" // 数据分析、产品设计
 )
 
-// categoryFamilyMap 项目分类 → 分类族映射
-var categoryFamilyMap = map[string]CategoryFamily{
-	"软件开发":  CategoryFamilyCoding,
-	"游戏开发":  CategoryFamilyCoding,
-	"小说创作":  CategoryFamilyCreative,
-	"动漫创作":  CategoryFamilyCreative,
-	"漫剧创作":  CategoryFamilyCreative,
-	"大电影创作": CategoryFamilyCreative,
-	"动画创作":  CategoryFamilyCreative,
-	"数据分析":  CategoryFamilyAnalysis,
-	"产品设计":  CategoryFamilyAnalysis,
+// categoryFamilyFallback 硬编码兜底映射（仅在 CategoryResolver 不可用时使用）
+var categoryFamilyFallback = map[string]CategoryFamily{
+	// category_code
+	"software_dev": CategoryFamilyCoding, "game_dev": CategoryFamilyCoding,
+	"novel_writing": CategoryFamilyCreative, "animation_writing": CategoryFamilyCreative,
+	"comic_drama_writing": CategoryFamilyCreative, "movie_writing": CategoryFamilyCreative,
+	"animation_project": CategoryFamilyCreative,
+	"data_analysis": CategoryFamilyAnalysis, "product_design": CategoryFamilyAnalysis,
+	// display_name（兼容旧调用）
+	"软件开发": CategoryFamilyCoding, "游戏开发": CategoryFamilyCoding,
+	"小说创作": CategoryFamilyCreative, "动漫创作": CategoryFamilyCreative,
+	"漫剧创作": CategoryFamilyCreative, "大电影创作": CategoryFamilyCreative,
+	"动画创作": CategoryFamilyCreative,
+	"数据分析": CategoryFamilyAnalysis, "产品设计": CategoryFamilyAnalysis,
 }
 
-// GetCategoryFamily 获取项目分类所属的分类族
+// globalResolver 全局分类解析器单例
+var globalResolver = workflow.NewCategoryResolver()
+
+// GetCategoryResolver 获取全局分类解析器实例。
+func GetCategoryResolver() *workflow.CategoryResolver {
+	return globalResolver
+}
+
+// GetCategoryFamily 获取项目分类所属的分类族。
+// 同时接受 category_code（如 software_dev）和 display_name（如 软件开发）。
 func GetCategoryFamily(projectCategory string) CategoryFamily {
-	if f, ok := categoryFamilyMap[projectCategory]; ok {
+	// 先通过 CategoryResolver 查询（走缓存，基本零成本）
+	ctx := context.Background()
+	info, err := globalResolver.ResolveByCode(ctx, projectCategory)
+	if err == nil && info != nil {
+		return CategoryFamily(info.FamilyCode)
+	}
+	info, err = globalResolver.ResolveByDisplayName(ctx, projectCategory)
+	if err == nil && info != nil {
+		return CategoryFamily(info.FamilyCode)
+	}
+
+	// 兜底硬编码
+	if f, ok := categoryFamilyFallback[projectCategory]; ok {
 		return f
 	}
-	return CategoryFamilyCoding // 默认按编码类处理
+	return CategoryFamilyCoding
 }
 
 // GetHeartbeatTimeout 根据分类族获取心跳超时时间（秒）

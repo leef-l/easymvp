@@ -38,8 +38,8 @@ type ruleConfig struct {
 // LoadAndEvaluate 加载项目类型对应的规则并执行评估。
 // 返回规则快照 JSON 和命中���果。
 func (e *RuleEngine) LoadAndEvaluate(ctx context.Context, in *AcceptContext) (rulesSnapshot string, hits []RuleHit, err error) {
-	// 加载规则
-	rules, err := e.ruleRepo.ListByProjectType(ctx, in.ProjectType)
+	// 加载规则：先按 category_code 精确匹配，无结果则按 family_code 回退
+	rules, err := e.ruleRepo.ListByProjectTypeWithFallback(ctx, in.ProjectType, in.FamilyCode)
 	if err != nil {
 		return "", nil, fmt.Errorf("加载规则失败: %w", err)
 	}
