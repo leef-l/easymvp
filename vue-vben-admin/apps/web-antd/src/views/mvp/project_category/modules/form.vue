@@ -9,15 +9,10 @@ import {
   updateProjectCategory,
 } from '#/api/mvp/project_category';
 
+
 const emit = defineEmits<{ success: [] }>();
 const isEdit = ref(false);
 const editId = ref('');
-
-/** 状态选项 */
-const statusOptions = [
-  { label: '禁用', value: '0' },
-  { label: '启用', value: '1' },
-];
 
 /** 表单配置 */
 const [Form, formApi] = useVbenForm({
@@ -26,42 +21,42 @@ const [Form, formApi] = useVbenForm({
     {
       component: 'Input',
       fieldName: 'categoryCode',
-      label: '分类代码',
+      label: '稳定分类编码',
       rules: 'required',
-      componentProps: { placeholder: '请输入分类代码（如 software_dev）', class: 'w-full' },
+      componentProps: { placeholder: '请输入稳定分类编码', maxlength: 64 },
     },
     {
       component: 'Input',
       fieldName: 'displayName',
-      label: '显示名称',
+      label: '展示名称',
       rules: 'required',
-      componentProps: { placeholder: '请输入显示名称（如 软件开发）', class: 'w-full' },
+      componentProps: { placeholder: '请输入展示名称', maxlength: 64 },
     },
     {
       component: 'Input',
       fieldName: 'familyCode',
-      label: '所属系',
-      componentProps: { placeholder: '请输入所属系（如 tech）', class: 'w-full' },
+      label: '能力家族编码',
+      rules: 'required',
+      componentProps: { placeholder: '请输入能力家族编码', maxlength: 32 },
     },
     {
-      component: 'Textarea',
+      component: 'Input',
       fieldName: 'description',
-      label: '描述',
-      componentProps: { placeholder: '请输入描述', rows: 3, maxlength: 500 },
+      label: '分类说明',
+      componentProps: { placeholder: '请输入分类说明', maxlength: 255 },
     },
     {
-      component: 'Select',
+      component: 'Switch',
       fieldName: 'status',
-      label: '状态',
-      componentProps: { options: statusOptions, placeholder: '请选择状态', allowClear: true, class: 'w-full' },
-      defaultValue: '1',
+      label: '1启用 0停用',
+      componentProps: { checkedValue: 1, unCheckedValue: 0 },
+      defaultValue: 1,
     },
     {
       component: 'InputNumber',
       fieldName: 'sort',
       label: '排序',
       componentProps: { placeholder: '请输入排序', class: 'w-full' },
-      defaultValue: 0,
     },
   ],
 });
@@ -96,7 +91,7 @@ const [Modal, modalApi] = useVbenModal({
       if (data?.id) {
         isEdit.value = true;
         editId.value = data.id;
-        modalApi.setState({ title: '编辑项目分类' });
+        modalApi.setState({ title: '编辑项目分类配置表' });
         try {
           const detail = await getProjectCategoryDetail(data.id);
           if (detail) {
@@ -108,7 +103,7 @@ const [Modal, modalApi] = useVbenModal({
       } else {
         isEdit.value = false;
         editId.value = '';
-        modalApi.setState({ title: '新建项目分类' });
+        modalApi.setState({ title: '新建项目分类配置表' });
         formApi.resetForm();
       }
     }
@@ -117,7 +112,7 @@ const [Modal, modalApi] = useVbenModal({
 </script>
 
 <template>
-  <Modal class="w-[560px]">
+  <Modal class="w-[600px]">
     <Form />
   </Modal>
 </template>

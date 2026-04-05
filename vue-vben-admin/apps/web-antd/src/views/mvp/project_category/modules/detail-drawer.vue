@@ -5,17 +5,6 @@ import { Descriptions, DescriptionsItem, Tag } from 'ant-design-vue';
 import { getProjectCategoryDetail } from '#/api/mvp/project_category';
 import type { ProjectCategoryItem } from '#/api/mvp/project_category/types';
 
-/** 状态映射 */
-const statusMap: Record<number, string> = {
-  0: '禁用',
-  1: '启用',
-};
-
-function getStatusColor(val: number): string {
-  const colorMap: Record<number, string> = { 0: 'red', 1: 'green' };
-  return colorMap[val] ?? 'default';
-}
-
 const detail = ref<ProjectCategoryItem | null>(null);
 
 const [Modal, modalApi] = useVbenModal({
@@ -25,7 +14,7 @@ const [Modal, modalApi] = useVbenModal({
     if (isOpen) {
       const data = modalApi.getData<{ id: string }>();
       if (data?.id) {
-        modalApi.setState({ title: '项目分类详情' });
+        modalApi.setState({ title: '项目分类配置表详情' });
         try {
           detail.value = await getProjectCategoryDetail(data.id);
         } catch {
@@ -40,19 +29,15 @@ const [Modal, modalApi] = useVbenModal({
 </script>
 
 <template>
-  <Modal class="w-[560px]">
+  <Modal class="w-[600px]">
     <Descriptions v-if="detail" bordered :column="1" size="small">
       <DescriptionsItem label="ID">{{ detail.id }}</DescriptionsItem>
-      <DescriptionsItem label="分类代码">{{ detail.categoryCode || '-' }}</DescriptionsItem>
-      <DescriptionsItem label="显示名称">{{ detail.displayName || '-' }}</DescriptionsItem>
-      <DescriptionsItem label="所属系">{{ detail.familyCode || '-' }}</DescriptionsItem>
-      <DescriptionsItem label="描述">{{ detail.description || '-' }}</DescriptionsItem>
-      <DescriptionsItem label="状态">
-        <Tag :color="getStatusColor(detail.status)">
-          {{ statusMap[detail.status] ?? detail.status }}
-        </Tag>
-      </DescriptionsItem>
-      <DescriptionsItem label="排序">{{ detail.sort ?? '-' }}</DescriptionsItem>
+      <DescriptionsItem label="稳定分类编码">{{ detail.categoryCode || '-' }}</DescriptionsItem>
+      <DescriptionsItem label="展示名称">{{ detail.displayName || '-' }}</DescriptionsItem>
+      <DescriptionsItem label="能力家族编码">{{ detail.familyCode || '-' }}</DescriptionsItem>
+      <DescriptionsItem label="分类说明">{{ detail.description || '-' }}</DescriptionsItem>
+      <DescriptionsItem label="1启用 0停用">{{ detail.status || '-' }}</DescriptionsItem>
+      <DescriptionsItem label="排序">{{ detail.sort || '-' }}</DescriptionsItem>
       <DescriptionsItem label="创建时间">{{ detail.createdAt || '-' }}</DescriptionsItem>
       <DescriptionsItem label="更新时间">{{ detail.updatedAt || '-' }}</DescriptionsItem>
     </Descriptions>

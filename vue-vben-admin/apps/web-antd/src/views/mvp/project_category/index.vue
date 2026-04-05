@@ -6,36 +6,14 @@ import { Page, useVbenModal } from '@vben/common-ui';
 import { Button, message, Modal, Tag } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import {
-  getProjectCategoryList,
-  deleteProjectCategory,
-  batchDeleteProjectCategory,
-  exportProjectCategory,
-  importProjectCategory,
-  downloadImportTemplateProjectCategory,
-  batchUpdateProjectCategory,
-} from '#/api/mvp/project_category';
+import { getProjectCategoryList, deleteProjectCategory, batchDeleteProjectCategory, exportProjectCategory, importProjectCategory, downloadImportTemplateProjectCategory, batchUpdateProjectCategory } from '#/api/mvp/project_category';
 import type { ProjectCategoryItem } from '#/api/mvp/project_category/types';
 import FormModal from './modules/form.vue';
 import DetailDrawer from './modules/detail-drawer.vue';
 
-/** 状态选项 */
-const statusOptions = [
-  { label: '禁用', value: '0' },
-  { label: '启用', value: '1' },
-];
+/** 标签颜色池 */
+const TAG_COLORS = ['green', 'red', 'blue', 'orange', 'cyan', 'purple', 'geekblue', 'magenta'];
 
-/** 状态映射 */
-const statusMap: Record<string, string> = {
-  '0': '禁用',
-  '1': '启用',
-};
-
-/** 状态颜色 */
-function getStatusColor(val: string | number): string {
-  const colorMap: Record<string, string> = { '0': 'red', '1': 'green' };
-  return colorMap[String(val)] ?? 'default';
-}
 
 /** 表单弹窗 */
 const [FormModalComp, formModalApi] = useVbenModal({
@@ -52,40 +30,26 @@ const [DetailDrawerComp, detailDrawerApi] = useVbenModal({
 /** 搜索表单配置 */
 const formOptions: VbenFormProps = {
   collapsed: false,
-  showCollapseButton: false,
+  showCollapseButton: true,
   submitOnChange: false,
   submitOnEnter: true,
   schema: [
     {
       component: 'Input',
-      componentProps: {
-        allowClear: true,
-        placeholder: '请输入显示名称',
-        class: 'w-full',
-      },
+      componentProps: { placeholder: '请输入展示名称', allowClear: true },
       fieldName: 'displayName',
-      label: '显示名称',
+      label: '展示名称',
     },
     {
-      component: 'Input',
+      component: 'RangePicker',
+      fieldName: 'timeRange',
+      label: '创建时间',
       componentProps: {
-        allowClear: true,
-        placeholder: '请输入分类代码',
+        showTime: true,
+        format: 'YYYY-MM-DD HH:mm:ss',
+        valueFormat: 'YYYY-MM-DD HH:mm:ss',
         class: 'w-full',
       },
-      fieldName: 'categoryCode',
-      label: '分类代码',
-    },
-    {
-      component: 'Select',
-      componentProps: {
-        allowClear: true,
-        options: statusOptions,
-        placeholder: '请选择状态',
-        class: 'w-full',
-      },
-      fieldName: 'status',
-      label: '状态',
     },
   ],
 };
@@ -95,14 +59,14 @@ const gridOptions: VxeGridProps<ProjectCategoryItem> = {
   columns: [
     { type: 'checkbox', width: 50 },
     { title: '序号', type: 'seq', width: 50 },
-    { field: 'categoryCode', title: '分类代码', width: 160 },
-    { field: 'displayName', title: '显示名称', minWidth: 160 },
-    { field: 'familyCode', title: '所属系', width: 120 },
-    { field: 'description', title: '描述', minWidth: 200, showOverflow: 'tooltip' },
-    { field: 'status', title: '状态', width: 80, slots: { default: 'status_cell' } },
-    { field: 'sort', title: '排序', width: 70 },
-    { field: 'createdAt', title: '创建时间', width: 160 },
-    { title: '操作', width: 180, fixed: 'right', slots: { default: 'action' } },
+    { field: 'categoryCode', title: '稳定分类编码' },
+    { field: 'displayName', title: '展示名称' },
+    { field: 'familyCode', title: '能力家族编码' },
+    { field: 'description', title: '分类说明' },
+    { field: 'status', title: '1启用 0停用' },
+    { field: 'sort', title: '排序' },
+    { field: 'createdAt', title: '创建时间', width: 180, formatter: 'formatDateTime', sortable: true },
+    { title: '操作', width: 240, fixed: 'right', slots: { default: 'action' } },
   ],
   height: 'auto',
   pagerConfig: {},
@@ -166,7 +130,7 @@ function handleEdit(row: ProjectCategoryItem) {
 function handleDelete(row: ProjectCategoryItem) {
   Modal.confirm({
     title: '确认删除',
-    content: '确定要删除该项目分类吗？',
+    content: '确定要删除该项目分类配置表吗？',
     okType: 'danger',
     async onOk() {
       await deleteProjectCategory(row.id);
@@ -175,7 +139,6 @@ function handleDelete(row: ProjectCategoryItem) {
     },
   });
 }
-
 /** 批量删除 */
 function handleBatchDelete() {
   const rows = gridApi.grid.getCheckboxRecords();
@@ -185,7 +148,7 @@ function handleBatchDelete() {
   }
   Modal.confirm({
     title: '确认批量删除',
-    content: `确定要删除选中的 ${rows.length} 条项目分类吗？`,
+    content: `确定要删除选中的 ${rows.length} 条项目分类配置表吗？`,
     okType: 'danger',
     async onOk() {
       await batchDeleteProjectCategory(rows.map((r: ProjectCategoryItem) => r.id));
@@ -209,7 +172,7 @@ async function handleExport() {
     const url = URL.createObjectURL(blob as any);
     const a = document.createElement('a');
     a.href = url;
-    a.download = '项目分类.csv';
+    a.download = '项目分类配置表.csv';
     a.click();
     URL.revokeObjectURL(url);
     message.success('导出成功');
@@ -246,7 +209,7 @@ async function handleDownloadTemplate() {
     const url = URL.createObjectURL(blob as any);
     const a = document.createElement('a');
     a.href = url;
-    a.download = '项目分类导入模板.csv';
+    a.download = '项目分类配置表导入模板.csv';
     a.click();
     URL.revokeObjectURL(url);
   } catch {
@@ -265,8 +228,8 @@ function handleBatchUpdateStatus() {
     title: '批量修改状态',
     content: `确定要将选中的 ${rows.length} 条数据的状态切换吗？`,
     async onOk() {
-      const newStatus = String(rows[0]?.status) === '1' ? '0' : '1';
-      await batchUpdateProjectCategory({ ids: rows.map((r: ProjectCategoryItem) => r.id), status: Number(newStatus) });
+      const newStatus = rows[0]?.status === 1 ? 0 : 1;
+      await batchUpdateProjectCategory({ ids: rows.map((r: ProjectCategoryItem) => r.id), status: newStatus });
       message.success('批量修改成功');
       gridApi.reload();
     },
@@ -286,11 +249,6 @@ function handleBatchUpdateStatus() {
         <Button v-auth="['mvp:project_category:import']" class="ml-2" @click="handleImport">导入</Button>
         <Button class="ml-2" @click="handleDownloadTemplate">模板下载</Button>
         <Button v-auth="['mvp:project_category:batch-update']" class="ml-2" @click="handleBatchUpdateStatus">批量修改状态</Button>
-      </template>
-      <template #status_cell="{ row }">
-        <Tag :color="getStatusColor(row.status)">
-          {{ statusMap[row.status] || row.status }}
-        </Tag>
       </template>
       <template #action="{ row }">
         <Button v-auth="['mvp:project_category:detail']" type="link" size="small" @click="handleView(row)">查看</Button>

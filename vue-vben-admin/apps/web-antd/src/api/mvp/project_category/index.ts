@@ -8,9 +8,9 @@ import type {
 } from './types';
 
 /** API 前缀 */
-const PREFIX = '/mvp/project-category';
+const PREFIX = '/mvp/project_category';
 
-/** 获取项目分类列表 */
+/** 获取项目分类配置表列表 */
 export function getProjectCategoryList(params: ProjectCategoryListParams) {
   return requestClient.get<{ list: ProjectCategoryItem[]; total: number }>(
     `${PREFIX}/list`,
@@ -18,34 +18,34 @@ export function getProjectCategoryList(params: ProjectCategoryListParams) {
   );
 }
 
-/** 获取项目分类详情 */
+/** 获取项目分类配置表详情 */
 export function getProjectCategoryDetail(id: string) {
   return requestClient.get<ProjectCategoryItem>(`${PREFIX}/detail`, {
     params: { id },
   });
 }
 
-/** 创建项目分类 */
+/** 创建项目分类配置表 */
 export function createProjectCategory(data: ProjectCategoryCreateParams) {
   return requestClient.post(`${PREFIX}/create`, data);
 }
 
-/** 更新项目分类 */
+/** 更新项目分类配置表 */
 export function updateProjectCategory(data: ProjectCategoryUpdateParams) {
   return requestClient.put(`${PREFIX}/update`, data);
 }
 
-/** 删除项目分类 */
+/** 删除项目分类配置表 */
 export function deleteProjectCategory(id: string) {
   return requestClient.delete(`${PREFIX}/delete`, { data: { id } });
 }
 
-/** 批量删除项目分类 */
+/** 批量删除项目分类配置表 */
 export function batchDeleteProjectCategory(ids: string[]) {
   return requestClient.delete(`${PREFIX}/batch-delete`, { data: { ids } });
 }
 
-/** 导出项目分类 */
+/** 导出项目分类配置表 */
 export function exportProjectCategory(params?: Record<string, any>) {
   return requestClient.get(`${PREFIX}/export`, {
     params,
@@ -53,7 +53,7 @@ export function exportProjectCategory(params?: Record<string, any>) {
   });
 }
 
-/** 导入项目分类 */
+/** 导入项目分类配置表 */
 export function importProjectCategory(data: FormData) {
   return requestClient.post<{ success: number; fail: number }>(
     `${PREFIX}/import`,
@@ -61,14 +61,14 @@ export function importProjectCategory(data: FormData) {
   );
 }
 
-/** 下载项目分类导入模板 */
+/** 下载项目分类配置表导入模板 */
 export function downloadImportTemplateProjectCategory() {
   return requestClient.get(`${PREFIX}/import-template`, {
     responseType: 'blob',
   });
 }
 
-/** 批量编辑项目分类 */
+/** 批量编辑项目分类配置表 */
 export function batchUpdateProjectCategory(data: { ids: string[]; status?: number }) {
   return requestClient.put(`${PREFIX}/batch-update`, data);
 }
