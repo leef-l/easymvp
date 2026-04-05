@@ -12,6 +12,11 @@ import (
 	"easymvp/utility/snowflake"
 )
 
+// GetModelInfoByID 根据模型 ID 获取模型信息（供 controller 层调用）。
+func GetModelInfoByID(ctx context.Context, modelID int64) (*ModelInfo, error) {
+	return getModelInfoStatic(ctx, modelID, "")
+}
+
 // ResolveModelInfo 根据 projectID + roleType + modelID 解析模型信息。
 // 如果 modelID > 0，直接查模型；否则从角色配置中查找。
 func ResolveModelInfo(ctx context.Context, projectID int64, roleType string, modelID int64) (*ModelInfo, error) {
