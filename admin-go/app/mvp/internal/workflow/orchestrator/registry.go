@@ -50,6 +50,8 @@ var (
 	execRegistry    *executorPkg.Registry
 	decisionCenter     *autonomy.DecisionCenter
 	collabBindingRepo  *collabRepo.BindingRepo
+	metaAssessor       *autonomy.MetaAssessor
+	metaTuner          *autonomy.MetaTuner
 )
 
 // Init 初始化所有工作流服务单例。在应用启动时调用一次。
@@ -419,6 +421,15 @@ func Init() {
 		actuator := autonomy.NewActuator()
 		decisionCenter.SetPhaseBDeps(planner, actuator)
 
+		// ==================== Phase D: 元认知 — Observer + Learner ====================
+		metaObserver := autonomy.NewMetaObserver()
+		learner := autonomy.NewLearner()
+		decisionCenter.SetPhaseDDeps(metaObserver, learner)
+
+		// MetaAssessor 和 MetaTuner 作为服务单例，供 API 层调用
+		metaAssessor = autonomy.NewMetaAssessor(metaObserver, learner)
+		metaTuner = autonomy.NewMetaTuner(learner)
+
 		// 注册 ActionDispatcher 回调（通过回调注入避免循环依赖）
 		actionDispatcher.SetCallback(consts.ActionTypeRetryTask, func(ctx context.Context, req *autonomy.DecisionRequest) error {
 			if req.DomainTaskID == 0 {
@@ -669,6 +680,18 @@ func GetDecisionCenter() *autonomy.DecisionCenter {
 func GetCollabBindingRepo() *collabRepo.BindingRepo {
 	Init()
 	return collabBindingRepo
+}
+
+// GetMetaAssessor 获取元认知评估器单例。
+func GetMetaAssessor() *autonomy.MetaAssessor {
+	Init()
+	return metaAssessor
+}
+
+// GetMetaTuner 获取元认知校准器单例。
+func GetMetaTuner() *autonomy.MetaTuner {
+	Init()
+	return metaTuner
 }
 
 // triggerReworkStage 触发返工阶段：创建 rework stage，启动分析流程。

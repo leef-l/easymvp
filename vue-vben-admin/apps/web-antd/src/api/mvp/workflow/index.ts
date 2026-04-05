@@ -850,3 +850,148 @@ export function getObjective(projectID: string) {
 export function saveObjective(data: { projectID: string } & Partial<ObjectiveData>) {
   return requestClient.post(`${PREFIX}/save-objective`, data);
 }
+
+// ==================== 元认知（Phase D / L7）====================
+
+export interface ObservationRecord {
+  id: string;
+  decisionActionId: string;
+  workflowRunId: string;
+  projectId: string;
+  decisionType: string;
+  triggerSource: string;
+  decisionLevel: string;
+  actionType: string;
+  outcome: string;
+  effectScore: number;
+  humanOverride: number;
+  overrideReason: string;
+  signalWeight: number;
+  createdAt: string;
+}
+
+export interface ObservationStats {
+  total: number;
+  outcomeDistribution: Record<string, number>;
+  levelDistribution: Record<string, number>;
+  humanOverrideCount: number;
+  humanOverrideRate: number;
+}
+
+export interface AssessmentData {
+  id: string;
+  projectId: string;
+  periodStart: string;
+  periodEnd: string;
+  sampleCount: number;
+  policyAccuracy: number;
+  gateFalsePositive: number;
+  gateFalseNegative: number;
+  humanOverrideRate: number;
+  matchAccuracy: number;
+  costEfficiency: number;
+  drifts: DriftItem[];
+  summary: string;
+}
+
+export interface DriftItem {
+  parameter: string;
+  currentValue: number;
+  optimalValue: number;
+  confidence: number;
+  evidence: string;
+}
+
+export interface TuneRecommendationItem {
+  id: string;
+  assessmentId: string;
+  projectId: string;
+  parameter: string;
+  currentValue: string;
+  suggestedValue: string;
+  direction: string;
+  reasoning: string;
+  confidence: number;
+  autoApplicable: boolean;
+  riskLevel: string;
+  status: string;
+  appliedAt?: string;
+  appliedBy?: string;
+}
+
+export interface LearningRecordItem {
+  id: string;
+  metricKey: string;
+  projectId: string;
+  emaValue: number;
+  rawValue: number;
+  sampleCount: number;
+  lastUpdated: string;
+  decayFactor: number;
+}
+
+/** 查询决策观测记录 */
+export function getMetaObservations(projectID: string, limit?: number) {
+  return requestClient.get<{ observations: ObservationRecord[] }>(
+    `${PREFIX}/meta/observations`,
+    { params: { projectID, ...(limit ? { limit } : {}) } },
+  );
+}
+
+/** 查询观测统计 */
+export function getMetaObservationStats(projectID: string) {
+  return requestClient.get<{ stats: ObservationStats }>(
+    `${PREFIX}/meta/observation-stats`,
+    { params: { projectID } },
+  );
+}
+
+/** 查询最新评估结果 */
+export function getMetaAssessment(projectID: string) {
+  return requestClient.get<{ assessment: AssessmentData }>(
+    `${PREFIX}/meta/assessment`,
+    { params: { projectID } },
+  );
+}
+
+/** 查询评估历史 */
+export function getMetaAssessmentHistory(projectID: string, limit?: number) {
+  return requestClient.get<{ assessments: AssessmentData[] }>(
+    `${PREFIX}/meta/assessment-history`,
+    { params: { projectID, ...(limit ? { limit } : {}) } },
+  );
+}
+
+/** 手动触发评估 */
+export function runMetaAssessment(projectID: string, days?: number) {
+  return requestClient.post<{ assessment: AssessmentData }>(
+    `${PREFIX}/meta/run-assessment`,
+    { projectID, ...(days ? { days } : {}) },
+  );
+}
+
+/** 查询调参建议 */
+export function getMetaRecommendations(projectID?: string, status?: string, limit?: number) {
+  return requestClient.get<{ recommendations: TuneRecommendationItem[] }>(
+    `${PREFIX}/meta/recommendations`,
+    { params: { ...(projectID ? { projectID } : {}), ...(status ? { status } : {}), ...(limit ? { limit } : {}) } },
+  );
+}
+
+/** 应用一条调参建议 */
+export function applyMetaRecommendation(recommendationID: string) {
+  return requestClient.post(`${PREFIX}/meta/apply-recommendation`, { recommendationID });
+}
+
+/** 驳回一条调参建议 */
+export function rejectMetaRecommendation(recommendationID: string) {
+  return requestClient.post(`${PREFIX}/meta/reject-recommendation`, { recommendationID });
+}
+
+/** 查询 EMA 学习记录 */
+export function getMetaLearning(projectID: string) {
+  return requestClient.get<{ records: LearningRecordItem[] }>(
+    `${PREFIX}/meta/learning`,
+    { params: { projectID } },
+  );
+}

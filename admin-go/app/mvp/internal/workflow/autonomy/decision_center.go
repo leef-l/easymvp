@@ -27,6 +27,8 @@ type DecisionCenter struct {
 	objectiveSvc     *ObjectiveService
 	planner          *Planner
 	actuator         *Actuator
+	observer         *MetaObserver
+	learner          *Learner
 }
 
 // NewDecisionCenter 创建决策中台。
@@ -58,6 +60,12 @@ func (dc *DecisionCenter) SetPhaseADeps(sensor *Sensor, objectiveSvc *ObjectiveS
 func (dc *DecisionCenter) SetPhaseBDeps(planner *Planner, actuator *Actuator) {
 	dc.planner = planner
 	dc.actuator = actuator
+}
+
+// SetPhaseDDeps 注入 Phase D 的元认知组件。
+func (dc *DecisionCenter) SetPhaseDDeps(observer *MetaObserver, learner *Learner) {
+	dc.observer = observer
+	dc.learner = learner
 }
 
 // IsEnabled 灰度检查：workflow.autonomy.enabled 是否开启。
@@ -275,6 +283,8 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 	if dc.isAuditOnly(ctx) {
 		g.Log().Infof(ctx, "[DecisionCenter] audit_only 模式，仅记录: actionID=%d type=%s",
 			actionID, resp.ActionType)
+		// Phase D：观测记录（审计模式也记录）
+		dc.recordObservation(ctx, actionID, req, resp, decisionType, plan, sit, createdBy, deptID)
 		// Handled=false → 调用方继续执行原逻辑
 		return resp
 	}
@@ -353,6 +363,27 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 		}
 	}
 
+	// Phase D：观测记录
+	outcome := "pending"
+	if resp.Executed {
+		outcome = "success"
+	} else if resp.Error != nil {
+		outcome = "failure"
+	}
+	dc.recordObservation(ctx, actionID, req, resp, decisionType, plan, sit, createdBy, deptID)
+	// Phase D：如果已有确定结果，回填观测 + 喂给 Learner
+	if outcome != "pending" && dc.observer != nil && dc.observer.IsEnabled(ctx) {
+		dc.observer.UpdateOutcome(ctx, actionID, outcome, 0)
+		if dc.learner != nil && dc.learner.IsEnabled(ctx) {
+			dc.learner.FeedFromObservation(ctx, &ObservationInput{
+				DecisionActionID: actionID,
+				ProjectID:        req.ProjectID,
+				DecisionType:     decisionType,
+				Outcome:          outcome,
+			})
+		}
+	}
+
 	return resp
 }
 
@@ -404,6 +435,21 @@ func (dc *DecisionCenter) ApproveAction(ctx context.Context, actionID int64) err
 
 	dc.emitEvent(ctx, event.EventAutonomyActionExecuted, event.EntityDecisionAction,
 		wfRunID, actionID, g.Map{"action_type": actionType})
+
+	// Phase D：记录人工批准事件
+	if dc.observer != nil && dc.observer.IsEnabled(ctx) {
+		dc.observer.UpdateHumanOverride(ctx, actionID, "approve", "")
+		if dc.learner != nil && dc.learner.IsEnabled(ctx) {
+			dc.learner.FeedFromObservation(ctx, &ObservationInput{
+				DecisionActionID: actionID,
+				ProjectID:        mapInt64(action, "project_id"),
+				DecisionType:     mapString(action, "decision_type"),
+				Outcome:          "success",
+				HumanOverride:    true,
+			})
+		}
+	}
+
 	return nil
 }
 
@@ -435,6 +481,21 @@ func (dc *DecisionCenter) RejectAction(ctx context.Context, actionID int64, reas
 		})
 		dc.emitEvent(ctx, event.EventAutonomyCheckpointHandled, event.EntityHumanCheckpoint,
 			wfRunID, cpID, g.Map{"action": consts.HandleActionReject, "reason": reason})
+	}
+
+	// Phase D：记录人工驳回事件（强信号 1.0）
+	if dc.observer != nil && dc.observer.IsEnabled(ctx) {
+		dc.observer.UpdateHumanOverride(ctx, actionID, "reject", reason)
+		if dc.learner != nil && dc.learner.IsEnabled(ctx) {
+			dc.learner.FeedFromObservation(ctx, &ObservationInput{
+				DecisionActionID: actionID,
+				ProjectID:        mapInt64(action, "project_id"),
+				DecisionType:     mapString(action, "decision_type"),
+				Outcome:          "failure",
+				HumanOverride:    true,
+				OverrideReason:   reason,
+			})
+		}
 	}
 
 	return nil
@@ -579,6 +640,39 @@ func (dc *DecisionCenter) handleAdmissionDenied(
 	dc.emitEvent(ctx, event.EventAutonomyCheckpointOpened, event.EntityHumanCheckpoint,
 		req.WorkflowRunID, 0, g.Map{"action_id": actionID, "reason": admission.DenyReason})
 	return resp
+}
+
+// recordObservation Phase D 观测记录的便捷方法。
+func (dc *DecisionCenter) recordObservation(ctx context.Context, actionID int64, req *DecisionRequest, resp *DecisionResponse, decisionType string, plan *ActionPlan, sit *Situation, createdBy, deptID int64) {
+	if dc.observer == nil || !dc.observer.IsEnabled(ctx) {
+		return
+	}
+
+	input := &ObservationInput{
+		DecisionActionID: actionID,
+		WorkflowRunID:    req.WorkflowRunID,
+		ProjectID:        req.ProjectID,
+		DecisionType:     decisionType,
+		TriggerSource:    req.TriggerSource,
+		DecisionLevel:    resp.DecisionLevel,
+		ActionType:       resp.ActionType,
+		InputSnapshot:    req.TriggerContext,
+		OutputSnapshot: map[string]interface{}{
+			"action_type":    resp.ActionType,
+			"decision_level": resp.DecisionLevel,
+			"auto_executable": resp.AutoExecutable,
+			"human_required": resp.HumanRequired,
+			"handled":        resp.Handled,
+		},
+		CreatedBy: createdBy,
+		DeptID:    deptID,
+	}
+
+	if plan != nil && plan.Meta != nil {
+		input.Meta = plan.Meta
+	}
+
+	dc.observer.Record(ctx, input)
 }
 
 // rebuildRequest 从审计记录重建 DecisionRequest（用于人工审批后执行）。
