@@ -326,7 +326,7 @@ CREATE TABLE `mvp_config` (
   UNIQUE KEY `uk_config_key` (`config_key`),
   KEY `idx_category` (`category`),
   KEY `idx_deleted_at` (`deleted_at`)
-) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='MVP配置表';
+) ENGINE=InnoDB AUTO_INCREMENT=13 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='MVP配置表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `mvp_conversation`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
