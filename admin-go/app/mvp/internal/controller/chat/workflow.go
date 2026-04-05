@@ -25,20 +25,12 @@ var Workflow = cWorkflow{}
 
 type cWorkflow struct{}
 
-// checkProjectOwnership 校验项目归属
+// checkProjectOwnership 校验项目归属（复用 middleware.CheckOwnership，支持超管跳过）
 func checkProjectOwnership(ctx context.Context, projectID int64) error {
-	userID := middleware.GetUserID(ctx)
-	if userID == 1 {
-		return nil
-	}
-	project, err := g.DB().Model("mvp_project").Where("id", projectID).Where("deleted_at IS NULL").One()
-	if err != nil || project.IsEmpty() {
-		return fmt.Errorf("项目不存在")
-	}
-	if project["created_by"].Int64() != userID {
-		return fmt.Errorf("无权操作该项目")
-	}
-	return nil
+	return middleware.CheckOwnership(ctx,
+		g.DB().Model("mvp_project").WhereNull("deleted_at"),
+		projectID, "id", "created_by",
+	)
 }
 
 // CreateProject 创建项目
@@ -1835,4 +1827,179 @@ func (c *cWorkflow) TriggerReport(ctx context.Context, req *v1.WorkflowTriggerRe
 		return nil, err
 	}
 	return &v1.WorkflowTriggerReportRes{}, nil
+}
+
+// AutonomyMode 查询当前自治模式
+func (c *cWorkflow) AutonomyMode(ctx context.Context, req *v1.WorkflowAutonomyModeReq) (res *v1.WorkflowAutonomyModeRes, err error) {
+	return &v1.WorkflowAutonomyModeRes{Mode: autonomy.GetAutonomyMode(ctx)}, nil
+}
+
+// SetAutonomyMode 设置自治模式（写入 mvp_config）
+func (c *cWorkflow) SetAutonomyMode(ctx context.Context, req *v1.WorkflowSetAutonomyModeReq) (res *v1.WorkflowSetAutonomyModeRes, err error) {
+	// 检查是否已有记录
+	count, _ := g.DB().Model("mvp_config").Ctx(ctx).
+		Where("config_key", "autonomy.mode").
+		WhereNull("deleted_at").Count()
+	if count > 0 {
+		_, err = g.DB().Model("mvp_config").Ctx(ctx).
+			Where("config_key", "autonomy.mode").
+			Update(g.Map{"config_value": req.Mode})
+	} else {
+		_, err = g.DB().Model("mvp_config").Ctx(ctx).Insert(g.Map{
+			"config_key":   "autonomy.mode",
+			"config_value": req.Mode,
+			"category":     "autonomy",
+			"description":  "自治模式：suggest=建议型 auto=全自动",
+		})
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &v1.WorkflowSetAutonomyModeRes{}, nil
+}
+
+// BatchProjectStats 批量查询项目运行时统计（为项目列表页提供进度数据）
+func (c *cWorkflow) BatchProjectStats(ctx context.Context, req *v1.WorkflowBatchProjectStatsReq) (res *v1.WorkflowBatchProjectStatsRes, err error) {
+	if len(req.ProjectIDs) > 50 {
+		return nil, fmt.Errorf("单次最多查询 50 个项目")
+	}
+
+	ids := make([]int64, 0, len(req.ProjectIDs))
+	for _, id := range req.ProjectIDs {
+		ids = append(ids, int64(id))
+	}
+
+	// 权限过滤：只保留用户有权访问的项目
+	userID := middleware.GetUserID(ctx)
+	if userID != 1 { // 超管跳过
+		ownedProjects, _ := g.DB().Model("mvp_project").Ctx(ctx).
+			WhereIn("id", ids).
+			Where("created_by", userID).
+			WhereNull("deleted_at").
+			Fields("id").All()
+		allowedIDs := make(map[int64]bool)
+		for _, p := range ownedProjects {
+			allowedIDs[p["id"].Int64()] = true
+		}
+		filtered := ids[:0]
+		for _, id := range ids {
+			if allowedIDs[id] {
+				filtered = append(filtered, id)
+			}
+		}
+		ids = filtered
+	}
+	if len(ids) == 0 {
+		return &v1.WorkflowBatchProjectStatsRes{Stats: []v1.ProjectRuntimeStat{}}, nil
+	}
+
+	// 批量查 workflow_run（排除已完成/已取消的旧 run，只取活跃或最新的）
+	wfRuns, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		WhereIn("project_id", ids).
+		WhereNull("deleted_at").
+		Fields("id, project_id, current_stage, status").
+		OrderDesc("run_no").
+		All()
+	if err != nil {
+		return nil, err
+	}
+
+	// project_id → workflow_run 映射（取最新的）
+	wfMap := make(map[int64]gdb.Record)
+	for _, r := range wfRuns {
+		pid := r["project_id"].Int64()
+		if _, exists := wfMap[pid]; !exists {
+			wfMap[pid] = r
+		}
+	}
+
+	// 收集所有 workflow_run_id
+	wfRunIDs := make([]int64, 0, len(wfMap))
+	for _, r := range wfMap {
+		wfRunIDs = append(wfRunIDs, r["id"].Int64())
+	}
+
+	// 批量统计 domain_task（按 workflow_run_id 分组）
+	type taskStat struct {
+		total, completed, failed, running int
+	}
+	taskStats := make(map[int64]*taskStat)
+
+	if len(wfRunIDs) > 0 {
+		tasks, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+			WhereIn("workflow_run_id", wfRunIDs).
+			WhereNull("deleted_at").
+			Fields("workflow_run_id, status").
+			All()
+		for _, t := range tasks {
+			wfID := t["workflow_run_id"].Int64()
+			if taskStats[wfID] == nil {
+				taskStats[wfID] = &taskStat{}
+			}
+			s := taskStats[wfID]
+			s.total++
+			switch t["status"].String() {
+			case "completed":
+				s.completed++
+			case "failed", "escalated":
+				s.failed++
+			case "running":
+				s.running++
+			}
+		}
+	}
+
+	// legacy 项目统计（独立 map，避免 key 冲突）
+	legacyStats := make(map[int64]*taskStat)
+	for _, pid := range ids {
+		if _, exists := wfMap[pid]; exists {
+			continue
+		}
+		tasks, _ := g.DB().Model("mvp_task").Ctx(ctx).
+			Where("project_id", pid).
+			WhereNull("deleted_at").
+			WhereNotIn("status", g.Slice{"draft"}).
+			Fields("status").All()
+		if len(tasks) > 0 {
+			st := &taskStat{}
+			for _, t := range tasks {
+				st.total++
+				switch t["status"].String() {
+				case "completed":
+					st.completed++
+				case "failed":
+					st.failed++
+				case "running":
+					st.running++
+				}
+			}
+			legacyStats[pid] = st
+		}
+	}
+
+	// 组装结果
+	stats := make([]v1.ProjectRuntimeStat, 0, len(ids))
+	for _, pid := range ids {
+		stat := v1.ProjectRuntimeStat{
+			ProjectID: snowflake.JsonInt64(pid),
+		}
+		if wf, ok := wfMap[pid]; ok {
+			stat.CurrentStage = wf["current_stage"].String()
+			wfID := wf["id"].Int64()
+			if ts, exists := taskStats[wfID]; exists {
+				stat.TotalTasks = ts.total
+				stat.CompletedTasks = ts.completed
+				stat.FailedTasks = ts.failed
+				stat.RunningTasks = ts.running
+			}
+		} else if ts, exists := legacyStats[pid]; exists {
+			stat.TotalTasks = ts.total
+			stat.CompletedTasks = ts.completed
+			stat.FailedTasks = ts.failed
+			stat.RunningTasks = ts.running
+		}
+		stats = append(stats, stat)
+	}
+
+	return &v1.WorkflowBatchProjectStatsRes{Stats: stats}, nil
 }

@@ -170,6 +170,7 @@ export const stageTypeMap: Record<string, { label: string; color: string }> = {
   design: { label: '设计', color: 'blue' },
   review: { label: '审核', color: 'cyan' },
   execute: { label: '执行', color: 'green' },
+  accept: { label: '验收', color: 'purple' },
   rework: { label: '返工', color: 'orange' },
   complete: { label: '完成', color: 'default' },
 };

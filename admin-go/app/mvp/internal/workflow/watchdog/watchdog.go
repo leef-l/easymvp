@@ -28,6 +28,9 @@ type EscalateCallback func(ctx context.Context, workflowRunID, taskID int64) err
 // PauseCallback 暂停项目回调（熔断时使用）。
 type PauseCallback func(ctx context.Context, workflowRunID int64, reason string) error
 
+// ReplanCallback 熔断后自动评估重规划的回调。
+type ReplanCallback func(ctx context.Context, workflowRunID, projectID int64, breakReason string)
+
 // DomainTaskWatchdog V2 链路任务看门狗。
 type DomainTaskWatchdog struct {
 	checkInterval time.Duration
@@ -43,6 +46,7 @@ type DomainTaskWatchdog struct {
 	retryFn        RetryCallback
 	escalateFn     EscalateCallback
 	pauseFn        PauseCallback
+	replanFn       ReplanCallback
 	circuitBreaker *autonomy.CircuitBreaker
 }
 
@@ -73,6 +77,9 @@ func (w *DomainTaskWatchdog) SetEscalateFn(fn EscalateCallback) { w.escalateFn =
 
 // SetPauseFn 注册暂停回调（熔断时使用）。
 func (w *DomainTaskWatchdog) SetPauseFn(fn PauseCallback) { w.pauseFn = fn }
+
+// SetReplanFn 注册重规划回调（熔断暂停后自动评估）。
+func (w *DomainTaskWatchdog) SetReplanFn(fn ReplanCallback) { w.replanFn = fn }
 
 // SetCircuitBreaker 注册熔断器。
 func (w *DomainTaskWatchdog) SetCircuitBreaker(cb *autonomy.CircuitBreaker) { w.circuitBreaker = cb }
@@ -247,6 +254,7 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 		Fields("id, workflow_run_id, retry_count").
 		All()
 	if err != nil {
+		g.Log().Errorf(ctx, "[WatchdogV2] 查询 failed 任务失败: %v", err)
 		return
 	}
 
@@ -291,7 +299,7 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 		if totalRetries >= w.maxRetries {
 			escalateList = append(escalateList, escalateItem{taskID: c.taskID, workflowRunID: c.workflowRunID})
 		} else {
-			w.retryCount[c.taskID]++
+			// 先不递增计数，DB 更新成功后再递增
 			retryList = append(retryList, retryItem{c.taskID, totalRetries + 1})
 		}
 	}
@@ -302,7 +310,7 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 		g.Log().Infof(ctx, "[WatchdogV2] 自动重试任务 %d (第 %d/%d 次)", item.taskID, item.retryNo, w.maxRetries)
 
 		now := gtime.Now()
-		result, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		result, dbErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
 			Where("id", item.taskID).
 			Where("status", domainTask.StatusFailed).
 			Update(g.Map{
@@ -311,10 +319,19 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 				"result":      nil,
 				"updated_at":  now,
 			})
+		if dbErr != nil {
+			g.Log().Errorf(ctx, "[WatchdogV2] 重试任务 %d DB 更新失败: %v", item.taskID, dbErr)
+			continue
+		}
 		rows, _ := result.RowsAffected()
 		if rows == 0 {
 			continue
 		}
+
+		// DB 更新成功后才递增内存计数
+		w.mu.Lock()
+		w.retryCount[item.taskID]++
+		w.mu.Unlock()
 
 		if w.retryFn != nil {
 			_ = w.retryFn(ctx, item.taskID)
@@ -379,7 +396,24 @@ func (w *DomainTaskWatchdog) checkCircuitBreaker(ctx context.Context, wfIDs map[
 		if w.pauseFn != nil {
 			if err := w.pauseFn(ctx, wfRunID, "熔断器触发: "+result.Reason); err != nil {
 				g.Log().Errorf(ctx, "[WatchdogV2] 熔断暂停失败: workflowRun=%d err=%v", wfRunID, err)
+				continue
 			}
+		}
+
+		// 异步触发重规划评估（暂停成功后才执行）
+		if w.replanFn != nil {
+			pid := projectID.Int64()
+			reason := result.Reason
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						g.Log().Errorf(context.Background(), "[WatchdogV2] replanFn panic: wfRun=%d err=%v", wfRunID, r)
+					}
+				}()
+				replanCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				defer cancel()
+				w.replanFn(replanCtx, wfRunID, pid, reason)
+			}()
 		}
 	}
 }

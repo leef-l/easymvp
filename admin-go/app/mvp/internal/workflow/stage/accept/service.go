@@ -82,13 +82,24 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 	projectType := project["project_category"].String()
 	workDir := project["work_dir"].String()
 
-	// 2. 获取验收轮次
+	// 2. 幂等检查：同一 stageRun 不重复创建 accept_run
+	existing, _ := g.DB().Model("mvp_accept_run").Ctx(ctx).
+		Where("stage_run_id", stageRunID).
+		WhereIn("status", g.Slice{"running"}).
+		WhereNull("deleted_at").
+		Count()
+	if existing > 0 {
+		g.Log().Warningf(ctx, "[AcceptStage] stageRun=%d 已有运行中的 accept_run，跳过重复创建", stageRunID)
+		return nil
+	}
+
+	// 3. 获取验收轮次
 	round, err := s.acceptRunRepo.GetNextRound(ctx, workflowRunID)
 	if err != nil {
 		round = 1
 	}
 
-	// 3. 创建 accept_run
+	// 4. 创建 accept_run
 	acceptRunID, err := s.acceptRunRepo.Create(ctx, g.Map{
 		"workflow_run_id": workflowRunID,
 		"stage_run_id":    stageRunID,
@@ -250,13 +261,21 @@ func (s *Service) ManualApprove(ctx context.Context, projectID int64, reason str
 	acceptRunID := gconv.Int64(acceptRun["id"])
 	workflowRunID := gconv.Int64(wfRun["id"])
 
+	// CAS: 只有 completed 状态的 accept_run 允许人工操作
+	arStatus := gconv.String(acceptRun["status"])
+	if arStatus != "completed" && arStatus != "running" {
+		return fmt.Errorf("accept_run(%d) 状态为 %s，不允许人工放行", acceptRunID, arStatus)
+	}
+
 	// 更新 accept_run 决策
 	if err := s.acceptRunRepo.UpdateDecision(ctx, acceptRunID, acceptance.DecisionPassed, 100, "人工放行: "+reason); err != nil {
 		return fmt.Errorf("更新决策失败: %w", err)
 	}
-	_, _ = s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "completed", "completed", g.Map{
-		"finished_at": gtime.Now(),
-	})
+	if arStatus == "running" {
+		_, _ = s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "running", "completed", g.Map{
+			"finished_at": gtime.Now(),
+		})
+	}
 
 	g.Log().Infof(ctx, "[AcceptStage] 人工放行: acceptRunID=%d project=%d reason=%s", acceptRunID, projectID, reason)
 
@@ -298,13 +317,21 @@ func (s *Service) ManualRework(ctx context.Context, projectID int64, reason stri
 	acceptRunID := gconv.Int64(acceptRun["id"])
 	workflowRunID := gconv.Int64(wfRun["id"])
 
+	// CAS: 只有 completed 或 running 状态的 accept_run 允许人工驳回
+	arStatus := gconv.String(acceptRun["status"])
+	if arStatus != "completed" && arStatus != "running" {
+		return fmt.Errorf("accept_run(%d) 状态为 %s，不允许人工驳回", acceptRunID, arStatus)
+	}
+
 	// 更新 accept_run 为 failed
 	if err := s.acceptRunRepo.UpdateDecision(ctx, acceptRunID, acceptance.DecisionFailed, 0, "人工驳回: "+reason); err != nil {
 		return fmt.Errorf("更新决策失败: %w", err)
 	}
-	_, _ = s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "completed", "completed", g.Map{
-		"finished_at": gtime.Now(),
-	})
+	if arStatus == "running" {
+		_, _ = s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "running", "completed", g.Map{
+			"finished_at": gtime.Now(),
+		})
+	}
 
 	g.Log().Infof(ctx, "[AcceptStage] 人工驳回并返工: acceptRunID=%d project=%d reason=%s", acceptRunID, projectID, reason)
 

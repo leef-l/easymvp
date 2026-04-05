@@ -23,6 +23,8 @@ import {
   triggerReplan,
   getProjectReports,
   triggerReport,
+  getAutonomyMode,
+  setAutonomyMode,
   type AutonomyDecisionItem,
   type ProjectReportItem,
 } from '#/api/mvp/workflow';
@@ -38,6 +40,8 @@ const decisionTypeFilter = ref<string | undefined>(undefined);
 const reportTypeFilter = ref<string | undefined>(undefined);
 const selectedReport = ref<ProjectReportItem | null>(null);
 const reportDetailVisible = ref(false);
+const autonomyMode = ref<string>('suggest');
+const modeLoading = ref(false);
 
 /** 加载数据 */
 async function loadData() {
@@ -161,11 +165,61 @@ function viewReport(record: ProjectReportItem) {
   reportDetailVisible.value = true;
 }
 
-onMounted(loadData);
+/** 加载自治模式 */
+async function loadMode() {
+  try {
+    const res = await getAutonomyMode();
+    autonomyMode.value = res.mode || 'suggest';
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 切换自治模式 */
+async function handleModeChange(mode: string) {
+  modeLoading.value = true;
+  try {
+    await setAutonomyMode(mode as 'auto' | 'suggest');
+    autonomyMode.value = mode;
+    message.success(`已切换为${mode === 'auto' ? '全自动' : '建议'}模式`);
+  } catch {
+    message.error('模式切换失败');
+  } finally {
+    modeLoading.value = false;
+  }
+}
+
+onMounted(() => {
+  loadData();
+  loadMode();
+});
 </script>
 
 <template>
   <div class="p-4">
+    <!-- 自治模式切换 -->
+    <Card size="small" class="mb-4">
+      <Space align="center">
+        <span class="font-medium">自治模式：</span>
+        <Select
+          :value="autonomyMode"
+          :loading="modeLoading"
+          style="width: 160px"
+          @change="handleModeChange"
+        >
+          <Select.Option value="suggest">
+            <Tag color="orange">建议型</Tag>
+            决策需人工确认
+          </Select.Option>
+          <Select.Option value="auto">
+            <Tag color="blue">全自动</Tag>
+            系统自动执行
+          </Select.Option>
+        </Select>
+        <Tag v-if="autonomyMode === 'auto'" color="red">注意：全自动模式下系统将自动执行重规划等操作</Tag>
+      </Space>
+    </Card>
+
     <Spin :spinning="loading">
       <Tabs v-model:activeKey="activeTab">
         <!-- 决策中心 -->

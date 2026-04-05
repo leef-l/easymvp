@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
@@ -43,6 +44,7 @@ var (
 	runtimeMgr      *runtime.Manager
 	eventBus        *event.Bus
 	eventPublisher  *event.Publisher
+	execRegistry    *executorPkg.Registry
 )
 
 // Init 初始化所有工作流服务单例。在应用启动时调用一次。
@@ -65,7 +67,7 @@ func Init() {
 		planVersionSvc = plan.NewPlanVersionService(planRepo, bpRepo)
 
 		// 执行器注册表
-		execRegistry := executorPkg.NewRegistry()
+		execRegistry = executorPkg.NewRegistry()
 		wsMgr := workspace.NewGitWorktreeManager()
 		execRegistry.Register(executorPkg.NewAiderExecutor(wsMgr))
 		execRegistry.Register(executorPkg.NewChatExecutor())
@@ -230,6 +232,37 @@ func Init() {
 		domainWatchdog.SetPauseFn(func(ctx context.Context, workflowRunID int64, reason string) error {
 			return workflowSvc.Pause(ctx, workflowRunID, reason)
 		})
+		// 熔断后自动重规划评估
+		replanner := autonomy.NewReplanner(decisionRepo)
+		domainWatchdog.SetReplanFn(func(ctx context.Context, workflowRunID, projectID int64, breakReason string) {
+			// 收集失败任务信息（ctx 由 watchdog goroutine 传入，已带超时）
+			failedTasks, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+				Where("workflow_run_id", workflowRunID).
+				WhereIn("status", g.Slice{"failed", "escalated"}).
+				WhereNull("deleted_at").
+				Fields("id, name, result, retry_count").All()
+			var failed []autonomy.FailedTaskInfo
+			for _, t := range failedTasks {
+				failed = append(failed, autonomy.FailedTaskInfo{
+					TaskID:       t["id"].Int64(),
+					TaskName:     t["name"].String(),
+					ErrorMessage: t["result"].String(),
+					RetryCount:   t["retry_count"].Int(),
+				})
+			}
+			rec, err := replanner.Evaluate(ctx, &autonomy.ReplanInput{
+				WorkflowRunID: workflowRunID,
+				ProjectID:     projectID,
+				TriggerSource: "circuit_breaker",
+				BreakReason:   breakReason,
+				FailedTasks:   failed,
+			})
+			if err != nil {
+				g.Log().Warningf(ctx, "[Registry] 熔断后重规划评估失败: wfRun=%d err=%v", workflowRunID, err)
+				return
+			}
+			g.Log().Infof(ctx, "[Registry] 熔断后重规划建议: wfRun=%d action=%s", workflowRunID, rec.Action)
+		})
 		domainWatchdog.Start(context.Background())
 
 		// 阶段报告回调：每个阶段完成时自动生成报告
@@ -239,6 +272,35 @@ func Init() {
 			if err := reporter.GenerateStageReport(ctx, workflowRunID, stageType); err != nil {
 				g.Log().Warningf(ctx, "[Registry] 阶段报告生成失败: wfRun=%d stage=%s err=%v", workflowRunID, stageType, err)
 			}
+		})
+
+		// Legacy → V2 执行器桥接：注入 V2ExecutorFn 到旧引擎，使 legacy 任务也能走 V2 执行器
+		legacyScheduler := engine.GetScheduler()
+		legacyScheduler.GetExecutor().SetV2Executor(func(ctx context.Context, projectID, taskID int64, task gdb.Record, modelInfo *engine.ModelInfo, executionMode string) bool {
+			v2Exec := execRegistry.Get(executionMode)
+			if v2Exec == nil {
+				return false // V2 不支持，回退 legacy
+			}
+			g.Log().Infof(ctx, "[Registry] legacy task=%d 桥接到 V2 执行器 mode=%s", taskID, executionMode)
+			// 注：此回调已在 legacy executor 的独立 goroutine 中执行，无需再起 goroutine
+			defer func() {
+				if r := recover(); r != nil {
+					g.Log().Errorf(ctx, "[Registry] V2 执行器 panic: task=%d mode=%s err=%v", taskID, executionMode, r)
+					legacyScheduler.OnTaskFailed(projectID, taskID, fmt.Sprintf("V2 executor panic: %v", r))
+				}
+			}()
+			result := v2Exec.Execute(ctx, &executorPkg.Request{
+				ProjectID:  projectID,
+				TaskID:     taskID,
+				TaskRecord: task,
+				ModelInfo:  modelInfo,
+			})
+			if result.Error != nil {
+				legacyScheduler.OnTaskFailed(projectID, taskID, result.Error.Error())
+			} else {
+				legacyScheduler.OnTaskCompleted(projectID, taskID)
+			}
+			return true
 		})
 	})
 }
@@ -325,6 +387,12 @@ func triggerReviewStage(ctx context.Context, projectID, planVersionID int64) err
 
 	// 异步运行审核流程（使用 runtime context 响应工作流级取消/暂停）
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[triggerReviewStage] RunReview panic: stageRun=%d err=%v", stageRunID, r)
+				_ = stageSvc.FailStage(context.Background(), stageRunID, fmt.Sprintf("review panic: %v", r))
+			}
+		}()
 		rtCtx := runtimeMgr.GetContext(workflowRunID)
 		if err := reviewStageSvc.RunReview(rtCtx, stageRunID, planVersionID); err != nil {
 			// 如果是 context 取消导致的错误，不标记为失败
@@ -389,6 +457,12 @@ func GetReworkStageService() *reworkStage.Service {
 func GetCompleteStageService() *completeStage.Service {
 	Init()
 	return completeStageSvc
+}
+
+// GetExecutorRegistry 获取 V2 执行器注册表（供 legacy 引擎统一分发）。
+func GetExecutorRegistry() *executorPkg.Registry {
+	Init()
+	return execRegistry
 }
 
 // triggerReworkStage 触发返工阶段：创建 rework stage，启动分析流程。

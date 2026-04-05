@@ -188,6 +188,11 @@ func (s *StageService) CompleteStage(ctx context.Context, stageRunID int64) erro
 		if st := stageType.String(); st != "" {
 			wfID := wfRunID.Int64()
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						g.Log().Errorf(context.Background(), "[StageService] onStageReport panic: wfRun=%d stage=%s err=%v", wfID, st, r)
+					}
+				}()
 				s.onStageReport(context.Background(), wfID, st)
 			}()
 		}
@@ -333,6 +338,12 @@ func (s *StageService) TransitionNext(ctx context.Context, workflowRunID int64) 
 	// accept 阶段需要异步触发验收流程
 	if nextStage == StageAccept && s.onAcceptTrigger != nil {
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					g.Log().Errorf(context.Background(), "[StageService] onAcceptTrigger panic: wfRun=%d stage=%d err=%v", workflowRunID, stageRunID, r)
+					_ = s.FailStage(context.Background(), stageRunID, fmt.Sprintf("accept trigger panic: %v", r))
+				}
+			}()
 			if triggerErr := s.onAcceptTrigger(ctx, workflowRunID, stageRunID); triggerErr != nil {
 				g.Log().Errorf(ctx, "[StageService] accept 触发失败: workflowRunID=%d err=%v", workflowRunID, triggerErr)
 				_ = s.FailStage(context.Background(), stageRunID, "accept 触发失败: "+triggerErr.Error())

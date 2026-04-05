@@ -1,11 +1,11 @@
 # ─────────────────────────────────────────────────────────────
 # EasyMVP - MVP核心引擎 Dockerfile
-# 多阶段构建：builder(golang:1.23-alpine) → runner(alpine)
+# 多阶段构建：builder(golang:1.25-alpine) → runner(alpine)
 # 注意：mvp 服务需要 aider CLI 和 git，运行时镜像稍大
 # ─────────────────────────────────────────────────────────────
 
 # Stage 1: 编译阶段
-FROM golang:1.23-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates tzdata
 

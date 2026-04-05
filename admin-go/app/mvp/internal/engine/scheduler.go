@@ -115,6 +115,9 @@ func GetScheduler() *Scheduler {
 	return defaultScheduler
 }
 
+// GetExecutor 返回内部执行器（供外部注入 V2 回调使用）。
+func (s *Scheduler) GetExecutor() *Executor { return s.executor }
+
 // StartProject 启动项目任务调度
 func (s *Scheduler) StartProject(projectID int64) {
 	ctx, cancel := context.WithCancel(context.Background())

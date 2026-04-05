@@ -8,9 +8,9 @@ import { Button, message, Modal, Progress, Tag } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getProjectList, deleteProject } from '#/api/mvp/project';
-import { confirmPlan, resumeProject } from '#/api/mvp/workflow';
+import { confirmPlan, resumeProject, batchProjectStats } from '#/api/mvp/workflow';
 import type { ProjectItem } from '#/api/mvp/project/types';
-import { engineVersionMap } from '../consts';
+import { engineVersionMap, stageTypeMap } from '../consts';
 
 import FormModal from './modules/form.vue';
 import PauseModal from './modules/pause-modal.vue';
@@ -25,6 +25,7 @@ const STATUS_LABELS: Record<string, string> = {
   running: '执行中',
   executing: '执行中',
   reworking: '返工中',
+  accepting: '验收中',
   paused: '已暂停',
   completed: '已完成',
   failed: '已失败',
@@ -38,6 +39,7 @@ const STATUS_COLORS: Record<string, string> = {
   running: 'green',
   executing: 'green',
   reworking: 'orange',
+  accepting: 'purple',
   paused: 'orange',
   completed: 'default',
   failed: 'red',
@@ -84,7 +86,9 @@ const formOptions: VbenFormProps = {
         options: [
           { label: '设计中', value: 'designing' },
           { label: '方案审核中', value: 'reviewing' },
-          { label: '执行中', value: 'running' },
+          { label: '执行中', value: 'executing' },
+          { label: '返工中', value: 'reworking' },
+          { label: '验收中', value: 'accepting' },
           { label: '已暂停', value: 'paused' },
           { label: '已完成', value: 'completed' },
         ],
@@ -119,6 +123,12 @@ const gridOptions: VxeGridProps<ProjectItem> = {
       title: '状态',
       width: 100,
       slots: { default: 'col-status' },
+    },
+    {
+      field: 'currentStage',
+      title: '当前阶段',
+      width: 100,
+      slots: { default: 'col-stage' },
     },
     {
       field: 'taskProgress',
@@ -164,7 +174,31 @@ const gridOptions: VxeGridProps<ProjectItem> = {
           }
         }
         const res = await getProjectList(params as any);
-        return { items: res?.list ?? [], total: res?.total ?? 0 };
+        const items = res?.list ?? [];
+
+        // 异步加载运行时统计（进度、阶段）
+        if (items.length > 0) {
+          const ids = items.map((p: ProjectItem) => p.id);
+          batchProjectStats(ids).then((statsRes) => {
+            const statsMap = new Map(
+              (statsRes?.stats ?? []).map((s) => [s.projectID, s]),
+            );
+            for (const item of items) {
+              const stat = statsMap.get(item.id);
+              if (stat) {
+                item.currentStage = stat.currentStage;
+                item.totalTasks = stat.totalTasks;
+                item.completedTasks = stat.completedTasks;
+                item.failedTasks = stat.failedTasks;
+                item.runningTasks = stat.runningTasks;
+              }
+            }
+            // 触发表格刷新渲染
+            gridApi.grid?.loadData(items);
+          }).catch(() => { /* 静默失败 */ });
+        }
+
+        return { items, total: res?.total ?? 0 };
       },
     },
   },
@@ -197,6 +231,11 @@ function handleViewStatus(row: ProjectItem) {
 /** 打开执行控制台 */
 function handleExecution(row: ProjectItem) {
   router.push({ path: '/mvp/workflow/execution', query: { projectId: row.id } });
+}
+
+/** 打开仪表板 */
+function handleDashboard(row: ProjectItem) {
+  router.push({ path: '/mvp/workflow/dashboard', query: { projectId: row.id } });
 }
 
 /** 确认方案（设计阶段 -> 执行阶段） */
@@ -281,6 +320,14 @@ function handleDelete(row: ProjectItem) {
         </Tag>
       </template>
 
+      <!-- 当前阶段列 -->
+      <template #col-stage="{ row }">
+        <Tag v-if="row.currentStage" :color="stageTypeMap[row.currentStage]?.color ?? 'default'" size="small">
+          {{ stageTypeMap[row.currentStage]?.label ?? row.currentStage }}
+        </Tag>
+        <span v-else class="text-xs text-gray-300">-</span>
+      </template>
+
       <!-- 任务进度列 -->
       <template #col-progress="{ row }">
         <div v-if="row.totalTasks > 0" class="flex items-center gap-2">
@@ -328,6 +375,12 @@ function handleDelete(row: ProjectItem) {
           <Button type="link" size="small" class="text-orange-500" @click="handlePause(row)">暂停</Button>
         </template>
 
+        <!-- 验收中：查看详情 + 仪表板 -->
+        <template v-else-if="row.status === 'accepting'">
+          <Button type="link" size="small" @click="handleViewStatus(row)">查看详情</Button>
+          <Button type="link" size="small" @click="handleDashboard(row)">仪表板</Button>
+        </template>
+
         <!-- 暂停中：恢复 + 进入对话 -->
         <template v-else-if="row.status === 'paused'">
           <Button type="link" size="small" class="text-green-600" @click="handleResume(row)">恢复</Button>
@@ -338,6 +391,14 @@ function handleDelete(row: ProjectItem) {
         <template v-else-if="row.status === 'completed'">
           <Button type="link" size="small" @click="handleViewStatus(row)">查看详情</Button>
         </template>
+
+        <!-- V2 项目通用：仪表板入口 -->
+        <Button
+          v-if="row.engineVersion === 'workflow_v2'"
+          type="link"
+          size="small"
+          @click="handleDashboard(row)"
+        >仪表板</Button>
 
         <!-- 编辑按钮（任何状态都可以编辑） -->
         <Button type="link" size="small" @click="handleEdit(row)">编辑</Button>

@@ -35,7 +35,8 @@ services:
       - "${MYSQL_HOST_PORT:-41001}:3306"
     command: ["mysqld", "--default-authentication-plugin=mysql_native_password"]
     volumes:
-      - ..\mysql\init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+      - ../../admin-go/codegen/sql/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+      - ../../admin-go/codegen/sql/seed_data.sql:/docker-entrypoint-initdb.d/01-seed.sql:ro
       - easymvp-mysql-data:/var/lib/mysql
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
@@ -61,8 +62,8 @@ services:
     ports:
       - "${SYSTEM_HOST_PORT:-41002}:8000"
     volumes:
-      - ..\..\admin-go:/workspace/admin-go
-      - .\start-go-app.sh:/opt/easymvp/docker/dev/start-go-app.sh:ro
+      - ../../admin-go:/workspace/admin-go
+      - ./start-go-app.sh:/opt/easymvp/docker/dev/start-go-app.sh:ro
       - easymvp-go-cache:/go/pkg/mod
       - easymvp-go-build:/root/.cache/go-build
     restart: unless-stopped
@@ -83,8 +84,8 @@ services:
     ports:
       - "${AI_HOST_PORT:-41003}:8000"
     volumes:
-      - ..\..\admin-go:/workspace/admin-go
-      - .\start-go-app.sh:/opt/easymvp/docker/dev/start-go-app.sh:ro
+      - ../../admin-go:/workspace/admin-go
+      - ./start-go-app.sh:/opt/easymvp/docker/dev/start-go-app.sh:ro
       - easymvp-go-cache:/go/pkg/mod
       - easymvp-go-build:/root/.cache/go-build
     restart: unless-stopped
@@ -105,8 +106,8 @@ services:
     ports:
       - "${MVP_HOST_PORT:-41004}:8000"
     volumes:
-      - ..\..\admin-go:/workspace/admin-go
-      - .\start-go-app.sh:/opt/easymvp/docker/dev/start-go-app.sh:ro
+      - ../../admin-go:/workspace/admin-go
+      - ./start-go-app.sh:/opt/easymvp/docker/dev/start-go-app.sh:ro
       - easymvp-go-cache:/go/pkg/mod
       - easymvp-go-build:/root/.cache/go-build
     restart: unless-stopped
@@ -147,8 +148,8 @@ services:
     ports:
       - "${WEB_HOST_PORT:-41005}:${WEB_CONTAINER_PORT:-5666}"
     volumes:
-      - ..\..\vue-vben-admin:/workspace/vue-vben-admin
-      - .\docker-web-start.sh:/opt/easymvp/docker/dev/docker-web-start.sh:ro
+      - ../../vue-vben-admin:/workspace/vue-vben-admin
+      - ./docker-web-start.sh:/opt/easymvp/docker/dev/docker-web-start.sh:ro
       - easymvp-web-node-modules:/workspace/vue-vben-admin/node_modules
     restart: unless-stopped
 

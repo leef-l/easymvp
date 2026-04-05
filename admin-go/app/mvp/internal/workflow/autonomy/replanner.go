@@ -89,7 +89,12 @@ func (r *Replanner) Evaluate(ctx context.Context, input *ReplanInput) (*ReplanRe
 		}, nil
 	}
 
-	// 写入决策记录
+	// 写入决策记录（模式跟随全局配置）
+	mode := GetAutonomyMode(ctx)
+	humanAction := ActionPending
+	if mode == ModeAuto {
+		humanAction = ActionApproved
+	}
 	triggerCtx, _ := json.Marshal(input)
 	recommendation, _ := json.Marshal(rec)
 	decisionID, err := r.decisionRepo.Create(ctx, g.Map{
@@ -99,8 +104,8 @@ func (r *Replanner) Evaluate(ctx context.Context, input *ReplanInput) (*ReplanRe
 		"trigger_source":  input.TriggerSource,
 		"trigger_context": string(triggerCtx),
 		"recommendation":  string(recommendation),
-		"decision_mode":   ModeSuggest,
-		"human_action":    ActionPending,
+		"decision_mode":   mode,
+		"human_action":    humanAction,
 	})
 	if err != nil {
 		g.Log().Warningf(ctx, "[Replanner] 写入决策记录失败: %v", err)
@@ -174,7 +179,11 @@ action 判断标准：
 
 func buildReplanUserPrompt(input *ReplanInput) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("## 重规划触发\n- 触发源：%s\n- 工作流ID：%d\n\n", input.TriggerSource, input.WorkflowRunID))
+	b.WriteString(fmt.Sprintf("## 重规划触发\n- 触发源：%s\n- 工作流ID：%d\n", input.TriggerSource, input.WorkflowRunID))
+	if input.BreakReason != "" {
+		b.WriteString(fmt.Sprintf("- 熔断原因：%s\n", input.BreakReason))
+	}
+	b.WriteString("\n")
 
 	b.WriteString("## 失败任务列表\n")
 	if len(input.FailedTasks) == 0 {

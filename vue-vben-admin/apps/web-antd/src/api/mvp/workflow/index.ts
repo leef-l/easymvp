@@ -501,3 +501,34 @@ export function getProjectReports(projectID: string, reportType?: string) {
 export function triggerReport(projectID: string, stageType?: string) {
   return requestClient.post(`${PREFIX}/trigger-report`, { projectID, ...(stageType ? { stageType } : {}) });
 }
+
+// ==================== 自治模式配置 ====================
+
+/** 查询当前自治模式 */
+export function getAutonomyMode() {
+  return requestClient.get<{ mode: string }>(`${PREFIX}/autonomy-mode`);
+}
+
+/** 设置自治模式 */
+export function setAutonomyMode(mode: 'auto' | 'suggest') {
+  return requestClient.post(`${PREFIX}/set-autonomy-mode`, { mode });
+}
+
+// ==================== 项目列表批量状态 ====================
+
+export interface ProjectRuntimeStat {
+  projectID: string;
+  currentStage: string;
+  totalTasks: number;
+  completedTasks: number;
+  failedTasks: number;
+  runningTasks: number;
+}
+
+/** 批量查询项目运行时统计 */
+export function batchProjectStats(projectIDs: string[]) {
+  return requestClient.post<{ stats: ProjectRuntimeStat[] }>(
+    `${PREFIX}/batch-project-stats`,
+    { projectIDs },
+  );
+}

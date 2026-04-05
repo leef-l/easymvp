@@ -1,7 +1,13 @@
 // Package autonomy 自治项目管理：风险评估、熔断、重规划、汇报、执行器选择。
 package autonomy
 
-import "github.com/gogf/gf/v2/os/gtime"
+import (
+	"context"
+
+	"github.com/gogf/gf/v2/os/gtime"
+
+	"easymvp/app/mvp/internal/engine"
+)
 
 // ==================== 风险评估 ====================
 
@@ -61,7 +67,8 @@ const (
 type ReplanInput struct {
 	WorkflowRunID int64
 	ProjectID     int64
-	TriggerSource string // rework_failed / batch_wipeout / accept_failed / manual
+	TriggerSource string // rework_failed / batch_wipeout / accept_failed / manual / circuit_breaker
+	BreakReason   string // 熔断原因（仅 circuit_breaker 触发时填充）
 	FailedTasks   []FailedTaskInfo
 	AcceptIssues  []string
 }
@@ -152,4 +159,21 @@ type EngineRecommendation struct {
 	EngineType string  `json:"engineType"`
 	Confidence float64 `json:"confidence"` // 0-1
 	Reason     string  `json:"reason"`
+}
+
+// ==================== 自治模式配置 ====================
+
+// GetAutonomyMode 读取自治模式配置：suggest（默认）或 auto。
+// 配置键：autonomy.mode，支持三级 fallback（DB mvp_config → config.yaml → 默认值）。
+func GetAutonomyMode(ctx context.Context) string {
+	mode := engine.GetConfigString(ctx, "autonomy.mode", "engine.autonomy.mode", ModeSuggest)
+	if mode != ModeSuggest && mode != ModeAuto {
+		return ModeSuggest
+	}
+	return mode
+}
+
+// IsAutoMode 判断当前是否处于全自动模式。
+func IsAutoMode(ctx context.Context) bool {
+	return GetAutonomyMode(ctx) == ModeAuto
 }

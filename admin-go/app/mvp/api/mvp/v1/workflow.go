@@ -669,3 +669,51 @@ type WorkflowTriggerReportReq struct {
 type WorkflowTriggerReportRes struct {
 	g.Meta `mime:"application/json"`
 }
+
+// ==================== 自治模式配置 ====================
+
+// WorkflowAutonomyModeReq 查询自治模式
+type WorkflowAutonomyModeReq struct {
+	g.Meta `path:"/workflow/autonomy-mode" method:"get" tags:"项目流程" summary:"查询自治模式"`
+}
+
+// WorkflowAutonomyModeRes 查询自治模式响应
+type WorkflowAutonomyModeRes struct {
+	g.Meta `mime:"application/json"`
+	Mode   string `json:"mode" dc:"当前模式：suggest 或 auto"`
+}
+
+// WorkflowSetAutonomyModeReq 设置自治模式
+type WorkflowSetAutonomyModeReq struct {
+	g.Meta `path:"/workflow/set-autonomy-mode" method:"post" tags:"项目流程" summary:"设置自治模式"`
+	Mode   string `json:"mode" v:"required|in:suggest,auto" dc:"suggest=建议型 auto=全自动"`
+}
+
+// WorkflowSetAutonomyModeRes 设置自治模式响应
+type WorkflowSetAutonomyModeRes struct {
+	g.Meta `mime:"application/json"`
+}
+
+// ==================== 项目列表批量状态 ====================
+
+// ProjectRuntimeStat 单个项目的运行时统计。
+type ProjectRuntimeStat struct {
+	ProjectID      snowflake.JsonInt64 `json:"projectID"`
+	CurrentStage   string              `json:"currentStage"`
+	TotalTasks     int                 `json:"totalTasks"`
+	CompletedTasks int                 `json:"completedTasks"`
+	FailedTasks    int                 `json:"failedTasks"`
+	RunningTasks   int                 `json:"runningTasks"`
+}
+
+// WorkflowBatchProjectStatsReq 批量查询项目运行时统计
+type WorkflowBatchProjectStatsReq struct {
+	g.Meta     `path:"/workflow/batch-project-stats" method:"post" tags:"项目流程" summary:"批量查询项目运行时统计"`
+	ProjectIDs []snowflake.JsonInt64 `json:"projectIDs" v:"required" dc:"项目ID列表（最多50个）"`
+}
+
+// WorkflowBatchProjectStatsRes 批量查询项目运行时统计响应
+type WorkflowBatchProjectStatsRes struct {
+	g.Meta `mime:"application/json"`
+	Stats  []ProjectRuntimeStat `json:"stats"`
+}

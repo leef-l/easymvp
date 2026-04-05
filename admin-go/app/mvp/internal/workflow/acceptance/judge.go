@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 
@@ -54,8 +55,10 @@ func (j *Judge) Evaluate(ctx context.Context, in *AcceptContext, evidence []Evid
 	systemPrompt := buildJudgeSystemPrompt()
 	userPrompt := buildJudgeUserPrompt(in, evidence, hits)
 
-	// 4. 非流式调用 LLM
-	resp, err := p.Chat(ctx, &provider.ChatRequest{
+	// 4. 非流式调用 LLM（60s 超时保护）
+	llmCtx, llmCancel := context.WithTimeout(ctx, 60*time.Second)
+	defer llmCancel()
+	resp, err := p.Chat(llmCtx, &provider.ChatRequest{
 		Model:        modelInfo.ModelCode,
 		Messages:     []provider.Message{{Role: provider.RoleUser, Content: userPrompt}},
 		MaxTokens:    2000,

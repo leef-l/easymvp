@@ -11,8 +11,15 @@ export interface ProjectItem {
   globalContext?: string;
   architectModelID?: string;
   workDir?: string;
+  engineVersion?: string;
   createdAt?: string;
   updatedAt?: string;
+  /** 以下为前端运行时扩展字段（由 batch-project-stats 异步填充） */
+  currentStage?: string;
+  totalTasks?: number;
+  completedTasks?: number;
+  failedTasks?: number;
+  runningTasks?: number;
 }
 
 /** MVP项目表列表查询参数 */

@@ -20,15 +20,23 @@ import (
 	"easymvp/utility/snowflake"
 )
 
+// V2ExecutorFn V2 执行器回调：给定 executionMode，如果 V2 支持则执行并返回 true。
+// 由外部注入（orchestrator 初始化时），避免循环依赖。
+type V2ExecutorFn func(ctx context.Context, projectID, taskID int64, task gdb.Record, modelInfo *ModelInfo, executionMode string) (handled bool)
+
 // Executor 任务执行器，为每个任务启动 goroutine 调用 AI
 type Executor struct {
-	scheduler *Scheduler
+	scheduler   *Scheduler
+	v2Executor  V2ExecutorFn
 }
 
 // NewExecutor 创建执行器
 func NewExecutor(scheduler *Scheduler) *Executor {
 	return &Executor{scheduler: scheduler}
 }
+
+// SetV2Executor 注入 V2 执行器回调（由 orchestrator 在初始化时注入）。
+func (e *Executor) SetV2Executor(fn V2ExecutorFn) { e.v2Executor = fn }
 
 // Execute 执行单个任务
 // 根据 execution_mode 分发执行方式：aider/chat/openhands
@@ -61,13 +69,22 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 
 	// 3. 根据 execution_mode 分发执行方式
 	executionMode := e.getExecutionMode(ctx, projectID, roleType, task["role_level"].String())
+
+	// 3a. 尝试 V2 执行器（如果已注入）；V2 支持 aider/openhands/claude_code/codex_cli/gemini_cli/chat 等
+	if e.v2Executor != nil {
+		if handled := e.v2Executor(ctx, projectID, taskID, task, modelInfo, executionMode); handled {
+			return
+		}
+		g.Log().Infof(ctx, "[Executor] V2 执行器未处理 mode=%s，回退 legacy: task=%d", executionMode, taskID)
+	}
+
+	// 3b. Legacy 分发（V2 未注入或不支持时走旧链路）
 	switch executionMode {
 	case "aider":
 		e.executeWithAider(ctx, projectID, taskID, task, modelInfo)
 		return
 	case "openhands":
-		// 未来扩展：OpenHands 沙箱执行
-		g.Log().Infof(ctx, "[Executor] openhands 模式暂未实现，回退到 chat: task=%d", taskID)
+		g.Log().Infof(ctx, "[Executor] openhands 模式（legacy）暂未实现，回退到 chat: task=%d", taskID)
 	}
 
 	// 4. 默认 chat 模式 → ChatStream 对话
