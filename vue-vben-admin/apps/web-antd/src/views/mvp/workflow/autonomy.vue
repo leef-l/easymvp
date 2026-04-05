@@ -152,6 +152,15 @@ const actionTypeMap: Record<string, string> = {
   approve_complete: '批准完成',
 };
 
+/** 决策类型（decision_type）与动作类型（action_type）是不同语义 */
+const decisionTypeMap: Record<string, string> = {
+  task_recovery: '任务恢复',
+  rework_flow: '返工流程',
+  accept_flow: '验收流程',
+  circuit_break: '熔断',
+  replan: '重规划',
+};
+
 const triggerSourceMap: Record<string, string> = {
   'task.failed': '任务失败',
   'task.timeout': '任务超时',
@@ -496,17 +505,16 @@ onMounted(() => {
               </Select>
               <Select
                 v-model:value="decisionTypeFilter"
-                placeholder="按类型过滤"
+                placeholder="按决策类型过滤"
                 allow-clear
                 style="width: 140px"
                 @change="loadHistory"
               >
-                <Select.Option value="retry_task">重试任务</Select.Option>
-                <Select.Option value="trigger_rework">触发返工</Select.Option>
-                <Select.Option value="rerun_accept">重新验收</Select.Option>
-                <Select.Option value="pause_workflow">暂停工作流</Select.Option>
-                <Select.Option value="replan_workflow">重规划</Select.Option>
-                <Select.Option value="approve_complete">批准完成</Select.Option>
+                <Select.Option value="task_recovery">任务恢复</Select.Option>
+                <Select.Option value="rework_flow">返工流程</Select.Option>
+                <Select.Option value="accept_flow">验收流程</Select.Option>
+                <Select.Option value="circuit_break">熔断</Select.Option>
+                <Select.Option value="replan">重规划</Select.Option>
               </Select>
               <Button @click="loadHistory">刷新</Button>
             </Space>
@@ -529,7 +537,7 @@ onMounted(() => {
                   </Tag>
                 </template>
                 <template v-if="column.key === 'decisionType'">
-                  {{ actionTypeMap[record.decisionType] || record.decisionType }}
+                  {{ decisionTypeMap[record.decisionType] || record.decisionType }}
                 </template>
                 <template v-if="column.key === 'actionType'">
                   <Tag color="purple">
@@ -609,7 +617,7 @@ onMounted(() => {
             >
               <template #bodyCell="{ column, record }">
                 <template v-if="column.key === 'decisionType'">
-                  {{ actionTypeMap[record.decisionType] || record.decisionType }}
+                  {{ decisionTypeMap[record.decisionType] || record.decisionType }}
                 </template>
                 <template v-if="column.key === 'decisionLevel'">
                   <Tag :color="levelMap[record.decisionLevel]?.color || 'default'">
