@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"fmt"
 	"sync"
 )
 
@@ -9,7 +8,7 @@ import (
 const (
 	TypeOpenAICompatible = "openai_compatible"
 	TypeAnthropic        = "anthropic"
-	TypeGoogle           = "google" // 预留，可后续实现
+	TypeGoogle           = "google"
 )
 
 // Factory Provider 工厂，管理 Provider 实例的创建和缓存
@@ -77,11 +76,20 @@ func (f *Factory) create(cfg Config) (Provider, error) {
 		return NewOpenAI(cfg), nil
 	case TypeAnthropic:
 		return NewAnthropic(cfg), nil
-	case TypeGoogle:
-		// Google Gemini 大部分也走 OpenAI 兼容格式（通过代理或官方 OpenAI 兼容端点）
+
+	// Anthropic 协议的 Coding Plan（腾讯云、百度等通过 Anthropic 兼容端点代理）
+	case "tencent_coding", "baidu_coding":
+		return NewAnthropic(cfg), nil
+
+	// OpenAI 兼容协议（大多数国内/海外供应商）
+	case "google", "deepseek", "qwen", "zhipu", "moonshot", "minimax",
+		"baidu", "tencent", "bytedance", "01ai", "mistral", "groq", "cohere",
+		"aliyun_coding":
 		return NewOpenAI(cfg), nil
+
 	default:
-		return nil, fmt.Errorf("unsupported provider type: %s", cfg.ProviderType)
+		// 未知类型默认尝试 OpenAI 兼容协议（大多数供应商都兼容）
+		return NewOpenAI(cfg), nil
 	}
 }
 
