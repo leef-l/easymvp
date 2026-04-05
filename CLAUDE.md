@@ -318,7 +318,50 @@ cd admin-go/codegen && go run . -table mvp_xxx -force -menu
 cd vue-vben-admin && pnpm dev
 ```
 
-## 十三、铁律：设计文档生命周期
+## 十三、铁律：数据权限必须实现
+
+**所有业务实体必须具备完整的数据权限能力，不允许用 created_by 单点校验代替。**
+
+### 权限模型（五级 DataScope）
+
+| DataScope | 含义 | 过滤逻辑 |
+|-----------|------|----------|
+| 1 | 全部数据 | 无过滤（超管） |
+| 2 | 本部门及以下 | `dept_id IN (本部门 + 所有子部门)` |
+| 3 | 本部门 | `dept_id = 当前用户部门` |
+| 4 | 仅本人 | `created_by = 当前用户` |
+| 5 | 自定义 | `dept_id IN (system_role_dept 关联的部门列表)` |
+
+### 强制规则
+
+1. **所有业务表必须包含 `created_by` 和 `dept_id` 字段**
+   - 独立业务对象（project、workflow_run 等）：创建时直接写入
+   - 附属对象（stage_run、domain_task、accept_run 等）：从父对象继承
+   - 禁止新增业务表时遗漏这两个字段
+
+2. **ApplyDataScope 必须实现真实的五级过滤**
+   - 读取用户角色的 `data_scope` 值
+   - 按上表逻辑拼接 WHERE 条件
+   - 禁止只按 `created_by` 过滤就声称"已实现数据权限"
+
+3. **CheckOwnership 必须升级为 CheckProjectAccess**
+   - 支持 owner（创建人）、dept_member（同部门）、admin（超管）三级
+   - Workflow 控制器层所有接口必须使用项目作用域校验，不允许只校验 created_by
+
+4. **Repo 层必须提供 scope 入口**
+   - 查询方法需支持按 `created_by` / `dept_id` 过滤
+   - 可通过 context 注入或显式参数传递
+
+### 检查清单（每次新增实体时对照）
+
+- [ ] 表有 `created_by` + `dept_id` 字段？
+- [ ] 创建时从 context 或父对象继承权限字段？
+- [ ] 列表查询经过 `ApplyDataScope`？
+- [ ] 详情/更新/删除经过 `CheckProjectAccess`？
+
+---
+
+## 十四、铁律：设计文档生命周期
 
 **大改动前必须先写设计文档。**
 

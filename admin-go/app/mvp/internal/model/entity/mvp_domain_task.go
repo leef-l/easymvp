@@ -41,4 +41,6 @@ type MvpDomainTask struct {
 	CreatedAt         *gtime.Time `orm:"created_at"          description:"创建时间"`                                                                             // 创建时间
 	UpdatedAt         *gtime.Time `orm:"updated_at"          description:"更新时间"`                                                                             // 更新时间
 	DeletedAt         *gtime.Time `orm:"deleted_at"          description:"软删除时间"`                                                                            // 软删除时间
+	CreatedBy         int64       `orm:"created_by"          description:"创建人ID"`                                                                            // 创建人ID
+	DeptId            int64       `orm:"dept_id"             description:"部门ID"`                                                                             // 部门ID
 }

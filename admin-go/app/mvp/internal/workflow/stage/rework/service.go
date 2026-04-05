@@ -14,6 +14,7 @@ import (
 
 	"easymvp/app/mvp/internal/engine"
 	domainTask "easymvp/app/mvp/internal/workflow/domain/task"
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/utility/snowflake"
 )
 
@@ -98,6 +99,7 @@ func (s *Service) HandleReworkWithSource(ctx context.Context, stageRunID int64, 
 	}
 
 	now := gtime.Now()
+	scope := repo.GetProjectScopeByWorkflowRun(ctx, workflowRunID)
 	_, err = g.DB().Model("mvp_domain_task").Ctx(ctx).Insert(g.Map{
 		"id":              analysisTaskID,
 		"workflow_run_id": workflowRunID,
@@ -122,6 +124,8 @@ func (s *Service) HandleReworkWithSource(ctx context.Context, stageRunID int64, 
 		"batch_no":        0, // 高优先级
 		"sort":            0,
 		"retry_count":     0,
+		"created_by":      scope.CreatedBy,
+		"dept_id":         scope.DeptID,
 		"created_at":      now,
 		"updated_at":      now,
 	})

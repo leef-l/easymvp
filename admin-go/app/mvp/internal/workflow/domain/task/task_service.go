@@ -64,7 +64,10 @@ func (s *TaskService) InstantiateFromBlueprint(ctx context.Context, planVersionI
 		}
 	}
 
-	// 2. 构建 blueprintID → domainTaskID 映射（用于依赖关系转换）
+	// 2. 获取项目归属字段（继承到领域任务）
+	scope := repo.GetProjectScopeByWorkflowRun(ctx, workflowRunID)
+
+	// 3. 构建 blueprintID → domainTaskID 映射（用于依赖关系转换）
 	bpIDToTaskID := make(map[int64]int64, len(blueprints))
 	taskInserts := make([]g.Map, 0, len(blueprints))
 
@@ -106,6 +109,8 @@ func (s *TaskService) InstantiateFromBlueprint(ctx context.Context, planVersionI
 			"batch_no":          bp["batch_no"].Int(),
 			"sort":              bp["sort"].Int(),
 			"affected_resources": bp["affected_resources"].String(),
+			"created_by":        scope.CreatedBy,
+			"dept_id":           scope.DeptID,
 			"created_at":        now,
 			"updated_at":        now,
 		})

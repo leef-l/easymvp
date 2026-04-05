@@ -8,6 +8,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/workflow/repo"
 )
 
@@ -111,6 +112,15 @@ func (r *DecisionReducer) Reduce(ctx context.Context, in *AcceptContext, hits []
 	// 追加 LLM 评审摘要
 	if llmSummary != "" {
 		result.Summary += "; LLM评审: " + llmSummary
+	}
+
+	// 灰度：manual_review 未启用时，uncertain 自动降级为 passed
+	if result.Decision == DecisionManualReview {
+		if engine.GetConfigInt(ctx, "accept.manual_review_enabled", "accept.manualReviewEnabled", 1) == 0 {
+			result.Decision = DecisionPassed
+			result.Summary += " (人工审核已禁用，自动放行)"
+			g.Log().Infof(ctx, "[DecisionReducer] manual_review 已禁用，uncertain→passed")
+		}
 	}
 
 	// 持久化 issue 到数据库

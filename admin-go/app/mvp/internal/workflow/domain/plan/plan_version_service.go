@@ -76,7 +76,10 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 			return fmt.Errorf("supersede 旧版本失败: %w", err)
 		}
 
-		// 3. 创建 plan_version
+		// 3. 获取项目归属字段
+		scope := repo.GetProjectScopeByProject(ctx, projectID)
+
+		// 4. 创建 plan_version
 		_, err = tx.Model("mvp_plan_version").Ctx(ctx).Insert(g.Map{
 			"id":                     pvID,
 			"project_id":             projectID,
@@ -87,6 +90,8 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 			"status":                 consts.PlanVersionStatusDraft,
 			"review_status":          consts.PlanReviewStatusPending,
 			"summary":                fmt.Sprintf("第 %d 版方案，共 %d 个任务蓝图", versionNo, len(tasks)),
+			"created_by":            scope.CreatedBy,
+			"dept_id":               scope.DeptID,
 			"created_at":             now,
 			"updated_at":             now,
 		})
@@ -108,6 +113,8 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 				"sort":               i + 1,
 				"affected_resources": string(affectedJSON),
 				"blueprint_status":   consts.BlueprintStatusDraft,
+				"created_by":        scope.CreatedBy,
+				"dept_id":           scope.DeptID,
 				"created_at":         now,
 				"updated_at":         now,
 			})

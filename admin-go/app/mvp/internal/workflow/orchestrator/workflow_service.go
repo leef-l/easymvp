@@ -50,13 +50,18 @@ func (s *WorkflowService) CreateRun(ctx context.Context, projectID int64) (int64
 			return fmt.Errorf("获取 run_no 失败: %w", err)
 		}
 
-		// 2. 创建 workflow_run
+		// 2. 获取项目归属字段
+		scope := repo.GetProjectScopeByProject(ctx, projectID)
+
+		// 3. 创建 workflow_run
 		_, err = tx.Model("mvp_workflow_run").Ctx(ctx).Insert(g.Map{
 			"id":            wfRunID,
 			"project_id":    projectID,
 			"run_no":        runNo,
 			"status":        consts.WorkflowRunStatusDesigning,
 			"current_stage": consts.StageTypeDesign,
+			"created_by":    scope.CreatedBy,
+			"dept_id":       scope.DeptID,
 			"created_at":    now,
 			"updated_at":    now,
 		})
@@ -64,13 +69,15 @@ func (s *WorkflowService) CreateRun(ctx context.Context, projectID int64) (int64
 			return fmt.Errorf("创建 workflow_run 失败: %w", err)
 		}
 
-		// 3. 创建 design stage_run
+		// 4. 创建 design stage_run
 		_, err = tx.Model("mvp_stage_run").Ctx(ctx).Insert(g.Map{
 			"id":              stageRunID,
 			"workflow_run_id": wfRunID,
 			"stage_type":      consts.StageTypeDesign,
 			"stage_no":        1,
 			"status":          consts.StageStatusPending,
+			"created_by":      scope.CreatedBy,
+			"dept_id":         scope.DeptID,
 			"created_at":      now,
 			"updated_at":      now,
 		})

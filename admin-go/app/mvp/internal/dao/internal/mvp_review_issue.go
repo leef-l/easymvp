@@ -38,6 +38,8 @@ type MvpReviewIssueColumns struct {
 	CreatedAt     string // 创建时间
 	UpdatedAt     string // 更新时间
 	DeletedAt     string // 软删除时间
+	CreatedBy     string // 创建人ID
+	DeptId        string // 部门ID
 }
 
 // mvpReviewIssueColumns holds the columns for the table mvp_review_issue.
@@ -59,6 +61,8 @@ var mvpReviewIssueColumns = MvpReviewIssueColumns{
 	CreatedAt:     "created_at",
 	UpdatedAt:     "updated_at",
 	DeletedAt:     "deleted_at",
+	CreatedBy:     "created_by",
+	DeptId:        "dept_id",
 }
 
 // NewMvpReviewIssueDao creates and returns a new DAO object for table data access.

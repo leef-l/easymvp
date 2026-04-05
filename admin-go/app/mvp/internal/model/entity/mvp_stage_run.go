@@ -15,6 +15,8 @@ type MvpStageRun struct {
 	StageType     string      `orm:"stage_type"      description:"阶段类型: design/review/execute/rework/complete"`  // 阶段类型: design/review/execute/rework/complete
 	StageNo       int         `orm:"stage_no"        description:"同类型阶段序号(支持多轮)"`                                // 同类型阶段序号(支持多轮)
 	Status        string      `orm:"status"          description:"状态: pending/running/completed/failed/skipped"` // 状态: pending/running/completed/failed/skipped
+	CreatedBy     int64       `orm:"created_by"      description:"创建人ID"`                                        // 创建人ID
+	DeptId        int64       `orm:"dept_id"         description:"部门ID"`                                         // 部门ID
 	InputRef      string      `orm:"input_ref"       description:"阶段输入引用(JSON)"`                                 // 阶段输入引用(JSON)
 	OutputRef     string      `orm:"output_ref"      description:"阶段输出引用(JSON)"`                                 // 阶段输出引用(JSON)
 	Decision      string      `orm:"decision"        description:"阶段决策结果(JSON)"`                                 // 阶段决策结果(JSON)

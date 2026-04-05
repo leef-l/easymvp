@@ -25,12 +25,10 @@ var Workflow = cWorkflow{}
 
 type cWorkflow struct{}
 
-// checkProjectOwnership 校验项目归属（复用 middleware.CheckOwnership，支持超管跳过）
+// checkProjectOwnership 校验项目访问权限（支持 owner/同部门/超管三级）。
+// 兼容别名：旧调用不需要改名。
 func checkProjectOwnership(ctx context.Context, projectID int64) error {
-	return middleware.CheckOwnership(ctx,
-		g.DB().Model("mvp_project").WhereNull("deleted_at"),
-		projectID, "id", "created_by",
-	)
+	return middleware.CheckProjectAccess(ctx, projectID)
 }
 
 // CreateProject 创建项目

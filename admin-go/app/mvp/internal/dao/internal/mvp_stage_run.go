@@ -26,6 +26,8 @@ type MvpStageRunColumns struct {
 	StageType     string // 阶段类型: design/review/execute/rework/complete
 	StageNo       string // 同类型阶段序号(支持多轮)
 	Status        string // 状态: pending/running/completed/failed/skipped
+	CreatedBy     string // 创建人ID
+	DeptId        string // 部门ID
 	InputRef      string // 阶段输入引用(JSON)
 	OutputRef     string // 阶段输出引用(JSON)
 	Decision      string // 阶段决策结果(JSON)
@@ -44,6 +46,8 @@ var mvpStageRunColumns = MvpStageRunColumns{
 	StageType:     "stage_type",
 	StageNo:       "stage_no",
 	Status:        "status",
+	CreatedBy:     "created_by",
+	DeptId:        "dept_id",
 	InputRef:      "input_ref",
 	OutputRef:     "output_ref",
 	Decision:      "decision",

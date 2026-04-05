@@ -11,6 +11,7 @@ import (
 
 	"easymvp/app/mvp/internal/consts"
 	"easymvp/app/mvp/internal/workflow/event"
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/utility/snowflake"
 )
 
@@ -79,13 +80,16 @@ func (s *StageService) StartStage(ctx context.Context, workflowRunID int64, stag
 		}
 		stageNo := int(maxNo) + 1
 
-		// 3. 创建 stage_run
+		// 3. 创建 stage_run（继承项目归属字段）
+		scope := repo.GetProjectScopeByWorkflowRun(ctx, workflowRunID)
 		_, err = tx.Model("mvp_stage_run").Ctx(ctx).Insert(g.Map{
 			"id":              stageRunID,
 			"workflow_run_id": workflowRunID,
 			"stage_type":      stageType,
 			"stage_no":        stageNo,
 			"status":          consts.StageStatusRunning,
+			"created_by":      scope.CreatedBy,
+			"dept_id":         scope.DeptID,
 			"started_at":      now,
 			"created_at":      now,
 			"updated_at":      now,

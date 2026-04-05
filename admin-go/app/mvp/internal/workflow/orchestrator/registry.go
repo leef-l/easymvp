@@ -117,7 +117,11 @@ func Init() {
 		acceptEvidenceRepo := repo.NewAcceptEvidenceRepo()
 		evidenceCollector := acceptance.NewEvidenceCollector(acceptEvidenceRepo)
 		ruleEngine := acceptance.NewRuleEngine(acceptRuleRepo)
-		judge := acceptance.NewJudge()
+		// 灰度：按 mvp_config 决定是否启用 LLM Judge
+		var judge *acceptance.Judge
+		if engine.GetConfigInt(context.Background(), "accept.llm_judge_enabled", "accept.llmJudgeEnabled", 1) == 1 {
+			judge = acceptance.NewJudge()
+		}
 		decisionReducer := acceptance.NewDecisionReducer(acceptIssueRepo, judge)
 		acceptStageSvc = acceptStage.NewService(acceptRunRepo, evidenceCollector, ruleEngine, decisionReducer)
 		acceptStageSvc.SetStageCompleter(stageSvc)

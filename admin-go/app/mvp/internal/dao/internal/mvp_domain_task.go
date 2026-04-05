@@ -52,6 +52,8 @@ type MvpDomainTaskColumns struct {
 	CreatedAt         string // 创建时间
 	UpdatedAt         string // 更新时间
 	DeletedAt         string // 软删除时间
+	CreatedBy         string // 创建人ID
+	DeptId            string // 部门ID
 }
 
 // mvpDomainTaskColumns holds the columns for the table mvp_domain_task.
@@ -87,6 +89,8 @@ var mvpDomainTaskColumns = MvpDomainTaskColumns{
 	CreatedAt:         "created_at",
 	UpdatedAt:         "updated_at",
 	DeletedAt:         "deleted_at",
+	CreatedBy:         "created_by",
+	DeptId:            "dept_id",
 }
 
 // NewMvpDomainTaskDao creates and returns a new DAO object for table data access.

@@ -17,6 +17,8 @@ type MvpStageRun struct {
 	StageType     any         // 阶段类型: design/review/execute/rework/complete
 	StageNo       any         // 同类型阶段序号(支持多轮)
 	Status        any         // 状态: pending/running/completed/failed/skipped
+	CreatedBy     any         // 创建人ID
+	DeptId        any         // 部门ID
 	InputRef      any         // 阶段输入引用(JSON)
 	OutputRef     any         // 阶段输出引用(JSON)
 	Decision      any         // 阶段决策结果(JSON)

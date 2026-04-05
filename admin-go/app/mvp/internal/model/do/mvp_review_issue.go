@@ -29,4 +29,6 @@ type MvpReviewIssue struct {
 	CreatedAt     *gtime.Time // 创建时间
 	UpdatedAt     *gtime.Time // 更新时间
 	DeletedAt     *gtime.Time // 软删除时间
+	CreatedBy     any         // 创建人ID
+	DeptId        any         // 部门ID
 }
