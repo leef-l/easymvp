@@ -138,6 +138,16 @@ func (s *sProject) cascadeDelete(ctx context.Context, projectIDs []snowflake.Jso
 			}
 		}
 
+		// 5. 收集 plan_version ids（用于删除 mvp_task_blueprint）
+		var planVersionIDs []int64
+		if len(workflowRunIDs) > 0 {
+			if err := db.Ctx(ctx).Model("mvp_plan_version").
+				WhereIn("workflow_run_id", workflowRunIDs).Where("deleted_at", nil).
+				Fields("id").Scan(&planVersionIDs); err != nil {
+				return err
+			}
+		}
+
 		// ── 软删：有 deleted_at 的表 ──────────────────────────
 
 		softDel := func(table, field string, ids []int64) error {
@@ -204,6 +214,12 @@ func (s *sProject) cascadeDelete(ctx context.Context, projectIDs []snowflake.Jso
 			if err := softDel("mvp_domain_task", "workflow_run_id", workflowRunIDs); err != nil {
 				return err
 			}
+			// task_blueprint 通过 plan_version_id 关联
+			if len(planVersionIDs) > 0 {
+				if err := softDel("mvp_task_blueprint", "plan_version_id", planVersionIDs); err != nil {
+					return err
+				}
+			}
 			if err := softDel("mvp_plan_version", "workflow_run_id", workflowRunIDs); err != nil {
 				return err
 			}
@@ -251,9 +267,6 @@ func (s *sProject) cascadeDelete(ctx context.Context, projectIDs []snowflake.Jso
 			return err
 		}
 		if err := softDelSnow("mvp_task", "project_id", projectIDs); err != nil {
-			return err
-		}
-		if err := softDelSnow("mvp_task_blueprint", "project_id", projectIDs); err != nil {
 			return err
 		}
 		if err := softDelSnow("mvp_task_workspace", "project_id", projectIDs); err != nil {
