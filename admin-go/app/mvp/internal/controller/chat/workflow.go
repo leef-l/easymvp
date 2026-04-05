@@ -9,6 +9,8 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/gconv"
 
 	v1 "easymvp/app/mvp/api/mvp/v1"
 	"easymvp/app/mvp/internal/activity"
@@ -2057,19 +2059,76 @@ func (c *cWorkflow) AutonomyCheckpoints(ctx context.Context, req *v1.WorkflowAut
 	}
 
 	dc := orchestrator.GetDecisionCenter()
-	checkpoints, cpErr := dc.ListOpenCheckpoints(ctx, projectID)
+	rawCheckpoints, cpErr := dc.ListOpenCheckpoints(ctx, projectID)
 	if cpErr != nil {
 		return nil, cpErr
 	}
-	actions, acErr := dc.ListPendingActions(ctx, projectID)
+	rawActions, acErr := dc.ListPendingActions(ctx, projectID)
 	if acErr != nil {
 		return nil, acErr
+	}
+
+	// snake_case g.Map → camelCase DTO
+	checkpoints := make([]v1.CheckpointDTO, 0, len(rawCheckpoints))
+	for _, m := range rawCheckpoints {
+		checkpoints = append(checkpoints, mapToCheckpointDTO(m))
+	}
+	actions := make([]v1.DecisionActionDTO, 0, len(rawActions))
+	for _, m := range rawActions {
+		actions = append(actions, mapToDecisionActionDTO(m))
 	}
 
 	return &v1.WorkflowAutonomyCheckpointsRes{
 		Checkpoints: checkpoints,
 		Actions:     actions,
 	}, nil
+}
+
+// mapToCheckpointDTO 将 g.Map (snake_case) 映射到 CheckpointDTO (camelCase)。
+func mapToCheckpointDTO(m g.Map) v1.CheckpointDTO {
+	return v1.CheckpointDTO{
+		ID:               mapJsonInt64(m, "id"),
+		WorkflowRunID:    mapJsonInt64(m, "workflow_run_id"),
+		ProjectID:        mapJsonInt64(m, "project_id"),
+		DecisionActionID: mapJsonInt64(m, "decision_action_id"),
+		CheckpointType:   mapString(m, "checkpoint_type"),
+		Title:            mapString(m, "title"),
+		Description:      mapString(m, "description"),
+		Status:           mapString(m, "status"),
+		AssignedTo:       mapJsonInt64(m, "assigned_to"),
+		HandledBy:        mapJsonInt64(m, "handled_by"),
+		HandleAction:     mapString(m, "handle_action"),
+		HandleReason:     mapString(m, "handle_reason"),
+		HandledAt:        mapGTime(m, "handled_at"),
+		ExpiresAt:        mapGTime(m, "expires_at"),
+		CreatedAt:        mapGTime(m, "created_at"),
+	}
+}
+
+// mapToDecisionActionDTO 将 g.Map (snake_case) 映射到 DecisionActionDTO (camelCase)。
+func mapToDecisionActionDTO(m g.Map) v1.DecisionActionDTO {
+	return v1.DecisionActionDTO{
+		ID:             mapJsonInt64(m, "id"),
+		WorkflowRunID:  mapJsonInt64(m, "workflow_run_id"),
+		ProjectID:      mapJsonInt64(m, "project_id"),
+		StageRunID:     mapJsonInt64(m, "stage_run_id"),
+		DomainTaskID:   mapJsonInt64(m, "domain_task_id"),
+		DecisionType:   mapString(m, "decision_type"),
+		DecisionLevel:  mapString(m, "decision_level"),
+		TriggerSource:  mapString(m, "trigger_source"),
+		TriggerContext: mapJSONString(m, "trigger_context"),
+		MatchedRuleID:  mapJsonInt64(m, "matched_rule_id"),
+		MatchedGateIDs: mapJSONString(m, "matched_gate_ids"),
+		ActionType:     mapString(m, "action_type"),
+		Recommendation: mapJSONString(m, "recommendation"),
+		FinalAction:    mapString(m, "final_action"),
+		ActionStatus:   mapString(m, "action_status"),
+		AutoExecutable: mapInt(m, "auto_executable"),
+		HumanRequired:  mapInt(m, "human_required"),
+		ExecutedAt:     mapGTime(m, "executed_at"),
+		Result:         mapJSONString(m, "result"),
+		CreatedAt:      mapGTime(m, "created_at"),
+	}
 }
 
 // AutonomyApprove 审批通过决策动作。
@@ -2121,4 +2180,86 @@ func autonomyActionProjectID(ctx context.Context, actionID int64) (int64, error)
 		return 0, fmt.Errorf("决策记录不存在: %d", actionID)
 	}
 	return val.Int64(), nil
+}
+
+// ---- g.Map → DTO 映射辅助函数 ----
+
+func mapString(m g.Map, key string) string {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", v)
+}
+
+func mapInt(m g.Map, key string) int {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return 0
+	}
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case json.Number:
+		i, _ := n.Int64()
+		return int(i)
+	default:
+		return gconv.Int(v)
+	}
+}
+
+func mapJsonInt64(m g.Map, key string) snowflake.JsonInt64 {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return 0
+	}
+	switch n := v.(type) {
+	case int64:
+		return snowflake.JsonInt64(n)
+	case float64:
+		return snowflake.JsonInt64(int64(n))
+	case json.Number:
+		i, _ := n.Int64()
+		return snowflake.JsonInt64(i)
+	default:
+		return snowflake.JsonInt64(gconv.Int64(v))
+	}
+}
+
+func mapGTime(m g.Map, key string) *gtime.Time {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return nil
+	}
+	switch t := v.(type) {
+	case *gtime.Time:
+		return t
+	default:
+		s := fmt.Sprintf("%v", v)
+		if s == "" || s == "<nil>" {
+			return nil
+		}
+		return gtime.New(s)
+	}
+}
+
+func mapJSONString(m g.Map, key string) string {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return ""
+	}
+	switch s := v.(type) {
+	case string:
+		return s
+	default:
+		b, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Sprintf("%v", v)
+		}
+		return string(b)
+	}
 }

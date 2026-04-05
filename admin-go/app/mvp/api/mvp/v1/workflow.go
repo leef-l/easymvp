@@ -749,11 +749,54 @@ type WorkflowAutonomyCheckpointsReq struct {
 	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
 }
 
+// CheckpointDTO 人工节点 DTO（camelCase 输出给前端）
+type CheckpointDTO struct {
+	ID               snowflake.JsonInt64 `json:"id"`
+	WorkflowRunID    snowflake.JsonInt64 `json:"workflowRunId"`
+	ProjectID        snowflake.JsonInt64 `json:"projectId"`
+	DecisionActionID snowflake.JsonInt64 `json:"decisionActionId"`
+	CheckpointType   string              `json:"checkpointType"`
+	Title            string              `json:"title"`
+	Description      string              `json:"description,omitempty"`
+	Status           string              `json:"status"`
+	AssignedTo       snowflake.JsonInt64 `json:"assignedTo,omitempty"`
+	HandledBy        snowflake.JsonInt64 `json:"handledBy,omitempty"`
+	HandleAction     string              `json:"handleAction,omitempty"`
+	HandleReason     string              `json:"handleReason,omitempty"`
+	HandledAt        *gtime.Time         `json:"handledAt,omitempty"`
+	ExpiresAt        *gtime.Time         `json:"expiresAt,omitempty"`
+	CreatedAt        *gtime.Time         `json:"createdAt"`
+}
+
+// DecisionActionDTO 决策动作 DTO（camelCase 输出给前端）
+type DecisionActionDTO struct {
+	ID              snowflake.JsonInt64 `json:"id"`
+	WorkflowRunID   snowflake.JsonInt64 `json:"workflowRunId"`
+	ProjectID       snowflake.JsonInt64 `json:"projectId"`
+	StageRunID      snowflake.JsonInt64 `json:"stageRunId,omitempty"`
+	DomainTaskID    snowflake.JsonInt64 `json:"domainTaskId,omitempty"`
+	DecisionType    string              `json:"decisionType"`
+	DecisionLevel   string              `json:"decisionLevel"`
+	TriggerSource   string              `json:"triggerSource"`
+	TriggerContext  string              `json:"triggerContext,omitempty"`
+	MatchedRuleID   snowflake.JsonInt64 `json:"matchedRuleId,omitempty"`
+	MatchedGateIDs  string              `json:"matchedGateIds,omitempty"`
+	ActionType      string              `json:"actionType"`
+	Recommendation  string              `json:"recommendation,omitempty"`
+	FinalAction     string              `json:"finalAction,omitempty"`
+	ActionStatus    string              `json:"actionStatus"`
+	AutoExecutable  int                 `json:"autoExecutable"`
+	HumanRequired   int                 `json:"humanRequired"`
+	ExecutedAt      *gtime.Time         `json:"executedAt,omitempty"`
+	Result          string              `json:"result,omitempty"`
+	CreatedAt       *gtime.Time         `json:"createdAt"`
+}
+
 // WorkflowAutonomyCheckpointsRes 查询待处理人工节点响应
 type WorkflowAutonomyCheckpointsRes struct {
 	g.Meta      `mime:"application/json"`
-	Checkpoints []g.Map `json:"checkpoints"`
-	Actions     []g.Map `json:"actions"`
+	Checkpoints []CheckpointDTO      `json:"checkpoints"`
+	Actions     []DecisionActionDTO  `json:"actions"`
 }
 
 // WorkflowAutonomyApproveReq 审批通过决策动作
