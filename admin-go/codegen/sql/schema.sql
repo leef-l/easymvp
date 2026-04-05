@@ -1,7 +1,3 @@
-SET NAMES utf8mb4;
-SET TIME_ZONE = '+08:00';
-SET FOREIGN_KEY_CHECKS = 0;
-
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `ai_engine` (
@@ -732,7 +728,7 @@ CREATE TABLE `mvp_project_role` (
   `role_level` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '角色等级：lite/pro/max',
   `model_id` bigint unsigned NOT NULL COMMENT 'AI模型ID',
   `system_prompt` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '系统提示词（角色设定）',
-  `execution_mode` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'chat' COMMENT '执行方式: chat=对话模式, aider=Aider, openhands=OpenHands, claude_code=Claude Code, codex_cli=Codex CLI, gemini_cli=Gemini CLI',
+  `execution_mode` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'chat' COMMENT '执行方式: auto=自动选择, chat=对话模式, aider=Aider, openhands=OpenHands, claude_code=Claude Code, codex_cli=Codex CLI, gemini_cli=Gemini CLI',
   `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态:0=禁用,1=启用',
   `created_by` bigint unsigned DEFAULT NULL COMMENT '创建人ID',
   `dept_id` bigint unsigned DEFAULT NULL COMMENT '所属部门ID',
@@ -806,7 +802,7 @@ CREATE TABLE `mvp_role_preset` (
   `role_level` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '角色等级：lite/pro/max',
   `model_id` bigint unsigned NOT NULL COMMENT 'AI模型ID',
   `system_prompt` text COLLATE utf8mb4_unicode_ci COMMENT '默认系统提示词（角色设定）',
-  `execution_mode` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'chat' COMMENT '执行方式: chat=对话模式, aider=Aider, openhands=OpenHands, claude_code=Claude Code, codex_cli=Codex CLI, gemini_cli=Gemini CLI',
+  `execution_mode` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'chat' COMMENT '执行方式: auto=自动选择, chat=对话模式, aider=Aider, openhands=OpenHands, claude_code=Claude Code, codex_cli=Codex CLI, gemini_cli=Gemini CLI',
   `is_default` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否为默认模板（1=默认，0=扩展）',
   `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态:0=禁用,1=启用',
   `sort` int NOT NULL DEFAULT '0' COMMENT '排序',
@@ -1246,5 +1242,3 @@ CREATE TABLE `system_users` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表';
 /*!40101 SET character_set_client = @saved_cs_client */;
-
-SET FOREIGN_KEY_CHECKS = 1;

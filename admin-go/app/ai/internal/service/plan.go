@@ -8,7 +8,7 @@ import (
 )
 
 type IPlan interface {
-	Create(ctx context.Context, in *model.PlanCreateInput) error
+	Create(ctx context.Context, in *model.PlanCreateInput) (int, error)
 	Update(ctx context.Context, in *model.PlanUpdateInput) error
 	Delete(ctx context.Context, id snowflake.JsonInt64) error
 	BatchDelete(ctx context.Context, ids []snowflake.JsonInt64) error

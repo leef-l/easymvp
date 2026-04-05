@@ -94,8 +94,9 @@ const [Modal, modalApi] = useVbenModal({
         await updatePlan({ id: editId.value, ...values });
         message.success('更新成功');
       } else {
-        await createPlan(values);
-        message.success('创建成功');
+        const res = await createPlan(values);
+        const initCount = (res as any)?.initCount ?? 0;
+        message.success(initCount > 0 ? `套餐创建成功，已自动初始化 ${initCount} 个 AI 模型` : '创建成功');
       }
       emit('success');
       modalApi.close();

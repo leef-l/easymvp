@@ -63,10 +63,11 @@ type RoleListOutput struct {
 
 // RoleListInput 角色表列表查询输入
 type RoleListInput struct {
-	PageNum   int `json:"pageNum"`
-	PageSize  int `json:"pageSize"`
-	DataScope int `json:"dataScope"`
-	Status    int `json:"status"`
+	PageNum   int    `json:"pageNum"`
+	PageSize  int    `json:"pageSize"`
+	Title     string `json:"title"`
+	DataScope int    `json:"dataScope"`
+	Status    int    `json:"status"`
 }
 
 // RoleTreeOutput 角色表树形输出

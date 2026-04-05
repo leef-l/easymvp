@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { h, ref, onMounted, computed } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
@@ -112,6 +112,8 @@ async function loadSituation() {
   try {
     const res = await getSituation(workflowRunId.value);
     situation.value = res.situation ?? null;
+  } catch (e) {
+    console.warn('[situation] loadSituation 失败:', e);
   } finally {
     loading.value = false;
   }
@@ -123,15 +125,21 @@ async function loadHistory() {
   try {
     const res = await getSituationHistory({ projectID: projectId.value, workflowRunID: workflowRunId.value || undefined, limit: 20 });
     history.value = res.snapshots ?? [];
+  } catch (e) {
+    console.warn('[situation] loadHistory 失败:', e);
   } finally {
     histLoading.value = false;
   }
 }
 
 onMounted(async () => {
-  workflowRunId.value = (route.query.workflowRunId as string) ?? '';
-  projectId.value = (route.query.projectId as string) ?? '';
-  await Promise.all([loadSituation(), loadHistory()]);
+  try {
+    workflowRunId.value = (route.query.workflowRunId as string) ?? '';
+    projectId.value = (route.query.projectId as string) ?? '';
+    await Promise.all([loadSituation(), loadHistory()]);
+  } catch (e) {
+    console.warn('[situation] onMounted 初始化失败:', e);
+  }
 });
 </script>
 

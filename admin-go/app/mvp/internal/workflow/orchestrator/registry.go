@@ -83,6 +83,7 @@ func Init() {
 		execRegistry.Register(executorPkg.NewClaudeCodeExecutor(wsMgr))
 		execRegistry.Register(executorPkg.NewCodexCLIExecutor(wsMgr))
 		execRegistry.Register(executorPkg.NewGeminiCLIExecutor(wsMgr))
+		execRegistry.Register(executorPkg.NewAutoExecutor(execRegistry))
 
 		// 执行阶段服务
 		taskRepo := repo.NewDomainTaskRepo()

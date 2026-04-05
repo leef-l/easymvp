@@ -69,7 +69,7 @@ const [Form, formApi] = useVbenForm({
     {
       component: 'Select',
       fieldName: 'executionMode',
-      label: tooltipLabel('执行方式', '决定该角色用什么方式执行任务：Chat对话、Aider代码编辑、OpenHands沙箱'),
+      label: tooltipLabel('执行方式', '执行方式：Auto自动选择、Chat对话、Aider/OpenHands/ClaudeCode/CodexCLI/GeminiCLI 代码执行引擎'),
       componentProps: { options: executionModeOptions, placeholder: '请选择执行方式', allowClear: true, class: 'w-full' },
       defaultValue: 'chat',
     },

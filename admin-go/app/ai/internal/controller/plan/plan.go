@@ -17,7 +17,7 @@ type cPlan struct{}
 
 // Create 创建AI套餐表
 func (c *cPlan) Create(ctx context.Context, req *v1.PlanCreateReq) (res *v1.PlanCreateRes, err error) {
-	err = service.Plan().Create(ctx, &model.PlanCreateInput{
+	initCount, err := service.Plan().Create(ctx, &model.PlanCreateInput{
 		ProviderID: req.ProviderID,
 		Name: req.Name,
 		Code: req.Code,
@@ -26,6 +26,10 @@ func (c *cPlan) Create(ctx context.Context, req *v1.PlanCreateReq) (res *v1.Plan
 		Status: req.Status,
 		Sort: req.Sort,
 	})
+	if err != nil {
+		return nil, err
+	}
+	res = &v1.PlanCreateRes{InitCount: initCount}
 	return
 }
 

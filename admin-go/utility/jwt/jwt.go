@@ -14,6 +14,7 @@ type Claims struct {
 	UserID   int64  `json:"userId"`
 	Username string `json:"username"`
 	DeptID   int64  `json:"deptId"`
+	IsAdmin  bool   `json:"isAdmin"`
 	gojwt.RegisteredClaims
 }
 
@@ -42,12 +43,13 @@ func init() {
 }
 
 // GenerateToken 生成 JWT Token
-func GenerateToken(userID int64, username string, deptID int64) (string, error) {
+func GenerateToken(userID int64, username string, deptID int64, isAdmin bool) (string, error) {
 	now := time.Now()
 	claims := Claims{
 		UserID:   userID,
 		Username: username,
 		DeptID:   deptID,
+		IsAdmin:  isAdmin,
 		RegisteredClaims: gojwt.RegisteredClaims{
 			ExpiresAt: gojwt.NewNumericDate(now.Add(expireTime)),
 			IssuedAt:  gojwt.NewNumericDate(now),

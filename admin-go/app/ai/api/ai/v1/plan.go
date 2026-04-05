@@ -27,7 +27,8 @@ type PlanCreateReq struct {
 
 // PlanCreateRes 创建AI套餐表响应
 type PlanCreateRes struct {
-	g.Meta `mime:"application/json"`
+	g.Meta    `mime:"application/json"`
+	InitCount int `json:"initCount" dc:"自动初始化的模型数量"`
 }
 
 // PlanUpdateReq 更新AI套餐表请求

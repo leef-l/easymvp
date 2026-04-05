@@ -182,14 +182,22 @@ export const stageTypeMap: Record<string, { label: string; color: string }> = {
 
 /** 执行方式选项 */
 export const executionModeOptions = [
-  { label: '对话模式 (Chat)', value: 'chat' },
-  { label: 'Aider 代码编辑', value: 'aider' },
-  { label: 'OpenHands 沙箱', value: 'openhands' },
+  { label: '🤖 Auto（自动选择）', value: 'auto' },
+  { label: '💬 Chat 对话', value: 'chat' },
+  { label: '✏️ Aider', value: 'aider' },
+  { label: '🐙 OpenHands', value: 'openhands' },
+  { label: '🔵 Claude Code', value: 'claude_code' },
+  { label: '🟢 Codex CLI', value: 'codex_cli' },
+  { label: '🔴 Gemini CLI', value: 'gemini_cli' },
 ];
 
 /** 执行方式映射 */
 export const executionModeMap: Record<string, { label: string; color: string }> = {
+  auto: { label: 'Auto', color: 'gold' },
   chat: { label: 'Chat', color: 'blue' },
   aider: { label: 'Aider', color: 'green' },
   openhands: { label: 'OpenHands', color: 'purple' },
+  claude_code: { label: 'Claude Code', color: 'cyan' },
+  codex_cli: { label: 'Codex CLI', color: 'lime' },
+  gemini_cli: { label: 'Gemini CLI', color: 'orange' },
 };

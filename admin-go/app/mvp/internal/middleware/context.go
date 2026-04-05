@@ -121,7 +121,7 @@ func ApplyDataScope(ctx context.Context, m *gdb.Model, columns ...string) *gdb.M
 	}
 
 	// 超级管理员（UserID=1）不限制数据范围
-	if claims.UserID == 1 {
+	if claims.IsAdmin {
 		return m
 	}
 
@@ -192,7 +192,7 @@ func CheckOwnership(ctx context.Context, m *gdb.Model, id interface{}, idColumn 
 	if claims == nil {
 		return fmt.Errorf("未登录")
 	}
-	if claims.UserID == 1 {
+	if claims.IsAdmin {
 		return nil
 	}
 	count, err := m.Where(idColumn, id).Where(createdByColumn, claims.UserID).Count()
@@ -213,7 +213,7 @@ func CheckProjectAccess(ctx context.Context, projectID int64) error {
 		return fmt.Errorf("未登录")
 	}
 	// 超管不限制
-	if claims.UserID == 1 {
+	if claims.IsAdmin {
 		return nil
 	}
 

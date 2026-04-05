@@ -6,3 +6,6 @@ const (
 	UsersStatus开启 = 1
 )
 
+func IsValidUsersStatus(value int) bool {
+	return value == UsersStatus关闭 || value == UsersStatus开启
+}

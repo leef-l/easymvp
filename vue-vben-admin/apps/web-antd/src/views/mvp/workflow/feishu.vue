@@ -10,6 +10,7 @@ import {
   FormItem,
   Input,
   Modal,
+  Select,
   Space,
   Switch,
   Table,
@@ -36,7 +37,7 @@ const bindingsLoading = ref(false);
 const saving = ref(false);
 const bindingSubmitting = ref(false);
 
-const config = reactive<FeishuConfigItem>({
+const config = reactive<FeishuConfigItem & { connectionMode: string }>({
   enabled: 0,
   appId: '',
   appSecret: '',
@@ -44,6 +45,7 @@ const config = reactive<FeishuConfigItem>({
   encryptKey: '',
   defaultNotifyUserIds: '',
   callbackPath: '/api/mvp/collab/feishu/callback',
+  connectionMode: 'webhook',
 });
 
 const bindForm = reactive({
@@ -205,6 +207,20 @@ const columns = [
                   />
                 </FormItem>
               </div>
+
+              <FormItem label="连接模式">
+                <Select
+                  v-model:value="config.connectionMode"
+                  style="width: 240px"
+                  :options="[
+                    { label: '回调模式（Webhook）', value: 'webhook' },
+                    { label: '长连接模式（WebSocket）', value: 'websocket' },
+                  ]"
+                />
+                <div style="color: #999; font-size: 12px; margin-top: 4px">
+                  Webhook：飞书主动推送事件到你的服务（需公网）；WebSocket：服务主动建立长连接接收事件（无需公网）
+                </div>
+              </FormItem>
 
               <FormItem label="回调地址">
                 <Space class="w-full">
