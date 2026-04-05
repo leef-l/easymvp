@@ -1,16 +1,3 @@
-mysqldump: [Warning] Using a password on the command line interface can be insecure.
-
-/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
-/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
-/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
-/*!50503 SET NAMES utf8mb4 */;
-/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
-/*!40103 SET TIME_ZONE='+00:00' */;
-/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;
-/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
-/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
-/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
-mysqldump: Error: 'Access denied; you need (at least one of) the PROCESS privilege(s) for this operation' when trying to dump tablespaces
 DROP TABLE IF EXISTS `ai_engine`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
@@ -1152,8 +1139,6 @@ CREATE TABLE `system_users` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
-mysqldump: [Warning] Using a password on the command line interface can be insecure.
-
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
 /*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
@@ -1164,8 +1149,6 @@ mysqldump: [Warning] Using a password on the command line interface can be insec
 /*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
 /*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
 /*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
-mysqldump: Error: 'Access denied; you need (at least one of) the PROCESS privilege(s) for this operation' when trying to dump tablespaces
-
 LOCK TABLES `mvp_config` WRITE;
 /*!40000 ALTER TABLE `mvp_config` DISABLE KEYS */;
 INSERT INTO `mvp_config` (`id`, `config_key`, `config_value`, `config_type`, `category`, `description`, `created_by`, `dept_id`, `created_at`, `updated_at`, `deleted_at`) VALUES (1,'watchdog.check_interval','120','int','watchdog','心跳检测间隔（秒）',0,0,'2026-04-03 16:31:01','2026-04-03 16:31:01',NULL),(2,'watchdog.max_stale_count','3','int','watchdog','连续无进展次数阈值（超过则判定卡死）',0,0,'2026-04-03 16:31:01','2026-04-03 16:31:01',NULL),(3,'watchdog.max_retries','3','int','watchdog','最大自动重试次数（超过则升级给架构师）',0,0,'2026-04-03 16:31:01','2026-04-03 16:31:01',NULL),(4,'scheduler.max_concurrent','20','int','scheduler','最大并发任务数',0,0,'2026-04-03 16:31:01','2026-04-03 16:31:01',NULL),(5,'scheduler.poll_interval','2','int','scheduler','调度轮询间隔（秒）',0,0,'2026-04-03 16:31:01','2026-04-03 16:31:01',NULL),(6,'review.timeout_seconds','300','int','engine','方案审核阶段超时时间（秒），超时跳过AI审核',0,0,'2026-04-04 16:04:26','2026-04-04 16:04:26',NULL),(7,'review.auto_fix_batch','1','int','engine','预检时是否自动修正batch_no不合理的问题（1=是）',0,0,'2026-04-04 16:04:26','2026-04-04 16:04:26',NULL),(8,'accept.llm_judge_enabled','1','int','accept','LLM 质量评审开关：1=启用 0=禁用（禁用时退化为纯硬规则裁决）',0,0,'2026-04-05 21:13:13','2026-04-05 21:13:13',NULL),(9,'accept.manual_review_enabled','1','int','accept','人工审核开关：1=启用 0=禁用（禁用时 uncertain 决策自动转 passed）',0,0,'2026-04-05 21:13:13','2026-04-05 21:13:13',NULL),(10,'accept.llm_judge_project_types','*','string','accept','LLM Judge 启用的项目类型白名单（JSON 数组如 [\"software_dev\",\"game_dev\"]，* 或空表示全部启用）',0,0,'2026-04-05 21:33:17','2026-04-05 21:33:17',NULL),(11,'accept.manual_review_project_types','*','string','accept','人工审核启用的项目类型白名单（JSON 数组，* 或空表示全部启用）',0,0,'2026-04-05 21:33:17','2026-04-05 21:33:17',NULL),(12,'accept.project_types','*','string','accept','Accept 验收总开关的项目类型白名单（JSON 数组，* 或空表示全部启用）',0,0,'2026-04-05 21:33:17','2026-04-05 21:33:17',NULL),(13,'workflow.autonomy.enabled','0','autonomy','general','自治中台总开关（0=关闭, 1=开启）',0,0,'2026-04-05 22:32:39','2026-04-05 23:42:00',NULL),(14,'workflow.autonomy.audit_only','1','autonomy','general','仅审计模式（1=只写记录不执行, 0=正式接管）',0,0,'2026-04-05 22:32:39','2026-04-05 23:42:00',NULL),(15,'workflow.autonomy.policy_engine_enabled','1','autonomy','general','策略引擎开关',0,0,'2026-04-05 22:32:39','2026-04-05 23:42:00',NULL),(16,'workflow.autonomy.risk_gate_enabled','1','autonomy','general','风险闸门开关',0,0,'2026-04-05 22:32:39','2026-04-05 23:42:00',NULL),(25,'workflow.collab.feishu_enabled','0','int','collab','飞书通知总开关(0关/1开)',0,0,'2026-04-06 00:38:35','2026-04-06 00:38:35',NULL),(26,'workflow.collab.feishu_app_id','','string','collab','飞书应用 App ID',0,0,'2026-04-06 00:38:35','2026-04-06 00:38:35',NULL),(27,'workflow.collab.feishu_app_secret','','string','collab','飞书应用 App Secret',0,0,'2026-04-06 00:38:35','2026-04-06 00:38:35',NULL),(28,'workflow.collab.feishu_encrypt_key','','string','collab','飞书事件回调加密 Key(签名验证)',0,0,'2026-04-06 00:38:35','2026-04-06 00:38:35',NULL),(29,'workflow.collab.feishu_default_notify_user_ids','','string','collab','降级通知的系统用户ID列表(逗号分隔)',0,0,'2026-04-06 00:38:35','2026-04-06 00:38:35',NULL);
