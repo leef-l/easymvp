@@ -44,6 +44,7 @@ type ProjectDetailOutput struct {
 	ArchitectModelID snowflake.JsonInt64 `json:"architectModelID"`
 	ArchitectModelName string `json:"architectModelName"`
 	WorkDir string `json:"workDir"`
+	EngineVersion string `json:"engineVersion"`
 	CreatedAt *gtime.Time `json:"createdAt"`
 	UpdatedAt *gtime.Time `json:"updatedAt"`
 }
@@ -60,6 +61,7 @@ type ProjectListOutput struct {
 	ArchitectModelID snowflake.JsonInt64 `json:"architectModelID"`
 	ArchitectModelName string `json:"architectModelName"`
 	WorkDir string `json:"workDir"`
+	EngineVersion string `json:"engineVersion"`
 	CreatedAt *gtime.Time `json:"createdAt"`
 	UpdatedAt *gtime.Time `json:"updatedAt"`
 }

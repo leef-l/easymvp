@@ -199,11 +199,12 @@ func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *M
 		SystemPrompt: modelInfo.SystemPrompt,
 	}
 
-	// 4. 流式调用 AI
+	// 4. 流式调用 AI（带重试：500/EOF/timeout 等瞬时错误最多重试 2 次）
+	const maxRetries = 2
 	var fullContent strings.Builder
 	chunkIndex := 0
 
-	err = p.ChatStream(ctx, req, func(chunk *provider.StreamChunk) error {
+	streamHandler := func(chunk *provider.StreamChunk) error {
 		if chunk.Content != "" {
 			fullContent.WriteString(chunk.Content)
 			chunkIndex++
@@ -243,10 +244,31 @@ func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *M
 		}
 
 		return nil
-	})
+	}
 
-	if err != nil {
-		e.failMessage(ctx, replyID, err.Error())
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			g.Log().Warningf(ctx, "[ChatEngine] AI 调用第 %d 次重试 (messageID=%d): %v", attempt, replyID, lastErr)
+			time.Sleep(time.Duration(attempt*2) * time.Second)
+		}
+		lastErr = p.ChatStream(ctx, req, streamHandler)
+		if lastErr == nil {
+			break
+		}
+		// 仅对瞬时错误重试（500/EOF/timeout），其他错误直接失败
+		errMsg := lastErr.Error()
+		isRetryable := strings.Contains(errMsg, "status 500") ||
+			strings.Contains(errMsg, "EOF") ||
+			strings.Contains(errMsg, "deadline exceeded") ||
+			strings.Contains(errMsg, "connection reset")
+		if !isRetryable {
+			break
+		}
+	}
+
+	if lastErr != nil {
+		e.failMessage(ctx, replyID, lastErr.Error())
 		return
 	}
 
