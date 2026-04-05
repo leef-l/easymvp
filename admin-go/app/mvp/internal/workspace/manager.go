@@ -76,10 +76,11 @@ type Manager interface {
 }
 
 // NeedsIsolation 判断执行模式是否需要工作空间隔离。
-// 当前仅 aider 已接入隔离链路；后续接入: openhands, claude_code, codex_cli, gemini_cli。
+// 注意：V2 执行链通过 Executor.NeedsWorkspace() 动态判断，不再依赖此函数。
+// 此函数仅供 legacy 旧引擎使用。
 func NeedsIsolation(executionMode string) bool {
 	switch executionMode {
-	case "aider":
+	case "aider", "openhands", "claude_code", "codex_cli", "gemini_cli":
 		return true
 	default:
 		return false
