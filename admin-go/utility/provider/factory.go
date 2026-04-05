@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"strings"
 	"sync"
 )
 
@@ -69,26 +70,30 @@ func (f *Factory) ClearCache() {
 	f.mu.Unlock()
 }
 
-// create 根据类型创建 Provider
+// detectProtocol 根据 base_url 特征自动识别协议类型，优先级高于 provider_type
+// 规则：
+//   - 包含 /anthropic 路径或 api.anthropic.com 域名 → Anthropic 协议
+//   - 包含 generativelanguage.googleapis.com         → Google 原生（当前走 OpenAI 兼容端点）
+//   - 其他一律 → OpenAI 兼容协议
+func detectProtocol(cfg Config) string {
+	url := strings.ToLower(strings.TrimSpace(cfg.BaseURL))
+	if strings.Contains(url, "api.anthropic.com") || strings.Contains(url, "/anthropic/") {
+		return TypeAnthropic
+	}
+	// provider_type 明确指定 anthropic 系时也走 Anthropic 协议
+	pt := strings.ToLower(cfg.ProviderType)
+	if pt == TypeAnthropic || pt == "tencent_coding" || pt == "baidu_coding" {
+		return TypeAnthropic
+	}
+	return TypeOpenAICompatible
+}
+
+// create 根据 base_url + provider_type 共同判断协议，创建 Provider
 func (f *Factory) create(cfg Config) (Provider, error) {
-	switch cfg.ProviderType {
-	case TypeOpenAICompatible:
-		return NewOpenAI(cfg), nil
+	switch detectProtocol(cfg) {
 	case TypeAnthropic:
 		return NewAnthropic(cfg), nil
-
-	// Anthropic 协议的 Coding Plan（腾讯云、百度等通过 Anthropic 兼容端点代理）
-	case "tencent_coding", "baidu_coding":
-		return NewAnthropic(cfg), nil
-
-	// OpenAI 兼容协议（大多数国内/海外供应商）
-	case "google", "deepseek", "qwen", "zhipu", "moonshot", "minimax",
-		"baidu", "tencent", "bytedance", "01ai", "mistral", "groq", "cohere",
-		"aliyun_coding":
-		return NewOpenAI(cfg), nil
-
 	default:
-		// 未知类型默认尝试 OpenAI 兼容协议（大多数供应商都兼容）
 		return NewOpenAI(cfg), nil
 	}
 }
