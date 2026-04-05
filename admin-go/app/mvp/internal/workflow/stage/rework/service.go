@@ -26,10 +26,14 @@ type StageCompleter interface {
 // ExecuteTriggerFn 触发执行阶段回调。
 type ExecuteTriggerFn func(ctx context.Context, workflowRunID, planVersionID int64) error
 
+// AcceptTriggerFn 触发验收阶段回调（返工完成后回验收）。
+type AcceptTriggerFn func(ctx context.Context, workflowRunID int64) error
+
 // Service 返工阶段服务。
 type Service struct {
 	stageCompleter StageCompleter
 	executeTrigger ExecuteTriggerFn
+	acceptTrigger  AcceptTriggerFn
 }
 
 // NewService 创建返工阶段服务。
@@ -40,6 +44,9 @@ func (s *Service) SetStageCompleter(sc StageCompleter) { s.stageCompleter = sc }
 
 // SetExecuteTrigger 注册执行阶段触发回调。
 func (s *Service) SetExecuteTrigger(fn ExecuteTriggerFn) { s.executeTrigger = fn }
+
+// SetAcceptTrigger 注册验收阶段触发回调（返工完成后回验收）。
+func (s *Service) SetAcceptTrigger(fn AcceptTriggerFn) { s.acceptTrigger = fn }
 
 // HandleRework 处理返工流程。
 // 接收失败的 domain_task，创建架构师分析任务，分析完成后回写原任务。

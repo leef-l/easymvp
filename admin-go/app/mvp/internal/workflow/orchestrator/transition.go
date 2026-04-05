@@ -5,6 +5,7 @@ const (
 	StageDesign   = "design"
 	StageReview   = "review"
 	StageExecute  = "execute"
+	StageAccept   = "accept"
 	StageRework   = "rework"
 	StageComplete = "complete"
 )
@@ -14,6 +15,7 @@ const (
 	WorkflowDesigning = "designing"
 	WorkflowReviewing = "reviewing"
 	WorkflowExecuting = "executing"
+	WorkflowAccepting = "accepting"
 	WorkflowReworking = "reworking"
 	WorkflowPaused    = "paused"
 	WorkflowCompleted = "completed"
@@ -33,10 +35,11 @@ const (
 // validWorkflowTransitions 合法的工作流状态迁移。
 var validWorkflowTransitions = map[string][]string{
 	WorkflowDesigning: {WorkflowReviewing, WorkflowPaused, WorkflowCanceled},
-	WorkflowReviewing: {WorkflowExecuting, WorkflowDesigning, WorkflowPaused, WorkflowCanceled}, // 驳回可回 designing
-	WorkflowExecuting: {WorkflowCompleted, WorkflowReworking, WorkflowPaused, WorkflowFailed, WorkflowCanceled},
-	WorkflowReworking: {WorkflowExecuting, WorkflowReviewing, WorkflowPaused, WorkflowCanceled}, // 返工完成可回执行
-	WorkflowPaused:    {WorkflowDesigning, WorkflowReviewing, WorkflowExecuting, WorkflowReworking, WorkflowCanceled}, // 恢复到暂停前的阶段
+	WorkflowReviewing: {WorkflowExecuting, WorkflowDesigning, WorkflowPaused, WorkflowCanceled},                       // 驳回可回 designing
+	WorkflowExecuting: {WorkflowAccepting, WorkflowCompleted, WorkflowReworking, WorkflowPaused, WorkflowFailed, WorkflowCanceled}, // 优先走 accept；灰度关闭时可直达 completed
+	WorkflowAccepting: {WorkflowCompleted, WorkflowReworking, WorkflowFailed, WorkflowPaused, WorkflowCanceled},        // accept passed→completed, failed→rework, 异常→failed
+	WorkflowReworking: {WorkflowExecuting, WorkflowAccepting, WorkflowReviewing, WorkflowPaused, WorkflowCanceled},     // 返工完成可回执行或验收
+	WorkflowPaused:    {WorkflowDesigning, WorkflowReviewing, WorkflowExecuting, WorkflowAccepting, WorkflowReworking, WorkflowCanceled}, // 恢复到暂停前的阶段
 	WorkflowCompleted: {},
 	WorkflowFailed:    {WorkflowDesigning, WorkflowReworking, WorkflowCanceled}, // 失败后可回设计（审核驳回）、返工或取消
 	WorkflowCanceled:  {},
@@ -57,6 +60,7 @@ var stageOrder = []string{
 	StageDesign,
 	StageReview,
 	StageExecute,
+	StageAccept,
 	StageComplete,
 }
 
@@ -97,6 +101,8 @@ func StageTypeToWorkflowStatus(stageType string) string {
 		return WorkflowReviewing
 	case StageExecute:
 		return WorkflowExecuting
+	case StageAccept:
+		return WorkflowAccepting
 	case StageRework:
 		return WorkflowReworking
 	case StageComplete:

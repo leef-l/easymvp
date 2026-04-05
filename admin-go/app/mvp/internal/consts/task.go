@@ -77,6 +77,7 @@ const (
 	WorkflowRunStatusDesigning = "designing"
 	WorkflowRunStatusReviewing = "reviewing"
 	WorkflowRunStatusExecuting = "executing"
+	WorkflowRunStatusAccepting = "accepting"
 	WorkflowRunStatusReworking = "reworking"
 	WorkflowRunStatusPaused    = "paused"
 	WorkflowRunStatusCompleted = "completed"
@@ -89,6 +90,7 @@ const (
 	StageTypeDesign   = "design"
 	StageTypeReview   = "review"
 	StageTypeExecute  = "execute"
+	StageTypeAccept   = "accept"
 	StageTypeRework   = "rework"
 	StageTypeComplete = "complete"
 )

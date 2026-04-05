@@ -169,6 +169,7 @@ func (s *WorkflowService) Pause(ctx context.Context, workflowRunID int64, reason
 		consts.WorkflowRunStatusDesigning: true,
 		consts.WorkflowRunStatusReviewing: true,
 		consts.WorkflowRunStatusExecuting: true,
+		consts.WorkflowRunStatusAccepting: true,
 		consts.WorkflowRunStatusReworking: true,
 	}
 	if !activeStatuses[currentStatus] {

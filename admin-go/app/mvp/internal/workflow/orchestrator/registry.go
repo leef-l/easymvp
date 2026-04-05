@@ -10,6 +10,7 @@ import (
 
 	"easymvp/app/mvp/internal/consts"
 	"easymvp/app/mvp/internal/engine"
+	"easymvp/app/mvp/internal/workflow/acceptance"
 	executorPkg "easymvp/app/mvp/internal/workflow/executor"
 	"easymvp/app/mvp/internal/workspace"
 	"easymvp/app/mvp/internal/workflow/domain/plan"
@@ -18,6 +19,7 @@ import (
 	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/app/mvp/internal/workflow/runtime"
 	"easymvp/app/mvp/internal/workflow/scheduler"
+	acceptStage "easymvp/app/mvp/internal/workflow/stage/accept"
 	completeStage "easymvp/app/mvp/internal/workflow/stage/complete"
 	executeStage "easymvp/app/mvp/internal/workflow/stage/execute"
 	reworkStage "easymvp/app/mvp/internal/workflow/stage/rework"
@@ -33,6 +35,7 @@ var (
 	reviewStageSvc  *reviewStage.Service
 	executeStageSvc *executeStage.Service
 	taskScheduler   *scheduler.DomainTaskScheduler
+	acceptStageSvc    *acceptStage.Service
 	reworkStageSvc    *reworkStage.Service
 	completeStageSvc  *completeStage.Service
 	domainWatchdog    *watchdogV2.DomainTaskWatchdog
@@ -104,6 +107,27 @@ func Init() {
 		// 完成阶段服务
 		completeStageSvc = completeStage.NewService()
 
+		// 验收阶段服务
+		acceptRunRepo := repo.NewAcceptRunRepo()
+		acceptIssueRepo := repo.NewAcceptIssueRepo()
+		acceptRuleRepo := repo.NewAcceptRuleRepo()
+		acceptEvidenceRepo := repo.NewAcceptEvidenceRepo()
+		evidenceCollector := acceptance.NewEvidenceCollector(acceptEvidenceRepo)
+		ruleEngine := acceptance.NewRuleEngine(acceptRuleRepo)
+		decisionReducer := acceptance.NewDecisionReducer(acceptIssueRepo)
+		acceptStageSvc = acceptStage.NewService(acceptRunRepo, evidenceCollector, ruleEngine, decisionReducer)
+		acceptStageSvc.SetStageCompleter(stageSvc)
+
+		// 注册 accept → complete 回调
+		acceptStageSvc.SetCompleteTrigger(func(ctx context.Context, workflowRunID int64) error {
+			return stageSvc.completeWorkflow(ctx, workflowRunID)
+		})
+
+		// 注册 accept 阶段触发回调到 StageService
+		stageSvc.SetAcceptTriggerFn(func(ctx context.Context, workflowRunID, stageRunID int64) error {
+			return acceptStageSvc.Run(ctx, workflowRunID, stageRunID)
+		})
+
 		// 返工阶段服务
 		reworkStageSvc = reworkStage.NewService()
 		reworkStageSvc.SetStageCompleter(stageSvc)
@@ -137,6 +161,38 @@ func Init() {
 
 			// 重启调度器拾取 pending 任务
 			return taskScheduler.Start(ctx, workflowRunID)
+		})
+
+		// 注册 accept failed → rework 回调
+		acceptStageSvc.SetReworkTrigger(func(ctx context.Context, workflowRunID int64, acceptRunID int64, issues []acceptance.RuleHit) error {
+			g.Log().Infof(ctx, "[Registry] 验收失败，触发返工: workflowRunID=%d acceptRunID=%d issues=%d",
+				workflowRunID, acceptRunID, len(issues))
+			// 找到第一个 blocker/error issue 关联的 taskID 作为返工入口
+			var failedTaskID int64
+			for _, issue := range issues {
+				if issue.DomainTaskID > 0 {
+					failedTaskID = issue.DomainTaskID
+					break
+				}
+			}
+			if failedTaskID == 0 {
+				// 没有关联具体任务的 issue，用 0 表示项目级返工
+				g.Log().Warningf(ctx, "[Registry] 验收失败但无关联任务，跳过自动返工: workflowRunID=%d", workflowRunID)
+				return nil
+			}
+			return triggerReworkStage(ctx, workflowRunID, failedTaskID)
+		})
+
+		// 注册 rework → accept 回调（返工完成后回验收）
+		reworkStageSvc.SetAcceptTrigger(func(ctx context.Context, workflowRunID int64) error {
+			g.Log().Infof(ctx, "[Registry] rework 完成，恢复验收状态: workflowRunID=%d", workflowRunID)
+
+			// StartStage("accept") 会自动 CAS: reworking→accepting + 同步 project.status
+			stageRunID, stageErr := stageSvc.StartStage(ctx, workflowRunID, "accept")
+			if stageErr != nil {
+				return fmt.Errorf("重建 accept stage 失败: %w", stageErr)
+			}
+			return acceptStageSvc.Run(ctx, workflowRunID, stageRunID)
 		})
 
 		// 注册 failure_analysis 完成回调到 execute service
@@ -297,6 +353,12 @@ func GetExecuteStageService() *executeStage.Service {
 func GetTaskScheduler() *scheduler.DomainTaskScheduler {
 	Init()
 	return taskScheduler
+}
+
+// GetAcceptStageService 获取验收阶段服务。
+func GetAcceptStageService() *acceptStage.Service {
+	Init()
+	return acceptStageSvc
 }
 
 // GetReworkStageService 获取返工阶段服务。

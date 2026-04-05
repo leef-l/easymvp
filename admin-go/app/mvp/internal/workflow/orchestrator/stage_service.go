@@ -21,6 +21,7 @@ type WorkflowFailedCallback func(ctx context.Context, workflowRunID int64)
 type StageService struct {
 	workflowSvc      *WorkflowService
 	onWorkflowFailed WorkflowFailedCallback
+	onAcceptTrigger  AcceptTriggerFn
 }
 
 // NewStageService 创建阶段服务。
@@ -237,6 +238,7 @@ func (s *StageService) FailStage(ctx context.Context, stageRunID int64, reason s
 		updated := false
 		for _, fromStatus := range []string{
 			consts.WorkflowRunStatusExecuting,
+			consts.WorkflowRunStatusAccepting,
 			consts.WorkflowRunStatusReviewing,
 			consts.WorkflowRunStatusReworking,
 			consts.WorkflowRunStatusDesigning,
@@ -268,6 +270,14 @@ func (s *StageService) FailStage(ctx context.Context, stageRunID int64, reason s
 	return nil
 }
 
+// AcceptTriggerFn accept 阶段触发回调。
+type AcceptTriggerFn func(ctx context.Context, workflowRunID, stageRunID int64) error
+
+// SetAcceptTriggerFn 注册 accept 阶段触发回调。
+func (s *StageService) SetAcceptTriggerFn(fn AcceptTriggerFn) {
+	s.onAcceptTrigger = fn
+}
+
 // TransitionNext 完成当前阶段并推进到下一阶段。
 // 如果没有下一阶段（即 complete 之后），则完成整个 workflow_run。
 func (s *StageService) TransitionNext(ctx context.Context, workflowRunID int64) error {
@@ -283,14 +293,47 @@ func (s *StageService) TransitionNext(ctx context.Context, workflowRunID int64) 
 	currentStage := wfRun["current_stage"].String()
 	nextStage := NextStage(currentStage)
 
+	// 灰度开关：当 workflow.accept.enabled=false 时，跳过 accept 直接进入 complete
+	if nextStage == StageAccept && !isAcceptEnabled(ctx) {
+		g.Log().Infof(ctx, "[StageService] accept 灰度未开启，跳过 accept 直接进入 complete: workflowRunID=%d", workflowRunID)
+		nextStage = NextStage(StageAccept) // complete
+	}
+
 	if nextStage == "" || nextStage == StageComplete {
 		// 没有下一阶段或到达 complete，结束 workflow
 		return s.completeWorkflow(ctx, workflowRunID)
 	}
 
 	// 启动下一阶段
-	_, err = s.StartStage(ctx, workflowRunID, nextStage)
-	return err
+	stageRunID, err := s.StartStage(ctx, workflowRunID, nextStage)
+	if err != nil {
+		return err
+	}
+
+	// accept 阶段需要异步触发验收流程
+	if nextStage == StageAccept && s.onAcceptTrigger != nil {
+		go func() {
+			if triggerErr := s.onAcceptTrigger(ctx, workflowRunID, stageRunID); triggerErr != nil {
+				g.Log().Errorf(ctx, "[StageService] accept 触发失败: workflowRunID=%d err=%v", workflowRunID, triggerErr)
+				_ = s.FailStage(context.Background(), stageRunID, "accept 触发失败: "+triggerErr.Error())
+			}
+		}()
+	}
+
+	return nil
+}
+
+// isAcceptEnabled ��查 accept 灰度开关。
+func isAcceptEnabled(ctx context.Context) bool {
+	val, err := g.DB().Model("mvp_config").Ctx(ctx).
+		Where("config_key", "workflow.accept.enabled").
+		WhereNull("deleted_at").
+		Value("config_value")
+	if err != nil || val.IsEmpty() {
+		// 默认开启
+		return true
+	}
+	return val.String() == "true" || val.String() == "1"
 }
 
 // TransitionTo 强制跳转到指定阶段（用于审核驳回回退 design 等场景）。
