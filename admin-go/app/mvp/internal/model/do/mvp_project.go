@@ -20,6 +20,7 @@ type MvpProject struct {
 	Status              any         // 项目状态: designing/reviewing/running/paused/completed
 	PauseReason         any         // 暂停原因
 	GlobalContext       any         // 项目全局上下文（架构师需求分析+方案设计的压缩摘要）
+	ObjectiveJson       any         // 项目目标约束(JSON): budget/deadline/risk_tolerance/autonomy_level
 	ArchitectModelId    any         // 架构师使用的AI模型ID
 	WorkDir             any         // 项目代码工作目录（Aider执行路径）
 	ActiveBatchNo       any         // 当前活跃批次号（调度器持久化，0=无活跃批次）

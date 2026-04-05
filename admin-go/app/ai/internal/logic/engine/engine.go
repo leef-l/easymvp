@@ -204,8 +204,48 @@ func (s *sEngine) TestConnection(ctx context.Context, engineCode string) (*model
 		}
 		defer resp.Body.Close()
 		return &model.EngineTestOutput{Success: resp.StatusCode < 500, Message: fmt.Sprintf("OpenHands 响应状态: %d", resp.StatusCode)}, nil
+	case "claude_code":
+		if _, err = exec.LookPath("claude"); err == nil {
+			return &model.EngineTestOutput{Success: true, Message: "Claude Code CLI 可用"}, nil
+		}
+		if detail.BaseURL != "" && detail.APIKeyMasked != "" {
+			return &model.EngineTestOutput{Success: true, Message: "Claude Code：已配置 API Key，CLI 未在 PATH 中（需手动安装）"}, nil
+		}
+		return &model.EngineTestOutput{Success: false, Message: "未找到 claude 可执行文件，且 API Key 未配置"}, nil
+
+	case "codex_cli":
+		if _, err = exec.LookPath("codex"); err == nil {
+			return &model.EngineTestOutput{Success: true, Message: "Codex CLI 可用"}, nil
+		}
+		if detail.APIKeyMasked != "" {
+			return &model.EngineTestOutput{Success: true, Message: "Codex CLI：已配置 API Key，CLI 未在 PATH 中（需手动安装）"}, nil
+		}
+		return &model.EngineTestOutput{Success: false, Message: "未找到 codex 可执行文件，且 API Key 未配置"}, nil
+
+	case "gemini_cli":
+		if _, err = exec.LookPath("gemini"); err == nil {
+			return &model.EngineTestOutput{Success: true, Message: "Gemini CLI 可用"}, nil
+		}
+		if detail.APIKeyMasked != "" {
+			return &model.EngineTestOutput{Success: true, Message: "Gemini CLI：已配置 API Key，CLI 未在 PATH 中（需手动安装）"}, nil
+		}
+		return &model.EngineTestOutput{Success: false, Message: "未找到 gemini 可执行文件，且 API Key 未配置"}, nil
+
+	case "chat":
+		if detail.BaseURL != "" {
+			client := &http.Client{Timeout: 5 * time.Second}
+			target := strings.TrimRight(detail.BaseURL, "/")
+			resp, err := client.Get(target)
+			if err != nil {
+				return &model.EngineTestOutput{Success: false, Message: "Chat 接口连接失败: " + err.Error()}, nil
+			}
+			defer resp.Body.Close()
+			return &model.EngineTestOutput{Success: resp.StatusCode < 500, Message: fmt.Sprintf("Chat 接口响应正常（状态码: %d）", resp.StatusCode)}, nil
+		}
+		return &model.EngineTestOutput{Success: true, Message: "Chat 对话模式无需额外配置，状态正常"}, nil
+
 	default:
-		return &model.EngineTestOutput{Success: false, Message: "暂不支持该引擎测试"}, nil
+		return &model.EngineTestOutput{Success: false, Message: "未知引擎类型: " + engineCode}, nil
 	}
 }
 

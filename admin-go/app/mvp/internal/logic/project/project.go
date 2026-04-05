@@ -78,25 +78,210 @@ func (s *sProject) Update(ctx context.Context, in *model.ProjectUpdateInput) err
 	return err
 }
 
-// Delete 软删除MVP项目表
+// Delete 软删除MVP项目表（级联删除所有关联数据）
 func (s *sProject) Delete(ctx context.Context, id snowflake.JsonInt64) error {
 	if err := middleware.CheckOwnership(ctx, dao.MvpProject.Ctx(ctx).Where(dao.MvpProject.Columns().DeletedAt, nil), id, dao.MvpProject.Columns().Id, dao.MvpProject.Columns().CreatedBy); err != nil {
 		return err
 	}
-	_, err := dao.MvpProject.Ctx(ctx).Where(dao.MvpProject.Columns().Id, id).Data(g.Map{
-		dao.MvpProject.Columns().DeletedAt: gtime.Now(),
-	}).Update()
-	return err
+	return s.cascadeDelete(ctx, []snowflake.JsonInt64{id})
 }
 
-// BatchDelete 批量软删除MVP项目表
+// BatchDelete 批量软删除MVP项目表（级联删除所有关联数据）
 func (s *sProject) BatchDelete(ctx context.Context, ids []snowflake.JsonInt64) error {
 	m := dao.MvpProject.Ctx(ctx).Where(dao.MvpProject.Columns().DeletedAt, nil).WhereIn(dao.MvpProject.Columns().Id, ids)
 	m = middleware.ApplyDataScope(ctx, m, dao.MvpProject.Columns().CreatedBy, dao.MvpProject.Columns().DeptId)
-	_, err := m.Data(g.Map{
-		dao.MvpProject.Columns().DeletedAt: gtime.Now(),
-	}).Update()
-	return err
+	// 只删有权限的项目
+	var allowedIDs []snowflake.JsonInt64
+	if err := m.Fields("id").Scan(&allowedIDs); err != nil || len(allowedIDs) == 0 {
+		return err
+	}
+	return s.cascadeDelete(ctx, allowedIDs)
+}
+
+// cascadeDelete 级联软删除项目及所有关联数据
+func (s *sProject) cascadeDelete(ctx context.Context, projectIDs []snowflake.JsonInt64) error {
+	now := gtime.Now()
+	db := g.DB()
+
+	return db.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		// 1. 收集 workflow_run ids
+		var workflowRunIDs []int64
+		if err := db.Ctx(ctx).Model("mvp_workflow_run").
+			WhereIn("project_id", projectIDs).Where("deleted_at", nil).
+			Fields("id").Scan(&workflowRunIDs); err != nil {
+			return err
+		}
+
+		// 2. 收集 task ids
+		var taskIDs []int64
+		if err := db.Ctx(ctx).Model("mvp_task").
+			WhereIn("project_id", projectIDs).Where("deleted_at", nil).
+			Fields("id").Scan(&taskIDs); err != nil {
+			return err
+		}
+
+		// 3. 收集 conversation ids
+		var convIDs []int64
+		if err := db.Ctx(ctx).Model("mvp_conversation").
+			WhereIn("project_id", projectIDs).Where("deleted_at", nil).
+			Fields("id").Scan(&convIDs); err != nil {
+			return err
+		}
+
+		// 4. 收集 stage_run ids
+		var stageRunIDs []int64
+		if len(workflowRunIDs) > 0 {
+			if err := db.Ctx(ctx).Model("mvp_stage_run").
+				WhereIn("workflow_run_id", workflowRunIDs).Where("deleted_at", nil).
+				Fields("id").Scan(&stageRunIDs); err != nil {
+				return err
+			}
+		}
+
+		// ── 软删：有 deleted_at 的表 ──────────────────────────
+
+		softDel := func(table, field string, ids []int64) error {
+			if len(ids) == 0 {
+				return nil
+			}
+			_, err := db.Ctx(ctx).Model(table).
+				WhereIn(field, ids).Where("deleted_at", nil).
+				Data(g.Map{"deleted_at": now}).Update()
+			return err
+		}
+		softDelSnow := func(table, field string, ids []snowflake.JsonInt64) error {
+			int64IDs := make([]int64, len(ids))
+			for i, id := range ids {
+				int64IDs[i] = int64(id)
+			}
+			return softDel(table, field, int64IDs)
+		}
+
+		// 消息分片（message_chunk 无 deleted_at，物理删）
+		if len(convIDs) > 0 {
+			var msgIDs []int64
+			if err := db.Ctx(ctx).Model("mvp_message").
+				WhereIn("conversation_id", convIDs).Where("deleted_at", nil).
+				Fields("id").Scan(&msgIDs); err != nil {
+				return err
+			}
+			if len(msgIDs) > 0 {
+				if _, err := db.Ctx(ctx).Model("mvp_message_chunk").
+					WhereIn("message_id", msgIDs).Delete(); err != nil {
+					return err
+				}
+			}
+			if err := softDel("mvp_message", "conversation_id", convIDs); err != nil {
+				return err
+			}
+		}
+
+		// task 相关
+		if len(taskIDs) > 0 {
+			if err := softDel("mvp_task_log", "task_id", taskIDs); err != nil {
+				return err
+			}
+			if err := softDel("mvp_task_workspace", "task_id", taskIDs); err != nil {
+				return err
+			}
+			// 物理删（无 deleted_at）
+			if _, err := db.Ctx(ctx).Model("mvp_task_dependency").WhereIn("task_id", taskIDs).Delete(); err != nil {
+				return err
+			}
+			if _, err := db.Ctx(ctx).Model("mvp_task_resource_lock").WhereIn("task_id", taskIDs).Delete(); err != nil {
+				return err
+			}
+		}
+
+		// workflow_run 相关
+		if len(workflowRunIDs) > 0 {
+			if _, err := db.Ctx(ctx).Model("mvp_workflow_event").WhereIn("workflow_run_id", workflowRunIDs).Delete(); err != nil {
+				return err
+			}
+			if _, err := db.Ctx(ctx).Model("mvp_handoff_record").WhereIn("workflow_run_id", workflowRunIDs).Delete(); err != nil {
+				return err
+			}
+			if err := softDel("mvp_domain_task", "workflow_run_id", workflowRunIDs); err != nil {
+				return err
+			}
+			if err := softDel("mvp_plan_version", "workflow_run_id", workflowRunIDs); err != nil {
+				return err
+			}
+			if err := softDel("mvp_review_issue", "workflow_run_id", workflowRunIDs); err != nil {
+				return err
+			}
+			if err := softDel("mvp_action_outcome", "workflow_run_id", workflowRunIDs); err != nil {
+				return err
+			}
+			if err := softDel("mvp_autonomy_decision", "workflow_run_id", workflowRunIDs); err != nil {
+				return err
+			}
+			if err := softDel("mvp_observation_record", "workflow_run_id", workflowRunIDs); err != nil {
+				return err
+			}
+			if err := softDel("mvp_situation_snapshot", "workflow_run_id", workflowRunIDs); err != nil {
+				return err
+			}
+			if err := softDel("mvp_accept_run", "workflow_run_id", workflowRunIDs); err != nil {
+				return err
+			}
+			if err := softDel("mvp_accept_issue", "workflow_run_id", workflowRunIDs); err != nil {
+				return err
+			}
+			if err := softDel("mvp_human_checkpoint", "workflow_run_id", workflowRunIDs); err != nil {
+				return err
+			}
+		}
+
+		// stage_run 相关
+		if len(stageRunIDs) > 0 {
+			if err := softDel("mvp_stage_task", "stage_run_id", stageRunIDs); err != nil {
+				return err
+			}
+			if err := softDel("mvp_stage_run", "id", stageRunIDs); err != nil {
+				return err
+			}
+		}
+
+		// 直接关联 project_id 的表
+		if err := softDelSnow("mvp_project_role", "project_id", projectIDs); err != nil {
+			return err
+		}
+		if err := softDelSnow("mvp_conversation", "project_id", projectIDs); err != nil {
+			return err
+		}
+		if err := softDelSnow("mvp_task", "project_id", projectIDs); err != nil {
+			return err
+		}
+		if err := softDelSnow("mvp_task_blueprint", "project_id", projectIDs); err != nil {
+			return err
+		}
+		if err := softDelSnow("mvp_task_workspace", "project_id", projectIDs); err != nil {
+			return err
+		}
+		if err := softDelSnow("mvp_project_report", "project_id", projectIDs); err != nil {
+			return err
+		}
+		if err := softDelSnow("mvp_workflow_run", "project_id", projectIDs); err != nil {
+			return err
+		}
+		if err := softDelSnow("mvp_assessment_result", "project_id", projectIDs); err != nil {
+			return err
+		}
+		if err := softDelSnow("mvp_learning_record", "project_id", projectIDs); err != nil {
+			return err
+		}
+		if err := softDelSnow("mvp_tune_recommendation", "project_id", projectIDs); err != nil {
+			return err
+		}
+
+		// 最后删项目本身
+		if err := softDelSnow("mvp_project", "id", projectIDs); err != nil {
+			return err
+		}
+
+		return nil
+	})
 }
 
 // Detail 获取MVP项目表详情

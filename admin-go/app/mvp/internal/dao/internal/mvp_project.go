@@ -29,6 +29,7 @@ type MvpProjectColumns struct {
 	Status              string // 项目状态: designing/reviewing/running/paused/completed
 	PauseReason         string // 暂停原因
 	GlobalContext       string // 项目全局上下文（架构师需求分析+方案设计的压缩摘要）
+	ObjectiveJson       string // 项目目标约束(JSON): budget/deadline/risk_tolerance/autonomy_level
 	ArchitectModelId    string // 架构师使用的AI模型ID
 	WorkDir             string // 项目代码工作目录（Aider执行路径）
 	ActiveBatchNo       string // 当前活跃批次号（调度器持久化，0=无活跃批次）
@@ -51,6 +52,7 @@ var mvpProjectColumns = MvpProjectColumns{
 	Status:              "status",
 	PauseReason:         "pause_reason",
 	GlobalContext:       "global_context",
+	ObjectiveJson:       "objective_json",
 	ArchitectModelId:    "architect_model_id",
 	WorkDir:             "work_dir",
 	ActiveBatchNo:       "active_batch_no",

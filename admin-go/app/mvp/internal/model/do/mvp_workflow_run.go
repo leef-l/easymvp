@@ -16,6 +16,8 @@ type MvpWorkflowRun struct {
 	ProjectId           any         // 所属项目ID
 	RunNo               any         // 项目内运行序号(从1递增)
 	Status              any         // 状态: designing/reviewing/executing/reworking/paused/completed/failed/canceled
+	TokensConsumed      any         // 已消耗Token总量
+	ReplanCount         any         // 重规划次数
 	CurrentStage        any         // 当前阶段: design/review/execute/rework/complete
 	CurrentStageRunId   any         // 当前阶段运行ID
 	ActivePlanVersionId any         // 当前活跃计划版本ID

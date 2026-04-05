@@ -25,6 +25,8 @@ type MvpWorkflowRunColumns struct {
 	ProjectId           string // 所属项目ID
 	RunNo               string // 项目内运行序号(从1递增)
 	Status              string // 状态: designing/reviewing/executing/reworking/paused/completed/failed/canceled
+	TokensConsumed      string // 已消耗Token总量
+	ReplanCount         string // 重规划次数
 	CurrentStage        string // 当前阶段: design/review/execute/rework/complete
 	CurrentStageRunId   string // 当前阶段运行ID
 	ActivePlanVersionId string // 当前活跃计划版本ID
@@ -47,6 +49,8 @@ var mvpWorkflowRunColumns = MvpWorkflowRunColumns{
 	ProjectId:           "project_id",
 	RunNo:               "run_no",
 	Status:              "status",
+	TokensConsumed:      "tokens_consumed",
+	ReplanCount:         "replan_count",
 	CurrentStage:        "current_stage",
 	CurrentStageRunId:   "current_stage_run_id",
 	ActivePlanVersionId: "active_plan_version_id",

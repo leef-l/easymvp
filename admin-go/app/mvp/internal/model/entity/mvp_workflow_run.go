@@ -14,6 +14,8 @@ type MvpWorkflowRun struct {
 	ProjectId           uint64      `orm:"project_id"             description:"所属项目ID"`                                                                       // 所属项目ID
 	RunNo               int         `orm:"run_no"                 description:"项目内运行序号(从1递增)"`                                                                // 项目内运行序号(从1递增)
 	Status              string      `orm:"status"                 description:"状态: designing/reviewing/executing/reworking/paused/completed/failed/canceled"` // 状态: designing/reviewing/executing/reworking/paused/completed/failed/canceled
+	TokensConsumed      int64       `orm:"tokens_consumed"        description:"已消耗Token总量"`                                                                   // 已消耗Token总量
+	ReplanCount         int         `orm:"replan_count"           description:"重规划次数"`                                                                        // 重规划次数
 	CurrentStage        string      `orm:"current_stage"          description:"当前阶段: design/review/execute/rework/complete"`                                  // 当前阶段: design/review/execute/rework/complete
 	CurrentStageRunId   uint64      `orm:"current_stage_run_id"   description:"当前阶段运行ID"`                                                                     // 当前阶段运行ID
 	ActivePlanVersionId uint64      `orm:"active_plan_version_id" description:"当前活跃计划版本ID"`                                                                   // 当前活跃计划版本ID

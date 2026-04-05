@@ -19,7 +19,7 @@ type MvpProjectRole struct {
 	RoleLevel       any         // 角色等级：lite/pro/max
 	ModelId         any         // AI模型ID
 	SystemPrompt    any         // 系统提示词（角色设定）
-	ExecutionMode   any         // 执行方式: chat=对话模式, aider=Aider代码编辑, openhands=OpenHands沙箱
+	ExecutionMode   any         // 执行方式: auto=自动选择, chat=对话模式, aider=Aider, openhands=OpenHands, claude_code=Claude Code, codex_cli=Codex CLI, gemini_cli=Gemini CLI
 	Status          any         // 状态:0=禁用,1=启用
 	CreatedBy       any         // 创建人ID
 	DeptId          any         // 所属部门ID
