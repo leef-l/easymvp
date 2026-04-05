@@ -106,6 +106,17 @@ func (s *StageService) StartStage(ctx context.Context, workflowRunID int64, stag
 			return fmt.Errorf("workflow_run(%d) 状态并发冲突（期望 %s），无法创建 %s 阶段", workflowRunID, currentStatus, stageType)
 		}
 
+		// 5. 同步 mvp_project.status（项目列表依赖此字段展示状态）
+		if targetWfStatus != "" {
+			projectID, _ := tx.Model("mvp_workflow_run").Ctx(ctx).
+				Where("id", workflowRunID).Value("project_id")
+			if projectID.Int64() > 0 {
+				_, _ = tx.Model("mvp_project").Ctx(ctx).
+					Where("id", projectID.Int64()).
+					Update(g.Map{"status": targetWfStatus, "updated_at": now})
+			}
+		}
+
 		return nil
 	})
 	if err != nil {
@@ -218,6 +229,17 @@ func (s *StageService) FailStage(ctx context.Context, stageRunID int64, reason s
 			if rows > 0 {
 				updated = true
 				break
+			}
+		}
+
+		// 同步 mvp_project.status
+		if updated {
+			projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+				Where("id", wfRunID).Value("project_id")
+			if projectID.Int64() > 0 {
+				_, _ = g.DB().Model("mvp_project").Ctx(ctx).
+					Where("id", projectID.Int64()).
+					Update(g.Map{"status": consts.WorkflowRunStatusFailed, "pause_reason": reason, "updated_at": gtime.Now()})
 			}
 		}
 

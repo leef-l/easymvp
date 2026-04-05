@@ -188,6 +188,14 @@ func (s *WorkflowService) Pause(ctx context.Context, workflowRunID int64, reason
 	}
 	s.runtimeMgr.Cancel(workflowRunID)
 
+	// 同步 mvp_project.status
+	projectID := wfRun["project_id"].Int64()
+	if projectID > 0 {
+		_, _ = g.DB().Model("mvp_project").Ctx(ctx).
+			Where("id", projectID).
+			Update(g.Map{"status": consts.WorkflowRunStatusPaused, "pause_reason": reason, "updated_at": now})
+	}
+
 	if s.publisher != nil {
 		s.publisher.Emit(ctx, event.Event{
 			WorkflowRunID: workflowRunID,
@@ -237,6 +245,13 @@ func (s *WorkflowService) Resume(ctx context.Context, workflowRunID int64) error
 	// 重建 runtime context（Pause 时已 Cancel）
 	projectID := wfRun["project_id"].Int64()
 	s.runtimeMgr.Create(workflowRunID, projectID)
+
+	// 同步 mvp_project.status
+	if projectID > 0 {
+		_, _ = g.DB().Model("mvp_project").Ctx(ctx).
+			Where("id", projectID).
+			Update(g.Map{"status": resumeStatus, "pause_reason": nil, "updated_at": now})
+	}
 
 	if s.publisher != nil {
 		s.publisher.Emit(ctx, event.Event{
