@@ -36,6 +36,7 @@ const loading = ref(false);
 const bindingsLoading = ref(false);
 const saving = ref(false);
 const bindingSubmitting = ref(false);
+const testing = ref(false);
 
 const config = reactive<FeishuConfigItem>({
   enabled: 0,
@@ -145,6 +146,24 @@ async function sendTest(row: FeishuBindingItem) {
   message.success('测试消息已发送');
 }
 
+async function testConnection() {
+  if (bindings.value.length === 0) {
+    message.warning('请先绑定飞书用户再测试');
+    return;
+  }
+  testing.value = true;
+  try {
+    const first = bindings.value[0];
+    await testFeishuMessage({
+      bindingId: first.id,
+      content: `EasyMVP 连通测试：飞书配置正常，系统用户 ${first.userId} 绑定有效。`,
+    });
+    message.success('测试消息已发送，请在飞书查收');
+  } finally {
+    testing.value = false;
+  }
+}
+
 async function copyCallbackUrl() {
   await navigator.clipboard.writeText(callbackUrl.value);
   message.success('回调地址已复制');
@@ -233,6 +252,7 @@ const columns = [
               <div class="flex justify-end">
                 <Space>
                   <Button @click="loadConfig">刷新</Button>
+                  <Button :loading="testing" @click="testConnection">测试连通</Button>
                   <Button type="primary" :loading="saving" @click="saveConfigForm">
                     保存配置
                   </Button>

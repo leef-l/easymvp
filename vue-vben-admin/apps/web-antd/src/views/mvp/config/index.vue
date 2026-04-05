@@ -1,128 +1,126 @@
 <script setup lang="ts">
-import { h } from 'vue';
-import type { VbenFormProps } from '#/adapter/form';
-import type { VxeGridProps } from '#/adapter/vxe-table';
+import { computed, h, onMounted, ref } from 'vue';
 
+import { DeleteOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons-vue';
 import { Page, useVbenModal } from '@vben/common-ui';
-import { Button, message, Modal, Tag, Tooltip } from 'ant-design-vue';
-import { QuestionCircleOutlined } from '@ant-design/icons-vue';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Modal,
+  Space,
+  Spin,
+  Tag,
+  Tooltip,
+  message,
+} from 'ant-design-vue';
 
-import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getConfigList, deleteConfig, batchDeleteConfig, exportConfig, importConfig, downloadImportTemplateConfig } from '#/api/mvp/config';
+import { deleteConfig, getConfigList } from '#/api/mvp/config';
 import type { ConfigItem } from '#/api/mvp/config/types';
-import FormModal from './modules/form.vue';
+
 import DetailDrawer from './modules/detail-drawer.vue';
+import FormModal from './modules/form.vue';
 
-/** 标签颜色池 */
-const TAG_COLORS = ['green', 'red', 'blue', 'orange', 'cyan', 'purple', 'geekblue', 'magenta'];
-
-/** 渲染带 Tooltip 的列标题 */
-function tooltipHeader(label: string, tip: string) {
-  return () => h('span', {}, [
-    label + ' ',
-    h(Tooltip, { title: tip }, {
-      default: () => h(QuestionCircleOutlined, { style: { color: '#999', marginLeft: '4px' } }),
-    }),
-  ]);
-}
-
-/** 表单弹窗 */
+/** 弹窗组件 */
 const [FormModalComp, formModalApi] = useVbenModal({
   connectedComponent: FormModal,
   destroyOnClose: true,
 });
 
-/** 详情抽屉 */
 const [DetailDrawerComp, detailDrawerApi] = useVbenModal({
   connectedComponent: DetailDrawer,
   destroyOnClose: true,
 });
 
-/** 搜索表单配置 */
-const formOptions: VbenFormProps = {
-  collapsed: false,
-  showCollapseButton: true,
-  submitOnChange: false,
-  submitOnEnter: true,
-  schema: [
-    {
-      component: 'RangePicker',
-      fieldName: 'timeRange',
-      label: '创建时间',
-      componentProps: {
-        showTime: true,
-        format: 'YYYY-MM-DD HH:mm:ss',
-        valueFormat: 'YYYY-MM-DD HH:mm:ss',
-        class: 'w-full',
-      },
-    },
-  ],
+/** 分类定义 */
+interface CategoryDef {
+  key: string;
+  label: string;
+  color: string;
+  description: string;
+  badge?: string;
+}
+
+const CATEGORY_DEFS: CategoryDef[] = [
+  { key: 'scheduler', label: '调度器', color: 'blue', description: '任务调度和并发控制' },
+  { key: 'watchdog', label: '看门狗', color: 'orange', description: '心跳检测与自动重试' },
+  { key: 'engine', label: '执行引擎', color: 'green', description: 'Aider/审核超时配置' },
+  { key: 'accept', label: '验收', color: 'cyan', description: 'LLM质量评审与人工审核' },
+  { key: 'general', label: '自治核心', color: 'purple', description: '⚡ 灰度开关，必须最先开启', badge: '灰度' },
+  { key: 'autonomy', label: '自治策略', color: 'geekblue', description: '灰度开关，general 开启后按序开启', badge: '灰度' },
+  { key: 'collab', label: '协作通知', color: 'magenta', description: '飞书集成配置' },
+];
+
+/** 类型 Tag 颜色映射 */
+const TYPE_COLOR: Record<string, string> = {
+  int: 'blue',
+  string: 'green',
+  autonomy: 'purple',
 };
 
-/** 表格列配置 */
-const gridOptions: VxeGridProps<ConfigItem> = {
-  columns: [
-    { type: 'checkbox', width: 50 },
-    { title: '序号', type: 'seq', width: 50 },
-    { field: 'configKey', title: '配置键', slots: { header: tooltipHeader('配置键', '唯一') } },
-    { field: 'configValue', title: '配置值' },
-    { field: 'configType', title: '值类型' },
-    { field: 'category', title: '分类' },
-    { field: 'description', title: '配置说明' },
-    { field: 'createdAt', title: '创建时间', width: 180, formatter: 'formatDateTime', sortable: true },
-    { title: '操作', width: 240, fixed: 'right', slots: { default: 'action' } },
-  ],
-  height: 'auto',
-  pagerConfig: {},
-  proxyConfig: {
-    ajax: {
-      query: async ({ page, sorts }, formValues) => {
-        const { timeRange, ...rest } = formValues;
-        const params: Record<string, any> = {
-          pageNum: page.currentPage,
-          pageSize: page.pageSize,
-          ...rest,
-        };
-        if (timeRange && timeRange.length === 2) {
-          params.startTime = timeRange[0];
-          params.endTime = timeRange[1];
-        }
-        if (sorts && sorts.length > 0) {
-          const sort = sorts[0];
-          if (sort && sort.field && sort.order) {
-            params.orderBy = sort.field;
-            params.orderDir = sort.order;
-          }
-        }
-        const res = await getConfigList(params as any);
-        return { items: res?.list ?? [], total: res?.total ?? 0 };
-      },
-    },
-  },
-  sortConfig: {
-    remote: true,
-    trigger: 'cell',
-  },
-  toolbarConfig: {
-    custom: true,
-    refresh: true,
-    search: true,
-  },
-};
+/** 数据 */
+const loading = ref(false);
+const allConfigs = ref<ConfigItem[]>([]);
 
-const [Grid, gridApi] = useVbenVxeGrid({
-  formOptions,
-  gridOptions,
+/** 加载所有配置 */
+async function loadConfigs() {
+  loading.value = true;
+  try {
+    const res = await getConfigList({ pageNum: 1, pageSize: 200 } as any);
+    allConfigs.value = res?.list ?? [];
+  } catch {
+    message.error('加载配置失败');
+  } finally {
+    loading.value = false;
+  }
+}
+
+onMounted(loadConfigs);
+
+/** 按分类分组，顺序固定 */
+const groupedConfigs = computed(() => {
+  const map = new Map<string, ConfigItem[]>();
+  for (const item of allConfigs.value) {
+    const cat = item.category || 'unknown';
+    if (!map.has(cat)) map.set(cat, []);
+    map.get(cat)!.push(item);
+  }
+
+  const result: { def: CategoryDef; items: ConfigItem[] }[] = [];
+
+  for (const def of CATEGORY_DEFS) {
+    if (map.has(def.key)) {
+      result.push({ def, items: map.get(def.key)! });
+      map.delete(def.key);
+    }
+  }
+
+  // 剩余未知分类
+  for (const [key, items] of map.entries()) {
+    result.push({
+      def: { key, label: key, color: 'default', description: '其他配置' },
+      items,
+    });
+  }
+
+  return result;
 });
+
+/** 判断是否是 0/1 的 int 开关 */
+function isBoolInt(item: ConfigItem) {
+  return item.configType === 'int' && (item.configValue === '0' || item.configValue === '1');
+}
+
+/** 截断文字 */
+function truncate(str: string | undefined, len: number) {
+  if (!str) return '';
+  return str.length > len ? str.slice(0, len) + '…' : str;
+}
 
 /** 新建 */
 function handleCreate() {
   formModalApi.setData(null).open();
-}
-
-/** 查看 */
-function handleView(row: ConfigItem) {
-  detailDrawerApi.setData({ id: row.id }).open();
 }
 
 /** 编辑 */
@@ -134,111 +132,253 @@ function handleEdit(row: ConfigItem) {
 function handleDelete(row: ConfigItem) {
   Modal.confirm({
     title: '确认删除',
-    content: '确定要删除该MVP配置表吗？',
+    content: `确定要删除配置项 "${row.configKey}" 吗？`,
     okType: 'danger',
     async onOk() {
       await deleteConfig(row.id);
       message.success('删除成功');
-      gridApi.reload();
-    },
-  });
-}
-/** 批量删除 */
-function handleBatchDelete() {
-  const rows = gridApi.grid.getCheckboxRecords();
-  if (rows.length === 0) {
-    message.warning('请先选择要删除的数据');
-    return;
-  }
-  Modal.confirm({
-    title: '确认批量删除',
-    content: `确定要删除选中的 ${rows.length} 条MVP配置表吗？`,
-    okType: 'danger',
-    async onOk() {
-      await batchDeleteConfig(rows.map((r: ConfigItem) => r.id));
-      message.success('批量删除成功');
-      gridApi.reload();
+      await loadConfigs();
     },
   });
 }
 
-/** 导出 */
-async function handleExport() {
-  try {
-    const formValues = await gridApi.formApi.getValues();
-    const params: Record<string, any> = { ...formValues };
-    if (params.timeRange && params.timeRange.length === 2) {
-      params.startTime = params.timeRange[0];
-      params.endTime = params.timeRange[1];
-      delete params.timeRange;
-    }
-    const blob = await exportConfig(params);
-    const url = URL.createObjectURL(blob as any);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'MVP配置表.csv';
-    a.click();
-    URL.revokeObjectURL(url);
-    message.success('导出成功');
-  } catch {
-    message.error('导出失败');
-  }
-}
-
-/** 导入 */
-async function handleImport() {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.csv,.xlsx,.xls';
-  input.onchange = async () => {
-    const file = input.files?.[0];
-    if (!file) return;
-    const formData = new FormData();
-    formData.append('file', file);
-    try {
-      const res = await importConfig(formData);
-      message.success(`导入完成：成功 ${res?.success ?? 0} 条，失败 ${res?.fail ?? 0} 条`);
-      gridApi.reload();
-    } catch {
-      message.error('导入失败');
-    }
-  };
-  input.click();
-}
-
-/** 下载导入模板 */
-async function handleDownloadTemplate() {
-  try {
-    const blob = await downloadImportTemplateConfig();
-    const url = URL.createObjectURL(blob as any);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'MVP配置表导入模板.csv';
-    a.click();
-    URL.revokeObjectURL(url);
-  } catch {
-    message.error('下载模板失败');
-  }
+/** 成功回调 */
+async function onFormSuccess() {
+  await loadConfigs();
 }
 </script>
 
 <template>
   <Page auto-content-height>
-    <FormModalComp @success="() => gridApi.reload()" />
+    <FormModalComp @success="onFormSuccess" />
     <DetailDrawerComp />
-    <Grid>
-      <template #toolbar-actions>
-        <Button v-auth="['mvp:config:create']" type="primary" @click="handleCreate">新建</Button>
-        <Button v-auth="['mvp:config:batch-delete']" danger class="ml-2" @click="handleBatchDelete">批量删除</Button>
-        <Button v-auth="['mvp:config:export']" class="ml-2" @click="handleExport">导出</Button>
-        <Button v-auth="['mvp:config:import']" class="ml-2" @click="handleImport">导入</Button>
-        <Button class="ml-2" @click="handleDownloadTemplate">模板下载</Button>
-      </template>
-      <template #action="{ row }">
-        <Button v-auth="['mvp:config:detail']" type="link" size="small" @click="handleView(row)">查看</Button>
-        <Button v-auth="['mvp:config:update']" type="link" size="small" @click="handleEdit(row)">编辑</Button>
-        <Button v-auth="['mvp:config:delete']" type="link" danger size="small" @click="handleDelete(row)">删除</Button>
-      </template>
-    </Grid>
+
+    <!-- 顶部标题栏 -->
+    <div class="mb-4 flex items-center justify-between">
+      <div>
+        <span class="text-xl font-semibold text-gray-800">引擎配置</span>
+        <span class="ml-2 text-sm text-gray-400">共 {{ allConfigs.length }} 项配置</span>
+      </div>
+      <Space>
+        <Button :icon="h(ReloadOutlined)" :loading="loading" @click="loadConfigs">刷新</Button>
+        <Button type="primary" @click="handleCreate">新建配置</Button>
+      </Space>
+    </div>
+
+    <Spin :spinning="loading">
+      <div class="space-y-4">
+        <template v-for="group in groupedConfigs" :key="group.def.key">
+          <Card :body-style="{ padding: '0' }" class="config-group-card">
+            <!-- 卡片标题 -->
+            <template #title>
+              <div class="flex items-center gap-2">
+                <Tag :color="group.def.color" class="font-medium">{{ group.def.label }}</Tag>
+                <span class="text-sm text-gray-500">{{ group.def.description }}</span>
+                <Badge
+                  v-if="group.def.badge"
+                  :count="group.def.badge"
+                  :number-style="{ backgroundColor: '#fa8c16', fontSize: '11px', height: '18px', lineHeight: '18px', padding: '0 6px' }"
+                  class="ml-1"
+                />
+                <span class="ml-auto text-xs text-gray-400">{{ group.items.length }} 项</span>
+              </div>
+            </template>
+
+            <!-- general 分类的灰度说明 -->
+            <Alert
+              v-if="group.def.key === 'general'"
+              class="m-3 rounded"
+              type="info"
+              show-icon
+            >
+              <template #message>
+                <div class="text-xs leading-6">
+                  <div class="mb-1 font-medium">📋 灰度开启顺序（建议）</div>
+                  <div>第1步：workflow.autonomy.enabled = 1（开启自治总开关）</div>
+                  <div>第2步：workflow.autonomy.audit_only = 1（保持审计模式，观察1-2天）</div>
+                  <div>第3步：workflow.autonomy.policy_engine_enabled = 1 + risk_gate_enabled = 1</div>
+                  <div>第4步：audit_only = 0（正式接管，慎重！）</div>
+                  <div>第5步（可选）：strategy_enabled = 1（开启 L5 策略函数）</div>
+                  <div>第6步（可选）：meta_cognition_enabled = 1（开启 L7 元认知观测）</div>
+                </div>
+              </template>
+            </Alert>
+
+            <!-- 配置项列表 -->
+            <div
+              v-for="(item, index) in group.items"
+              :key="item.id"
+              class="config-row"
+              :class="{ 'border-t border-gray-100': index > 0 }"
+            >
+              <!-- 左侧：类型Tag + 键名 + 说明 -->
+              <div class="config-row-left">
+                <Tag
+                  :color="TYPE_COLOR[item.configType ?? ''] ?? 'default'"
+                  class="config-type-tag shrink-0"
+                >
+                  {{ item.configType || 'str' }}
+                </Tag>
+                <div class="min-w-0 flex-1">
+                  <div class="config-key">{{ item.configKey }}</div>
+                  <Tooltip v-if="item.description" :title="item.description" placement="topLeft">
+                    <div class="config-desc">{{ truncate(item.description, 60) }}</div>
+                  </Tooltip>
+                </div>
+              </div>
+
+              <!-- 右侧：值 + 操作 -->
+              <div class="config-row-right">
+                <!-- 0/1 开关类型 -->
+                <template v-if="isBoolInt(item)">
+                  <Tag
+                    :color="item.configValue === '1' ? 'success' : 'default'"
+                    class="config-value-tag"
+                  >
+                    {{ item.configValue === '1' ? '开启' : '关闭' }}
+                  </Tag>
+                </template>
+                <!-- 普通值 -->
+                <template v-else>
+                  <Tooltip
+                    v-if="item.configValue && item.configValue.length > 20"
+                    :title="item.configValue"
+                  >
+                    <span class="config-value-text">{{ truncate(item.configValue, 20) }}</span>
+                  </Tooltip>
+                  <span v-else class="config-value-text">{{ item.configValue || '—' }}</span>
+                </template>
+
+                <!-- 操作按钮 -->
+                <Space :size="4" class="config-actions">
+                  <Button
+                    :icon="h(EditOutlined)"
+                    size="small"
+                    type="link"
+                    @click.stop="handleEdit(item)"
+                  >
+                    编辑
+                  </Button>
+                  <Button
+                    :icon="h(DeleteOutlined)"
+                    danger
+                    size="small"
+                    type="link"
+                    @click.stop="handleDelete(item)"
+                  >
+                    删除
+                  </Button>
+                </Space>
+              </div>
+            </div>
+
+            <!-- 空状态 -->
+            <div v-if="group.items.length === 0" class="py-6 text-center text-gray-400 text-sm">
+              暂无配置项
+            </div>
+          </Card>
+        </template>
+
+        <!-- 全局空状态 -->
+        <div v-if="!loading && groupedConfigs.length === 0" class="py-16 text-center text-gray-400">
+          暂无配置数据，点击右上角"新建配置"添加
+        </div>
+      </div>
+    </Spin>
   </Page>
 </template>
+
+<style scoped>
+.config-group-card :deep(.ant-card-head) {
+  padding: 0 16px;
+  min-height: 48px;
+}
+
+.config-group-card :deep(.ant-card-head-title) {
+  padding: 10px 0;
+}
+
+.config-row {
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;
+  gap: 12px;
+  transition: background-color 0.15s;
+}
+
+.config-row:hover {
+  background-color: #fafafa;
+}
+
+.config-row-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.config-type-tag {
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 5px;
+  height: 20px;
+  border-radius: 3px;
+}
+
+.config-key {
+  font-size: 13px;
+  font-weight: 500;
+  color: #262626;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  line-height: 1.5;
+}
+
+.config-desc {
+  font-size: 12px;
+  color: #8c8c8c;
+  line-height: 1.4;
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 500px;
+  cursor: default;
+}
+
+.config-row-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.config-value-tag {
+  font-size: 12px;
+  min-width: 44px;
+  text-align: center;
+}
+
+.config-value-text {
+  font-size: 12px;
+  color: #595959;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: middle;
+  cursor: default;
+}
+
+.config-actions {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.config-row:hover .config-actions {
+  opacity: 1;
+}
+</style>

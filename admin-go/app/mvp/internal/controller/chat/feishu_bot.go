@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
@@ -25,23 +26,36 @@ type botIntent struct {
 }
 
 // intentSystemPrompt AI 意图解析系统提示词。
-const intentSystemPrompt = `你是 EasyMVP 的飞书机器人助手，负责理解用户的自然语言消息并转换为结构化指令。
+const intentSystemPrompt = `你是 EasyMVP 的飞书机器人助手。EasyMVP 是一个 AI 驱动的项目管理平台，支持多角色 AI 团队（架构师/实现者/审计员）自动完成软件项目的需求分析、任务拆解、代码实现、质量审计全流程。
 
-用户可能用各种表达方式描述意图，你需要准确识别并返回 JSON。
+## 你能做的事
+- 创建项目（软件开发/游戏开发/数据分析/内容创作/运营策划）
+- 查看项目列表和执行进度
+- 查询项目状态（任务完成率/当前阶段）
+- 暂停/继续项目执行
+- 在飞书里直接和架构师AI对话（描述需求，AI会拆解任务）
+- 确认方案后自动启动执行
 
-支持的 action：
+## 支持的 action（JSON输出）
 - create_project：创建新项目（需要 project_name，可选 category）
-- list_projects：列出项目
+- list_projects：列出我的项目
 - project_status：查询项目状态（需要 project_name）
 - pause_project：暂停项目（需要 project_name）
 - resume_project：继续/恢复项目（需要 project_name）
-- chat：普通对话或不确定的意图（在 reply 字段填写你的回复）
+- chat：普通对话/回答问题/不确定意图（在 reply 字段填写你的中文回复）
 - help：显示帮助
+
+## 意图识别规则
+- "帮我创建/新建/做一个XXX项目" → create_project
+- "我的项目/列表/有哪些" → list_projects
+- "XXX进度/状态/怎么样了" → project_status（project_name=XXX）
+- "暂停/停止XXX" → pause_project（project_name=XXX）
+- "继续/恢复/重启XXX" → resume_project（project_name=XXX）
+- 其他：chat（reply字段填写友好的中文回复）
 
 category 常见值：软件开发、游戏开发、数据分析、内容创作、运营策划。未指定时默认"软件开发"。
 
-只返回 JSON，不要有其他文字。格式：
-{"action":"...","project_name":"...","category":"...","reply":"..."}`
+只返回 JSON，格式：{"action":"...","project_name":"...","category":"...","reply":"..."}`
 
 // DispatchFeishuCommand 用 AI 解析用户意图后路由到对应处理器。
 func DispatchFeishuCommand(ctx context.Context, openID, messageID, chatID, contentStr string) {
@@ -85,7 +99,7 @@ func DispatchFeishuCommand(ctx context.Context, openID, messageID, chatID, conte
 	// 4. 路由执行
 	switch intent.Action {
 	case "create_project":
-		handleBotCreateProject(ctx, intent.ProjectName, intent.Category, systemUserID, deptID, reply)
+		handleBotCreateProject(ctx, intent.ProjectName, intent.Category, systemUserID, deptID, openID, reply)
 	case "list_projects":
 		handleBotListProjects(ctx, systemUserID, reply)
 	case "project_status":
@@ -97,6 +111,24 @@ func DispatchFeishuCommand(ctx context.Context, openID, messageID, chatID, conte
 	case "help":
 		reply(feishuHelpText())
 	case "chat":
+		// 检查特殊退出指令
+		lowerText := strings.ToLower(text)
+		if lowerText == "退出对话" || lowerText == "exit" || lowerText == "quit" {
+			clearFeishuSession(openID)
+			reply("✅ 已退出对话模式")
+			return
+		}
+		// 确认方案指令
+		if strings.Contains(lowerText, "确认方案") || strings.Contains(lowerText, "confirm plan") {
+			handleBotConfirmPlan(ctx, openID, systemUserID, reply)
+			return
+		}
+		// 检查是否有活跃对话会话
+		if convID, ok := getFeishuSession(openID); ok {
+			handleBotChat(ctx, openID, convID, text, systemUserID, deptID, reply)
+			return
+		}
+		// 无活跃会话，用 AI 直接回复
 		if intent.Reply != "" {
 			reply(intent.Reply)
 		} else {
@@ -205,7 +237,7 @@ func loadBotModel(ctx context.Context, systemUserID int64) (*engine.ModelInfo, e
 
 // ─── 指令处理器 ───────────────────────────────────────────────────────────────
 
-func handleBotCreateProject(ctx context.Context, projectName, category string, systemUserID, deptID int64, reply func(string)) {
+func handleBotCreateProject(ctx context.Context, projectName, category string, systemUserID, deptID int64, openID string, reply func(string)) {
 	if systemUserID == 0 {
 		reply("❌ 您尚未绑定飞书账号，请先在 EasyMVP 管理端完成飞书绑定。")
 		return
@@ -224,6 +256,24 @@ func handleBotCreateProject(ctx context.Context, projectName, category string, s
 		return
 	}
 
+	// 查询项目对应的架构师对话，自动进入对话模式
+	extraTip := ""
+	if openID != "" {
+		var convID int64
+		val, _ := g.DB().Ctx(ctx).Model("mvp_conversation").
+			Where("project_id", projectID).
+			WhereNull("deleted_at").
+			OrderAsc("created_at").
+			Value("id")
+		if val != nil {
+			convID = val.Int64()
+		}
+		if convID > 0 {
+			setFeishuSession(openID, convID)
+			extraTip = "\n\n💬 已进入对话模式，可以直接和架构师描述需求。\n说「确认方案」可以启动执行，说「退出对话」可以结束对话。"
+		}
+	}
+
 	reply(fmt.Sprintf(
 		"✅ 项目已创建\n"+
 			"───────────────\n"+
@@ -231,8 +281,8 @@ func handleBotCreateProject(ctx context.Context, projectName, category string, s
 			"🏷️ 分类：%s\n"+
 			"🆔 项目ID：%d\n"+
 			"───────────────\n"+
-			"下一步：在 EasyMVP 管理端与架构师对话，确认方案后自动执行。",
-		projectName, category, projectID,
+			"下一步：直接描述你的需求，架构师AI会为你拆解任务。%s",
+		projectName, category, projectID, extraTip,
 	))
 }
 
@@ -537,6 +587,78 @@ func extractJSON(s string) string {
 		return s
 	}
 	return s[start : end+1]
+}
+
+// handleBotChat 将用户消息转发给架构师AI，等待回复后发回飞书。
+func handleBotChat(ctx context.Context, openID string, conversationID int64, text string, systemUserID, deptID int64, reply func(string)) {
+	// 查询对话所属项目
+	conv, err := g.DB().Ctx(ctx).Model("mvp_conversation").
+		Where("id", conversationID).WhereNull("deleted_at").One()
+	if err != nil || conv.IsEmpty() {
+		clearFeishuSession(openID)
+		reply("❌ 对话已失效，请重新创建或进入项目")
+		return
+	}
+	projectID := conv["project_id"].Int64()
+
+	// 通过 ChatEngine 发送消息并触发 AI 回复
+	chatEng := engine.NewChatEngine()
+	replyMsgID, err := chatEng.SendFeishuMessage(ctx, conversationID, projectID, text, systemUserID, deptID)
+	if err != nil {
+		reply(fmt.Sprintf("❌ 消息发送失败：%v", err))
+		return
+	}
+
+	// 等待 AI 回复（轮询，最多等30秒）
+	aiReply := waitForAIReply(ctx, replyMsgID, 30*time.Second)
+	if aiReply == "" {
+		reply("⏳ AI 正在思考中，请稍后发送「项目状态」查看进展")
+		return
+	}
+	reply(aiReply)
+}
+
+// handleBotConfirmPlan 确认当前活跃对话的方案并启动执行。
+func handleBotConfirmPlan(ctx context.Context, openID string, systemUserID int64, reply func(string)) {
+	convID, ok := getFeishuSession(openID)
+	if !ok {
+		reply("❌ 当前没有活跃的项目对话，请先创建项目")
+		return
+	}
+	conv, err := g.DB().Ctx(ctx).Model("mvp_conversation").
+		Where("id", convID).WhereNull("deleted_at").One()
+	if err != nil || conv.IsEmpty() {
+		reply("❌ 对话不存在")
+		return
+	}
+	projectID := conv["project_id"].Int64()
+	if err := engine.GetScheduler().ConfirmPlan(ctx, projectID); err != nil {
+		reply(fmt.Sprintf("❌ 确认方案失败：%v", err))
+		return
+	}
+	clearFeishuSession(openID)
+	reply(fmt.Sprintf("🚀 方案已确认！项目 ID:%d 开始自动执行。\n发送「项目状态 %d」可查看执行进度", projectID, projectID))
+}
+
+// waitForAIReply 轮询等待 AI 回复消息完成（status=completed）。
+func waitForAIReply(ctx context.Context, replyMsgID int64, timeout time.Duration) string {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		record, err := g.DB().Model("mvp_message").Ctx(ctx).
+			Where("id", replyMsgID).
+			Fields("content, status").One()
+		if err == nil && !record.IsEmpty() {
+			status := record["status"].String()
+			if status == "completed" || status == "done" {
+				return record["content"].String()
+			}
+			if status == "failed" {
+				return ""
+			}
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return ""
 }
 
 // feishuHelpText 返回帮助文本。

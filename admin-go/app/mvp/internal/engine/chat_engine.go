@@ -425,6 +425,75 @@ func (e *ChatEngine) loadHistory(ctx context.Context, conversationID int64, excl
 	return messages, nil
 }
 
+// SendFeishuMessage 供飞书 Bot 调用：发送用户消息到对话并触发 AI 回复。
+// 返回 AI 回复消息的 ID（用于轮询结果）。
+func (e *ChatEngine) SendFeishuMessage(ctx context.Context, conversationID, projectID int64, content string, userID, deptID int64) (int64, error) {
+	// 1. 查询对话信息（校验存在）
+	conv, err := g.DB().Model("mvp_conversation").Where("id", conversationID).Where("deleted_at IS NULL").One()
+	if err != nil {
+		return 0, fmt.Errorf("查询对话失败: %w", err)
+	}
+	if conv.IsEmpty() {
+		return 0, fmt.Errorf("对话不存在")
+	}
+
+	// 2. 查找该对话角色对应的 AI 模型配置
+	modelInfo, err := e.resolveModel(ctx, projectID, conv["role_type"].String())
+	if err != nil {
+		return 0, err
+	}
+
+	// 3. 展开消息中的 "读取：路径" 指令
+	project, _ := g.DB().Model("mvp_project").Where("id", projectID).Fields("work_dir").One()
+	workDir := project["work_dir"].String()
+	if workDir == "" {
+		workDir = "/www/wwwroot/project/easymvp"
+	}
+	expandedContent := ExpandFileReads(content, workDir)
+
+	// 4. 保存用户消息
+	msgID := int64(snowflake.Generate())
+	_, err = g.DB().Model("mvp_message").Insert(g.Map{
+		"id":              msgID,
+		"conversation_id": conversationID,
+		"role":            "user",
+		"message_type":    mvpmodel.MessageTypeChatUser,
+		"content":         expandedContent,
+		"status":          "completed",
+		"created_by":      userID,
+		"dept_id":         deptID,
+		"created_at":      gtime.Now(),
+		"updated_at":      gtime.Now(),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("保存用户消息失败: %w", err)
+	}
+
+	// 5. 创建 AI 回复消息（status=streaming）
+	replyID := int64(snowflake.Generate())
+	_, err = g.DB().Model("mvp_message").Insert(g.Map{
+		"id":              replyID,
+		"conversation_id": conversationID,
+		"role":            "assistant",
+		"message_type":    mvpmodel.MessageTypeChatReply,
+		"content":         "",
+		"model_id":        modelInfo.ModelID,
+		"status":          "streaming",
+		"created_by":      userID,
+		"dept_id":         deptID,
+		"created_at":      gtime.Now(),
+		"updated_at":      gtime.Now(),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("创建AI回复消息失败: %w", err)
+	}
+
+	// 6. 启动 goroutine 异步调用 AI
+	go e.runAICall(conversationID, replyID, modelInfo)
+
+	return replyID, nil
+}
+
 // failMessage 标记消息为失败状态
 func (e *ChatEngine) failMessage(ctx context.Context, replyID int64, errMsg string) {
 	g.Log().Errorf(ctx, "AI 调用失败 (messageID=%d): %s", replyID, errMsg)
