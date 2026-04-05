@@ -6,14 +6,19 @@ server:
 
 # https://goframe.org/docs/core/glog-config
 logger:
-  level : "all"
-  stdout: true
+  path:              "/www/wwwroot/project/easymvp/admin-go/logs/ai"
+  level:             "info|warning|error|critical|panic|fatal"
+  stdout:            true
+  rotateSize:        "100M"
+  rotateExpire:      "7d"
+  rotateBackupLimit: 10
+  stStatus:          0
 
 # https://goframe.org/docs/core/gdb-config-file
 database:
   default:
     link: "mysql:easymvp:JKcHFJYXnkrB6BXE@tcp(127.0.0.1:3306)/easymvp"
-    debug: true
+    debug: false
     charset: "utf8mb4"
 
 # JWT 配置

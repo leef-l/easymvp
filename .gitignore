@@ -30,3 +30,6 @@ admin-go/.runtime-config/
 
 # Local test workspace
 admin-go/easymvp-test/
+
+# Logs
+admin-go/logs/
