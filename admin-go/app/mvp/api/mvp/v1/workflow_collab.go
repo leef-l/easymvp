@@ -191,3 +191,103 @@ type WorkflowDeleteChatMenuReq struct {
 type WorkflowDeleteChatMenuRes struct {
 	g.Meta `mime:"application/json"`
 }
+
+// ==================== Telegram 协作管理 API ====================
+
+// WorkflowTelegramConfigReq 查询 Telegram 配置。
+type WorkflowTelegramConfigReq struct {
+	g.Meta `path:"/workflow/telegram-config" method:"get" tags:"Telegram协作" summary:"查询 Telegram Bot 配置"`
+}
+
+// TelegramConfigDTO Telegram 配置 DTO。
+type TelegramConfigDTO struct {
+	Enabled    int    `json:"enabled"`
+	BotToken   string `json:"botToken"`
+	BotRunning bool   `json:"botRunning"` // Polling 是否在线
+}
+
+// WorkflowTelegramConfigRes 查询 Telegram 配置响应。
+type WorkflowTelegramConfigRes struct {
+	g.Meta `mime:"application/json"`
+	Config TelegramConfigDTO `json:"config"`
+}
+
+// WorkflowSaveTelegramConfigReq 保存 Telegram 配置。
+type WorkflowSaveTelegramConfigReq struct {
+	g.Meta   `path:"/workflow/save-telegram-config" method:"post" tags:"Telegram协作" summary:"保存 Telegram Bot 配置"`
+	Enabled  int    `json:"enabled" dc:"0=关闭 1=开启"`
+	BotToken string `json:"botToken" dc:"Telegram Bot Token"`
+}
+
+// WorkflowSaveTelegramConfigRes 保存 Telegram 配置响应。
+type WorkflowSaveTelegramConfigRes struct {
+	g.Meta `mime:"application/json"`
+}
+
+// WorkflowTelegramBindingsReq 查询 Telegram 绑定列表。
+type WorkflowTelegramBindingsReq struct {
+	g.Meta `path:"/workflow/telegram-bindings" method:"get" tags:"Telegram协作" summary:"查询 Telegram 用户绑定列表"`
+}
+
+// WorkflowTelegramBindingsRes 查询 Telegram 绑定列表响应。
+type WorkflowTelegramBindingsRes struct {
+	g.Meta   `mime:"application/json"`
+	Bindings []FeishuBindingDTO `json:"bindings"` // 复用同一 DTO
+}
+
+// WorkflowBindTelegramUserReq 绑定 Telegram 用户。
+type WorkflowBindTelegramUserReq struct {
+	g.Meta         `path:"/workflow/bind-telegram-user" method:"post" tags:"Telegram协作" summary:"绑定 Telegram 用户"`
+	UserID         snowflake.JsonInt64 `json:"userId" v:"required" dc:"系统用户ID"`
+	PlatformUserID string              `json:"platformUserId" v:"required" dc:"Telegram chat_id（数字字符串）"`
+	PlatformName   string              `json:"platformName" dc:"Telegram 用户名（@username）"`
+}
+
+// WorkflowBindTelegramUserRes 绑定 Telegram 用户响应。
+type WorkflowBindTelegramUserRes struct {
+	g.Meta `mime:"application/json"`
+	ID     snowflake.JsonInt64 `json:"id"`
+}
+
+// WorkflowUnbindTelegramUserReq 解绑 Telegram 用户。
+type WorkflowUnbindTelegramUserReq struct {
+	g.Meta    `path:"/workflow/unbind-telegram-user" method:"post" tags:"Telegram协作" summary:"解绑 Telegram 用户"`
+	BindingID snowflake.JsonInt64 `json:"bindingId" v:"required" dc:"绑定记录ID"`
+}
+
+// WorkflowUnbindTelegramUserRes 解绑 Telegram 用户响应。
+type WorkflowUnbindTelegramUserRes struct {
+	g.Meta `mime:"application/json"`
+}
+
+// WorkflowTestTelegramMessageReq 发送 Telegram 测试消息。
+type WorkflowTestTelegramMessageReq struct {
+	g.Meta    `path:"/workflow/test-telegram-message" method:"post" tags:"Telegram协作" summary:"发送 Telegram 测试消息"`
+	BindingID snowflake.JsonInt64 `json:"bindingId" v:"required" dc:"绑定记录ID"`
+	Content   string              `json:"content" dc:"测试消息内容"`
+}
+
+// WorkflowTestTelegramMessageRes 发送 Telegram 测试消息响应。
+type WorkflowTestTelegramMessageRes struct {
+	g.Meta `mime:"application/json"`
+}
+
+// TelegramCommandItem Telegram Bot 命令菜单项。
+type TelegramCommandItem struct {
+	Command     string `json:"command"`     // 命令（不含/，如 help）
+	Description string `json:"description"` // 描述（显示在命令菜单里）
+}
+
+// WorkflowSetTelegramCommandsReq 设置 Telegram Bot 命令菜单。
+type WorkflowSetTelegramCommandsReq struct {
+	g.Meta   `path:"/workflow/telegram-set-commands" method:"post" tags:"Telegram协作" summary:"设置 Telegram Bot 命令菜单"`
+	Commands []TelegramCommandItem `json:"commands" dc:"命令列表（传空则恢复默认）"`
+	UseDefault bool                `json:"useDefault" dc:"true=恢复默认命令菜单"`
+}
+
+// WorkflowSetTelegramCommandsRes 设置 Telegram Bot 命令菜单响应。
+type WorkflowSetTelegramCommandsRes struct {
+	g.Meta   `mime:"application/json"`
+	Message  string               `json:"message"`
+	Commands []TelegramCommandItem `json:"commands"`
+}

@@ -1037,3 +1037,48 @@ export function getMetaLearning(projectID: string) {
     { params: { projectID } },
   );
 }
+
+// ─── Telegram Bot 协作管理 ─────────────────────────────────────────────────────
+
+export interface TelegramConfigItem {
+  enabled: number;
+  botToken: string;
+  botRunning: boolean;
+}
+
+export interface TelegramCommandItem {
+  command: string;
+  description: string;
+}
+
+export function getTelegramConfig() {
+  return requestClient.get<{ config: TelegramConfigItem }>(`${PREFIX}/telegram-config`);
+}
+
+export function saveTelegramConfig(data: { enabled: number; botToken: string }) {
+  return requestClient.post(`${PREFIX}/save-telegram-config`, data);
+}
+
+export function getTelegramBindings() {
+  return requestClient.get<{ bindings: FeishuBindingItem[] }>(`${PREFIX}/telegram-bindings`);
+}
+
+export function bindTelegramUser(data: {
+  userId: string;
+  platformUserId: string;
+  platformName?: string;
+}) {
+  return requestClient.post<{ id: string }>(`${PREFIX}/bind-telegram-user`, data);
+}
+
+export function unbindTelegramUser(bindingId: string) {
+  return requestClient.post(`${PREFIX}/unbind-telegram-user`, { bindingId });
+}
+
+export function testTelegramMessage(data: { bindingId: string; content?: string }) {
+  return requestClient.post(`${PREFIX}/test-telegram-message`, data);
+}
+
+export function setTelegramCommands(data: { commands?: TelegramCommandItem[]; useDefault?: boolean }) {
+  return requestClient.post<{ message: string; commands: TelegramCommandItem[] }>(`${PREFIX}/telegram-set-commands`, data);
+}
