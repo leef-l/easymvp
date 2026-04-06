@@ -80,8 +80,13 @@ func StartDeleteWorker(ctx context.Context) {
 	}()
 
 	go func() {
+		// 安全获取 Redis 实例，配置缺失时降级退出
+		redis := safeGetRedis(ctx)
+		if redis == nil {
+			g.Log().Warning(ctx, "[DeleteWorker] Redis 未配置，异步删除 worker 已禁用（软删除记录将保留）")
+			return
+		}
 		g.Log().Info(ctx, "[DeleteWorker] 启动，监听 Redis 队列")
-		redis := g.Redis()
 		for {
 			select {
 			case <-ctx.Done():
@@ -115,8 +120,14 @@ func StartDeleteWorker(ctx context.Context) {
 }
 
 // EnqueueDelete 将删除任务推入 Redis 队列（软删除后调用）。
+// Redis 未配置时静默跳过（软删除记录保留，等待兜底扫描或手动清理）。
 func EnqueueDelete(ctx context.Context, entity string, ids []int64) error {
 	if len(ids) == 0 {
+		return nil
+	}
+	redis := safeGetRedis(ctx)
+	if redis == nil {
+		g.Log().Warningf(ctx, "[DeleteWorker] Redis 未配置，跳过入队 entity=%s ids=%v", entity, ids)
 		return nil
 	}
 	job := deleteJob{
@@ -125,7 +136,7 @@ func EnqueueDelete(ctx context.Context, entity string, ids []int64) error {
 		IDs:    ids,
 	}
 	payload, _ := json.Marshal(job)
-	_, err := g.Redis().LPush(ctx, redisQueueKey, string(payload))
+	_, err := redis.LPush(ctx, redisQueueKey, string(payload))
 	if err != nil {
 		return fmt.Errorf("推入删除队列失败: %w", err)
 	}
@@ -183,15 +194,20 @@ func processJob(ctx context.Context, redis *gredis.Redis, job *deleteJob, rawPay
 // scanSoftDeleted 扫描软删除超过30分钟但实际数据还在的记录，自动入队真删除。
 // 通过 Redis SET 做分布式去重锁，避免多实例重复入队。
 func scanSoftDeleted(ctx context.Context) {
+	redis := safeGetRedis(ctx)
+	if redis == nil {
+		return // Redis 未配置，跳过扫描
+	}
+
 	// 分布式锁：同一时刻只有一个实例在扫描
 	lockKey := "easymvp:delete:scan_lock"
-	ok, err := g.Redis().SetNX(ctx, lockKey, "1")
+	ok, err := redis.SetNX(ctx, lockKey, "1")
 	if err != nil || !ok {
 		return // 其他实例正在扫描
 	}
-	defer g.Redis().Del(ctx, lockKey)
+	defer redis.Del(ctx, lockKey)
 	// 锁有效期 5 分钟（扫描正常不超过这个时间）
-	g.Redis().Expire(ctx, lockKey, 300)
+	redis.Expire(ctx, lockKey, 300)
 
 	type idRow struct{ ID int64 }
 
@@ -212,12 +228,12 @@ func scanSoftDeleted(ctx context.Context) {
 	toEnqueue := make([]int64, 0, len(rows))
 	for _, r := range rows {
 		inQueueKey := fmt.Sprintf("easymvp:delete:queued:mvp_task:%d", r.ID)
-		exists, _ := g.Redis().Exists(ctx, inQueueKey)
+		exists, _ := redis.Exists(ctx, inQueueKey)
 		if exists == 0 {
 			toEnqueue = append(toEnqueue, r.ID)
 			// 标记已入队
-			g.Redis().Set(ctx, inQueueKey, "1")
-			g.Redis().Expire(ctx, inQueueKey, 3600)
+			redis.Set(ctx, inQueueKey, "1")
+			redis.Expire(ctx, inQueueKey, 3600)
 		}
 	}
 
@@ -250,6 +266,17 @@ func saveFailedJob(ctx context.Context, job *deleteJob, errMsg string) {
 		"created_at":  gtime.Now(),
 		"updated_at":  gtime.Now(),
 	})
+}
+
+// safeGetRedis 安全获取 Redis 实例，配置不存在时返回 nil 而不是 panic。
+func safeGetRedis(ctx context.Context) (r *gredis.Redis) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			g.Log().Warningf(ctx, "[DeleteWorker] Redis 配置未找到，降级跳过: %v", rec)
+			r = nil
+		}
+	}()
+	return g.Redis()
 }
 
 // ─── mvp_task 级联删除 ────────────────────────────────────────────────────────
