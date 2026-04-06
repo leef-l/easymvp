@@ -37,8 +37,12 @@ func DispatchBotCommand(ctx context.Context, bc *BotContext) {
 		bc.Platform.Reply(ctx, text)
 	}
 
+	startTime := time.Now()
 	text := strings.TrimSpace(bc.Content)
 	g.Log().Infof(ctx, "[Bot/%s] 收到文本: openID=%s text=%q", bc.Platform.PlatformName(), bc.OpenID, text)
+	defer func() {
+		g.Log().Infof(ctx, "[Bot/%s] 处理完成: openID=%s text=%q 耗时=%dms", bc.Platform.PlatformName(), bc.OpenID, text, time.Since(startTime).Milliseconds())
+	}()
 	if text == "" {
 		reply(botHelpText())
 		return
