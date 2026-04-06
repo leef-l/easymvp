@@ -518,6 +518,9 @@ func boolToInt(ok bool) int {
 	return 0
 }
 
+// FeishuWSEventHandlerExport 导出的 WS 事件处理器，供启动时自动恢复连接使用。
+var FeishuWSEventHandlerExport = feishuWSEventHandler
+
 // feishuWSEventHandler WebSocket 模式的事件处理器（与 Webhook 模式共用逻辑）。
 func feishuWSEventHandler(ctx context.Context, header map[string]interface{}, event map[string]interface{}) {
 	if header == nil || event == nil {
