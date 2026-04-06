@@ -1061,7 +1061,7 @@ CREATE TABLE `mvp_user_collab_binding` (
   `updated_at` datetime DEFAULT NULL,
   `deleted_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_user_platform` (`user_id`,`platform`),
+  UNIQUE KEY `uk_user_platform_active` (`user_id`,`platform`,`deleted_at`),
   KEY `idx_platform_user` (`platform`,`platform_user_id`),
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户协作平台绑定';
