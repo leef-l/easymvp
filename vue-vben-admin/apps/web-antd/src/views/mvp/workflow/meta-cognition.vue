@@ -222,7 +222,7 @@ function pct(v: number | undefined) {
       <Alert
         v-if="!selectedProjectID"
         type="info"
-        message="请先选择项目，或通过项目列表点击"元认知"按钮直接跳转"
+        message="请先选择项目，或通过项目列表点击【元认知】按钮直接跳转"
         show-icon
         style="margin-top: 8px"
       />
