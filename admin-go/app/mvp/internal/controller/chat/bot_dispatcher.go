@@ -168,6 +168,24 @@ func dispatchIntent(
 	}
 }
 
+// looksLikeCommand 判断消息是否包含项目操作关键词，是则值得调 AI 解析意图。
+// 不含关键词的闲聊/问候直接走 fallback，避免不必要的 AI 调用。
+func looksLikeCommand(lower string) bool {
+	keywords := []string{
+		"项目", "任务", "创建", "新建", "暂停", "恢复", "继续", "重试", "跳过",
+		"状态", "进度", "完成", "失败", "审核", "验收", "通过", "驳回", "拒绝",
+		"批准", "确认", "方案", "自治", "检查点",
+		"create", "project", "task", "pause", "resume", "retry", "skip",
+		"status", "review", "accept", "approve", "reject", "confirm",
+	}
+	for _, kw := range keywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
 // botHelpText 平台无关的帮助文本。
 func botHelpText() string {
 	return `🤖 EasyMVP 机器人
