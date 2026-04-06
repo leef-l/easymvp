@@ -80,10 +80,23 @@ func StartDeleteWorker(ctx context.Context) {
 	}()
 
 	go func() {
-		// 安全获取 Redis 实例，配置缺失时降级退出
-		redis := safeGetRedis(ctx)
+		// 等待 Redis 就绪（最多等 60 秒，每 3 秒重试一次）
+		var redis *gredis.Redis
+		for i := 0; i < 20; i++ {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			redis = safeGetRedis(ctx)
+			if redis != nil {
+				break
+			}
+			g.Log().Warningf(ctx, "[DeleteWorker] Redis 未就绪，3秒后重试（%d/20）", i+1)
+			time.Sleep(3 * time.Second)
+		}
 		if redis == nil {
-			g.Log().Warning(ctx, "[DeleteWorker] Redis 未配置，异步删除 worker 已禁用（软删除记录将保留）")
+			g.Log().Warning(ctx, "[DeleteWorker] Redis 连接超时，异步删除 worker 已禁用（软删除记录将保留）")
 			return
 		}
 		g.Log().Info(ctx, "[DeleteWorker] 启动，监听 Redis 队列")
