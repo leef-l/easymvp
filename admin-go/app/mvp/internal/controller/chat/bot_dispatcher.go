@@ -43,11 +43,20 @@ func DispatchBotCommand(ctx context.Context, bc *BotContext) {
 		return
 	}
 
-	// 退出/确认方案的快捷指令（无需 AI 解析）
-	lower := strings.ToLower(text)
-	if lower == "退出对话" || lower == "exit" || lower == "quit" {
+	// 快速关键词匹配（无需调 AI，毫秒级响应）
+	lower := strings.ToLower(strings.TrimSpace(text))
+	switch lower {
+	case "退出对话", "exit", "quit":
 		clearFeishuSession(bc.OpenID)
 		reply("✅ 已退出对话模式")
+		return
+	case "帮助", "help", "?", "？", "怎么用", "使用说明", "功能":
+		reply(botHelpText())
+		return
+	case "我的项目", "项目列表", "所有项目", "list":
+		systemUserID, deptID := lookupSystemUser(ctx, bc.OpenID)
+		handleBotListProjects(ctx, systemUserID, reply)
+		_ = deptID
 		return
 	}
 
