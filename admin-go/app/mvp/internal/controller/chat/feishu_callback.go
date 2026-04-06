@@ -197,7 +197,7 @@ func handleFeishuMessageEvent(r *ghttp.Request, event map[string]interface{}) {
 	msgType, _ := messageMap["message_type"].(string)
 	contentStr, _ := messageMap["content"].(string)
 
-	g.Log().Infof(ctx, "[FeishuBot] 收到消息: openID=%s messageID=%s chatID=%s type=%s", openID, messageID, chatID, msgType)
+	g.Log().Infof(ctx, "[FeishuBot] 收到消息: openID=%s messageID=%s chatID=%s type=%s content=%s", openID, messageID, chatID, msgType, contentStr)
 
 	// 非文本消息类型：直接回复提示，不走 AI 解析
 	if msgType != "" && msgType != "text" {

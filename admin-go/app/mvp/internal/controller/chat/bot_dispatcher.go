@@ -38,6 +38,7 @@ func DispatchBotCommand(ctx context.Context, bc *BotContext) {
 	}
 
 	text := strings.TrimSpace(bc.Content)
+	g.Log().Infof(ctx, "[Bot/%s] 收到文本: openID=%s text=%q", bc.Platform.PlatformName(), bc.OpenID, text)
 	if text == "" {
 		reply(botHelpText())
 		return
