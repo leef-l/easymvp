@@ -32,7 +32,7 @@ database:
     debug: false
 
 logger:
-  level: "info|warning|error|critical|panic|fatal"
+  level: "info"
   stdout: true
 
 jwt:
