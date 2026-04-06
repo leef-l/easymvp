@@ -577,11 +577,16 @@ func feishuWSEventHandler(ctx context.Context, header map[string]interface{}, ev
 				openID, _ = operatorID["open_id"].(string)
 			}
 		}
+		// 取单聊 chat_id，用于回复
+		chatID := ""
+		if chatMap, ok := event["chat"].(map[string]interface{}); ok {
+			chatID, _ = chatMap["chat_id"].(string)
+		}
 		eventKey, _ := event["event_key"].(string)
-		g.Log().Infof(ctx, "[FeishuMenuClick] openID=%s key=%s", openID, eventKey)
+		g.Log().Infof(ctx, "[FeishuMenuClick] openID=%s chatID=%s key=%s", openID, chatID, eventKey)
 		if openID != "" && eventKey != "" {
 			cmdText := botMenuKeyToCommand(eventKey)
-			DispatchFeishuCommand(ctx, openID, "", "", `{"text":"`+cmdText+`"}`)
+			DispatchFeishuCommand(ctx, openID, "", chatID, `{"text":"`+cmdText+`"}`)
 		}
 	}
 }

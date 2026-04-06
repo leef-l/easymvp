@@ -43,10 +43,11 @@ func (a *FeishuAdapter) SendTextMessage(ctx context.Context, openID string, text
 		return fmt.Errorf("获取飞书 token 失败: %w", err)
 	}
 
+	contentJSON, _ := json.Marshal(map[string]string{"text": text})
 	body := g.Map{
 		"receive_id": openID,
 		"msg_type":   "text",
-		"content":    fmt.Sprintf(`{"text":"%s"}`, text),
+		"content":    string(contentJSON),
 	}
 	resp, err := g.Client().
 		SetHeaderMap(map[string]string{

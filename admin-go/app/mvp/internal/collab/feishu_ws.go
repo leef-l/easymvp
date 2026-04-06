@@ -55,11 +55,13 @@ func (c *FeishuWSClient) Start(ctx context.Context) {
 		c.handleRawPayload(ctx, req.Body)
 		return nil
 	}
+	noopHandler := func(ctx context.Context, req *larkevent.EventReq) error { return nil }
 	d := dispatcher.NewEventDispatcher("", "").
 		OnCustomizedEvent("im.message.receive_v1", rawHandler).
 		OnCustomizedEvent("application.bot.menu_v6", rawHandler).
 		OnCustomizedEvent("im.chat.member.bot.added_v1", rawHandler).
-		OnCustomizedEvent("im.chat.member.bot.deleted_v1", rawHandler)
+		OnCustomizedEvent("im.chat.member.bot.deleted_v1", rawHandler).
+		OnCustomizedEvent("im.message.message_read_v1", noopHandler)
 
 	sdkCli := larkws.NewClient(c.appID, c.appSecret,
 		larkws.WithEventHandler(d),

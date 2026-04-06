@@ -237,11 +237,15 @@ func handleFeishuMenuClickEvent(r *ghttp.Request, event map[string]interface{}) 
 			openID, _ = operatorID["open_id"].(string)
 		}
 	}
+	chatID := ""
+	if chatMap, ok := event["chat"].(map[string]interface{}); ok {
+		chatID, _ = chatMap["chat_id"].(string)
+	}
 	eventKey, _ := event["event_key"].(string)
-	g.Log().Infof(ctx, "[FeishuMenuClick] openID=%s key=%s", openID, eventKey)
+	g.Log().Infof(ctx, "[FeishuMenuClick] openID=%s chatID=%s key=%s", openID, chatID, eventKey)
 	if openID != "" && eventKey != "" {
 		cmdText := botMenuKeyToCommand(eventKey)
-		DispatchFeishuCommand(ctx, openID, "", "", `{"text":"`+cmdText+`"}`)
+		DispatchFeishuCommand(ctx, openID, "", chatID, `{"text":"`+cmdText+`"}`)
 	}
 	r.Response.WriteJson(g.Map{"msg": "ok"})
 }
