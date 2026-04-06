@@ -63,10 +63,14 @@ func DispatchBotCommand(ctx context.Context, bc *BotContext) {
 	// 反查绑定的系统用户
 	systemUserID, deptID := lookupSystemUser(ctx, bc.OpenID)
 
-	// AI 解析意图
-	intent, err := parseIntentWithAI(ctx, text, systemUserID)
-	if err != nil {
-		intent = fallbackParseIntent(text)
+	// 快速判断：不含项目操作关键词的消息直接走 fallback，不调 AI
+	intent := fallbackParseIntent(text)
+	if looksLikeCommand(lower) {
+		var err error
+		intent, err = parseIntentWithAI(ctx, text, systemUserID)
+		if err != nil {
+			intent = fallbackParseIntent(text)
+		}
 	}
 
 	g.Log().Infof(ctx, "[Bot/%s] 意图: action=%s project=%s", bc.Platform.PlatformName(), intent.Action, intent.ProjectName)

@@ -22,6 +22,8 @@ node_modules/
 .env.local
 *.local
 admin-go/.env
+docker/prod/.env
+docker/dev/.env
 admin-go/.runtime-config/
 
 # Claude Code

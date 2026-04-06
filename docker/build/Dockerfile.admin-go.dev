@@ -1,4 +1,4 @@
-ARG GO_BASE_IMAGE=golang:1.25-bookworm
+ARG GO_BASE_IMAGE=registry.cn-hangzhou.aliyuncs.com/library/golang:1.25-bookworm
 FROM ${GO_BASE_IMAGE}
 
 ARG GO_PROXY=https://goproxy.cn,direct

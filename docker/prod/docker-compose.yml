@@ -161,7 +161,7 @@ services:
   # gotools - Go 工具容器（按需运行）
   # ─────────────────────────────────────────────
   gotools:
-    image: golang:1.25-alpine
+    image: registry.cn-hangzhou.aliyuncs.com/library/golang:1.25-alpine
     container_name: easymvp_gotools
     profiles:
       - tools
