@@ -145,3 +145,49 @@ type WorkflowSetBotMenuRes struct {
 	g.Meta  `mime:"application/json"`
 	Message string `json:"message"`
 }
+
+// ==================== 飞书群菜单 API ====================
+
+// ChatMenuItem 群菜单项（跳转链接类型）。
+type ChatMenuItem struct {
+	Name    string         `json:"name"`              // 菜单名称
+	URL     string         `json:"url"`               // 跳转链接
+	Children []ChatMenuItem `json:"children,omitempty"` // 二级菜单（有子菜单时 URL 忽略）
+}
+
+// WorkflowCreateChatMenuReq 创建群菜单请求。
+type WorkflowCreateChatMenuReq struct {
+	g.Meta   `path:"/workflow/feishu-create-chat-menu" method:"post" tags:"飞书协作" summary:"创建飞书群菜单"`
+	ChatID   string         `json:"chatId" v:"required" dc:"飞书群 chat_id"`
+	MenuItems []ChatMenuItem `json:"menuItems" dc:"菜单项列表（不传则使用默认 EasyMVP 快捷菜单）"`
+}
+
+// WorkflowCreateChatMenuRes 创建群菜单响应。
+type WorkflowCreateChatMenuRes struct {
+	g.Meta  `mime:"application/json"`
+	Message string `json:"message"`
+}
+
+// WorkflowGetChatMenuReq 获取群菜单请求。
+type WorkflowGetChatMenuReq struct {
+	g.Meta `path:"/workflow/feishu-get-chat-menu" method:"get" tags:"飞书协作" summary:"获取飞书群菜单"`
+	ChatID string `json:"chatId" v:"required" dc:"飞书群 chat_id"`
+}
+
+// WorkflowGetChatMenuRes 获取群菜单响应。
+type WorkflowGetChatMenuRes struct {
+	g.Meta    `mime:"application/json"`
+	MenuItems []g.Map `json:"menuItems"`
+}
+
+// WorkflowDeleteChatMenuReq 删除群菜单请求。
+type WorkflowDeleteChatMenuReq struct {
+	g.Meta  `path:"/workflow/feishu-delete-chat-menu" method:"post" tags:"飞书协作" summary:"删除飞书群菜单"`
+	ChatID  string   `json:"chatId" v:"required" dc:"飞书群 chat_id"`
+	MenuIDs []string `json:"menuIds" v:"required" dc:"要删除的一级菜单ID列表"`
+}
+
+// WorkflowDeleteChatMenuRes 删除群菜单响应。
+type WorkflowDeleteChatMenuRes struct {
+	g.Meta `mime:"application/json"`
+}

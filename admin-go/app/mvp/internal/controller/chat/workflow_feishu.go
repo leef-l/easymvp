@@ -251,6 +251,185 @@ func (c *cWorkflow) SetBotMenu(ctx context.Context, req *v1.WorkflowSetBotMenuRe
 	}, nil
 }
 
+// ─── 飞书群菜单 ───────────────────────────────────────────────────────────────
+
+// defaultChatMenuItems 返回默认群菜单（快捷跳转后台页面）。
+// baseURL 为后台访问地址（如 https://easymvp.example.com）。
+func defaultChatMenuItems(baseURL string) []v1.ChatMenuItem {
+	if baseURL == "" {
+		baseURL = "https://easymvp.example.com"
+	}
+	return []v1.ChatMenuItem{
+		{
+			Name: "项目管理",
+			Children: []v1.ChatMenuItem{
+				{Name: "项目列表", URL: baseURL + "/mvp/project/index"},
+				{Name: "新建项目", URL: baseURL + "/mvp/workflow/create"},
+				{Name: "项目仪表盘", URL: baseURL + "/mvp/workflow/dashboard"},
+			},
+		},
+		{
+			Name: "任务管理",
+			Children: []v1.ChatMenuItem{
+				{Name: "任务列表", URL: baseURL + "/mvp/task/index"},
+				{Name: "工作流状态", URL: baseURL + "/mvp/workflow/situation"},
+			},
+		},
+		{
+			Name: "系统设置",
+			Children: []v1.ChatMenuItem{
+				{Name: "飞书配置", URL: baseURL + "/mvp/workflow/feishu"},
+				{Name: "AI 配置", URL: baseURL + "/ai/model/index"},
+			},
+		},
+	}
+}
+
+// buildFeishuChatMenuBody 将 ChatMenuItem 转换为飞书 API 请求体结构。
+func buildFeishuChatMenuBody(items []v1.ChatMenuItem) g.Map {
+	topLevels := make([]g.Map, 0, len(items))
+	for _, item := range items {
+		menuItem := g.Map{
+			"action_type": "NONE",
+			"name":        item.Name,
+			"i18n_names":  g.Map{"zh_cn": item.Name},
+		}
+		entry := g.Map{"chat_menu_item": menuItem}
+
+		if len(item.Children) > 0 {
+			children := make([]g.Map, 0, len(item.Children))
+			for _, sub := range item.Children {
+				children = append(children, g.Map{
+					"chat_menu_item": g.Map{
+						"action_type":   "REDIRECT_LINK",
+						"name":          sub.Name,
+						"i18n_names":    g.Map{"zh_cn": sub.Name},
+						"redirect_link": g.Map{"common_url": sub.URL},
+					},
+				})
+			}
+			entry["children"] = children
+		} else if item.URL != "" {
+			menuItem["action_type"] = "REDIRECT_LINK"
+			menuItem["redirect_link"] = g.Map{"common_url": item.URL}
+		}
+
+		topLevels = append(topLevels, entry)
+	}
+	return g.Map{
+		"menu_tree": g.Map{
+			"chat_menu_top_levels": topLevels,
+		},
+	}
+}
+
+// CreateChatMenu 在指定飞书群创建快捷跳转菜单。
+func (c *cWorkflow) CreateChatMenu(ctx context.Context, req *v1.WorkflowCreateChatMenuReq) (res *v1.WorkflowCreateChatMenuRes, err error) {
+	if engine.GetConfigInt(ctx, "workflow.collab.feishu_enabled", "workflow.collab.feishuEnabled", 0) != 1 {
+		return nil, fmt.Errorf("飞书通知总开关未开启，请先启用飞书配置")
+	}
+	feishu := adapter.NewFeishuAdapter()
+	token, err := feishu.GetTenantAccessToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("获取飞书 token 失败: %w", err)
+	}
+
+	items := req.MenuItems
+	if len(items) == 0 {
+		baseURL := engine.GetConfigString(ctx, "workflow.collab.base_url", "", "")
+		items = defaultChatMenuItems(baseURL)
+	}
+
+	body := buildFeishuChatMenuBody(items)
+	url := fmt.Sprintf("https://open.feishu.cn/open-apis/im/v1/chats/%s/menu_tree", req.ChatID)
+	resp, err := g.Client().
+		SetHeaderMap(map[string]string{
+			"Authorization": "Bearer " + token,
+			"Content-Type":  "application/json; charset=utf-8",
+		}).
+		Post(ctx, url, body)
+	if err != nil {
+		return nil, fmt.Errorf("调用飞书群菜单 API 失败: %w", err)
+	}
+	defer resp.Close()
+	respBody := resp.ReadAllString()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("飞书 API 返回 %d: %s", resp.StatusCode, respBody)
+	}
+	g.Log().Infof(ctx, "[FeishuChatMenu] 创建群菜单成功 chatID=%s: %s", req.ChatID, respBody)
+
+	return &v1.WorkflowCreateChatMenuRes{
+		Message: fmt.Sprintf("群菜单创建成功，用户在群 %s 中可看到快捷菜单", req.ChatID),
+	}, nil
+}
+
+// GetChatMenu 获取指定飞书群的菜单。
+func (c *cWorkflow) GetChatMenu(ctx context.Context, req *v1.WorkflowGetChatMenuReq) (res *v1.WorkflowGetChatMenuRes, err error) {
+	feishu := adapter.NewFeishuAdapter()
+	token, err := feishu.GetTenantAccessToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("获取飞书 token 失败: %w", err)
+	}
+
+	url := fmt.Sprintf("https://open.feishu.cn/open-apis/im/v1/chats/%s/menu_tree", req.ChatID)
+	resp, err := g.Client().
+		SetHeaderMap(map[string]string{
+			"Authorization": "Bearer " + token,
+		}).
+		Get(ctx, url)
+	if err != nil {
+		return nil, fmt.Errorf("获取群菜单失败: %w", err)
+	}
+	defer resp.Close()
+
+	var result struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			MenuTree struct {
+				ChatMenuTopLevels []g.Map `json:"chat_menu_top_levels"`
+			} `json:"menu_tree"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(resp.ReadAll(), &result); err != nil {
+		return nil, fmt.Errorf("解析群菜单响应失败: %w", err)
+	}
+	if result.Code != 0 {
+		return nil, fmt.Errorf("飞书 API 错误: code=%d msg=%s", result.Code, result.Msg)
+	}
+
+	return &v1.WorkflowGetChatMenuRes{
+		MenuItems: result.Data.MenuTree.ChatMenuTopLevels,
+	}, nil
+}
+
+// DeleteChatMenu 删除指定飞书群的菜单项。
+func (c *cWorkflow) DeleteChatMenu(ctx context.Context, req *v1.WorkflowDeleteChatMenuReq) (res *v1.WorkflowDeleteChatMenuRes, err error) {
+	feishu := adapter.NewFeishuAdapter()
+	token, err := feishu.GetTenantAccessToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("获取飞书 token 失败: %w", err)
+	}
+
+	url := fmt.Sprintf("https://open.feishu.cn/open-apis/im/v1/chats/%s/menu_tree", req.ChatID)
+	resp, err := g.Client().
+		SetHeaderMap(map[string]string{
+			"Authorization": "Bearer " + token,
+			"Content-Type":  "application/json; charset=utf-8",
+		}).
+		Delete(ctx, url, g.Map{"chat_menu_top_level_ids": req.MenuIDs})
+	if err != nil {
+		return nil, fmt.Errorf("删除群菜单失败: %w", err)
+	}
+	defer resp.Close()
+	respBody := resp.ReadAllString()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("飞书 API 返回 %d: %s", resp.StatusCode, respBody)
+	}
+
+	return &v1.WorkflowDeleteChatMenuRes{}, nil
+}
+
 func saveMvpConfig(ctx context.Context, key, value, configType, category, description string) error {
 	now := gtime.Now()
 	userID := middleware.GetUserID(ctx)

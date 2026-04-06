@@ -21,7 +21,10 @@ import {
 
 import {
   bindFeishuUser,
+  createChatMenu,
+  deleteChatMenu,
   getBotMenu,
+  getChatMenu,
   getFeishuBindings,
   getFeishuConfig,
   saveFeishuConfig,
@@ -29,6 +32,7 @@ import {
   testFeishuMessage,
   unbindFeishuUser,
   type BotMenuItem,
+  type ChatMenuItem,
   type FeishuBindingItem,
   type FeishuConfigItem,
 } from '#/api/mvp/workflow';
@@ -247,6 +251,88 @@ function removeSubMenu(parentIdx: number, subIdx: number) {
 
 // 在 onMounted 中加载菜单（懒加载：切换到菜单 tab 时再加载）
 const menuTabLoaded = ref(false);
+
+// ─── 群菜单 ────────────────────────────────────────────────────────────────────
+const chatMenuLoading = ref(false);
+const chatMenuSaving = ref(false);
+const chatMenuDeleting = ref(false);
+const chatID = ref('');
+const baseURL = ref(window.location.origin);
+const chatMenuList = ref<any[]>([]);
+
+const defaultChatMenuPreview: ChatMenuItem[] = [
+  {
+    name: '项目管理',
+    children: [
+      { name: '项目列表', url: '{baseURL}/mvp/project/index' },
+      { name: '新建项目', url: '{baseURL}/mvp/workflow/create' },
+      { name: '项目仪表盘', url: '{baseURL}/mvp/workflow/dashboard' },
+    ],
+  },
+  {
+    name: '任务管理',
+    children: [
+      { name: '任务列表', url: '{baseURL}/mvp/task/index' },
+      { name: '工作流状态', url: '{baseURL}/mvp/workflow/situation' },
+    ],
+  },
+  {
+    name: '系统设置',
+    children: [
+      { name: '飞书配置', url: '{baseURL}/mvp/workflow/feishu' },
+      { name: 'AI 配置', url: '{baseURL}/ai/model/index' },
+    ],
+  },
+];
+
+async function loadChatMenu() {
+  if (!chatID.value) {
+    message.warning('请先输入群 chat_id');
+    return;
+  }
+  chatMenuLoading.value = true;
+  try {
+    const res = await getChatMenu(chatID.value);
+    chatMenuList.value = res.menuItems ?? [];
+  } catch (e: any) {
+    message.error(e?.message || '获取群菜单失败');
+  } finally {
+    chatMenuLoading.value = false;
+  }
+}
+
+async function handleCreateChatMenu() {
+  if (!chatID.value) {
+    message.warning('请先输入群 chat_id');
+    return;
+  }
+  chatMenuSaving.value = true;
+  try {
+    const res = await createChatMenu({ chatId: chatID.value });
+    message.success(res.message || '群菜单创建成功');
+    await loadChatMenu();
+  } catch (e: any) {
+    message.error(e?.message || '创建群菜单失败');
+  } finally {
+    chatMenuSaving.value = false;
+  }
+}
+
+async function handleDeleteAllChatMenu() {
+  if (!chatID.value || chatMenuList.value.length === 0) return;
+  chatMenuDeleting.value = true;
+  try {
+    const ids = chatMenuList.value.map((m: any) => m.chat_menu_top_level_id).filter(Boolean);
+    await deleteChatMenu({ chatId: chatID.value, menuIds: ids });
+    message.success('群菜单已清空');
+    chatMenuList.value = [];
+  } catch (e: any) {
+    message.error(e?.message || '删除群菜单失败');
+  } finally {
+    chatMenuDeleting.value = false;
+  }
+}
+
 function onTabChange(key: string) {
   if (key === 'menu' && !menuTabLoaded.value) {
     menuTabLoaded.value = true;
@@ -686,6 +772,96 @@ const menuEventKeyDocs = [
               </div>
               <div class="mt-2 text-xs text-gray-400">
                 自定义 EventKey 时，Bot 会将其作为文本指令发送给 AI 处理（支持自然语言）。
+              </div>
+            </Card>
+          </div>
+        </Tabs.TabPane>
+
+        <Tabs.TabPane key="chat-menu" tab="群菜单">
+          <div class="space-y-4">
+            <Alert
+              type="info"
+              show-icon
+              message="飞书群菜单（快捷跳转）"
+              description="在指定飞书群中添加快捷跳转菜单，用户点击菜单项可直接跳转到 EasyMVP 后台对应页面。需要 Bot 已加入目标群，并开启 im:chat 权限。"
+            />
+
+            <Card title="群菜单管理">
+              <div class="space-y-4">
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <FormItem label="群 chat_id">
+                    <Input
+                      v-model:value="chatID"
+                      placeholder="oc_xxxxxxxxxxxxxxxxxx"
+                      allow-clear
+                    />
+                  </FormItem>
+                  <FormItem label="后台访问地址">
+                    <Input
+                      v-model:value="baseURL"
+                      placeholder="https://easymvp.example.com"
+                    />
+                  </FormItem>
+                </div>
+
+                <div class="flex gap-2">
+                  <Button :loading="chatMenuLoading" @click="loadChatMenu">查看当前菜单</Button>
+                  <Button type="primary" :loading="chatMenuSaving" @click="handleCreateChatMenu">
+                    一键创建默认菜单
+                  </Button>
+                  <Button
+                    danger
+                    :loading="chatMenuDeleting"
+                    :disabled="chatMenuList.length === 0"
+                    @click="handleDeleteAllChatMenu"
+                  >
+                    清空群菜单
+                  </Button>
+                </div>
+
+                <!-- 当前群菜单展示 -->
+                <div v-if="chatMenuList.length > 0" class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <div class="mb-2 text-sm font-semibold text-gray-600">当前群菜单（{{ chatMenuList.length }} 个一级菜单）</div>
+                  <div class="space-y-2">
+                    <div v-for="(top, i) in chatMenuList" :key="i" class="rounded border border-gray-100 bg-white p-2">
+                      <div class="font-medium text-gray-700">{{ top.chat_menu_item?.name ?? '-' }}</div>
+                      <div v-if="top.children?.length" class="ml-3 mt-1 space-y-0.5">
+                        <div v-for="(sub, j) in top.children" :key="j" class="text-xs text-gray-500">
+                          └ {{ sub.chat_menu_item?.name }}
+                          <span v-if="sub.chat_menu_item?.redirect_link?.common_url" class="text-blue-400">
+                            → {{ sub.chat_menu_item.redirect_link.common_url }}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+
+            <!-- 默认菜单预览 -->
+            <Card title="默认菜单结构预览">
+              <div class="space-y-2 text-sm text-gray-600">
+                <div v-for="(top, i) in defaultChatMenuPreview" :key="i" class="rounded border border-gray-100 p-2">
+                  <div class="font-medium text-gray-700">{{ top.name }}</div>
+                  <div class="ml-3 mt-1 space-y-0.5">
+                    <div v-for="(sub, j) in top.children" :key="j" class="text-xs text-gray-500">
+                      └ {{ sub.name }} → <span class="text-blue-400">{{ sub.url?.replace('{baseURL}', baseURL) }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="mt-3 text-xs text-gray-400">
+                链接地址会自动替换为「后台访问地址」字段的值。
+              </div>
+            </Card>
+
+            <!-- 如何获取 chat_id -->
+            <Card title="如何获取群 chat_id">
+              <div class="space-y-1 text-sm text-gray-600">
+                <div>方法一：飞书开发者后台 → 群管理 → 找到目标群 → 复制 chat_id</div>
+                <div>方法二：调用飞书 API <span class="rounded bg-gray-100 px-1 font-mono text-xs">GET /open-apis/im/v1/chats</span> 列出 Bot 所在的群</div>
+                <div>方法三：在目标群发送消息，从飞书 Webhook 日志中获取 <span class="font-mono text-xs">chat_id</span> 字段</div>
               </div>
             </Card>
           </div>

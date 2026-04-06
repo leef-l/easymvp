@@ -697,6 +697,26 @@ export function setBotMenu(data: { menuItems?: BotMenuItem[]; useDefault?: boole
   return requestClient.post<{ message: string }>(`${PREFIX}/feishu-set-bot-menu`, data);
 }
 
+// ─── 群菜单 ────────────────────────────────────────────────────────────────────
+
+export interface ChatMenuItem {
+  name: string;
+  url?: string;
+  children?: ChatMenuItem[];
+}
+
+export function createChatMenu(data: { chatId: string; menuItems?: ChatMenuItem[] }) {
+  return requestClient.post<{ message: string }>(`${PREFIX}/feishu-create-chat-menu`, data);
+}
+
+export function getChatMenu(chatId: string) {
+  return requestClient.get<{ menuItems: any[] }>(`${PREFIX}/feishu-get-chat-menu`, { chatId });
+}
+
+export function deleteChatMenu(data: { chatId: string; menuIds: string[] }) {
+  return requestClient.post(`${PREFIX}/feishu-delete-chat-menu`, data);
+}
+
 /** 手动触发重规划 */
 export function triggerReplan(projectID: string) {
   return requestClient.post(`${PREFIX}/trigger-replan`, { projectID });
