@@ -217,19 +217,18 @@ func (c *FeishuWSClient) getToken(ctx context.Context) (string, error) {
 	return result.TenantAccessToken, nil
 }
 
-// getWSEndpoint 调用飞书 API 获取 WebSocket 长连接地址。
-// 飞书长连接文档：https://open.feishu.cn/document/server-docs/event-subscription-guide/long-connection
-// 接口：POST /open-apis/event/v1/websocket_app_ticket → 返回 ticket
-// WS 地址：wss://go.feishu.cn/ws?app_id=xxx&ticket=xxx
-func (c *FeishuWSClient) getWSEndpoint(ctx context.Context, token string) (string, error) {
+// getWSEndpoint 调用飞书官方接口获取 WebSocket 长连接地址。
+// 文档：https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/server-side-sdk/golang-sdk-guide/preparations
+// 接口：POST https://open.feishu.cn/callback/ws/endpoint
+// 请求体：{"AppID":"...","AppSecret":"..."}  响应：{"data":{"URL":"wss://..."}}
+func (c *FeishuWSClient) getWSEndpoint(ctx context.Context, _ string) (string, error) {
 	resp, err := g.Client().
 		SetHeaderMap(map[string]string{
-			"Authorization": "Bearer " + token,
-			"Content-Type":  "application/json",
+			"Content-Type": "application/json",
 		}).
 		Post(ctx,
-			"https://open.feishu.cn/open-apis/event/v1/websocket_app_ticket",
-			g.Map{"app_id": c.appID})
+			"https://open.feishu.cn/callback/ws/endpoint",
+			g.Map{"AppID": c.appID, "AppSecret": c.appSecret})
 	if err != nil {
 		return "", err
 	}
@@ -239,23 +238,18 @@ func (c *FeishuWSClient) getWSEndpoint(ctx context.Context, token string) (strin
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 		Data struct {
-			Ticket string `json:"ticket"`
-			// 部分版本直接返回 url
-			URL string `json:"url"`
+			URL string `json:"URL"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal(resp.ReadAll(), &result); err != nil {
-		return "", err
+	body := resp.ReadAll()
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("解析 endpoint 响应失败: %w, body=%s", err, string(body))
 	}
 	if result.Code != 0 {
 		return "", fmt.Errorf("code=%d msg=%s", result.Code, result.Msg)
 	}
-	// 优先直接返回的 url，否则用 ticket 拼接
-	if result.Data.URL != "" {
-		return result.Data.URL, nil
+	if result.Data.URL == "" {
+		return "", fmt.Errorf("飞书返回的 WS URL 为空, body=%s", string(body))
 	}
-	if result.Data.Ticket != "" {
-		return fmt.Sprintf("wss://go.feishu.cn/ws?app_id=%s&ticket=%s", c.appID, result.Data.Ticket), nil
-	}
-	return "", fmt.Errorf("飞书返回的 WS endpoint 信息为空（url 和 ticket 均为空）")
+	return result.Data.URL, nil
 }

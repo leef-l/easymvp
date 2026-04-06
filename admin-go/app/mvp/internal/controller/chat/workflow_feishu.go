@@ -231,88 +231,23 @@ func (c *cWorkflow) GetBotMenu(ctx context.Context, req *v1.WorkflowGetBotMenuRe
 	}, nil
 }
 
-// SetBotMenu 设置飞书机器人菜单（支持自定义或恢复默认），推送到飞书 API。
+// SetBotMenu 保存飞书机器人菜单配置到 DB。
+// 注意：飞书机器人自定义菜单（单聊底部菜单）没有服务端 API，
+// 需要在飞书开发者后台手动配置，此处仅保存 EventKey 映射供后端事件处理使用。
 func (c *cWorkflow) SetBotMenu(ctx context.Context, req *v1.WorkflowSetBotMenuReq) (res *v1.WorkflowSetBotMenuRes, err error) {
-	if engine.GetConfigInt(ctx, "workflow.collab.feishu_enabled", "workflow.collab.feishuEnabled", 0) != 1 {
-		return nil, fmt.Errorf("飞书通知总开关未开启，请先启用飞书配置")
-	}
-
-	// 确定最终菜单
 	var items []v1.BotMenuItem
 	if req.UseDefault || len(req.MenuItems) == 0 {
 		items = defaultBotMenuItems()
-	} else {
-		items = req.MenuItems
-	}
-
-	// 保存到 DB（UseDefault 时清空，使用默认）
-	if req.UseDefault {
 		_ = saveMvpConfig(ctx, "workflow.collab.feishu_bot_menu", "", "string", "collab", "飞书机器人自定义菜单 JSON")
 	} else {
+		items = req.MenuItems
 		menuJSON, _ := json.Marshal(items)
 		_ = saveMvpConfig(ctx, "workflow.collab.feishu_bot_menu", string(menuJSON), "string", "collab", "飞书机器人自定义菜单 JSON")
 	}
-
-	// 推送到飞书 API
-	feishu := adapter.NewFeishuAdapter()
-	token, err := feishu.GetTenantAccessToken(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("获取飞书 token 失败: %w", err)
-	}
-
-	children := make([]g.Map, 0, len(items))
-	for _, item := range items {
-		entry := g.Map{
-			"event_key":   item.EventKey,
-			"type":        "parent",
-			"name":        item.Name,
-			"i18n_names":  g.Map{"zh_cn": item.Name},
-		}
-		if len(item.Children) > 0 {
-			subs := make([]g.Map, 0, len(item.Children))
-			for _, sub := range item.Children {
-				subs = append(subs, g.Map{
-					"event_key":  sub.EventKey,
-					"type":       "click",
-					"name":       sub.Name,
-					"i18n_names": g.Map{"zh_cn": sub.Name},
-				})
-			}
-			entry["children"] = subs
-		} else {
-			entry["type"] = "click"
-		}
-		children = append(children, entry)
-	}
-
-	menu := g.Map{
-		"app_menu": g.Map{
-			"event_key":  "ROOT",
-			"type":       "parent",
-			"name":       "EasyMVP",
-			"i18n_names": g.Map{"zh_cn": "EasyMVP"},
-			"children":   children,
-		},
-	}
-
-	resp, err := g.Client().
-		SetHeaderMap(map[string]string{
-			"Authorization": "Bearer " + token,
-			"Content-Type":  "application/json; charset=utf-8",
-		}).
-		Put(ctx, "https://open.feishu.cn/open-apis/bot/v3/menus", menu)
-	if err != nil {
-		return nil, fmt.Errorf("调用飞书菜单 API 失败: %w", err)
-	}
-	defer resp.Close()
-	body := resp.ReadAllString()
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("飞书 API 返回 %d: %s", resp.StatusCode, body)
-	}
-	g.Log().Infof(ctx, "[FeishuMenu] 设置机器人菜单成功: %s", body)
+	_ = items
 
 	return &v1.WorkflowSetBotMenuRes{
-		Message: "菜单已成功推送到飞书。用户点击菜单后 Bot 将自动响应对应指令。",
+		Message: "菜单配置已保存。飞书机器人菜单需在「飞书开发者后台 → 应用功能 → 机器人 → 自定义菜单」中手动配置，将菜单响应动作设为「推送事件」并填写对应 EventKey 即可。",
 	}, nil
 }
 

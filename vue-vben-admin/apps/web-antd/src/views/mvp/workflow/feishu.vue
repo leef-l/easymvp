@@ -574,12 +574,12 @@ const menuEventKeyDocs = [
               type="info"
               show-icon
               message="飞书机器人菜单"
-              description="在飞书中，用户点击 Bot 会话底部的菜单可快速触发常用指令。最多支持 3 个一级菜单，每个一级菜单最多 5 个子菜单。点击菜单项后，Bot 会自动响应对应功能。"
+              description="飞书机器人菜单需在「飞书开发者后台 → 应用功能 → 机器人 → 自定义菜单」中手动配置，此处管理 EventKey 与指令的映射关系，保存后后端会识别对应的菜单点击事件。"
             />
             <Alert
               type="warning"
               show-icon
-              message="注意：使用机器人菜单功能需要在飞书开放平台订阅 bot.menu.click 事件"
+              message="配置步骤：① 在此保存 EventKey 配置 → ② 去飞书开发者后台创建菜单，响应动作选「推送事件」并填写 EventKey → ③ 订阅 application.bot.menu_v6 事件"
             />
 
             <Card :loading="menuLoading" title="当前菜单配置">
@@ -658,10 +658,10 @@ const menuEventKeyDocs = [
 
               <div class="mt-4 flex justify-end gap-2">
                 <Button :loading="menuSaving" @click="deployMenu(true)">
-                  恢复默认菜单
+                  恢复默认
                 </Button>
                 <Button type="primary" :loading="menuSaving" @click="deployMenu(false)">
-                  保存并推送到飞书
+                  保存配置
                 </Button>
               </div>
             </Card>
