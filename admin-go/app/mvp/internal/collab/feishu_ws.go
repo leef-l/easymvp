@@ -102,6 +102,8 @@ func (c *FeishuWSClient) handleRawPayload(ctx context.Context, body []byte) {
 		return
 	}
 
+	g.Log().Infof(ctx, "[FeishuWS] 原始payload: %s", string(body))
+
 	var raw map[string]interface{}
 	if err := json.Unmarshal(body, &raw); err != nil {
 		g.Log().Warningf(ctx, "[FeishuWS] payload JSON 解析失败: %v, body=%s", err, string(body))
