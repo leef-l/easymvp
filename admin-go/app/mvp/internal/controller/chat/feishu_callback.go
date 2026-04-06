@@ -56,7 +56,7 @@ func (c *cFeishuCallback) Handle(r *ghttp.Request) {
 		return
 	}
 
-	// 2b. 消息事件（im.message.receive_v1）和菜单点击事件（bot.menu.click）
+	// 2b. 消息事件（im.message.receive_v1）和菜单点击事件（application.bot.menu_v6）
 	if header, ok := raw["header"].(map[string]interface{}); ok {
 		eventType, _ := header["event_type"].(string)
 		switch eventType {
@@ -67,7 +67,7 @@ func (c *cFeishuCallback) Handle(r *ghttp.Request) {
 				r.Response.WriteJson(g.Map{"msg": "ok"})
 			}
 			return
-		case "bot.menu.click":
+		case "application.bot.menu_v6":
 			if event, ok := raw["event"].(map[string]interface{}); ok {
 				handleFeishuMenuClickEvent(r, event)
 			} else {
@@ -207,7 +207,7 @@ func handleFeishuMessageEvent(r *ghttp.Request, event map[string]interface{}) {
 	r.Response.WriteJson(g.Map{"msg": "ok"})
 }
 
-// handleFeishuMenuClickEvent 处理飞书机器人菜单点击事件（bot.menu.click）。
+// handleFeishuMenuClickEvent 处理飞书机器人菜单点击事件（application.bot.menu_v6）。
 func handleFeishuMenuClickEvent(r *ghttp.Request, event map[string]interface{}) {
 	ctx := r.GetCtx()
 	operatorMap, _ := event["operator"].(map[string]interface{})

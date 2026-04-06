@@ -352,7 +352,7 @@ const menuEventKeyDocs = [
                     <div class="flex items-start gap-3">
                       <Tag color="orange" class="mt-0.5 shrink-0">菜单需要</Tag>
                       <div>
-                        <div class="font-mono font-semibold">bot.menu.click</div>
+                        <div class="font-mono font-semibold">application.bot.menu_v6</div>
                         <div class="mt-0.5 text-xs text-gray-500">接收用户点击机器人菜单的事件，启用「机器人菜单」功能时必须订阅</div>
                       </div>
                     </div>
@@ -375,7 +375,7 @@ const menuEventKeyDocs = [
                   2. 左侧「事件订阅」<br>
                   3. 添加事件：<br>
                   &nbsp;&nbsp;&nbsp;→ 搜索 im.message.receive_v1 → 添加（必须）<br>
-                  &nbsp;&nbsp;&nbsp;→ 搜索 bot.menu.click → 添加（使用菜单功能时必须）<br>
+                  &nbsp;&nbsp;&nbsp;→ 搜索 application.bot.menu_v6 → 添加（使用菜单功能时必须）<br>
                   4. Webhook 模式：填写「请求地址」= 本页「回调地址」中的 URL<br>
                   &nbsp;&nbsp;&nbsp;WebSocket 模式：选择「使用长连接接收事件」，无需填 URL
                 </div>

@@ -449,7 +449,7 @@ func feishuWSEventHandler(ctx context.Context, header map[string]interface{}, ev
 		}
 		DispatchFeishuCommand(ctx, openID, messageID, chatID, contentStr)
 
-	case "bot.menu.click":
+	case "application.bot.menu_v6":
 		// 机器人菜单点击事件
 		operatorMap, _ := event["operator"].(map[string]interface{})
 		openID := ""
