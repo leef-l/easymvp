@@ -242,9 +242,9 @@ func loadBotModel(ctx context.Context, systemUserID int64) (*engine.ModelInfo, e
 
 // ─── 指令处理器 ───────────────────────────────────────────────────────────────
 
-func handleBotCreateProject(ctx context.Context, projectName, category string, systemUserID, deptID int64, openID string, reply func(string)) {
+func handleBotCreateProject(ctx context.Context, projectName, category string, systemUserID, deptID int64, openID, platform string, reply func(string)) {
 	if systemUserID == 0 {
-		reply("❌ 您尚未绑定飞书账号，请先在 EasyMVP 管理端完成飞书绑定。")
+		reply("❌ 您尚未绑定账号，请先在 EasyMVP 管理端完成账号绑定。")
 		return
 	}
 	if projectName == "" {
@@ -274,7 +274,7 @@ func handleBotCreateProject(ctx context.Context, projectName, category string, s
 			convID = val.Int64()
 		}
 		if convID > 0 {
-			setFeishuSession(openID, convID)
+			setBotSession(platform, openID, convID)
 			extraTip = "\n\n💬 已进入对话模式，可以直接和架构师描述需求。\n说「确认方案」可以启动执行，说「退出对话」可以结束对话。"
 		}
 	}
@@ -526,6 +526,50 @@ func lookupSystemUser(ctx context.Context, openID string) (userID int64, deptID 
 	return
 }
 
+// lookupBotUser 按平台+openID 查找绑定的系统用户，平台无关版本。
+func lookupBotUser(ctx context.Context, platform, openID string) (userID int64, deptID int64) {
+	if openID == "" {
+		return 0, 0
+	}
+	bindingRepo := orchestrator.GetCollabBindingRepo()
+	if bindingRepo == nil {
+		bindingRepo = collabRepo.NewBindingRepo()
+	}
+	binding, err := bindingRepo.GetByPlatformUserID(ctx, platform, openID)
+	if err != nil || binding == nil {
+		return 0, 0
+	}
+	userID = toCallbackInt64(binding["user_id"])
+	deptID = toCallbackInt64(binding["dept_id"])
+	return
+}
+
+// getBotSession 按平台获取会话，平台无关版本。
+func getBotSession(platform, openID string) (int64, bool) {
+	if platform == "telegram" {
+		return getTGSession(openID)
+	}
+	return getFeishuSession(openID)
+}
+
+// setBotSession 按平台设置会话。
+func setBotSession(platform, openID string, convID int64) {
+	if platform == "telegram" {
+		setTGSession(openID, convID)
+	} else {
+		setFeishuSession(openID, convID)
+	}
+}
+
+// clearBotSession 按平台清除会话。
+func clearBotSession(platform, openID string) {
+	if platform == "telegram" {
+		clearTGSession(openID)
+	} else {
+		clearFeishuSession(openID)
+	}
+}
+
 // findProjectByKeyword 按项目名或 ID 查找项目（限当前用户）。
 func findProjectByKeyword(ctx context.Context, keyword string, userID int64) (gdb.Record, error) {
 	m := g.DB().Ctx(ctx).Model("mvp_project").
@@ -595,8 +639,8 @@ func extractJSON(s string) string {
 }
 
 // handleBotConfirmPlan 确认当前活跃对话的方案并启动执行。
-func handleBotConfirmPlan(ctx context.Context, openID string, systemUserID int64, reply func(string)) {
-	convID, ok := getFeishuSession(openID)
+func handleBotConfirmPlan(ctx context.Context, openID, platform string, systemUserID int64, reply func(string)) {
+	convID, ok := getBotSession(platform, openID)
 	if !ok {
 		reply("❌ 当前没有活跃的项目对话，请先创建项目")
 		return
@@ -612,7 +656,7 @@ func handleBotConfirmPlan(ctx context.Context, openID string, systemUserID int64
 		reply(fmt.Sprintf("❌ 确认方案失败：%v", err))
 		return
 	}
-	clearFeishuSession(openID)
+	clearBotSession(platform, openID)
 	reply(fmt.Sprintf("🚀 方案已确认！项目 ID:%d 开始自动执行。\n发送「项目状态 %d」可查看执行进度", projectID, projectID))
 }
 

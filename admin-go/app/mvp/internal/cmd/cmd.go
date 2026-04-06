@@ -64,6 +64,9 @@ var (
 			// 自动恢复飞书 WS 长连接（读取 DB 配置）
 			autoStartFeishuWS(ctx)
 
+			// 自动启动 Telegram Bot Polling（读取 DB 配置）
+			chat.StartTelegramPolling(ctx)
+
 			s := g.Server()
 			s.Group("/", func(group *ghttp.RouterGroup) {
 				group.Middleware(ghttp.MiddlewareHandlerResponse)

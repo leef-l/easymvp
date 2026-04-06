@@ -52,21 +52,21 @@ func DispatchBotCommand(ctx context.Context, bc *BotContext) {
 	lower := strings.ToLower(strings.TrimSpace(text))
 	switch lower {
 	case "退出对话", "exit", "quit":
-		clearFeishuSession(bc.OpenID)
+		clearBotSession(bc.Platform.PlatformName(), bc.OpenID)
 		reply("✅ 已退出对话模式")
 		return
 	case "帮助", "help", "?", "？", "怎么用", "使用说明", "功能":
 		reply(botHelpText())
 		return
 	case "我的项目", "项目列表", "所有项目", "list":
-		systemUserID, deptID := lookupSystemUser(ctx, bc.OpenID)
+		systemUserID, deptID := lookupBotUser(ctx, bc.Platform.PlatformName(), bc.OpenID)
 		handleBotListProjects(ctx, systemUserID, reply)
 		_ = deptID
 		return
 	}
 
-	// 反查绑定的系统用户
-	systemUserID, deptID := lookupSystemUser(ctx, bc.OpenID)
+	// 反查绑定的系统用户（按平台区分）
+	systemUserID, deptID := lookupBotUser(ctx, bc.Platform.PlatformName(), bc.OpenID)
 
 	// 快速判断：不含项目操作关键词的消息直接走 fallback，不调 AI
 	intent := fallbackParseIntent(text)
@@ -81,7 +81,7 @@ func DispatchBotCommand(ctx context.Context, bc *BotContext) {
 	g.Log().Infof(ctx, "[Bot/%s] 意图: action=%s project=%s", bc.Platform.PlatformName(), intent.Action, intent.ProjectName)
 
 	// 路由
-	dispatchIntent(ctx, intent, text, bc.OpenID, systemUserID, deptID, reply)
+	dispatchIntent(ctx, intent, text, bc.OpenID, systemUserID, deptID, reply, bc.Platform.PlatformName())
 }
 
 // dispatchIntent 意图路由（被各平台共同调用）。
@@ -92,11 +92,16 @@ func dispatchIntent(
 	openID string,
 	systemUserID, deptID int64,
 	reply func(string),
+	platform ...string,
 ) {
+	platformName := "feishu"
+	if len(platform) > 0 && platform[0] != "" {
+		platformName = platform[0]
+	}
 	switch intent.Action {
 	// ── 项目管理 ──
 	case "create_project":
-		handleBotCreateProject(ctx, intent.ProjectName, intent.Category, systemUserID, deptID, openID, reply)
+		handleBotCreateProject(ctx, intent.ProjectName, intent.Category, systemUserID, deptID, openID, platformName, reply)
 	case "list_projects":
 		handleBotListProjects(ctx, systemUserID, reply)
 	case "project_status":
@@ -106,7 +111,7 @@ func dispatchIntent(
 	case "resume_project":
 		handleBotResumeProject(ctx, intent.ProjectName, systemUserID, reply)
 	case "confirm_plan":
-		handleBotConfirmPlan(ctx, openID, systemUserID, reply)
+		handleBotConfirmPlan(ctx, openID, platformName, systemUserID, reply)
 
 	// ── 任务管理 ──
 	case "list_tasks":
@@ -145,7 +150,7 @@ func dispatchIntent(
 		reply(botHelpText())
 	case "chat":
 		// 先检查是否有活跃对话会话
-		if convID, ok := getFeishuSession(openID); ok {
+		if convID, ok := getBotSession(platformName, openID); ok {
 			conv, _ := g.DB().Ctx(ctx).Model("mvp_conversation").
 				Where("id", convID).WhereNull("deleted_at").One()
 			if !conv.IsEmpty() {
