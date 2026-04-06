@@ -38,7 +38,7 @@ func (a *FeishuAdapter) SendTextMessage(ctx context.Context, openID string, text
 	if !a.IsEnabled(ctx) {
 		return nil
 	}
-	token, err := a.getTenantAccessToken(ctx)
+	token, err := a.GetTenantAccessToken(ctx)
 	if err != nil {
 		return fmt.Errorf("获取飞书 token 失败: %w", err)
 	}
@@ -70,7 +70,7 @@ func (a *FeishuAdapter) SendCardMessage(ctx context.Context, openID string, card
 	if !a.IsEnabled(ctx) {
 		return nil
 	}
-	token, err := a.getTenantAccessToken(ctx)
+	token, err := a.GetTenantAccessToken(ctx)
 	if err != nil {
 		return fmt.Errorf("获取飞书 token 失败: %w", err)
 	}
@@ -102,7 +102,7 @@ func (a *FeishuAdapter) SendCardMessage(ctx context.Context, openID string, card
 
 // ReplyMessage 回复一条飞书消息（reply to message_id）。
 func (a *FeishuAdapter) ReplyMessage(ctx context.Context, messageID string, text string) error {
-	token, err := a.getTenantAccessToken(ctx)
+	token, err := a.GetTenantAccessToken(ctx)
 	if err != nil {
 		return fmt.Errorf("获取飞书 token 失败: %w", err)
 	}
@@ -129,7 +129,7 @@ func (a *FeishuAdapter) ReplyMessage(ctx context.Context, messageID string, text
 
 // SendTextToChat 向群/会话发送文本消息（receive_id 为 chat_id）。
 func (a *FeishuAdapter) SendTextToChat(ctx context.Context, chatID string, text string) error {
-	token, err := a.getTenantAccessToken(ctx)
+	token, err := a.GetTenantAccessToken(ctx)
 	if err != nil {
 		return fmt.Errorf("获取飞书 token 失败: %w", err)
 	}
@@ -154,8 +154,8 @@ func (a *FeishuAdapter) SendTextToChat(ctx context.Context, chatID string, text 
 	return nil
 }
 
-// getTenantAccessToken 获取 tenant_access_token，内存缓存 110 分钟。
-func (a *FeishuAdapter) getTenantAccessToken(ctx context.Context) (string, error) {
+// GetTenantAccessToken 获取 tenant_access_token，内存缓存 110 分钟。
+func (a *FeishuAdapter) GetTenantAccessToken(ctx context.Context) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 

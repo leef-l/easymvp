@@ -238,6 +238,11 @@ function handleDashboard(row: ProjectItem) {
   router.push({ path: '/mvp/workflow/dashboard', query: { projectId: row.id } });
 }
 
+/** 打开元认知页面 */
+function handleMetaCognition(row: ProjectItem) {
+  router.push({ path: '/mvp/workflow/meta-cognition', query: { projectID: row.id } });
+}
+
 /** 确认方案（设计阶段 -> 执行阶段） */
 function handleConfirmPlan(row: ProjectItem) {
   Modal.confirm({
@@ -392,13 +397,19 @@ function handleDelete(row: ProjectItem) {
           <Button type="link" size="small" @click="handleViewStatus(row)">查看详情</Button>
         </template>
 
-        <!-- V2 项目通用：仪表板入口 -->
+        <!-- V2 项目通用：仪表板 + 元认知入口 -->
         <Button
           v-if="row.engineVersion === 'workflow_v2'"
           type="link"
           size="small"
           @click="handleDashboard(row)"
         >仪表板</Button>
+        <Button
+          v-if="row.engineVersion === 'workflow_v2'"
+          type="link"
+          size="small"
+          @click="handleMetaCognition(row)"
+        >元认知</Button>
 
         <!-- 编辑按钮（任何状态都可以编辑） -->
         <Button type="link" size="small" @click="handleEdit(row)">编辑</Button>

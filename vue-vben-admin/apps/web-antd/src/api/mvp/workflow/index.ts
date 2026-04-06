@@ -677,6 +677,26 @@ export function testFeishuMessage(data: { bindingId: string; content?: string })
   return requestClient.post(`${PREFIX}/test-feishu-message`, data);
 }
 
+export interface BotMenuItem {
+  eventKey: string;
+  name: string;
+  children?: BotMenuItem[];
+}
+
+export interface BotMenuConfig {
+  menuItems: BotMenuItem[];
+  isDefault: boolean;
+  defaultItems: BotMenuItem[];
+}
+
+export function getBotMenu() {
+  return requestClient.get<BotMenuConfig>(`${PREFIX}/feishu-bot-menu`);
+}
+
+export function setBotMenu(data: { menuItems?: BotMenuItem[]; useDefault?: boolean }) {
+  return requestClient.post<{ message: string }>(`${PREFIX}/feishu-set-bot-menu`, data);
+}
+
 /** 手动触发重规划 */
 export function triggerReplan(projectID: string) {
   return requestClient.post(`${PREFIX}/trigger-replan`, { projectID });

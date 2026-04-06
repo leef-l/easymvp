@@ -110,3 +110,38 @@ type WorkflowTestFeishuMessageReq struct {
 type WorkflowTestFeishuMessageRes struct {
 	g.Meta `mime:"application/json"`
 }
+
+// ==================== 飞书机器人菜单 API ====================
+
+// BotMenuItem 菜单项（支持最多两级）。
+type BotMenuItem struct {
+	EventKey string        `json:"eventKey"` // 事件 key（点击后触发，用于识别指令）
+	Name     string        `json:"name"`     // 中文显示名
+	Children []BotMenuItem `json:"children,omitempty"`
+}
+
+// WorkflowGetBotMenuReq 查询当前飞书机器人菜单配置。
+type WorkflowGetBotMenuReq struct {
+	g.Meta `path:"/workflow/feishu-bot-menu" method:"get" tags:"飞书协作" summary:"查询飞书机器人菜单配置"`
+}
+
+// WorkflowGetBotMenuRes 查询飞书机器人菜单配置响应。
+type WorkflowGetBotMenuRes struct {
+	g.Meta       `mime:"application/json"`
+	MenuItems    []BotMenuItem `json:"menuItems"`    // 当前保存的自定义菜单（未设置则返回默认）
+	IsDefault    bool          `json:"isDefault"`    // true = 当前使用的是默认菜单
+	DefaultItems []BotMenuItem `json:"defaultItems"` // 默认菜单结构（供参考/恢复用）
+}
+
+// WorkflowSetBotMenuReq 设置飞书机器人菜单（可自定义，留空则使用默认）。
+type WorkflowSetBotMenuReq struct {
+	g.Meta    `path:"/workflow/feishu-set-bot-menu" method:"post" tags:"飞书协作" summary:"设置飞书机器人菜单"`
+	MenuItems []BotMenuItem `json:"menuItems" dc:"自定义菜单项（不传或传空则使用默认菜单）"`
+	UseDefault bool         `json:"useDefault" dc:"true=恢复默认菜单并推送到飞书"`
+}
+
+// WorkflowSetBotMenuRes 设置飞书机器人菜单响应。
+type WorkflowSetBotMenuRes struct {
+	g.Meta  `mime:"application/json"`
+	Message string `json:"message"`
+}

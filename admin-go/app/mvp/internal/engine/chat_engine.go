@@ -312,10 +312,18 @@ func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *M
 	})
 	e.hub.Publish(replyID, string(doneJSON))
 
+	// 7. 飞书主动推送：将 AI 回复发给对话绑定用户（异步，不阻塞）
+	go func() {
+		feishuNotifyAIReply(ctx, conversationID, fullContent.String())
+	}()
+
 	// 短暂延迟后关闭 channel，让前端有时间接收最后的消息
 	time.Sleep(100 * time.Millisecond)
 	e.hub.Done(replyID)
 }
+
+// feishuNotifyAIReply 推送 AI 回复到飞书（避免循环引用，用函数变量注入）。
+var feishuNotifyAIReply = func(ctx context.Context, conversationID int64, content string) {}
 
 // tryParseArchitectTasks 尝试从架构师回复中解析任务清单
 func (e *ChatEngine) tryParseArchitectTasks(conversationID int64, aiReply string) {

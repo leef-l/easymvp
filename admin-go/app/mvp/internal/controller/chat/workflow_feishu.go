@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -159,6 +160,162 @@ func (c *cWorkflow) TestFeishuMessage(ctx context.Context, req *v1.WorkflowTestF
 	return &v1.WorkflowTestFeishuMessageRes{}, nil
 }
 
+// ─── 飞书机器人菜单管理 ─────────────────────────────────────────────────────────
+
+// defaultBotMenuItems 返回默认菜单结构（供前端展示和恢复用）。
+func defaultBotMenuItems() []v1.BotMenuItem {
+	return []v1.BotMenuItem{
+		{
+			EventKey: "PARENT_PROJECT",
+			Name:     "项目管理",
+			Children: []v1.BotMenuItem{
+				{EventKey: "list_projects", Name: "我的项目"},
+				{EventKey: "create_project_tip", Name: "创建项目"},
+				{EventKey: "help", Name: "帮助"},
+			},
+		},
+		{
+			EventKey: "PARENT_TASK",
+			Name:     "任务管理",
+			Children: []v1.BotMenuItem{
+				{EventKey: "project_status_tip", Name: "项目进度"},
+				{EventKey: "list_tasks_tip", Name: "查看任务"},
+				{EventKey: "retry_task_tip", Name: "重试失败任务"},
+			},
+		},
+		{
+			EventKey: "PARENT_REVIEW",
+			Name:     "审核验收",
+			Children: []v1.BotMenuItem{
+				{EventKey: "review_status_tip", Name: "审核状态"},
+				{EventKey: "accept_status_tip", Name: "验收状态"},
+				{EventKey: "autonomy_status_tip", Name: "自治状态"},
+			},
+		},
+	}
+}
+
+// GetBotMenu 查询当前飞书机器人菜单配置（从 DB 读取，未设置则返回默认）。
+func (c *cWorkflow) GetBotMenu(ctx context.Context, req *v1.WorkflowGetBotMenuReq) (res *v1.WorkflowGetBotMenuRes, err error) {
+	defaults := defaultBotMenuItems()
+
+	// 从 mvp_config 读取自定义菜单
+	var configVal string
+	_ = g.DB().Model("mvp_config").Ctx(ctx).
+		Where("config_key", "workflow.collab.feishu_bot_menu").
+		WhereNull("deleted_at").
+		Fields("config_value").
+		Scan(&configVal)
+
+	if configVal == "" {
+		return &v1.WorkflowGetBotMenuRes{
+			MenuItems:    defaults,
+			IsDefault:    true,
+			DefaultItems: defaults,
+		}, nil
+	}
+
+	var items []v1.BotMenuItem
+	if err := json.Unmarshal([]byte(configVal), &items); err != nil || len(items) == 0 {
+		return &v1.WorkflowGetBotMenuRes{
+			MenuItems:    defaults,
+			IsDefault:    true,
+			DefaultItems: defaults,
+		}, nil
+	}
+
+	return &v1.WorkflowGetBotMenuRes{
+		MenuItems:    items,
+		IsDefault:    false,
+		DefaultItems: defaults,
+	}, nil
+}
+
+// SetBotMenu 设置飞书机器人菜单（支持自定义或恢复默认），推送到飞书 API。
+func (c *cWorkflow) SetBotMenu(ctx context.Context, req *v1.WorkflowSetBotMenuReq) (res *v1.WorkflowSetBotMenuRes, err error) {
+	if engine.GetConfigInt(ctx, "workflow.collab.feishu_enabled", "workflow.collab.feishuEnabled", 0) != 1 {
+		return nil, fmt.Errorf("飞书通知总开关未开启，请先启用飞书配置")
+	}
+
+	// 确定最终菜单
+	var items []v1.BotMenuItem
+	if req.UseDefault || len(req.MenuItems) == 0 {
+		items = defaultBotMenuItems()
+	} else {
+		items = req.MenuItems
+	}
+
+	// 保存到 DB（UseDefault 时清空，使用默认）
+	if req.UseDefault {
+		_ = saveMvpConfig(ctx, "workflow.collab.feishu_bot_menu", "", "string", "collab", "飞书机器人自定义菜单 JSON")
+	} else {
+		menuJSON, _ := json.Marshal(items)
+		_ = saveMvpConfig(ctx, "workflow.collab.feishu_bot_menu", string(menuJSON), "string", "collab", "飞书机器人自定义菜单 JSON")
+	}
+
+	// 推送到飞书 API
+	feishu := adapter.NewFeishuAdapter()
+	token, err := feishu.GetTenantAccessToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("获取飞书 token 失败: %w", err)
+	}
+
+	children := make([]g.Map, 0, len(items))
+	for _, item := range items {
+		entry := g.Map{
+			"event_key":   item.EventKey,
+			"type":        "parent",
+			"name":        item.Name,
+			"i18n_names":  g.Map{"zh_cn": item.Name},
+		}
+		if len(item.Children) > 0 {
+			subs := make([]g.Map, 0, len(item.Children))
+			for _, sub := range item.Children {
+				subs = append(subs, g.Map{
+					"event_key":  sub.EventKey,
+					"type":       "click",
+					"name":       sub.Name,
+					"i18n_names": g.Map{"zh_cn": sub.Name},
+				})
+			}
+			entry["children"] = subs
+		} else {
+			entry["type"] = "click"
+		}
+		children = append(children, entry)
+	}
+
+	menu := g.Map{
+		"app_menu": g.Map{
+			"event_key":  "ROOT",
+			"type":       "parent",
+			"name":       "EasyMVP",
+			"i18n_names": g.Map{"zh_cn": "EasyMVP"},
+			"children":   children,
+		},
+	}
+
+	resp, err := g.Client().
+		SetHeaderMap(map[string]string{
+			"Authorization": "Bearer " + token,
+			"Content-Type":  "application/json; charset=utf-8",
+		}).
+		Put(ctx, "https://open.feishu.cn/open-apis/bot/v3/menus", menu)
+	if err != nil {
+		return nil, fmt.Errorf("调用飞书菜单 API 失败: %w", err)
+	}
+	defer resp.Close()
+	body := resp.ReadAllString()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("飞书 API 返回 %d: %s", resp.StatusCode, body)
+	}
+	g.Log().Infof(ctx, "[FeishuMenu] 设置机器人菜单成功: %s", body)
+
+	return &v1.WorkflowSetBotMenuRes{
+		Message: "菜单已成功推送到飞书。用户点击菜单后 Bot 将自动响应对应指令。",
+	}, nil
+}
+
 func saveMvpConfig(ctx context.Context, key, value, configType, category, description string) error {
 	now := gtime.Now()
 	userID := middleware.GetUserID(ctx)
@@ -213,6 +370,32 @@ func mapToFeishuBindingDTO(m g.Map) v1.FeishuBindingDTO {
 	}
 }
 
+// botMenuKeyToCommand 将飞书菜单 event_key 转换为 Bot 指令文本。
+func botMenuKeyToCommand(key string) string {
+	switch key {
+	case "list_projects":
+		return "我的项目列表"
+	case "create_project_tip":
+		return "我想创建一个新项目，请告诉我需要提供哪些信息？"
+	case "help":
+		return "help"
+	case "project_status_tip":
+		return "请告诉我某个项目的进度，你需要知道项目名称"
+	case "list_tasks_tip":
+		return "查看任务列表，你需要知道项目名称"
+	case "retry_task_tip":
+		return "重试失败任务，你需要知道项目名称"
+	case "review_status_tip":
+		return "查看审核状态，你需要知道项目名称"
+	case "accept_status_tip":
+		return "查看验收状态，你需要知道项目名称"
+	case "autonomy_status_tip":
+		return "查看自治状态，你需要知道项目名称"
+	default:
+		return key
+	}
+}
+
 func boolToInt(ok bool) int {
 	if ok {
 		return 1
@@ -226,25 +409,61 @@ func feishuWSEventHandler(ctx context.Context, header map[string]interface{}, ev
 		return
 	}
 	eventType, _ := header["event_type"].(string)
-	if eventType != "im.message.receive_v1" {
-		return
-	}
 
-	sender, _ := event["sender"].(map[string]interface{})
-	messageMap, _ := event["message"].(map[string]interface{})
-	if sender == nil || messageMap == nil {
-		return
-	}
+	switch eventType {
+	case "im.message.receive_v1":
+		sender, _ := event["sender"].(map[string]interface{})
+		messageMap, _ := event["message"].(map[string]interface{})
+		if sender == nil || messageMap == nil {
+			return
+		}
+		senderID, _ := sender["sender_id"].(map[string]interface{})
+		openID := ""
+		if senderID != nil {
+			openID, _ = senderID["open_id"].(string)
+		}
+		messageID, _ := messageMap["message_id"].(string)
+		chatID, _ := messageMap["chat_id"].(string)
+		msgType, _ := messageMap["message_type"].(string)
+		contentStr, _ := messageMap["content"].(string)
+		g.Log().Infof(ctx, "[FeishuWSBot] 收到消息: openID=%s messageID=%s type=%s", openID, messageID, msgType)
 
-	senderID, _ := sender["sender_id"].(map[string]interface{})
-	openID := ""
-	if senderID != nil {
-		openID, _ = senderID["open_id"].(string)
-	}
-	messageID, _ := messageMap["message_id"].(string)
-	chatID, _ := messageMap["chat_id"].(string)
-	contentStr, _ := messageMap["content"].(string)
+		// 非文本消息：直接回复提示
+		if msgType != "" && msgType != "text" {
+			platform := &feishuBotPlatform{messageID: messageID, chatID: chatID}
+			switch msgType {
+			case "audio":
+				platform.Reply(ctx, "收到语音消息，暂不支持语音识别。请直接发文字，我会立即处理 😊")
+			case "image":
+				platform.Reply(ctx, "收到图片消息，暂不支持图片识别。请用文字描述你的需求 📝")
+			case "file":
+				platform.Reply(ctx, "收到文件消息，暂不支持文件处理。请用文字说明你的需求 📄")
+			case "sticker":
+				platform.Reply(ctx, "收到表情包 😄 如果你想操作项目，请发送文字指令。发送「帮助」可查看所有功能。")
+			case "video":
+				platform.Reply(ctx, "收到视频消息，暂不支持视频处理。请用文字描述你的需求 🎬")
+			default:
+				platform.Reply(ctx, fmt.Sprintf("收到 %s 类型消息，暂不支持此类型。请发送文字消息 🚀", msgType))
+			}
+			return
+		}
+		DispatchFeishuCommand(ctx, openID, messageID, chatID, contentStr)
 
-	g.Log().Infof(ctx, "[FeishuWSBot] 收到消息: openID=%s messageID=%s", openID, messageID)
-	DispatchFeishuCommand(ctx, openID, messageID, chatID, contentStr)
+	case "bot.menu.click":
+		// 机器人菜单点击事件
+		operatorMap, _ := event["operator"].(map[string]interface{})
+		openID := ""
+		if operatorMap != nil {
+			operatorID, _ := operatorMap["operator_id"].(map[string]interface{})
+			if operatorID != nil {
+				openID, _ = operatorID["open_id"].(string)
+			}
+		}
+		eventKey, _ := event["event_key"].(string)
+		g.Log().Infof(ctx, "[FeishuMenuClick] openID=%s key=%s", openID, eventKey)
+		if openID != "" && eventKey != "" {
+			cmdText := botMenuKeyToCommand(eventKey)
+			DispatchFeishuCommand(ctx, openID, "", "", `{"text":"`+cmdText+`"}`)
+		}
+	}
 }

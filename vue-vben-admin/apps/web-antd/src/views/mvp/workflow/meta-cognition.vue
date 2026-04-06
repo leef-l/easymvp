@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import {
   Card, Row, Col, Statistic, Table, Tag, Button, Space, Tabs, Progress,
-  Descriptions, Popconfirm, message, Empty, Spin, Alert,
+  Descriptions, Popconfirm, message, Empty, Spin, Alert, Select,
 } from 'ant-design-vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
+import { getProjectList } from '#/api/mvp/project';
+import type { ProjectItem } from '#/api/mvp/project/types';
 import {
   getMetaObservationStats,
   getMetaObservations,
@@ -23,7 +25,34 @@ import {
 } from '#/api/mvp/workflow';
 
 const route = useRoute();
-const projectID = computed(() => (route.query.projectID as string) || '');
+const router = useRouter();
+
+// URL 参数优先；没有则由下拉选择
+const projectID = computed(() => (route.query.projectID as string) || selectedProjectID.value);
+
+// 下拉框选择的 projectID（仅在无 URL 参数时使用）
+const selectedProjectID = ref('');
+const projectOptions = ref<{ label: string; value: string }[]>([]);
+const projectsLoading = ref(false);
+
+async function loadProjects() {
+  projectsLoading.value = true;
+  try {
+    const res = await getProjectList({ pageNum: 1, pageSize: 50 } as any);
+    projectOptions.value = (res?.list ?? []).map((p: ProjectItem) => ({
+      label: `${p.name}（${p.status ?? ''}）`,
+      value: String(p.id),
+    }));
+  } finally {
+    projectsLoading.value = false;
+  }
+}
+
+function onSelectProject(val: string) {
+  selectedProjectID.value = val;
+  // 同步到 URL，方便分享和刷新
+  router.replace({ query: { ...route.query, projectID: val } });
+}
 
 const loading = ref(false);
 const activeTab = ref('overview');
@@ -60,7 +89,18 @@ async function loadAll() {
   }
 }
 
-onMounted(loadAll);
+onMounted(async () => {
+  // 没有 URL 参数时才加载项目列表供选择
+  if (!route.query.projectID) {
+    await loadProjects();
+  }
+  await loadAll();
+});
+
+// 选中项目后自动加载数据
+watch(selectedProjectID, (val) => {
+  if (val) loadAll();
+});
 
 // ==================== 操作 ====================
 const assessmentRunning = ref(false);
@@ -161,13 +201,32 @@ function pct(v: number | undefined) {
 
 <template>
   <div style="padding: 16px">
-    <Alert
-      v-if="!projectID"
-      type="warning"
-      message="请通过 URL 参数传入 projectID"
-      show-icon
-      style="margin-bottom: 16px"
-    />
+    <!-- 无 URL 参数时展示项目选择器 -->
+    <div v-if="!route.query.projectID" style="margin-bottom: 16px">
+      <Card size="small">
+        <Space>
+          <span style="font-size: 13px; color: #595959">选择项目：</span>
+          <Select
+            v-model:value="selectedProjectID"
+            :loading="projectsLoading"
+            :options="projectOptions"
+            placeholder="请选择要查看元认知数据的项目"
+            style="width: 360px"
+            show-search
+            option-filter-prop="label"
+            @change="onSelectProject"
+          />
+          <Button v-if="!selectedProjectID" size="small" @click="loadProjects">刷新列表</Button>
+        </Space>
+      </Card>
+      <Alert
+        v-if="!selectedProjectID"
+        type="info"
+        message="请先选择项目，或通过项目列表点击"元认知"按钮直接跳转"
+        show-icon
+        style="margin-top: 8px"
+      />
+    </div>
 
     <Spin :spinning="loading">
       <Tabs v-model:activeKey="activeTab">

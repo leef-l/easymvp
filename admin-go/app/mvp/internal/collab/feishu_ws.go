@@ -217,7 +217,10 @@ func (c *FeishuWSClient) getToken(ctx context.Context) (string, error) {
 	return result.TenantAccessToken, nil
 }
 
-// getWSEndpoint 调用飞书 API 获取 WebSocket 连接地址。
+// getWSEndpoint 调用飞书 API 获取 WebSocket 长连接地址。
+// 飞书长连接文档：https://open.feishu.cn/document/server-docs/event-subscription-guide/long-connection
+// 接口：POST /open-apis/event/v1/websocket_app_ticket → 返回 ticket
+// WS 地址：wss://go.feishu.cn/ws?app_id=xxx&ticket=xxx
 func (c *FeishuWSClient) getWSEndpoint(ctx context.Context, token string) (string, error) {
 	resp, err := g.Client().
 		SetHeaderMap(map[string]string{
@@ -236,6 +239,8 @@ func (c *FeishuWSClient) getWSEndpoint(ctx context.Context, token string) (strin
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 		Data struct {
+			Ticket string `json:"ticket"`
+			// 部分版本直接返回 url
 			URL string `json:"url"`
 		} `json:"data"`
 	}
@@ -245,8 +250,12 @@ func (c *FeishuWSClient) getWSEndpoint(ctx context.Context, token string) (strin
 	if result.Code != 0 {
 		return "", fmt.Errorf("code=%d msg=%s", result.Code, result.Msg)
 	}
-	if result.Data.URL == "" {
-		return "", fmt.Errorf("飞书返回的 WS URL 为空")
+	// 优先直接返回的 url，否则用 ticket 拼接
+	if result.Data.URL != "" {
+		return result.Data.URL, nil
 	}
-	return result.Data.URL, nil
+	if result.Data.Ticket != "" {
+		return fmt.Sprintf("wss://go.feishu.cn/ws?app_id=%s&ticket=%s", c.appID, result.Data.Ticket), nil
+	}
+	return "", fmt.Errorf("飞书返回的 WS endpoint 信息为空（url 和 ticket 均为空）")
 }

@@ -19,6 +19,9 @@ import (
 
 
 	"easymvp/app/mvp/internal/middleware"
+	"easymvp/app/mvp/internal/collab/notifier"
+	"easymvp/app/mvp/internal/engine"
+	"easymvp/app/mvp/internal/worker"
 )
 
 var (
@@ -27,6 +30,15 @@ var (
 		Usage: "main",
 		Brief: "start mvp http server",
 		Func: func(ctx context.Context, parser *gcmd.Parser) (err error) {
+			// 注册飞书通知钩子
+			n := notifier.GetNotifier()
+			engine.RegisterFeishuNotifyAIReply(n.NotifyAIReply)
+			engine.RegisterFeishuNotifyTaskFailed(n.NotifyTaskFailed)
+			engine.RegisterFeishuNotifyProjectCompleted(n.NotifyProjectCompleted)
+
+			// 启动异步删除 worker（Redis 队列消费）
+			worker.StartDeleteWorker(ctx)
+
 			s := g.Server()
 			s.Group("/", func(group *ghttp.RouterGroup) {
 				group.Middleware(ghttp.MiddlewareHandlerResponse)

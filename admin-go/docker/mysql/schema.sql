@@ -1242,3 +1242,16 @@ CREATE TABLE `system_users` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+CREATE TABLE `sys_delete_queue` (
+  `id` bigint unsigned NOT NULL COMMENT '雪花ID',
+  `entity` varchar(64) NOT NULL COMMENT '实体类型，如 mvp_task',
+  `ids` json NOT NULL COMMENT '待删除的主键列表',
+  `status` varchar(16) NOT NULL DEFAULT 'pending' COMMENT 'pending/processing/done/failed',
+  `retry_count` int NOT NULL DEFAULT 0,
+  `error_msg` text,
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_status` (`status`,`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='异步删除队列';

@@ -56,12 +56,20 @@ func (c *cFeishuCallback) Handle(r *ghttp.Request) {
 		return
 	}
 
-	// 2b. 消息事件（im.message.receive_v1）
+	// 2b. 消息事件（im.message.receive_v1）和菜单点击事件（bot.menu.click）
 	if header, ok := raw["header"].(map[string]interface{}); ok {
 		eventType, _ := header["event_type"].(string)
-		if eventType == "im.message.receive_v1" {
+		switch eventType {
+		case "im.message.receive_v1":
 			if event, ok := raw["event"].(map[string]interface{}); ok {
 				handleFeishuMessageEvent(r, event)
+			} else {
+				r.Response.WriteJson(g.Map{"msg": "ok"})
+			}
+			return
+		case "bot.menu.click":
+			if event, ok := raw["event"].(map[string]interface{}); ok {
+				handleFeishuMenuClickEvent(r, event)
 			} else {
 				r.Response.WriteJson(g.Map{"msg": "ok"})
 			}
@@ -167,11 +175,55 @@ func handleFeishuMessageEvent(r *ghttp.Request, event map[string]interface{}) {
 
 	messageID, _ := messageMap["message_id"].(string)
 	chatID, _ := messageMap["chat_id"].(string)
+	msgType, _ := messageMap["message_type"].(string)
 	contentStr, _ := messageMap["content"].(string)
 
-	g.Log().Infof(ctx, "[FeishuBot] 收到消息: openID=%s messageID=%s chatID=%s", openID, messageID, chatID)
+	g.Log().Infof(ctx, "[FeishuBot] 收到消息: openID=%s messageID=%s chatID=%s type=%s", openID, messageID, chatID, msgType)
+
+	// 非文本消息类型：直接回复提示，不走 AI 解析
+	if msgType != "" && msgType != "text" {
+		platform := &feishuBotPlatform{messageID: messageID, chatID: chatID}
+		var tip string
+		switch msgType {
+		case "audio":
+			tip = "收到语音消息，暂不支持语音识别。请直接发文字，我会立即处理 😊"
+		case "image":
+			tip = "收到图片消息，暂不支持图片识别。请用文字描述你的需求 📝"
+		case "file":
+			tip = "收到文件消息，暂不支持文件处理。请用文字说明你的需求 📄"
+		case "sticker":
+			tip = "收到表情包 😄 如果你想操作项目，请发送文字指令。发送「帮助」可查看所有功能。"
+		case "video":
+			tip = "收到视频消息，暂不支持视频处理。请用文字描述你的需求 🎬"
+		default:
+			tip = fmt.Sprintf("收到 %s 类型消息，暂不支持此类型。请发送文字消息，我可以帮你管理项目 🚀", msgType)
+		}
+		platform.Reply(ctx, tip)
+		r.Response.WriteJson(g.Map{"msg": "ok"})
+		return
+	}
 
 	DispatchFeishuCommand(ctx, openID, messageID, chatID, contentStr)
+	r.Response.WriteJson(g.Map{"msg": "ok"})
+}
+
+// handleFeishuMenuClickEvent 处理飞书机器人菜单点击事件（bot.menu.click）。
+func handleFeishuMenuClickEvent(r *ghttp.Request, event map[string]interface{}) {
+	ctx := r.GetCtx()
+	operatorMap, _ := event["operator"].(map[string]interface{})
+	openID := ""
+	if operatorMap != nil {
+		operatorID, _ := operatorMap["operator_id"].(map[string]interface{})
+		if operatorID != nil {
+			openID, _ = operatorID["open_id"].(string)
+		}
+	}
+	eventKey, _ := event["event_key"].(string)
+	g.Log().Infof(ctx, "[FeishuMenuClick] openID=%s key=%s", openID, eventKey)
+	if openID != "" && eventKey != "" {
+		cmdText := botMenuKeyToCommand(eventKey)
+		DispatchFeishuCommand(ctx, openID, "", "", `{"text":"`+cmdText+`"}`)
+	}
 	r.Response.WriteJson(g.Map{"msg": "ok"})
 }
 

@@ -124,3 +124,21 @@ type AiderTaskConfig struct {
 	APISecret   string
 	BaseURL     string
 }
+
+// ─── 飞书通知钩子注册 ─────────────────────────────────────────────────────────
+// 用函数变量注入避免循环引用（engine 不 import collab/notifier）
+
+// RegisterFeishuNotifyAIReply 注册 AI 回复完成后的飞书推送钩子。
+func RegisterFeishuNotifyAIReply(fn func(ctx context.Context, conversationID int64, content string)) {
+	feishuNotifyAIReply = fn
+}
+
+// RegisterFeishuNotifyTaskFailed 注册任务失败飞书推送钩子。
+func RegisterFeishuNotifyTaskFailed(fn func(ctx context.Context, projectID, taskID int64, taskName, errMsg string)) {
+	feishuNotifyTaskFailed = fn
+}
+
+// RegisterFeishuNotifyProjectCompleted 注册项目完成飞书推送钩子。
+func RegisterFeishuNotifyProjectCompleted(fn func(ctx context.Context, projectID int64)) {
+	feishuNotifyProjectCompleted = fn
+}

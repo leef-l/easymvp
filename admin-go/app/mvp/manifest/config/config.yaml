@@ -21,6 +21,13 @@ database:
     debug: false
     charset: "utf8mb4"
 
+# Redis 配置（GoFrame gredis）
+redis:
+  default:
+    address: "${REDIS_ADDR:127.0.0.1:6379}"
+    pass:    "${REDIS_PASS:}"
+    db:      0
+
 # JWT 配置
 jwt:
   secret: "easymvp-secret-key-2026"

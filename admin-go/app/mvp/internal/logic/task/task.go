@@ -13,6 +13,7 @@ import (
 	"easymvp/app/mvp/internal/middleware"
 	"easymvp/app/mvp/internal/model"
 	"easymvp/app/mvp/internal/service"
+	"easymvp/app/mvp/internal/worker"
 	"easymvp/utility/snowflake"
 )
 
@@ -85,24 +86,36 @@ func (s *sTask) Update(ctx context.Context, in *model.TaskUpdateInput) error {
 	return err
 }
 
-// Delete 软删除MVP任务表
+// Delete 软删除任务并将真删除任务投入 Redis 队列。
 func (s *sTask) Delete(ctx context.Context, id snowflake.JsonInt64) error {
 	if err := middleware.CheckOwnership(ctx, dao.MvpTask.Ctx(ctx).Where(dao.MvpTask.Columns().DeletedAt, nil), id, dao.MvpTask.Columns().Id, dao.MvpTask.Columns().CreatedBy); err != nil {
 		return err
 	}
-	_, err := dao.MvpTask.Ctx(ctx).Where(dao.MvpTask.Columns().Id, id).Data(g.Map{
+	// 1. 软删除（立即对前端不可见）
+	if _, err := dao.MvpTask.Ctx(ctx).Where(dao.MvpTask.Columns().Id, id).Data(g.Map{
 		dao.MvpTask.Columns().DeletedAt: gtime.Now(),
-	}).Update()
-	return err
+	}).Update(); err != nil {
+		return err
+	}
+	// 2. 入队异步真删除
+	return worker.EnqueueDelete(ctx, "mvp_task", []int64{int64(id)})
 }
 
-// BatchDelete 批量软删除MVP任务表
+// BatchDelete 批量软删除并入队真删除。
 func (s *sTask) BatchDelete(ctx context.Context, ids []snowflake.JsonInt64) error {
+	int64IDs := make([]int64, len(ids))
+	for i, id := range ids {
+		int64IDs[i] = int64(id)
+	}
+	// 1. 软删除
 	m := middleware.ApplyDataScope(ctx, dao.MvpTask.Ctx(ctx).Where(dao.MvpTask.Columns().DeletedAt, nil).WhereIn(dao.MvpTask.Columns().Id, ids), dao.MvpTask.Columns().CreatedBy, dao.MvpTask.Columns().DeptId)
-	_, err := m.Data(g.Map{
+	if _, err := m.Data(g.Map{
 		dao.MvpTask.Columns().DeletedAt: gtime.Now(),
-	}).Update()
-	return err
+	}).Update(); err != nil {
+		return err
+	}
+	// 2. 入队异步真删除
+	return worker.EnqueueDelete(ctx, "mvp_task", int64IDs)
 }
 
 // Detail 获取MVP任务表详情

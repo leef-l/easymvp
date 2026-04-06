@@ -19,124 +19,113 @@ import (
 
 // botIntent AI 解析出的用户意图。
 type botIntent struct {
-	Action      string `json:"action"`       // create_project | list_projects | project_status | pause_project | resume_project | chat | help
-	ProjectName string `json:"project_name"` // 项目名称（create/status/pause/resume 时有值）
-	Category    string `json:"category"`     // 项目分类（create 时有值，默认"软件开发"）
+	Action      string `json:"action"`       // 意图动作，见下方 intentSystemPrompt
+	ProjectName string `json:"project_name"` // 项目名称（多数操作需要）
+	Category    string `json:"category"`     // 项目分类（create 时有值）
+	TaskID      string `json:"task_id"`      // 任务ID（retry_task/skip_task）
+	IssueID     string `json:"issue_id"`     // 审核/验收问题ID
 	Reply       string `json:"reply"`        // chat 时 AI 的直接回复文本
 }
 
 // intentSystemPrompt AI 意图解析系统提示词。
-const intentSystemPrompt = `你是 EasyMVP 的飞书机器人助手。EasyMVP 是一个 AI 驱动的项目管理平台，支持多角色 AI 团队（架构师/实现者/审计员）自动完成软件项目的需求分析、任务拆解、代码实现、质量审计全流程。
+const intentSystemPrompt = `你是 EasyMVP 的飞书机器人助手。EasyMVP 是 AI 驱动的项目管理平台，支持多角色 AI 团队（架构师/实现者/审计员）自动完成软件项目的需求分析、任务拆解、代码实现、质量审计全流程。
 
-## 你能做的事
-- 创建项目（软件开发/游戏开发/数据分析/内容创作/运营策划）
-- 查看项目列表和执行进度
-- 查询项目状态（任务完成率/当前阶段）
-- 暂停/继续项目执行
-- 在飞书里直接和架构师AI对话（描述需求，AI会拆解任务）
-- 确认方案后自动启动执行
+## 支持的 action 完整列表
 
-## 支持的 action（JSON输出）
-- create_project：创建新项目（需要 project_name，可选 category）
+### 项目管理
+- create_project：创建新项目（project_name必填，category可选）
 - list_projects：列出我的项目
-- project_status：查询项目状态（需要 project_name）
-- pause_project：暂停项目（需要 project_name）
-- resume_project：继续/恢复项目（需要 project_name）
-- chat：普通对话/回答问题/不确定意图（在 reply 字段填写你的中文回复）
+- project_status：查询项目状态和进度（project_name必填）
+- pause_project：暂停项目执行（project_name必填）
+- resume_project：继续/恢复项目（project_name必填）
+- confirm_plan：确认当前对话中的方案并启动自动执行
+
+### 任务管理
+- list_tasks：查看项目任务列表（project_name必填）
+- retry_task：重试失败任务（project_name必填，task_id可选，不填则重试所有失败任务）
+- skip_task：跳过阻塞任务（project_name必填，task_id必填）
+
+### 审核管理
+- review_status：查看项目当前审核状态和问题（project_name必填）
+- approve_review：通过人工审核（project_name必填）
+- reject_review：驳回人工审核（project_name必填）
+
+### 验收管理
+- accept_status：查看项目验收状态（project_name必填）
+- approve_accept：验收通过（project_name必填）
+- reject_accept：验收驳回/打回返工（project_name必填）
+
+### 自治管理
+- autonomy_status：查看自治模式状态和待审检查点（project_name必填）
+- approve_checkpoint：批准自治检查点（project_name必填）
+- reject_checkpoint：拒绝自治检查点（project_name必填）
+
+### 通用
+- chat：普通对话/不确定意图（reply字段填写中文回复）
 - help：显示帮助
 
 ## 意图识别规则
-- "帮我创建/新建/做一个XXX项目" → create_project
-- "我的项目/列表/有哪些" → list_projects
-- "XXX进度/状态/怎么样了" → project_status（project_name=XXX）
-- "暂停/停止XXX" → pause_project（project_name=XXX）
-- "继续/恢复/重启XXX" → resume_project（project_name=XXX）
-- 其他：chat（reply字段填写友好的中文回复）
+- "创建/新建/做一个XXX项目" → create_project
+- "我的项目/项目列表/有哪些项目" → list_projects
+- "XXX进度/状态/怎么样了" → project_status
+- "暂停/停止XXX" → pause_project
+- "继续/恢复/重启XXX" → resume_project
+- "确认方案/开始执行/启动" → confirm_plan
+- "任务列表/查看任务/XXX的任务" → list_tasks
+- "重试/重新执行XXX失败任务" → retry_task
+- "跳过任务/跳过阻塞" → skip_task
+- "审核状态/审核结果/审核通过了吗" → review_status
+- "通过审核/审核通过" → approve_review
+- "驳回审核/审核不通过" → reject_review
+- "验收状态/验收结果/通过验收了吗" → accept_status
+- "验收通过/通过了" → approve_accept
+- "验收不通过/打回/返工" → reject_accept
+- "自治状态/自治模式/检查点" → autonomy_status
+- "批准检查点/同意自治" → approve_checkpoint
+- "拒绝检查点/不同意自治" → reject_checkpoint
+- 其他：chat（reply填写友好回复）
 
-category 常见值：软件开发、游戏开发、数据分析、内容创作、运营策划。未指定时默认"软件开发"。
+category 常见值：软件开发、游戏开发、数据分析、内容创作、运营策划。未指定默认"软件开发"。
 
-只返回 JSON，格式：{"action":"...","project_name":"...","category":"...","reply":"..."}`
+只返回 JSON，格式：{"action":"...","project_name":"...","category":"...","task_id":"...","issue_id":"...","reply":"..."}`
 
-// DispatchFeishuCommand 用 AI 解析用户意图后路由到对应处理器。
-func DispatchFeishuCommand(ctx context.Context, openID, messageID, chatID, contentStr string) {
+// feishuBotPlatform 实现 BotPlatform 接口，封装飞书消息回复。
+type feishuBotPlatform struct {
+	messageID string
+	chatID    string
+}
+
+func (f *feishuBotPlatform) Reply(ctx context.Context, text string) {
 	feishu := adapter.NewFeishuAdapter()
-	reply := func(text string) {
-		if messageID != "" {
-			if err := feishu.ReplyMessage(ctx, messageID, text); err != nil {
-				g.Log().Warningf(ctx, "[FeishuBot] 回复失败: %v", err)
-			}
-			return
+	if f.messageID != "" {
+		if err := feishu.ReplyMessage(ctx, f.messageID, text); err != nil {
+			g.Log().Warningf(ctx, "[FeishuBot] 回复失败: %v", err)
 		}
-		if chatID != "" {
-			if err := feishu.SendTextToChat(ctx, chatID, text); err != nil {
-				g.Log().Warningf(ctx, "[FeishuBot] 发送群消息失败: %v", err)
-			}
+		return
+	}
+	if f.chatID != "" {
+		if err := feishu.SendTextToChat(ctx, f.chatID, text); err != nil {
+			g.Log().Warningf(ctx, "[FeishuBot] 发送群消息失败: %v", err)
 		}
 	}
+}
 
-	// 1. 解析消息文本
+func (f *feishuBotPlatform) PlatformName() string { return "feishu" }
+
+// DispatchFeishuCommand 飞书消息入口，解析消息后转发到统一 Bot 调度器。
+func DispatchFeishuCommand(ctx context.Context, openID, messageID, chatID, contentStr string) {
 	text := extractFeishuText(contentStr)
 	text = removeAtMention(text)
 	text = strings.TrimSpace(text)
-	if text == "" {
-		reply(feishuHelpText())
-		return
-	}
 
-	// 2. 反查绑定的系统用户
-	systemUserID, deptID := lookupSystemUser(ctx, openID)
-
-	// 3. AI 解析意图
-	intent, err := parseIntentWithAI(ctx, text, systemUserID)
-	if err != nil {
-		g.Log().Warningf(ctx, "[FeishuBot] AI 意图解析失败，降级到关键词匹配: %v", err)
-		// 降级到简单关键词匹配
-		intent = fallbackParseIntent(text)
-	}
-
-	g.Log().Infof(ctx, "[FeishuBot] 意图: action=%s project=%s category=%s", intent.Action, intent.ProjectName, intent.Category)
-
-	// 4. 路由执行
-	switch intent.Action {
-	case "create_project":
-		handleBotCreateProject(ctx, intent.ProjectName, intent.Category, systemUserID, deptID, openID, reply)
-	case "list_projects":
-		handleBotListProjects(ctx, systemUserID, reply)
-	case "project_status":
-		handleBotProjectStatus(ctx, intent.ProjectName, systemUserID, reply)
-	case "pause_project":
-		handleBotPauseProject(ctx, intent.ProjectName, systemUserID, reply)
-	case "resume_project":
-		handleBotResumeProject(ctx, intent.ProjectName, systemUserID, reply)
-	case "help":
-		reply(feishuHelpText())
-	case "chat":
-		// 检查特殊退出指令
-		lowerText := strings.ToLower(text)
-		if lowerText == "退出对话" || lowerText == "exit" || lowerText == "quit" {
-			clearFeishuSession(openID)
-			reply("✅ 已退出对话模式")
-			return
-		}
-		// 确认方案指令
-		if strings.Contains(lowerText, "确认方案") || strings.Contains(lowerText, "confirm plan") {
-			handleBotConfirmPlan(ctx, openID, systemUserID, reply)
-			return
-		}
-		// 检查是否有活跃对话会话
-		if convID, ok := getFeishuSession(openID); ok {
-			handleBotChat(ctx, openID, convID, text, systemUserID, deptID, reply)
-			return
-		}
-		// 无活跃会话，用 AI 直接回复
-		if intent.Reply != "" {
-			reply(intent.Reply)
-		} else {
-			reply(feishuHelpText())
-		}
-	default:
-		reply(feishuHelpText())
-	}
+	DispatchBotCommand(ctx, &BotContext{
+		OpenID:  openID,
+		Content: text,
+		Platform: &feishuBotPlatform{
+			messageID: messageID,
+			chatID:    chatID,
+		},
+	})
 }
 
 // parseIntentWithAI 调用 AI 解析用户消息意图，返回结构化 botIntent。
@@ -589,35 +578,6 @@ func extractJSON(s string) string {
 	return s[start : end+1]
 }
 
-// handleBotChat 将用户消息转发给架构师AI，等待回复后发回飞书。
-func handleBotChat(ctx context.Context, openID string, conversationID int64, text string, systemUserID, deptID int64, reply func(string)) {
-	// 查询对话所属项目
-	conv, err := g.DB().Ctx(ctx).Model("mvp_conversation").
-		Where("id", conversationID).WhereNull("deleted_at").One()
-	if err != nil || conv.IsEmpty() {
-		clearFeishuSession(openID)
-		reply("❌ 对话已失效，请重新创建或进入项目")
-		return
-	}
-	projectID := conv["project_id"].Int64()
-
-	// 通过 ChatEngine 发送消息并触发 AI 回复
-	chatEng := engine.NewChatEngine()
-	replyMsgID, err := chatEng.SendFeishuMessage(ctx, conversationID, projectID, text, systemUserID, deptID)
-	if err != nil {
-		reply(fmt.Sprintf("❌ 消息发送失败：%v", err))
-		return
-	}
-
-	// 等待 AI 回复（轮询，最多等30秒）
-	aiReply := waitForAIReply(ctx, replyMsgID, 30*time.Second)
-	if aiReply == "" {
-		reply("⏳ AI 正在思考中，请稍后发送「项目状态」查看进展")
-		return
-	}
-	reply(aiReply)
-}
-
 // handleBotConfirmPlan 确认当前活跃对话的方案并启动执行。
 func handleBotConfirmPlan(ctx context.Context, openID string, systemUserID int64, reply func(string)) {
 	convID, ok := getFeishuSession(openID)
@@ -661,19 +621,451 @@ func waitForAIReply(ctx context.Context, replyMsgID int64, timeout time.Duration
 	return ""
 }
 
-// feishuHelpText 返回帮助文本。
-func feishuHelpText() string {
-	return `🤖 EasyMVP 机器人
-───────────────
-我能理解自然语言，直接说需求即可：
+// ─── 任务管理处理器 ─────────────────────────────────────────────────────────
 
-📁 "帮我创建一个电商后台项目"
-📁 "新建游戏开发类型的H5小游戏"
-📋 "列出我的项目"
-📊 "电商后台进度怎么样了"
-⏸️ "暂停电商后台"
-▶️ "继续执行电商后台"
-❓ "帮助"
-───────────────
-提示：在飞书中 @EasyMVP 后说话`
+func handleBotListTasks(ctx context.Context, projectName string, systemUserID int64, reply func(string)) {
+	if systemUserID == 0 {
+		reply("❌ 请先在 EasyMVP 管理端绑定飞书账号")
+		return
+	}
+	project, err := findProjectByKeyword(ctx, projectName, systemUserID)
+	if err != nil || project == nil {
+		reply(fmt.Sprintf("❌ 未找到项目「%s」", projectName))
+		return
+	}
+	projectID := project["id"].Int64()
+
+	type taskRow struct {
+		ID     int64  `json:"id"`
+		Name   string `json:"name"`
+		Status string `json:"status"`
+	}
+	var tasks []taskRow
+	_ = g.DB().Ctx(ctx).Model("mvp_task").
+		Where("project_id", projectID).
+		WhereNull("deleted_at").
+		Fields("id, name, status").
+		OrderAsc("batch_no").
+		Limit(20).
+		Scan(&tasks)
+
+	if len(tasks) == 0 {
+		reply(fmt.Sprintf("📭 项目「%s」暂无任务", project["name"].String()))
+		return
+	}
+
+	statusIcon := map[string]string{
+		"pending":   "⏳",
+		"running":   "🔄",
+		"completed": "✅",
+		"failed":    "❌",
+		"skipped":   "⏭️",
+		"draft":     "📝",
+	}
+	lines := []string{fmt.Sprintf("📋 %s 的任务（最近20条）", project["name"].String()), "───────────────"}
+	for _, t := range tasks {
+		icon := statusIcon[t.Status]
+		if icon == "" {
+			icon = "•"
+		}
+		lines = append(lines, fmt.Sprintf("%s [%d] %s（%s）", icon, t.ID, t.Name, t.Status))
+	}
+	reply(strings.Join(lines, "\n"))
 }
+
+func handleBotRetryTask(ctx context.Context, projectName, taskIDStr string, systemUserID int64, reply func(string)) {
+	if systemUserID == 0 {
+		reply("❌ 请先在 EasyMVP 管理端绑定飞书账号")
+		return
+	}
+	project, err := findProjectByKeyword(ctx, projectName, systemUserID)
+	if err != nil || project == nil {
+		reply(fmt.Sprintf("❌ 未找到项目「%s」", projectName))
+		return
+	}
+	projectID := project["id"].Int64()
+
+	// 如果指定了 task_id，重试单个
+	if taskIDStr != "" {
+		var taskID int64
+		fmt.Sscanf(taskIDStr, "%d", &taskID)
+		if taskID > 0 {
+			if err := engine.GetScheduler().RetryTask(projectID, taskID); err != nil {
+				reply(fmt.Sprintf("❌ 重试任务 %d 失败：%v", taskID, err))
+				return
+			}
+			reply(fmt.Sprintf("🔄 任务 %d 已重新加入队列", taskID))
+			return
+		}
+	}
+
+	// 重试所有失败任务
+	type taskIDRow struct{ ID int64 }
+	var rows []taskIDRow
+	_ = g.DB().Ctx(ctx).Model("mvp_task").
+		Where("project_id", projectID).
+		Where("status", "failed").
+		WhereNull("deleted_at").
+		Fields("id").
+		Scan(&rows)
+
+	if len(rows) == 0 {
+		reply(fmt.Sprintf("✅ 项目「%s」没有失败的任务", project["name"].String()))
+		return
+	}
+	errCount := 0
+	for _, r := range rows {
+		if err := engine.GetScheduler().RetryTask(projectID, r.ID); err != nil {
+			errCount++
+		}
+	}
+	reply(fmt.Sprintf("🔄 已重试 %d 个失败任务（失败 %d 个）", len(rows)-errCount, errCount))
+}
+
+func handleBotSkipTask(ctx context.Context, projectName, taskIDStr string, systemUserID int64, reply func(string)) {
+	if systemUserID == 0 {
+		reply("❌ 请先在 EasyMVP 管理端绑定飞书账号")
+		return
+	}
+	if taskIDStr == "" {
+		reply("❌ 请提供任务ID，例如：跳过任务 123456")
+		return
+	}
+	var taskID int64
+	fmt.Sscanf(taskIDStr, "%d", &taskID)
+	if taskID == 0 {
+		reply("❌ 任务ID格式不正确")
+		return
+	}
+	// 需要 projectID，先查任务所属项目
+	taskRecord, _ := g.DB().Ctx(ctx).Model("mvp_task").Where("id", taskID).WhereNull("deleted_at").Fields("project_id").One()
+	var skipProjectID int64
+	if !taskRecord.IsEmpty() {
+		skipProjectID = taskRecord["project_id"].Int64()
+	}
+	if err := engine.GetScheduler().SkipTask(ctx, skipProjectID, taskID, "飞书机器人指令跳过"); err != nil {
+		reply(fmt.Sprintf("❌ 跳过任务失败：%v", err))
+		return
+	}
+	reply(fmt.Sprintf("⏭️ 任务 %d 已跳过", taskID))
+}
+
+// ─── 审核管理处理器 ─────────────────────────────────────────────────────────
+
+func handleBotReviewStatus(ctx context.Context, projectName string, systemUserID int64, reply func(string)) {
+	if systemUserID == 0 {
+		reply("❌ 请先在 EasyMVP 管理端绑定飞书账号")
+		return
+	}
+	project, err := findProjectByKeyword(ctx, projectName, systemUserID)
+	if err != nil || project == nil {
+		reply(fmt.Sprintf("❌ 未找到项目「%s」", projectName))
+		return
+	}
+	projectID := project["id"].Int64()
+
+	// 查最新的 workflow_run
+	run, _ := g.DB().Ctx(ctx).Model("mvp_workflow_run").
+		Where("project_id", projectID).
+		WhereNull("deleted_at").
+		Fields("id, status, review_status, created_at").
+		OrderDesc("created_at").One()
+
+	if run.IsEmpty() {
+		reply(fmt.Sprintf("📭 项目「%s」暂无工作流记录，请先确认方案", project["name"].String()))
+		return
+	}
+
+	// 查审核问题数量
+	issueCount, _ := g.DB().Ctx(ctx).Model("mvp_review_issue").
+		Where("workflow_run_id", run["id"].Int64()).
+		WhereNull("deleted_at").
+		Count()
+
+	lines := []string{
+		fmt.Sprintf("🔍 %s 审核状态", project["name"].String()),
+		"───────────────",
+		fmt.Sprintf("工作流状态：%s", run["status"].String()),
+		fmt.Sprintf("审核状态：%s", run["review_status"].String()),
+		fmt.Sprintf("问题数量：%d", issueCount),
+	}
+	if run["review_status"].String() == "waiting" {
+		lines = append(lines, "\n💡 发送「通过审核 "+project["name"].String()+"」或「驳回审核 "+project["name"].String()+"」")
+	}
+	reply(strings.Join(lines, "\n"))
+}
+
+func handleBotApproveReview(ctx context.Context, projectName string, systemUserID int64, reply func(string)) {
+	if systemUserID == 0 {
+		reply("❌ 请先在 EasyMVP 管理端绑定飞书账号")
+		return
+	}
+	project, err := findProjectByKeyword(ctx, projectName, systemUserID)
+	if err != nil || project == nil {
+		reply(fmt.Sprintf("❌ 未找到项目「%s」", projectName))
+		return
+	}
+	projectID := project["id"].Int64()
+
+	run, _ := g.DB().Ctx(ctx).Model("mvp_workflow_run").
+		Where("project_id", projectID).
+		Where("review_status", "waiting").
+		WhereNull("deleted_at").
+		OrderDesc("created_at").One()
+	if run.IsEmpty() {
+		reply(fmt.Sprintf("❌ 项目「%s」当前没有等待审核的工作流", project["name"].String()))
+		return
+	}
+
+	_, err = g.DB().Ctx(ctx).Model("mvp_workflow_run").
+		Where("id", run["id"].Int64()).
+		Update(g.Map{"review_status": "approved", "reviewed_by": systemUserID})
+	if err != nil {
+		reply(fmt.Sprintf("❌ 审核操作失败：%v", err))
+		return
+	}
+	reply(fmt.Sprintf("✅ 项目「%s」审核已通过，系统将继续执行", project["name"].String()))
+}
+
+func handleBotRejectReview(ctx context.Context, projectName string, systemUserID int64, reply func(string)) {
+	if systemUserID == 0 {
+		reply("❌ 请先在 EasyMVP 管理端绑定飞书账号")
+		return
+	}
+	project, err := findProjectByKeyword(ctx, projectName, systemUserID)
+	if err != nil || project == nil {
+		reply(fmt.Sprintf("❌ 未找到项目「%s」", projectName))
+		return
+	}
+	projectID := project["id"].Int64()
+
+	run, _ := g.DB().Ctx(ctx).Model("mvp_workflow_run").
+		Where("project_id", projectID).
+		Where("review_status", "waiting").
+		WhereNull("deleted_at").
+		OrderDesc("created_at").One()
+	if run.IsEmpty() {
+		reply(fmt.Sprintf("❌ 项目「%s」当前没有等待审核的工作流", project["name"].String()))
+		return
+	}
+
+	_, err = g.DB().Ctx(ctx).Model("mvp_workflow_run").
+		Where("id", run["id"].Int64()).
+		Update(g.Map{"review_status": "rejected", "reviewed_by": systemUserID})
+	if err != nil {
+		reply(fmt.Sprintf("❌ 审核操作失败：%v", err))
+		return
+	}
+	reply(fmt.Sprintf("🚫 项目「%s」审核已驳回，项目已暂停", project["name"].String()))
+}
+
+// ─── 验收管理处理器 ─────────────────────────────────────────────────────────
+
+func handleBotAcceptStatus(ctx context.Context, projectName string, systemUserID int64, reply func(string)) {
+	if systemUserID == 0 {
+		reply("❌ 请先在 EasyMVP 管理端绑定飞书账号")
+		return
+	}
+	project, err := findProjectByKeyword(ctx, projectName, systemUserID)
+	if err != nil || project == nil {
+		reply(fmt.Sprintf("❌ 未找到项目「%s」", projectName))
+		return
+	}
+	projectID := project["id"].Int64()
+
+	run, _ := g.DB().Ctx(ctx).Model("mvp_accept_run").
+		Where("project_id", projectID).
+		WhereNull("deleted_at").
+		Fields("id, status, passed_count, failed_count, created_at").
+		OrderDesc("created_at").One()
+
+	if run.IsEmpty() {
+		reply(fmt.Sprintf("📭 项目「%s」暂无验收记录", project["name"].String()))
+		return
+	}
+
+	lines := []string{
+		fmt.Sprintf("🎯 %s 验收状态", project["name"].String()),
+		"───────────────",
+		fmt.Sprintf("验收状态：%s", run["status"].String()),
+		fmt.Sprintf("通过：%d  失败：%d", run["passed_count"].Int(), run["failed_count"].Int()),
+	}
+	if run["status"].String() == "pending_human" {
+		lines = append(lines, "\n💡 发送「验收通过 "+project["name"].String()+"」或「验收驳回 "+project["name"].String()+"」")
+	}
+	reply(strings.Join(lines, "\n"))
+}
+
+func handleBotApproveAccept(ctx context.Context, projectName string, systemUserID int64, reply func(string)) {
+	if systemUserID == 0 {
+		reply("❌ 请先在 EasyMVP 管理端绑定飞书账号")
+		return
+	}
+	project, err := findProjectByKeyword(ctx, projectName, systemUserID)
+	if err != nil || project == nil {
+		reply(fmt.Sprintf("❌ 未找到项目「%s」", projectName))
+		return
+	}
+	projectID := project["id"].Int64()
+
+	run, _ := g.DB().Ctx(ctx).Model("mvp_accept_run").
+		Where("project_id", projectID).
+		Where("status", "pending_human").
+		WhereNull("deleted_at").
+		OrderDesc("created_at").One()
+	if run.IsEmpty() {
+		reply(fmt.Sprintf("❌ 项目「%s」当前没有待人工验收的记录", project["name"].String()))
+		return
+	}
+
+	_, err = g.DB().Ctx(ctx).Model("mvp_accept_run").
+		Where("id", run["id"].Int64()).
+		Update(g.Map{"status": "passed", "reviewed_by": systemUserID})
+	if err != nil {
+		reply(fmt.Sprintf("❌ 验收操作失败：%v", err))
+		return
+	}
+	reply(fmt.Sprintf("🎉 项目「%s」验收通过！项目即将完成", project["name"].String()))
+}
+
+func handleBotRejectAccept(ctx context.Context, projectName string, systemUserID int64, reply func(string)) {
+	if systemUserID == 0 {
+		reply("❌ 请先在 EasyMVP 管理端绑定飞书账号")
+		return
+	}
+	project, err := findProjectByKeyword(ctx, projectName, systemUserID)
+	if err != nil || project == nil {
+		reply(fmt.Sprintf("❌ 未找到项目「%s」", projectName))
+		return
+	}
+	projectID := project["id"].Int64()
+
+	run, _ := g.DB().Ctx(ctx).Model("mvp_accept_run").
+		Where("project_id", projectID).
+		Where("status", "pending_human").
+		WhereNull("deleted_at").
+		OrderDesc("created_at").One()
+	if run.IsEmpty() {
+		reply(fmt.Sprintf("❌ 项目「%s」当前没有待人工验收的记录", project["name"].String()))
+		return
+	}
+
+	_, err = g.DB().Ctx(ctx).Model("mvp_accept_run").
+		Where("id", run["id"].Int64()).
+		Update(g.Map{"status": "rework", "reviewed_by": systemUserID})
+	if err != nil {
+		reply(fmt.Sprintf("❌ 验收操作失败：%v", err))
+		return
+	}
+	reply(fmt.Sprintf("🔁 项目「%s」验收驳回，已打回返工", project["name"].String()))
+}
+
+// ─── 自治管理处理器 ─────────────────────────────────────────────────────────
+
+func handleBotAutonomyStatus(ctx context.Context, projectName string, systemUserID int64, reply func(string)) {
+	if systemUserID == 0 {
+		reply("❌ 请先在 EasyMVP 管理端绑定飞书账号")
+		return
+	}
+	project, err := findProjectByKeyword(ctx, projectName, systemUserID)
+	if err != nil || project == nil {
+		reply(fmt.Sprintf("❌ 未找到项目「%s」", projectName))
+		return
+	}
+	projectID := project["id"].Int64()
+
+	// 查待审检查点
+	type cpRow struct {
+		ID          int64  `json:"id"`
+		CheckType   string `json:"check_type"`
+		Description string `json:"description"`
+	}
+	var checkpoints []cpRow
+	_ = g.DB().Ctx(ctx).Model("mvp_human_checkpoint").
+		Where("project_id", projectID).
+		Where("status", "pending").
+		WhereNull("deleted_at").
+		Fields("id, check_type, description").
+		Limit(5).
+		Scan(&checkpoints)
+
+	// 查最新自治决策
+	decisionCount, _ := g.DB().Ctx(ctx).Model("mvp_autonomy_decision").
+		Where("project_id", projectID).
+		WhereNull("deleted_at").Count()
+
+	lines := []string{
+		fmt.Sprintf("🤖 %s 自治状态", project["name"].String()),
+		"───────────────",
+		fmt.Sprintf("累计自治决策：%d 次", decisionCount),
+		fmt.Sprintf("待审检查点：%d 个", len(checkpoints)),
+	}
+	for _, cp := range checkpoints {
+		lines = append(lines, fmt.Sprintf("  📌 [%d] %s：%s", cp.ID, cp.CheckType, cp.Description))
+	}
+	if len(checkpoints) > 0 {
+		lines = append(lines, "\n💡 发送「批准检查点 "+project["name"].String()+"」或「拒绝检查点 "+project["name"].String()+"」")
+	}
+	reply(strings.Join(lines, "\n"))
+}
+
+func handleBotApproveCheckpoint(ctx context.Context, projectName string, systemUserID int64, reply func(string)) {
+	if systemUserID == 0 {
+		reply("❌ 请先在 EasyMVP 管理端绑定飞书账号")
+		return
+	}
+	project, err := findProjectByKeyword(ctx, projectName, systemUserID)
+	if err != nil || project == nil {
+		reply(fmt.Sprintf("❌ 未找到项目「%s」", projectName))
+		return
+	}
+	projectID := project["id"].Int64()
+
+	result, err := g.DB().Ctx(ctx).Model("mvp_human_checkpoint").
+		Where("project_id", projectID).
+		Where("status", "pending").
+		WhereNull("deleted_at").
+		Update(g.Map{"status": "approved", "reviewed_by": systemUserID})
+	if err != nil {
+		reply(fmt.Sprintf("❌ 操作失败：%v", err))
+		return
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		reply(fmt.Sprintf("❌ 项目「%s」没有待审的检查点", project["name"].String()))
+		return
+	}
+	reply(fmt.Sprintf("✅ 已批准 %d 个自治检查点，系统继续执行", n))
+}
+
+func handleBotRejectCheckpoint(ctx context.Context, projectName string, systemUserID int64, reply func(string)) {
+	if systemUserID == 0 {
+		reply("❌ 请先在 EasyMVP 管理端绑定飞书账号")
+		return
+	}
+	project, err := findProjectByKeyword(ctx, projectName, systemUserID)
+	if err != nil || project == nil {
+		reply(fmt.Sprintf("❌ 未找到项目「%s」", projectName))
+		return
+	}
+	projectID := project["id"].Int64()
+
+	result, err := g.DB().Ctx(ctx).Model("mvp_human_checkpoint").
+		Where("project_id", projectID).
+		Where("status", "pending").
+		WhereNull("deleted_at").
+		Update(g.Map{"status": "rejected", "reviewed_by": systemUserID})
+	if err != nil {
+		reply(fmt.Sprintf("❌ 操作失败：%v", err))
+		return
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		reply(fmt.Sprintf("❌ 项目「%s」没有待审的检查点", project["name"].String()))
+		return
+	}
+	reply(fmt.Sprintf("🚫 已拒绝 %d 个自治检查点，项目已暂停等待人工处理", n))
+}
+
+// feishuHelpText 飞书平台帮助文本（复用通用版本）。
+func feishuHelpText() string { return botHelpText() }

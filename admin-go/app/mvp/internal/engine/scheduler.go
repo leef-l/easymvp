@@ -230,6 +230,17 @@ func (s *Scheduler) OnTaskFailed(projectID int64, taskID int64, errMsg string) {
 	s.releaseTaskResources(taskID)
 	logTaskAction(taskID, "failed", "running", "failed", errMsg, "system")
 
+	// 飞书推送：任务失败通知
+	go func() {
+		ctx := s.getProjectContext(projectID)
+		task, _ := g.DB().Ctx(ctx).Model("mvp_task").Where("id", taskID).Fields("name").One()
+		taskName := ""
+		if !task.IsEmpty() {
+			taskName = task["name"].String()
+		}
+		feishuNotifyTaskFailed(ctx, projectID, taskID, taskName, errMsg)
+	}()
+
 	go s.scheduleOnce(s.getProjectContext(projectID), projectID)
 }
 
@@ -596,6 +607,9 @@ func (s *Scheduler) checkProjectDone(projectID int64) {
 			"updated_at":      gtime.Now(),
 		})
 
+		// 飞书推送：项目完成通知
+		go feishuNotifyProjectCompleted(context.Background(), projectID)
+
 		s.mu.Lock()
 		if rt, ok := s.projectCtx[projectID]; ok {
 			rt.cancel()
@@ -751,3 +765,10 @@ func logTaskAction(taskID int64, action, fromStatus, toStatus, message, operator
 		"created_at":  gtime.Now(),
 	})
 }
+
+
+// feishuNotifyTaskFailed / feishuNotifyProjectCompleted
+// 通过函数变量注入，避免 engine 包直接 import collab/notifier（循环引用）。
+// 在 cmd_custom.go 启动时由 collab/notifier 包注册实现。
+var feishuNotifyTaskFailed = func(ctx context.Context, projectID, taskID int64, taskName, errMsg string) {}
+var feishuNotifyProjectCompleted = func(ctx context.Context, projectID int64) {}

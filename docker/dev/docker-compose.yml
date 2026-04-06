@@ -17,11 +17,28 @@ x-admin-go-env: &admin-go-env
   DB_USER: ${DB_USER:-easymvp}
   DB_PASSWORD: ${DB_PASSWORD:-JKcHFJYXnkrB6BXE}
   DB_NAME: ${DB_NAME:-easymvp}
+  REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+  REDIS_PASS: ${REDIS_PASS:-}
   JWT_SECRET: ${JWT_SECRET:-easymvp-secret-key}
   GOPROXY: ${GO_PROXY:-https://goproxy.cn,direct}
   PATH: /usr/local/go/bin:/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.local/share/uv/tools/aider-chat/bin:/root/.local/share/uv/tools/openhands/bin
 
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: easymvp-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_HOST_PORT:-41000}:6379"
+    volumes:
+      - easymvp-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   mysql:
     image: mysql:8.0
     container_name: easymvp-mysql
@@ -64,6 +81,8 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "${SYSTEM_HOST_PORT:-41002}:8000"
     volumes:
@@ -86,6 +105,8 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "${AI_HOST_PORT:-41003}:8000"
     volumes:
@@ -107,6 +128,8 @@ services:
       APP_PORT: 8000
     depends_on:
       mysql:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     ports:
       - "${MVP_HOST_PORT:-41004}:8000"
@@ -159,6 +182,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  easymvp-redis-data:
   easymvp-mysql-data:
   easymvp-go-cache:
   easymvp-go-build:

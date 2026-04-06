@@ -118,6 +118,9 @@ function goToFeishu() {
 function goToChat() {
   router.push({ path: '/mvp/chat', query: { projectId: projectId.value } });
 }
+function goToMetaCognition() {
+  router.push({ path: '/mvp/workflow/meta-cognition', query: { projectID: projectId.value } });
+}
 </script>
 
 <template>
@@ -273,6 +276,9 @@ function goToChat() {
             </Button>
             <Button @click="goToAutonomy">
               自治控制台
+            </Button>
+            <Button @click="goToMetaCognition">
+              元认知
             </Button>
             <Button @click="goToFeishu">
               飞书协作

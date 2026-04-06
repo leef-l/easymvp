@@ -21,11 +21,14 @@ import {
 
 import {
   bindFeishuUser,
+  getBotMenu,
   getFeishuBindings,
   getFeishuConfig,
   saveFeishuConfig,
+  setBotMenu,
   testFeishuMessage,
   unbindFeishuUser,
+  type BotMenuItem,
   type FeishuBindingItem,
   type FeishuConfigItem,
 } from '#/api/mvp/workflow';
@@ -182,6 +185,88 @@ const columns = [
   { title: '更新时间', dataIndex: 'updatedAt', key: 'updatedAt', width: 180 },
   { title: '操作', key: 'action', width: 220, fixed: 'right' as const },
 ];
+
+// ─── 机器人菜单 ────────────────────────────────────────────────────────────────
+const menuLoading = ref(false);
+const menuSaving = ref(false);
+const menuIsDefault = ref(true);
+const menuItems = ref<BotMenuItem[]>([]);
+const defaultMenuItems = ref<BotMenuItem[]>([]);
+
+async function loadBotMenu() {
+  menuLoading.value = true;
+  try {
+    const res = await getBotMenu();
+    menuItems.value = JSON.parse(JSON.stringify(res.menuItems ?? []));
+    menuIsDefault.value = res.isDefault ?? true;
+    defaultMenuItems.value = res.defaultItems ?? [];
+  } finally {
+    menuLoading.value = false;
+  }
+}
+
+async function deployMenu(useDefault = false) {
+  menuSaving.value = true;
+  try {
+    const payload = useDefault
+      ? { useDefault: true }
+      : { menuItems: menuItems.value };
+    const res = await setBotMenu(payload);
+    message.success(res.message || '菜单已推送到飞书');
+    await loadBotMenu();
+  } finally {
+    menuSaving.value = false;
+  }
+}
+
+function addTopMenu() {
+  if (menuItems.value.length >= 3) {
+    message.warning('飞书机器人菜单最多支持 3 个一级菜单');
+    return;
+  }
+  menuItems.value.push({ eventKey: `PARENT_${Date.now()}`, name: '新菜单', children: [] });
+}
+
+function addSubMenu(parentIdx: number) {
+  const parent = menuItems.value[parentIdx];
+  if (!parent.children) parent.children = [];
+  if (parent.children.length >= 5) {
+    message.warning('每个一级菜单最多支持 5 个子菜单');
+    return;
+  }
+  parent.children.push({ eventKey: `item_${Date.now()}`, name: '新菜单项' });
+}
+
+function removeTopMenu(idx: number) {
+  menuItems.value.splice(idx, 1);
+}
+
+function removeSubMenu(parentIdx: number, subIdx: number) {
+  menuItems.value[parentIdx].children?.splice(subIdx, 1);
+}
+
+// 在 onMounted 中加载菜单（懒加载：切换到菜单 tab 时再加载）
+const menuTabLoaded = ref(false);
+function onTabChange(key: string) {
+  if (key === 'menu' && !menuTabLoaded.value) {
+    menuTabLoaded.value = true;
+    loadBotMenu();
+  }
+}
+
+// EventKey 说明文档
+const menuEventKeyDocs = [
+  { key: 'list_projects', desc: '列出我的项目列表' },
+  { key: 'create_project_tip', desc: '引导用户创建新项目（Bot 会提示需要哪些信息）' },
+  { key: 'help', desc: '显示帮助信息（所有可用指令）' },
+  { key: 'project_status_tip', desc: '查询项目执行进度（Bot 会进一步询问项目名称）' },
+  { key: 'list_tasks_tip', desc: '查看项目任务列表（Bot 会进一步询问项目名称）' },
+  { key: 'retry_task_tip', desc: '重试项目失败任务（Bot 会进一步询问项目名称）' },
+  { key: 'review_status_tip', desc: '查看人工审核状态（Bot 会进一步询问项目名称）' },
+  { key: 'accept_status_tip', desc: '查看验收状态（Bot 会进一步询问项目名称）' },
+  { key: 'autonomy_status_tip', desc: '查看自治检查点状态（Bot 会进一步询问项目名称）' },
+  { key: '自定义key', desc: 'Bot 将 key 文本作为指令发送给 AI 处理（AI 会理解并响应）' },
+];
 </script>
 
 <template>
@@ -190,11 +275,180 @@ const columns = [
       <Alert
         type="info"
         show-icon
-        message="飞书一期管理面"
-        description="这里用于保存飞书应用配置、维护系统用户与飞书 open_id 的映射，并直接做联通测试。审批回调仍走 EasyMVP 原服务链。"
+        message="EasyMVP 飞书 Bot — 在飞书里完成项目管理全流程"
+        description="接入后可在飞书单聊/群聊中：创建项目、与架构师AI对话、查看执行进度、处理审核/验收/自治检查点，并自动接收任务失败、项目完成等关键通知。查看「使用说明」标签了解详情。"
       />
 
-      <Tabs>
+      <Tabs @change="onTabChange">
+        <Tabs.TabPane key="guide" tab="使用说明">
+          <div class="space-y-4">
+            <!-- 能力介绍 -->
+            <Card title="🤖 飞书 Bot 能做什么">
+              <div class="space-y-3 text-sm text-gray-700">
+                <div class="rounded-lg bg-blue-50 p-3">
+                  <div class="mb-2 font-semibold text-blue-700">📁 项目全生命周期管理</div>
+                  <div class="space-y-1 text-gray-600">
+                    <div>• 直接说需求创建项目，支持：软件开发、游戏开发、数据分析、内容创作、运营策划</div>
+                    <div>• 查看项目列表、执行进度、暂停/恢复项目</div>
+                    <div>• 说「确认方案」启动自动执行流水线</div>
+                  </div>
+                </div>
+                <div class="rounded-lg bg-green-50 p-3">
+                  <div class="mb-2 font-semibold text-green-700">💬 与 AI 角色直接对话</div>
+                  <div class="space-y-1 text-gray-600">
+                    <div>• 创建项目后，直接在飞书里和<strong>架构师 AI</strong> 对话，描述需求、拆解任务</div>
+                    <div>• AI 回复完成后自动推送到飞书，无需刷新后台</div>
+                    <div>• 说「退出对话」结束当前对话上下文</div>
+                  </div>
+                </div>
+                <div class="rounded-lg bg-orange-50 p-3">
+                  <div class="mb-2 font-semibold text-orange-700">📋 任务管理</div>
+                  <div class="space-y-1 text-gray-600">
+                    <div>• 查看项目任务列表和状态</div>
+                    <div>• 重试所有失败任务（或指定单个任务 ID）</div>
+                    <div>• 跳过阻塞任务解除卡点</div>
+                  </div>
+                </div>
+                <div class="rounded-lg bg-purple-50 p-3">
+                  <div class="mb-2 font-semibold text-purple-700">🔔 主动推送通知（无需查后台）</div>
+                  <div class="space-y-1 text-gray-600">
+                    <div>• ✅ 项目全部执行完成 → 飞书通知</div>
+                    <div>• ❌ 任务失败 → 飞书通知（含失败原因）</div>
+                    <div>• 🔍 需要人工审核 → 飞书通知（可直接回复审核指令）</div>
+                    <div>• 🎯 需要人工验收 → 飞书通知（可直接回复验收指令）</div>
+                    <div>• 🤖 自治检查点需确认 → 飞书通知（可直接回复批准/拒绝）</div>
+                  </div>
+                </div>
+                <div class="rounded-lg bg-gray-50 p-3">
+                  <div class="mb-2 font-semibold text-gray-700">📌 使用方式</div>
+                  <div class="space-y-1 text-gray-600">
+                    <div>• <strong>单聊</strong>：直接给 Bot 发消息，无需 @</div>
+                    <div>• <strong>群聊</strong>：@EasyMVP 后跟随指令</div>
+                    <div>• <strong>自然语言</strong>：不用记命令，直接描述意图，AI 自动理解</div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+
+            <!-- 事件订阅说明 -->
+            <Card title="📡 飞书开放平台事件订阅配置">
+              <Alert
+                type="warning"
+                show-icon
+                message="必须在飞书开放平台配置事件订阅，Bot 才能收到消息"
+                class="mb-4"
+              />
+              <div class="space-y-3">
+                <div class="rounded-lg border border-red-200 bg-red-50 p-3">
+                  <div class="mb-2 font-semibold text-red-700">🔴 必须订阅的事件</div>
+                  <div class="space-y-2">
+                    <div class="flex items-start gap-3">
+                      <Tag color="red" class="mt-0.5 shrink-0">必须</Tag>
+                      <div>
+                        <div class="font-mono font-semibold">im.message.receive_v1</div>
+                        <div class="mt-0.5 text-xs text-gray-500">接收用户发给 Bot 的消息（单聊 + 群聊 @Bot），所有飞书功能的基础</div>
+                      </div>
+                    </div>
+                    <div class="flex items-start gap-3">
+                      <Tag color="orange" class="mt-0.5 shrink-0">菜单需要</Tag>
+                      <div>
+                        <div class="font-mono font-semibold">bot.menu.click</div>
+                        <div class="mt-0.5 text-xs text-gray-500">接收用户点击机器人菜单的事件，启用「机器人菜单」功能时必须订阅</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <div class="mb-2 font-semibold text-gray-700">⚪ 不需要订阅的事件</div>
+                  <div class="space-y-1 text-xs text-gray-500">
+                    <div>• 审批事件（approval.*）：EasyMVP 有自己的审核流，不走飞书审批</div>
+                    <div>• 机器人进出群（im.chat.member.*）：当前版本不需要</div>
+                    <div>• 消息已读（im.message.message_read_v1）：可选，不影响核心功能</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mt-4 space-y-2 text-sm">
+                <div class="font-semibold text-gray-700">配置步骤</div>
+                <div class="rounded bg-gray-100 p-3 font-mono text-xs leading-6 text-gray-700">
+                  1. 飞书开发者后台 → 选择你的应用<br>
+                  2. 左侧「事件订阅」<br>
+                  3. 添加事件：<br>
+                  &nbsp;&nbsp;&nbsp;→ 搜索 im.message.receive_v1 → 添加（必须）<br>
+                  &nbsp;&nbsp;&nbsp;→ 搜索 bot.menu.click → 添加（使用菜单功能时必须）<br>
+                  4. Webhook 模式：填写「请求地址」= 本页「回调地址」中的 URL<br>
+                  &nbsp;&nbsp;&nbsp;WebSocket 模式：选择「使用长连接接收事件」，无需填 URL
+                </div>
+              </div>
+            </Card>
+
+            <!-- 权限配置说明 -->
+            <Card title="🔑 飞书应用权限配置">
+              <div class="space-y-2 text-sm">
+                <div class="text-gray-500">在飞书开发者后台 → 权限管理 中开启以下权限：</div>
+                <div class="overflow-x-auto">
+                  <table class="w-full text-xs">
+                    <thead>
+                      <tr class="bg-gray-50 text-left">
+                        <th class="px-3 py-2 font-semibold">权限标识</th>
+                        <th class="px-3 py-2 font-semibold">用途</th>
+                        <th class="px-3 py-2 font-semibold">是否必须</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                      <tr>
+                        <td class="px-3 py-2 font-mono">im:message</td>
+                        <td class="px-3 py-2 text-gray-600">读取消息内容（接收 im.message.receive_v1）</td>
+                        <td class="px-3 py-2"><Tag color="red" class="text-xs">必须</Tag></td>
+                      </tr>
+                      <tr>
+                        <td class="px-3 py-2 font-mono">im:message:send_as_bot</td>
+                        <td class="px-3 py-2 text-gray-600">以 Bot 身份发送消息（回复用户、主动推送）</td>
+                        <td class="px-3 py-2"><Tag color="red" class="text-xs">必须</Tag></td>
+                      </tr>
+                      <tr>
+                        <td class="px-3 py-2 font-mono">im:message.group_at_msg:readonly</td>
+                        <td class="px-3 py-2 text-gray-600">接收群聊中 @Bot 的消息</td>
+                        <td class="px-3 py-2"><Tag color="orange" class="text-xs">群聊需要</Tag></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </Card>
+
+            <!-- 接入流程 -->
+            <Card title="🚀 快速接入流程">
+              <div class="space-y-2 text-sm text-gray-700">
+                <div class="flex items-start gap-2">
+                  <div class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-600">1</div>
+                  <div>在飞书开放平台创建企业自建应用，获取 App ID 和 App Secret</div>
+                </div>
+                <div class="flex items-start gap-2">
+                  <div class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-600">2</div>
+                  <div>切换到「配置」标签，填入 App ID / App Secret，选择连接模式，保存</div>
+                </div>
+                <div class="flex items-start gap-2">
+                  <div class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-600">3</div>
+                  <div>在飞书开发者后台订阅 <span class="rounded bg-gray-100 px-1 font-mono text-xs">im.message.receive_v1</span> 事件，开启必要权限</div>
+                </div>
+                <div class="flex items-start gap-2">
+                  <div class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-600">4</div>
+                  <div>切换到「绑定」标签，将系统用户与飞书 open_id 绑定（每人绑定一次即可）</div>
+                </div>
+                <div class="flex items-start gap-2">
+                  <div class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-600">5</div>
+                  <div>在「绑定」页点击「测试消息」，确认收到飞书消息</div>
+                </div>
+                <div class="flex items-start gap-2">
+                  <div class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-600">6</div>
+                  <div>（可选）切换到「机器人菜单」标签，点击「一键推送菜单」为用户设置快捷菜单 → 接入完成 🎉</div>
+                </div>
+              </div>
+            </Card>
+          </div>
+        </Tabs.TabPane>
+
         <Tabs.TabPane key="config" tab="配置">
           <Card :loading="loading" title="飞书应用配置">
             <Form layout="vertical">
@@ -312,6 +566,129 @@ const columns = [
               </template>
             </Table>
           </Card>
+        </Tabs.TabPane>
+
+        <Tabs.TabPane key="menu" tab="机器人菜单">
+          <div class="space-y-4">
+            <Alert
+              type="info"
+              show-icon
+              message="飞书机器人菜单"
+              description="在飞书中，用户点击 Bot 会话底部的菜单可快速触发常用指令。最多支持 3 个一级菜单，每个一级菜单最多 5 个子菜单。点击菜单项后，Bot 会自动响应对应功能。"
+            />
+            <Alert
+              type="warning"
+              show-icon
+              message="注意：使用机器人菜单功能需要在飞书开放平台订阅 bot.menu.click 事件"
+            />
+
+            <Card :loading="menuLoading" title="当前菜单配置">
+              <template #extra>
+                <Space>
+                  <Tag :color="menuIsDefault ? 'blue' : 'green'">
+                    {{ menuIsDefault ? '使用默认菜单' : '自定义菜单' }}
+                  </Tag>
+                  <Button size="small" @click="loadBotMenu">刷新</Button>
+                </Space>
+              </template>
+
+              <div class="space-y-3">
+                <div
+                  v-for="(topItem, topIdx) in menuItems"
+                  :key="topIdx"
+                  class="rounded-lg border border-gray-200 bg-gray-50 p-3"
+                >
+                  <div class="mb-2 flex items-center gap-2">
+                    <span class="text-xs font-semibold text-gray-500">一级菜单 {{ topIdx + 1 }}</span>
+                    <Input
+                      v-model:value="topItem.name"
+                      size="small"
+                      style="width: 140px"
+                      placeholder="菜单名称"
+                    />
+                    <Input
+                      v-model:value="topItem.eventKey"
+                      size="small"
+                      style="width: 180px"
+                      placeholder="EventKey（唯一标识）"
+                    />
+                    <Button size="small" danger @click="removeTopMenu(topIdx)">删除</Button>
+                  </div>
+                  <div class="ml-4 space-y-1">
+                    <div
+                      v-for="(subItem, subIdx) in topItem.children"
+                      :key="subIdx"
+                      class="flex items-center gap-2"
+                    >
+                      <span class="text-xs text-gray-400">└</span>
+                      <Input
+                        v-model:value="subItem.name"
+                        size="small"
+                        style="width: 130px"
+                        placeholder="子菜单名称"
+                      />
+                      <Input
+                        v-model:value="subItem.eventKey"
+                        size="small"
+                        style="width: 180px"
+                        placeholder="EventKey（唯一标识）"
+                      />
+                      <Button size="small" danger @click="removeSubMenu(topIdx, subIdx)">删除</Button>
+                    </div>
+                    <Button
+                      size="small"
+                      type="dashed"
+                      style="margin-top: 4px"
+                      @click="addSubMenu(topIdx)"
+                    >
+                      + 添加子菜单
+                    </Button>
+                  </div>
+                </div>
+
+                <Button
+                  v-if="menuItems.length < 3"
+                  type="dashed"
+                  block
+                  @click="addTopMenu"
+                >
+                  + 添加一级菜单
+                </Button>
+              </div>
+
+              <div class="mt-4 flex justify-end gap-2">
+                <Button :loading="menuSaving" @click="deployMenu(true)">
+                  恢复默认菜单
+                </Button>
+                <Button type="primary" :loading="menuSaving" @click="deployMenu(false)">
+                  保存并推送到飞书
+                </Button>
+              </div>
+            </Card>
+
+            <!-- 菜单 EventKey 说明 -->
+            <Card title="EventKey 说明（点击菜单项时触发的指令）">
+              <div class="overflow-x-auto">
+                <table class="w-full text-xs">
+                  <thead>
+                    <tr class="bg-gray-50 text-left">
+                      <th class="px-3 py-2 font-semibold">EventKey</th>
+                      <th class="px-3 py-2 font-semibold">触发动作</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-100">
+                    <tr v-for="(row, i) in menuEventKeyDocs" :key="i">
+                      <td class="px-3 py-1.5 font-mono text-blue-600">{{ row.key }}</td>
+                      <td class="px-3 py-1.5 text-gray-600">{{ row.desc }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="mt-2 text-xs text-gray-400">
+                自定义 EventKey 时，Bot 会将其作为文本指令发送给 AI 处理（支持自然语言）。
+              </div>
+            </Card>
+          </div>
         </Tabs.TabPane>
 
         <Tabs.TabPane key="status" tab="状态">
