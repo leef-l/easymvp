@@ -68,9 +68,10 @@ func (c *cWorkflow) SaveFeishuConfig(ctx context.Context, req *v1.WorkflowSaveFe
 	// 联动 WebSocket 长连接
 	appID := strings.TrimSpace(req.AppID)
 	appSecret := strings.TrimSpace(req.AppSecret)
+	encryptKey := strings.TrimSpace(req.EncryptKey)
 	wsMgr := collab.GetWSManager()
 	if req.Enabled == 1 && mode == "websocket" && appID != "" && appSecret != "" {
-		wsMgr.StartWS(appID, appSecret, feishuWSEventHandler)
+		wsMgr.StartWS(appID, appSecret, encryptKey, feishuWSEventHandler)
 	} else {
 		wsMgr.StopWS()
 	}

@@ -2,6 +2,11 @@ package collab
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,8 +21,9 @@ import (
 // FeishuWSClient 飞书 WebSocket 长连接客户端。
 // 文档：https://open.feishu.cn/document/server-docs/event-subscription-guide/long-connection
 type FeishuWSClient struct {
-	appID     string
-	appSecret string
+	appID      string
+	appSecret  string
+	encryptKey string // 飞书 EncryptKey，非空时对 body 做 AES-256-CBC 解密
 
 	conn    *websocket.Conn
 	mu      sync.Mutex
@@ -29,11 +35,12 @@ type FeishuWSClient struct {
 }
 
 // NewFeishuWSClient 创建 WebSocket 客户端。
-func NewFeishuWSClient(appID, appSecret string) *FeishuWSClient {
+func NewFeishuWSClient(appID, appSecret, encryptKey string) *FeishuWSClient {
 	return &FeishuWSClient{
-		appID:     appID,
-		appSecret: appSecret,
-		stopCh:    make(chan struct{}),
+		appID:      appID,
+		appSecret:  appSecret,
+		encryptKey: encryptKey,
+		stopCh:     make(chan struct{}),
 	}
 }
 
@@ -149,24 +156,166 @@ func (c *FeishuWSClient) readLoop(ctx context.Context) {
 }
 
 // dispatch 解析并分发一条 WS 消息。
+// 飞书 WS 帧格式（二进制）：
+//   [magic 2byte] [headerLen 4byte BE uint32] [bodyLen 4byte BE uint32] [header bytes] [body bytes]
+//
+// magic = 0x00 0x00 或其他；headerLen/bodyLen 均为大端无符号32位整数。
+// header 是 JSON；body 可能是明文 JSON 或 AES-256-CBC 加密后的密文（base64）。
 func (c *FeishuWSClient) dispatch(ctx context.Context, msg []byte) {
-	var raw map[string]interface{}
-	if err := json.Unmarshal(msg, &raw); err != nil {
-		g.Log().Warningf(ctx, "[FeishuWS] 消息解析失败: %v", err)
+	// ── 尝试解析二进制帧 ─────────────────────────────────────────────
+	headerBytes, bodyBytes, ok := parseWSFrame(msg)
+	if !ok {
+		// 不是二进制帧，尝试直接按 JSON 解析（兼容旧版/纯文本模式）
+		var raw map[string]interface{}
+		if err := json.Unmarshal(msg, &raw); err != nil {
+			g.Log().Warningf(ctx, "[FeishuWS] 消息解析失败: %v, rawHex=%x", err, truncate(msg, 20))
+			return
+		}
+		if typ, _ := raw["type"].(string); typ == "pong" {
+			return
+		}
+		header, _ := raw["header"].(map[string]interface{})
+		event, _ := raw["event"].(map[string]interface{})
+		if c.OnEvent != nil && (header != nil || event != nil) {
+			c.OnEvent(ctx, header, event)
+		}
 		return
 	}
 
-	// 心跳 pong
-	if typ, _ := raw["type"].(string); typ == "pong" {
+	// ── 解析 header ──────────────────────────────────────────────────
+	var header map[string]interface{}
+	if len(headerBytes) > 0 {
+		_ = json.Unmarshal(headerBytes, &header)
+	}
+
+	// ── 心跳 pong ────────────────────────────────────────────────────
+	if typ, _ := header["type"].(string); typ == "pong" {
 		return
 	}
 
-	header, _ := raw["header"].(map[string]interface{})
-	event, _ := raw["event"].(map[string]interface{})
+	// ── 解密 body（如有 encryptKey）──────────────────────────────────
+	plainBody := bodyBytes
+	if c.encryptKey != "" && len(bodyBytes) > 0 {
+		// body 可能是 JSON 包装的加密字段：{"encrypt":"base64..."}
+		var enc struct {
+			Encrypt string `json:"encrypt"`
+		}
+		if err := json.Unmarshal(bodyBytes, &enc); err == nil && enc.Encrypt != "" {
+			decrypted, err := FeishuAESDecrypt(enc.Encrypt, c.encryptKey)
+			if err != nil {
+				g.Log().Warningf(ctx, "[FeishuWS] 解密失败: %v", err)
+				return
+			}
+			plainBody = decrypted
+		}
+	}
+
+	// ── 解析 event ───────────────────────────────────────────────────
+	var event map[string]interface{}
+	if len(plainBody) > 0 {
+		_ = json.Unmarshal(plainBody, &event)
+	}
 
 	if c.OnEvent != nil && (header != nil || event != nil) {
 		c.OnEvent(ctx, header, event)
 	}
+}
+
+// parseWSFrame 解析飞书 WS 二进制帧。
+// 格式：[magic 2B][headerLen 4B BE][bodyLen 4B BE][header][body]
+// magic 前2字节忽略（兼容不同版本），只校验长度合理性。
+func parseWSFrame(msg []byte) (header, body []byte, ok bool) {
+	if len(msg) < 10 {
+		return nil, nil, false
+	}
+	// 第一个字节不是 '{' 或 '[' 则认为是二进制帧
+	if msg[0] == '{' || msg[0] == '[' {
+		return nil, nil, false
+	}
+	headerLen := binary.BigEndian.Uint32(msg[2:6])
+	bodyLen := binary.BigEndian.Uint32(msg[6:10])
+	// 合理性校验：header 和 body 不能超过 4MB
+	if headerLen > 4*1024*1024 || bodyLen > 4*1024*1024 {
+		return nil, nil, false
+	}
+	total := 10 + int(headerLen) + int(bodyLen)
+	if len(msg) < total {
+		return nil, nil, false
+	}
+	header = msg[10 : 10+headerLen]
+	body = msg[10+headerLen : 10+headerLen+bodyLen]
+	return header, body, true
+}
+
+// FeishuAESDecrypt 解密飞书 AES-256-CBC 加密的 base64 密文。
+// key = SHA256(encryptKey)[:32]；IV = 密文前16字节。
+// Webhook 模式和 WS 模式共用此函数。
+func FeishuAESDecrypt(cipherB64, encryptKey string) ([]byte, error) {
+	cipherData, err := base64.StdEncoding.DecodeString(cipherB64)
+	if err != nil {
+		return nil, fmt.Errorf("base64解码失败: %w", err)
+	}
+	if len(cipherData) < aes.BlockSize {
+		return nil, fmt.Errorf("密文太短: %d", len(cipherData))
+	}
+
+	// key = SHA256(encryptKey)
+	key := sha256Sum([]byte(encryptKey))[:32]
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("创建AES块失败: %w", err)
+	}
+
+	iv := cipherData[:aes.BlockSize]
+	cipherData = cipherData[aes.BlockSize:]
+
+	if len(cipherData)%aes.BlockSize != 0 {
+		return nil, fmt.Errorf("密文长度不是块大小的倍数")
+	}
+
+	mode := cipher.NewCBCDecrypter(block, iv)
+	mode.CryptBlocks(cipherData, cipherData)
+
+	// 去除 PKCS7 padding
+	plain, err := pkcs7Unpad(cipherData)
+	if err != nil {
+		return nil, err
+	}
+	return plain, nil
+}
+
+func sha256Sum(data []byte) []byte {
+	h := sha256.New()
+	h.Write(data)
+	return h.Sum(nil)
+}
+
+func pkcs7Unpad(data []byte) ([]byte, error) {
+	length := len(data)
+	if length == 0 {
+		return nil, fmt.Errorf("空数据")
+	}
+	padding := int(data[length-1])
+	if padding > aes.BlockSize || padding == 0 {
+		return nil, fmt.Errorf("无效的 padding: %d", padding)
+	}
+	if length < padding {
+		return nil, fmt.Errorf("数据长度小于 padding")
+	}
+	for _, b := range data[length-padding:] {
+		if int(b) != padding {
+			return nil, fmt.Errorf("padding 字节不一致")
+		}
+	}
+	return data[:length-padding], nil
+}
+
+func truncate(b []byte, n int) []byte {
+	if len(b) <= n {
+		return b
+	}
+	return b[:n]
 }
 
 // pingLoop 每 30 秒发送一次心跳。

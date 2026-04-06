@@ -23,7 +23,8 @@ func GetWSManager() *FeishuWSManager {
 }
 
 // StartWS 启动 WebSocket 长连接（如已运行则先停止旧连接）。
-func (m *FeishuWSManager) StartWS(appID, appSecret string, onEvent func(ctx context.Context, header, event map[string]interface{})) {
+// encryptKey 非空时对 body 做 AES-256-CBC 解密（对应飞书"启用加密"场景）。
+func (m *FeishuWSManager) StartWS(appID, appSecret, encryptKey string, onEvent func(ctx context.Context, header, event map[string]interface{})) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -37,7 +38,7 @@ func (m *FeishuWSManager) StartWS(appID, appSecret string, onEvent func(ctx cont
 		m.client = nil
 	}
 
-	client := NewFeishuWSClient(appID, appSecret)
+	client := NewFeishuWSClient(appID, appSecret, encryptKey)
 	client.OnEvent = onEvent
 
 	ctx, cancel := context.WithCancel(context.Background())

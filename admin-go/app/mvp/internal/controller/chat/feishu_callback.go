@@ -9,6 +9,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 
+	"easymvp/app/mvp/internal/collab"
 	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/workflow/orchestrator"
 )
@@ -42,9 +43,27 @@ func (c *cFeishuCallback) Handle(r *ghttp.Request) {
 		}
 	}
 
-	// 2. 解析事件类型
+	// 2. 解析（含加密解密）
+	plainBody := body
+	if encryptKey != "" {
+		// 尝试 AES 解密：body 可能是 {"encrypt":"base64..."}
+		var enc struct {
+			Encrypt string `json:"encrypt"`
+		}
+		if err := json.Unmarshal(body, &enc); err == nil && enc.Encrypt != "" {
+			decrypted, err := collab.FeishuAESDecrypt(enc.Encrypt, encryptKey)
+			if err != nil {
+				g.Log().Warningf(ctx, "[FeishuCallback] 解密失败: %v", err)
+				r.Response.WriteStatus(400)
+				r.Response.WriteJson(g.Map{"msg": "decrypt failed"})
+				return
+			}
+			plainBody = decrypted
+		}
+	}
+
 	var raw map[string]interface{}
-	if err := json.Unmarshal(body, &raw); err != nil {
+	if err := json.Unmarshal(plainBody, &raw); err != nil {
 		r.Response.WriteStatus(400)
 		r.Response.WriteJson(g.Map{"msg": "invalid json"})
 		return
