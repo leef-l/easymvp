@@ -27,15 +27,12 @@ server:
   swaggerPath: "/swagger"
 
 database:
-  logger:
-    level: "all"
-    stdout: true
   default:
     link: "mysql:${DB_USER}:${DB_PASSWORD}@tcp(${DB_HOST}:${DB_PORT:-3306})/${DB_NAME}?charset=utf8mb4&loc=Local&parseTime=true"
-    debug: true
+    debug: false
 
 logger:
-  level: "all"
+  level: "info|warning|error|critical|panic|fatal"
   stdout: true
 
 jwt:

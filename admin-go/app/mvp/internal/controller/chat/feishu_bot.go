@@ -100,6 +100,7 @@ func (f *feishuBotPlatform) Reply(ctx context.Context, text string) {
 	feishu := adapter.NewFeishuAdapter()
 	// 优先回复原消息
 	if f.messageID != "" {
+		g.Log().Infof(ctx, "[FeishuBot] 回复消息: messageID=%s text=%q", f.messageID, text)
 		if err := feishu.ReplyMessage(ctx, f.messageID, text); err != nil {
 			g.Log().Warningf(ctx, "[FeishuBot] 回复消息失败: %v", err)
 		}
@@ -107,6 +108,7 @@ func (f *feishuBotPlatform) Reply(ctx context.Context, text string) {
 	}
 	// 其次发到对话（群聊或单聊 chat_id）
 	if f.chatID != "" {
+		g.Log().Infof(ctx, "[FeishuBot] 发送消息: chatID=%s text=%q", f.chatID, text)
 		if err := feishu.SendTextToChat(ctx, f.chatID, text); err != nil {
 			g.Log().Warningf(ctx, "[FeishuBot] 发送消息失败(chatID): %v", err)
 		}
@@ -114,6 +116,7 @@ func (f *feishuBotPlatform) Reply(ctx context.Context, text string) {
 	}
 	// 兜底：用 open_id 发私信
 	if f.openID != "" {
+		g.Log().Infof(ctx, "[FeishuBot] 发送私信: openID=%s text=%q", f.openID, text)
 		if err := feishu.SendTextMessage(ctx, f.openID, text); err != nil {
 			g.Log().Warningf(ctx, "[FeishuBot] 发送私信失败(openID): %v", err)
 		}
