@@ -32,7 +32,7 @@ database:
     debug: false
 
 logger:
-  level: "info"
+  level: "all"
   stdout: true
 
 jwt:

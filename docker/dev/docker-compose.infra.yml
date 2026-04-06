@@ -1,0 +1,50 @@
+name: easymvp-infra
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: easymvp-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - easymvp-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  mysql:
+    image: ${MYSQL_IMAGE:-mysql:8.0}
+    container_name: easymvp-mysql
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${DB_NAME:-easymvp}
+      MYSQL_USER: ${DB_USER:-easymvp}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-JKcHFJYXnkrB6BXE}
+    ports:
+      - "127.0.0.1:3306:3306"
+    command:
+      - "mysqld"
+      - "--default-authentication-plugin=mysql_native_password"
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+      - "--init-connect=SET NAMES utf8mb4"
+      - "--skip-character-set-client-handshake"
+    volumes:
+      - ../../admin-go/docker/mysql/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+      - easymvp-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  easymvp-redis-data:
+  easymvp-mysql-data:

@@ -25,6 +25,7 @@ export function createProject(data: {
   workDir: string;
   architectModelID: string;
   engineVersion?: string;
+  selectedRoles?: { presetID: string }[];
 }) {
   return requestClient.post<{
     projectID: string;
@@ -75,6 +76,7 @@ export function skipTask(data: {
 
 /** 角色预设项 */
 export interface RolePresetItem {
+  id: string;
   roleType: string;
   roleLevel: string;
   modelID: string;
@@ -87,13 +89,13 @@ export interface RolePresetItem {
 /** 获取角色预设列表（可按项目分类过滤，优先 categoryCode） */
 export function getRolePresets(categoryCodeOrDisplayName?: string) {
   if (!categoryCodeOrDisplayName) {
-    return requestClient.get<{ list: RolePresetItem[] }>(`${PREFIX}/role-presets`);
+    return requestClient.get<{ list: RolePresetItem[] }>(`${PREFIX}/role-presets`, { params: { all: true } });
   }
   // 判断是 categoryCode（英文下划线）还是 displayName（中文）
   const isCategoryCode = /^[a-z_]+$/.test(categoryCodeOrDisplayName);
   const params = isCategoryCode
-    ? { categoryCode: categoryCodeOrDisplayName }
-    : { projectCategory: categoryCodeOrDisplayName };
+    ? { categoryCode: categoryCodeOrDisplayName, all: true }
+    : { projectCategory: categoryCodeOrDisplayName, all: true };
   return requestClient.get<{ list: RolePresetItem[] }>(
     `${PREFIX}/role-presets`,
     { params },

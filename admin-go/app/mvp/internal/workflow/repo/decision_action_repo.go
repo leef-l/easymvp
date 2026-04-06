@@ -5,6 +5,8 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+
+	"easymvp/utility/snowflake"
 )
 
 // DecisionActionRepo 决策动作仓储。
@@ -17,12 +19,10 @@ func (r *DecisionActionRepo) table() string { return "mvp_decision_action" }
 
 // Create 创建决策动作记录。
 func (r *DecisionActionRepo) Create(ctx context.Context, data g.Map) (int64, error) {
-	result, err := g.DB().Model(r.table()).Ctx(ctx).Insert(data)
-	if err != nil {
-		return 0, err
-	}
-	id, _ := result.LastInsertId()
-	return id, nil
+	id := snowflake.Generate()
+	data["id"] = id
+	_, err := g.DB().Model(r.table()).Ctx(ctx).Insert(data)
+	return int64(id), err
 }
 
 // GetByID 按 ID 查询。

@@ -19,6 +19,12 @@ type WorkflowCreateProjectReq struct {
 	WorkDir          string              `json:"workDir" v:"max-length:500" dc:"代码工作目录（编码类项目必填，非编码类可留空由系统自动生成）"`
 	ArchitectModelID snowflake.JsonInt64  `json:"architectModelID" v:"required" dc:"架构师AI模型ID"`
 	EngineVersion    string               `json:"engineVersion" dc:"引擎版本: legacy(默认) / workflow_v2"`
+	SelectedRoles    []SelectedRoleItem   `json:"selectedRoles" dc:"用户选择的角色预设ID列表，为空则使用默认预设"`
+}
+
+// SelectedRoleItem 用户选择的角色预设
+type SelectedRoleItem struct {
+	PresetID snowflake.JsonInt64 `json:"presetID" dc:"角色预设ID"`
 }
 
 // WorkflowCreateProjectRes 创建项目响应
@@ -143,6 +149,7 @@ type WorkflowRolePresetsRes struct {
 
 // RolePresetItem 角色预设项
 type RolePresetItem struct {
+	ID            snowflake.JsonInt64 `json:"id"`
 	RoleType      string             `json:"roleType"`
 	RoleLevel     string             `json:"roleLevel"`
 	ModelID       snowflake.JsonInt64 `json:"modelID"`

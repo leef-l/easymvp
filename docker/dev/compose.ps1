@@ -5,6 +5,17 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# --- --local 模式：转发给 local-dev.ps1 ---
+if ($ComposeArgs -contains '--local') {
+    $localScript = Join-Path $PSScriptRoot 'local-dev.ps1'
+    $localArgs = @()
+    if ($ComposeArgs -contains '--no-web') { $localArgs += '-NoWeb' }
+    if ($ComposeArgs -contains '--no-infra') { $localArgs += '-NoInfra' }
+    if ($ComposeArgs -contains '--stop-infra') { $localArgs += '-StopInfra' }
+    & $localScript @localArgs
+    exit $LASTEXITCODE
+}
+
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $composeFile = Join-Path $PSScriptRoot 'docker-compose.cn.yml'
 $sourceEnv = Join-Path $PSScriptRoot '.env'

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
@@ -15,7 +16,8 @@ import (
 
 // ConfirmPlan 确认实施方案，进入方案审核阶段
 // 流程：designing → reviewing → (审核通过) → running
-//       reviewing → (审核不通过) → designing
+//
+//	reviewing → (审核不通过) → designing
 func (s *Scheduler) ConfirmPlan(ctx context.Context, projectID int64) error {
 	// 1. 检查项目状态
 	project, err := g.DB().Model("mvp_project").Where("id", projectID).Where("deleted_at IS NULL").One()
@@ -58,11 +60,11 @@ func (s *Scheduler) runReviewAsync(ctx context.Context, projectID int64) {
 	result, err := RunReview(ctx, projectID)
 	if err != nil {
 		g.Log().Errorf(ctx, "[Workflow] 方案审核执行失败: project=%d, err=%v", projectID, err)
-		// 审核执行失败，退回 designing
+		// 审核执行失败，退回 designing，保留完整错误链
 		HandleReviewFailure(ctx, projectID, &ReviewResult{
 			Errors: []ReviewIssue{{
 				Severity: "error",
-				Message:  fmt.Sprintf("审核流程执行异常: %v", err),
+				Message:  fmt.Sprintf("审核流程执行异常: %s", FormatErrorChain(err)),
 			}},
 		})
 		return
@@ -132,8 +134,8 @@ func (s *Scheduler) Resume(ctx context.Context, projectID int64) error {
 }
 
 // CreateProject 创建项目并初始化架构师对话
-// architectModelID 为前端传入的架构师模型，若为 0 则从预设读取
-func CreateProject(ctx context.Context, name, projectCategory, description, workDir string, architectModelID int64, userID int64, deptID int64, engineVersion ...string) (int64, int64, error) {
+// selectedPresetIDs 为前端选择的角色预设 ID 列表，为空则按分类读取默认预设（兼容）
+func CreateProject(ctx context.Context, name, projectCategory, description, workDir string, architectModelID int64, userID int64, deptID int64, selectedPresetIDs []int64, engineVersion ...string) (int64, int64, error) {
 	// 1.5 默认分类
 	if projectCategory == "" {
 		projectCategory = "软件开发"
@@ -160,14 +162,25 @@ func CreateProject(ctx context.Context, name, projectCategory, description, work
 		}
 	}
 
-	// 1. 按项目分类读取默认角色预设模板（is_default=1）
-	presets, err := g.DB().Model("mvp_role_preset").
-		Where("status", 1).
-		Where("project_category", projectCategory).
-		Where("is_default", 1).
-		Where("deleted_at IS NULL").
-		OrderAsc("sort").
-		All()
+	// 1. 读取角色预设：优先按前端选择的 ID 列表，否则按分类默认
+	var presets gdb.Result
+	var err error
+	if len(selectedPresetIDs) > 0 {
+		presets, err = g.DB().Model("mvp_role_preset").
+			WhereIn("id", selectedPresetIDs).
+			Where("status", 1).
+			Where("deleted_at IS NULL").
+			OrderAsc("sort").
+			All()
+	} else {
+		presets, err = g.DB().Model("mvp_role_preset").
+			Where("status", 1).
+			Where("project_category", projectCategory).
+			Where("is_default", 1).
+			Where("deleted_at IS NULL").
+			OrderAsc("sort").
+			All()
+	}
 	if err != nil {
 		return 0, 0, fmt.Errorf("读取角色预设失败: %w", err)
 	}
@@ -263,14 +276,14 @@ func CreateProject(ctx context.Context, name, projectCategory, description, work
 			"project_category": projectCategory,
 			"role_type":        roleType,
 			"role_level":       p["role_level"].String(),
-			"model_id":        modelID,
-			"system_prompt":   systemPrompt,
-			"execution_mode":  executionMode,
-			"status":          1,
-			"created_by":      userID,
-			"dept_id":         deptID,
-			"created_at":      gtime.Now(),
-			"updated_at":      gtime.Now(),
+			"model_id":         modelID,
+			"system_prompt":    systemPrompt,
+			"execution_mode":   executionMode,
+			"status":           1,
+			"created_by":       userID,
+			"dept_id":          deptID,
+			"created_at":       gtime.Now(),
+			"updated_at":       gtime.Now(),
 		})
 		if err != nil {
 			return 0, 0, fmt.Errorf("创建角色配置(%s)失败: %w", roleType, err)
@@ -284,13 +297,13 @@ func CreateProject(ctx context.Context, name, projectCategory, description, work
 			"project_id":       projectID,
 			"project_category": projectCategory,
 			"role_type":        "architect",
-			"model_id":      architectModelID,
-			"system_prompt": buildArchitectPrompt(name, description, modelPromptMap[architectModelID]),
-			"status":        1,
-			"created_by":    userID,
-			"dept_id":       deptID,
-			"created_at":    gtime.Now(),
-			"updated_at":    gtime.Now(),
+			"model_id":         architectModelID,
+			"system_prompt":    buildArchitectPrompt(name, description, modelPromptMap[architectModelID]),
+			"status":           1,
+			"created_by":       userID,
+			"dept_id":          deptID,
+			"created_at":       gtime.Now(),
+			"updated_at":       gtime.Now(),
 		})
 		if err != nil {
 			return 0, 0, fmt.Errorf("创建架构师配置失败: %w", err)

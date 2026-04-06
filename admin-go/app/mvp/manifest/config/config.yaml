@@ -7,7 +7,7 @@ server:
 # https://goframe.org/docs/core/glog-config
 logger:
   path:              "/www/wwwroot/project/easymvp/admin-go/logs/mvp"
-  level:             "info"
+  level:             "all"
   stdout:            true
   rotateSize:        "100M"
   rotateExpire:      "7d"

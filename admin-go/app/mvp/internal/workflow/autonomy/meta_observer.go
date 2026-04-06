@@ -61,7 +61,8 @@ func (o *MetaObserver) Record(ctx context.Context, input *ObservationInput) {
 				g.Log().Warningf(ctx, "[MetaObserver] Record panic recovered: %v", r)
 			}
 		}()
-		o.doRecord(ctx, input)
+		// 使用独立 context，避免调用方 context 取消导致写入失败
+		o.doRecord(context.Background(), input)
 	}()
 }
 
@@ -72,7 +73,7 @@ func (o *MetaObserver) doRecord(ctx context.Context, input *ObservationInput) {
 	inputJSON, _ := json.Marshal(input.InputSnapshot)
 	outputJSON, _ := json.Marshal(input.OutputSnapshot)
 
-	var metaJSON []byte
+	metaJSON := []byte("{}")
 	if input.Meta != nil {
 		metaJSON, _ = json.Marshal(input.Meta)
 	}

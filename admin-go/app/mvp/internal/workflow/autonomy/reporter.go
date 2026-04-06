@@ -2,6 +2,7 @@ package autonomy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -39,6 +40,7 @@ func (r *Reporter) GenerateStageReport(ctx context.Context, workflowRunID int64,
 
 	stageLabel := stageTypeLabel(stageType)
 	title := fmt.Sprintf("%s阶段报告", stageLabel)
+	metricsJSON, _ := json.Marshal(metrics)
 
 	_, err = r.reportRepo.Create(ctx, g.Map{
 		"workflow_run_id": workflowRunID,
@@ -47,7 +49,7 @@ func (r *Reporter) GenerateStageReport(ctx context.Context, workflowRunID int64,
 		"stage_type":      stageType,
 		"title":           title,
 		"content":         content,
-		"metrics":         metrics,
+		"metrics":         string(metricsJSON),
 	})
 	if err != nil {
 		return fmt.Errorf("保存阶段报告失败: %w", err)

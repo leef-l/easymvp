@@ -5,6 +5,8 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+
+	"easymvp/utility/snowflake"
 )
 
 // PolicyRuleRepo 策略规则仓储。
@@ -17,12 +19,10 @@ func (r *PolicyRuleRepo) table() string { return "mvp_policy_rule" }
 
 // Create 创建策略规则。
 func (r *PolicyRuleRepo) Create(ctx context.Context, data g.Map) (int64, error) {
-	result, err := g.DB().Model(r.table()).Ctx(ctx).Insert(data)
-	if err != nil {
-		return 0, err
-	}
-	id, _ := result.LastInsertId()
-	return id, nil
+	id := snowflake.Generate()
+	data["id"] = id
+	_, err := g.DB().Model(r.table()).Ctx(ctx).Insert(data)
+	return int64(id), err
 }
 
 // GetByID 按 ID 查询。

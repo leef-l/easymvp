@@ -20,9 +20,9 @@ import (
 
 // ReviewResult 审核结果
 type ReviewResult struct {
-	Passed   bool           `json:"passed"`
-	Errors   []ReviewIssue  `json:"errors"`
-	Warnings []ReviewIssue  `json:"warnings"`
+	Passed    bool          `json:"passed"`
+	Errors    []ReviewIssue `json:"errors"`
+	Warnings  []ReviewIssue `json:"warnings"`
 	AutoFixes []string      `json:"auto_fixes,omitempty"`
 }
 
@@ -35,9 +35,9 @@ type ReviewIssue struct {
 
 // AuditorReviewResult 审计员 AI 审核输出
 type AuditorReviewResult struct {
-	Approved    bool            `json:"approved"`
-	Issues      []ReviewIssue   `json:"issues"`
-	Suggestions string          `json:"suggestions"`
+	Approved    bool          `json:"approved"`
+	Issues      []ReviewIssue `json:"issues"`
+	Suggestions string        `json:"suggestions"`
 }
 
 // CoordinatorOptResult 协调员 AI 优化输出
@@ -56,8 +56,11 @@ type CoordinatorOptResult struct {
 func RunReview(ctx context.Context, projectID int64) (*ReviewResult, error) {
 	// 获取项目信息
 	project, err := g.DB().Model("mvp_project").Where("id", projectID).One()
-	if err != nil || project.IsEmpty() {
-		return nil, fmt.Errorf("项目不存在")
+	if err != nil {
+		return nil, fmt.Errorf("查询项目信息失败: %w", err)
+	}
+	if project.IsEmpty() {
+		return nil, fmt.Errorf("项目 %d 不存在", projectID)
 	}
 	workDir := project["work_dir"].String()
 	projectCategory := project["project_category"].String()
@@ -455,7 +458,7 @@ func doCoordinatorOptimize(ctx context.Context, modelInfo *ModelInfo, tasks gdb.
 
 	var optResult CoordinatorOptResult
 	if err := parseJSONFromAI(resp.Content, &optResult); err != nil {
-		return nil, fmt.Errorf("解析协调员优化结果失败: %w", err, )
+		return nil, fmt.Errorf("解析协调员优化结果失败: %w", err)
 	}
 
 	return &optResult, nil

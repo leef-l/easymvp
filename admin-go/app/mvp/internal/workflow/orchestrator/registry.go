@@ -188,7 +188,7 @@ func Init() {
 			}
 
 			// 重启调度器拾取 pending 任务
-			return taskScheduler.Start(ctx, workflowRunID)
+			return taskScheduler.Start(context.Background(), workflowRunID)
 		})
 
 		// 注册 accept failed → rework 回调（决策点 5: accept.failed, 6: accept.manual_review）

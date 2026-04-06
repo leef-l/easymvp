@@ -51,7 +51,15 @@ func (c *cWorkflow) CreateProject(ctx context.Context, req *v1.WorkflowCreatePro
 		projectCategory = "软件开发"
 	}
 
-	projectID, convID, err := engine.CreateProject(ctx, req.Name, projectCategory, req.Description, req.WorkDir, int64(req.ArchitectModelID), userID, deptID, req.EngineVersion)
+	// 提取用户选择的预设 ID 列表
+	var selectedPresetIDs []int64
+	for _, sr := range req.SelectedRoles {
+		if int64(sr.PresetID) > 0 {
+			selectedPresetIDs = append(selectedPresetIDs, int64(sr.PresetID))
+		}
+	}
+
+	projectID, convID, err := engine.CreateProject(ctx, req.Name, projectCategory, req.Description, req.WorkDir, int64(req.ArchitectModelID), userID, deptID, selectedPresetIDs, req.EngineVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +179,7 @@ func (c *cWorkflow) Resume(ctx context.Context, req *v1.WorkflowResumeReq) (res 
 		return nil, err
 	}
 	if wfRun["current_stage"].String() == "execute" {
-		_ = orchestrator.GetTaskScheduler().Start(ctx, wfRunID)
+		_ = orchestrator.GetTaskScheduler().Start(context.Background(), wfRunID)
 	}
 	return &v1.WorkflowResumeRes{}, nil
 }
@@ -363,7 +371,7 @@ func (c *cWorkflow) RolePresets(ctx context.Context, req *v1.WorkflowRolePresets
 
 	m := g.DB().Model("mvp_role_preset AS p").
 		LeftJoin("ai_model AS m", "m.id = p.model_id").
-		Fields("p.role_type, p.role_level, p.model_id, m.name AS model_name, p.system_prompt, p.execution_mode, p.is_default").
+		Fields("p.id, p.role_type, p.role_level, p.model_id, m.name AS model_name, p.system_prompt, p.execution_mode, p.is_default").
 		Where("p.status", 1).
 		Where("p.deleted_at IS NULL")
 	if filterCategory != "" {
@@ -380,6 +388,7 @@ func (c *cWorkflow) RolePresets(ctx context.Context, req *v1.WorkflowRolePresets
 	list := make([]v1.RolePresetItem, 0, len(presets))
 	for _, p := range presets {
 		list = append(list, v1.RolePresetItem{
+			ID:            snowflake.JsonInt64(p["id"].Int64()),
 			RoleType:      p["role_type"].String(),
 			RoleLevel:     p["role_level"].String(),
 			ModelID:       snowflake.JsonInt64(p["model_id"].Int64()),

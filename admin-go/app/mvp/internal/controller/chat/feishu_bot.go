@@ -255,7 +255,7 @@ func handleBotCreateProject(ctx context.Context, projectName, category string, s
 		category = "软件开发"
 	}
 
-	projectID, _, err := engine.CreateProject(ctx, projectName, category, "", "", 0, systemUserID, deptID)
+	projectID, _, err := engine.CreateProject(ctx, projectName, category, "", "", 0, systemUserID, deptID, nil)
 	if err != nil {
 		reply(fmt.Sprintf("❌ 创建项目失败：%v", err))
 		return

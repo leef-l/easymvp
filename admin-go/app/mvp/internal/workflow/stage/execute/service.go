@@ -104,7 +104,7 @@ func (s *Service) InstantiateAndStart(ctx context.Context, stageRunID int64, pla
 	})
 
 	// 4. 启动调度
-	return s.scheduler.Start(ctx, workflowRunID)
+	return s.scheduler.Start(context.Background(), workflowRunID)
 }
 
 // AnalysisCompletedFn 分析任务完成回调（路由到 rework service）。

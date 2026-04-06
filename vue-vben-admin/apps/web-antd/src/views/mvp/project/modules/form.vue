@@ -3,7 +3,7 @@ import { h, ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useVbenModal } from '@vben/common-ui';
 import { useVbenForm } from '#/adapter/form';
-import { message, Tooltip, Tag } from 'ant-design-vue';
+import { message, Tooltip, Tag, Checkbox } from 'ant-design-vue';
 import { QuestionCircleOutlined, TeamOutlined } from '@ant-design/icons-vue';
 import {
   getProjectDetail,
@@ -25,6 +25,24 @@ const presetArchitectModelID = ref<string>('');
 const selectedCategoryCode = ref<string>('software_dev');
 /** 当前分类的默认角色预设（用于只读展示） */
 const defaultPresets = ref<RolePresetItem[]>([]);
+/** 用户选中的预设 ID 集合 */
+const selectedPresetIDs = ref<Set<string>>(new Set());
+
+/** 切换预设选中状态 */
+function togglePreset(presetId: string, roleType: string) {
+  const newSet = new Set(selectedPresetIDs.value);
+  if (newSet.has(presetId)) {
+    // 架构师不允许取消
+    if (roleType === 'architect') {
+      message.warning('架构师角色为必选');
+      return;
+    }
+    newSet.delete(presetId);
+  } else {
+    newSet.add(presetId);
+  }
+  selectedPresetIDs.value = newSet;
+}
 
 /** 动态分类选项（从 API 加载，value=categoryCode, label=displayName） */
 const dynamicCategoryOptions = ref<{ label: string; value: string; familyCode: string }[]>([]);
@@ -65,6 +83,10 @@ async function loadPresetsForCategory(categoryCode: string) {
     const presetRes = await getRolePresets(categoryCode);
     const presets = presetRes?.list ?? [];
     defaultPresets.value = presets;
+    // 默认勾选 isDefault=true 的预设
+    selectedPresetIDs.value = new Set(
+      presets.filter((p) => p.isDefault).map((p) => p.id),
+    );
     // 从预设中提取架构师模型
     const architectPreset = presets.find((p) => p.roleType === 'architect');
     if (architectPreset?.modelID) {
@@ -220,6 +242,7 @@ const [Modal, modalApi] = useVbenModal({
           workDir: values.workDir,
           architectModelID: values.architectModelID,
           engineVersion: values.engineVersion || 'workflow_v2',
+          selectedRoles: [...selectedPresetIDs.value].map((id) => ({ presetID: id })),
         });
         message.success('项目创建成功，正在跳转到对话页面...');
         emit('success');
@@ -282,6 +305,10 @@ const [Modal, modalApi] = useVbenModal({
           }));
           // 保存默认预设列表用于展示
           defaultPresets.value = presetRes?.list ?? [];
+          // 默认勾选 isDefault=true 的预设
+          selectedPresetIDs.value = new Set(
+            defaultPresets.value.filter((p) => p.isDefault).map((p) => p.id),
+          );
           // 读取预设中架构师的默认模型
           const architectPreset = defaultPresets.value.find(
             (p) => p.roleType === 'architect',
@@ -300,18 +327,26 @@ const [Modal, modalApi] = useVbenModal({
 <template>
   <Modal class="w-[600px]">
     <Form />
-    <!-- 默认 AI 团队组成预览（仅新建模式） -->
+    <!-- AI 团队角色选择（仅新建模式） -->
     <div v-if="!isEdit && defaultPresets.length > 0" class="mt-4 rounded border border-gray-200 bg-gray-50 p-3">
       <div class="mb-2 flex items-center text-sm font-medium text-gray-600">
         <TeamOutlined class="mr-1" />
-        默认 AI 团队组成
+        AI 团队角色配置
+        <span class="ml-2 text-xs font-normal text-gray-400">勾选要加入项目的角色</span>
       </div>
-      <div class="flex flex-wrap gap-2">
+      <div class="flex flex-col gap-2">
         <div
           v-for="preset in defaultPresets"
-          :key="`${preset.roleType}-${preset.roleLevel}`"
-          class="flex items-center gap-1"
+          :key="preset.id"
+          class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 transition-colors hover:bg-gray-100"
+          @click="togglePreset(preset.id, preset.roleType)"
         >
+          <Checkbox
+            :checked="selectedPresetIDs.has(preset.id)"
+            :disabled="preset.roleType === 'architect'"
+            @click.stop
+            @change="togglePreset(preset.id, preset.roleType)"
+          />
           <Tag :color="roleTypeMap[preset.roleType]?.color || 'default'">
             {{ roleTypeMap[preset.roleType]?.label || preset.roleType }}
           </Tag>
@@ -320,6 +355,8 @@ const [Modal, modalApi] = useVbenModal({
             · {{ executionModeMap[preset.executionMode]?.label || preset.executionMode }}
             · {{ preset.modelName || '未绑定' }}
           </span>
+          <Tag v-if="preset.isDefault" class="ml-auto" color="blue" size="small">默认</Tag>
+          <Tag v-else class="ml-auto" color="default" size="small">扩展</Tag>
         </div>
       </div>
     </div>

@@ -143,7 +143,7 @@ func (s *DomainTaskScheduler) scheduleOnce(ctx context.Context, workflowRunID in
 		WhereNull("deleted_at")
 
 	if batchNo > 0 {
-		query = query.Where("(batch_no = 0 OR batch_no = ?)", batchNo)
+		query = query.WhereIn("batch_no", g.Slice{0, batchNo})
 	} else {
 		query = query.Where("batch_no = 0")
 	}
