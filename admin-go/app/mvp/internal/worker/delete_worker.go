@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	_ "github.com/gogf/gf/contrib/nosql/redis/v2" // 注册 gredis 驱动
@@ -281,15 +282,36 @@ func saveFailedJob(ctx context.Context, job *deleteJob, errMsg string) {
 	})
 }
 
-// safeGetRedis 安全获取 Redis 实例，配置不存在时返回 nil 而不是 panic。
+// safeGetRedis 安全获取 Redis 实例。
+// 优先从 GoFrame 配置文件读取，找不到时用环境变量 REDIS_ADDR 直接创建。
 func safeGetRedis(ctx context.Context) (r *gredis.Redis) {
+	// 先尝试配置文件
 	defer func() {
 		if rec := recover(); rec != nil {
 			g.Log().Warningf(ctx, "[DeleteWorker] Redis 配置未找到，降级跳过: %v", rec)
 			r = nil
 		}
 	}()
-	return g.Redis()
+	r = g.Redis()
+	if r != nil {
+		return r
+	}
+	// 配置文件没有，尝试环境变量
+	addr := os.Getenv("REDIS_ADDR")
+	if addr == "" {
+		addr = "127.0.0.1:6379"
+	}
+	pass := os.Getenv("REDIS_PASS")
+	client, err := gredis.New(&gredis.Config{
+		Address: addr,
+		Pass:    pass,
+		Db:      0,
+	})
+	if err != nil {
+		g.Log().Warningf(ctx, "[DeleteWorker] Redis 直连失败 addr=%s: %v", addr, err)
+		return nil
+	}
+	return client
 }
 
 // ─── mvp_task 级联删除 ────────────────────────────────────────────────────────

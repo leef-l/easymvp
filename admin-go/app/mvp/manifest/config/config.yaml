@@ -22,10 +22,10 @@ database:
     charset: "utf8mb4"
 
 # Redis 配置（GoFrame gredis）
+# 地址通过环境变量 REDIS_ADDR 覆盖，默认本地
 redis:
   default:
-    address: "${REDIS_ADDR:127.0.0.1:6379}"
-    pass:    "${REDIS_PASS:}"
+    address: "127.0.0.1:6379"
     db:      0
 
 # JWT 配置
