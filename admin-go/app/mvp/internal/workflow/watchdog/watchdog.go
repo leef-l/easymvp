@@ -3,6 +3,7 @@ package watchdog
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -178,11 +179,11 @@ func (w *DomainTaskWatchdog) checkRunningTasks(ctx context.Context) {
 		elapsed := time.Since(refTime.Time)
 		if elapsed > heartbeatTimeout {
 			w.staleCount[taskID]++
-			if w.staleCount[taskID] >= 1 {
-				// 已超过心跳超时阈值
+			if w.staleCount[taskID] >= w.maxStaleCount {
+				// 连续无心跳次数达到阈值
 				staleTasks = append(staleTasks, staleTask{
 					taskID: taskID,
-					reason: "心跳超时：最后活跃 " + refTime.String(),
+					reason: fmt.Sprintf("心跳超时：最后活跃 %s, 连续无心跳 %d 次", refTime.String(), w.staleCount[taskID]),
 				})
 				delete(w.staleCount, taskID)
 			}

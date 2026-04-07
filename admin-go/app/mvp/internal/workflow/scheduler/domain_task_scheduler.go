@@ -194,7 +194,7 @@ func (s *DomainTaskScheduler) scheduleOnce(ctx context.Context, workflowRunID in
 
 		// CAS 更新状态 pending → running（必须先确认数据库更新成功再写内存锁）
 		now := gtime.Now()
-		casResult, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		casResult, casErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
 			Where("id", taskID).
 			Where("status", domainTask.StatusPending).
 			Update(g.Map{
@@ -202,6 +202,10 @@ func (s *DomainTaskScheduler) scheduleOnce(ctx context.Context, workflowRunID in
 				"started_at": now,
 				"updated_at": now,
 			})
+		if casErr != nil {
+			g.Log().Warningf(ctx, "[Scheduler] CAS 更新任务状态失败: task=%d err=%v", taskID, casErr)
+			continue
+		}
 		casRows, _ := casResult.RowsAffected()
 		if casRows == 0 {
 			// CAS 失败：任务已不在 pending 状态（被并发 Pause/Resume/手动重试改走），跳过
@@ -217,11 +221,19 @@ func (s *DomainTaskScheduler) scheduleOnce(ctx context.Context, workflowRunID in
 
 		// 持久化资源锁
 		if len(resources) > 0 {
-			lockedJSON, _ := json.Marshal(resources)
-			_, _ = g.DB().Model("mvp_domain_task").Ctx(ctx).
-				Where("id", taskID).
-				Update(g.Map{"locked_resources": string(lockedJSON)})
-			_ = s.lockMgr.AcquireLocks(ctx, workflowRunID, taskID, resources)
+			lockedJSON, jsonErr := json.Marshal(resources)
+			if jsonErr != nil {
+				g.Log().Warningf(ctx, "[Scheduler] 序列化资源锁失败: task=%d err=%v", taskID, jsonErr)
+			} else {
+				if _, upErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
+					Where("id", taskID).
+					Update(g.Map{"locked_resources": string(lockedJSON)}); upErr != nil {
+					g.Log().Warningf(ctx, "[Scheduler] 持久化资源锁失败: task=%d err=%v", taskID, upErr)
+				}
+			}
+			if lockErr := s.lockMgr.AcquireLocks(ctx, workflowRunID, taskID, resources); lockErr != nil {
+				g.Log().Warningf(ctx, "[Scheduler] 获取资源锁失败: task=%d err=%v", taskID, lockErr)
+			}
 		}
 
 		// 执行

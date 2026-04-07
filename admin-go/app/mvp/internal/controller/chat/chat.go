@@ -65,8 +65,8 @@ func (c *cChat) SSE(ctx context.Context, req *v1.ChatSSEReq) (res *v1.ChatSSERes
 	userID := middleware.GetUserID(ctx)
 	if userID != 1 {
 		convID := msg["conversation_id"].Int64()
-		conv, _ := g.DB().Model("mvp_conversation").Where("id", convID).Where("deleted_at IS NULL").One()
-		if conv.IsEmpty() || conv["created_by"].Int64() != userID {
+		conv, convErr := g.DB().Model("mvp_conversation").Where("id", convID).Where("deleted_at IS NULL").One()
+		if convErr != nil || conv.IsEmpty() || conv["created_by"].Int64() != userID {
 			writeSSEEvent(r, "error", `{"error":"无权访问"}`)
 			writeSSEEvent(r, "done", `{"done":true}`)
 			r.Response.Flush()
@@ -85,10 +85,13 @@ func (c *cChat) SSE(ctx context.Context, req *v1.ChatSSEReq) (res *v1.ChatSSERes
 	}
 
 	// 2. 消息正在 streaming，先发送已有的 chunks
-	chunks, _ := g.DB().Model("mvp_message_chunk").
+	chunks, chunkErr := g.DB().Model("mvp_message_chunk").
 		Where("message_id", messageID).
 		Order("chunk_index ASC").
 		All()
+	if chunkErr != nil {
+		g.Log().Warningf(ctx, "[SSE] 查询 chunks 失败: msg=%d err=%v", messageID, chunkErr)
+	}
 	for _, chunk := range chunks {
 		writeSSEEvent(r, "chunk", fmt.Sprintf(`{"content":%q,"index":%d}`, chunk["content"].String(), chunk["chunk_index"].Int()))
 	}

@@ -205,7 +205,7 @@ func (s *Sensor) DetectAnomalies(sit *Situation) []AnomalySignal {
 		return nil
 	}
 	signals := make([]AnomalySignal, 0, 4)
-	if sit.Health != nil && sit.Health.RecentFailureRate >= 0.5 && sit.Progress.TotalTasks >= 4 {
+	if sit.Health != nil && sit.Progress != nil && sit.Health.RecentFailureRate >= 0.5 && sit.Progress.TotalTasks >= 4 {
 		signals = append(signals, AnomalySignal{
 			Type:       "failure_spike",
 			Severity:   "warning",
