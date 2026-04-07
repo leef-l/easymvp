@@ -48,7 +48,6 @@ services:
       - "--init-connect=SET NAMES utf8mb4"
       - "--skip-character-set-client-handshake"
     volumes:
-      - ../../admin-go/docker/mysql/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
       - easymvp-mysql-data:/var/lib/mysql
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
