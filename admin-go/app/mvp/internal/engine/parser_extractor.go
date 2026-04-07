@@ -110,14 +110,60 @@ func (p *TaskParser) extractTaskPlan(text string) (*ArchitectTaskPlan, error) {
 }
 
 // tryParseJSON 尝试解析 JSON 为 ArchitectTaskPlan
+// 如果首次解析失败，会逐级尝试修复常见的 AI 输出格式问题后重试。
 func (p *TaskParser) tryParseJSON(jsonStr string) (*ArchitectTaskPlan, error) {
 	jsonStr = p.cleanJSON(jsonStr)
 
 	var plan ArchitectTaskPlan
-	if err := json.Unmarshal([]byte(jsonStr), &plan); err != nil {
-		return nil, err
+	if err := json.Unmarshal([]byte(jsonStr), &plan); err == nil {
+		return &plan, nil
 	}
-	return &plan, nil
+
+	// 第一级修复：修复多重转义
+	fixed1 := fixBrokenJSON(jsonStr)
+	if fixed1 != jsonStr {
+		if err := json.Unmarshal([]byte(fixed1), &plan); err == nil {
+			return &plan, nil
+		}
+	}
+
+	// 第二级修复：更激进——将所有 \\" 替换为空（去除字符串值中的错误转义引号）
+	fixed2 := strings.ReplaceAll(jsonStr, `\\"`, ``)
+	if fixed2 != jsonStr {
+		if err := json.Unmarshal([]byte(fixed2), &plan); err == nil {
+			return &plan, nil
+		}
+	}
+
+	// 第三级修复：将 \\" 替换为 '（用单引号替代转义引号）
+	fixed3 := strings.ReplaceAll(jsonStr, `\\"`, `'`)
+	if fixed3 != jsonStr {
+		if err := json.Unmarshal([]byte(fixed3), &plan); err == nil {
+			return &plan, nil
+		}
+	}
+
+	return nil, fmt.Errorf("JSON 解析失败，已尝试多级修复")
+}
+
+// fixBrokenJSON 修复 AI 输出中常见的 JSON 格式问题
+func fixBrokenJSON(s string) string {
+	// 1. 修复多重转义：\\\" → \"（三重转义降为一重）
+	//    AI 常见问题：在 JSON 字符串值中对引号过度转义
+	s = strings.ReplaceAll(s, `\\\"`, `\"`)
+
+	// 2. 修复 \\\\ → \\（四重反斜杠降为两重）
+	for strings.Contains(s, `\\\\`) {
+		s = strings.ReplaceAll(s, `\\\\`, `\\`)
+	}
+
+	// 3. 修复半角/全角引号混用
+	s = strings.ReplaceAll(s, "\u201c", `"`) // 左双引号 "
+	s = strings.ReplaceAll(s, "\u201d", `"`) // 右双引号 "
+	s = strings.ReplaceAll(s, "\u2018", `'`) // 左单引号 '
+	s = strings.ReplaceAll(s, "\u2019", `'`) // 右单引号 '
+
+	return s
 }
 
 // cleanJSON 清理 AI 输出的非标准 JSON（注释、尾随逗号等）
