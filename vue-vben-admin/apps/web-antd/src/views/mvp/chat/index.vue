@@ -305,6 +305,16 @@ async function connectSSE(replyID: string, targetMessageIndex: number) {
         }
       }
     }
+
+    // SSE 流结束但未收到 done 事件（后端异常中断），兜底处理消息状态
+    const msg = messages.value[targetMessageIndex];
+    if (msg && msg.status === 'streaming') {
+      msg.content = msg.streamingContent || msg.content || '（AI 回复中断）';
+      msg.streamingContent = undefined;
+      msg.status = hasFailed ? 'failed' : 'completed';
+    }
+    if (scrollTimer) { clearTimeout(scrollTimer); scrollTimer = null; }
+    await scrollToBottom();
   } catch (err: any) {
     if (err.name === 'AbortError') {
       // 主动中断，不处理
