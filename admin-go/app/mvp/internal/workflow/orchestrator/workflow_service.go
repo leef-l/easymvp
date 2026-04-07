@@ -17,12 +17,21 @@ import (
 	"easymvp/utility/snowflake"
 )
 
+// WorkflowPausedCallback 工作流暂停后的清理回调（停调度器等）。
+type WorkflowPausedCallback func(ctx context.Context, workflowRunID int64)
+
 // WorkflowService 工作流编排服务。
 type WorkflowService struct {
-	runtimeMgr *runtime.Manager
-	publisher  *event.Publisher
-	wfRepo     *repo.WorkflowRunRepo
-	stageRepo  *repo.StageRunRepo
+	runtimeMgr       *runtime.Manager
+	publisher        *event.Publisher
+	wfRepo           *repo.WorkflowRunRepo
+	stageRepo        *repo.StageRunRepo
+	onWorkflowPaused WorkflowPausedCallback
+}
+
+// SetWorkflowPausedCallback 注册工作流暂停后的清理回调。
+func (s *WorkflowService) SetWorkflowPausedCallback(fn WorkflowPausedCallback) {
+	s.onWorkflowPaused = fn
 }
 
 // NewWorkflowService 创建工作流服务。
@@ -195,6 +204,11 @@ func (s *WorkflowService) Pause(ctx context.Context, workflowRunID int64, reason
 		return fmt.Errorf("工作流状态并发冲突，暂停失败")
 	}
 	s.runtimeMgr.Cancel(workflowRunID)
+
+	// 停调度器 + 释放资源锁
+	if s.onWorkflowPaused != nil {
+		s.onWorkflowPaused(ctx, workflowRunID)
+	}
 
 	// 同步 mvp_project.status
 	projectID := wfRun["project_id"].Int64()

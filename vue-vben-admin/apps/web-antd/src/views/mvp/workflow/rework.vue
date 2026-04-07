@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
@@ -27,8 +27,10 @@ import { getReworkStatus, type ReworkRoundInfo, type ReworkStageInfo } from '#/a
 
 defineOptions({ name: 'WorkflowRework' });
 
+const props = defineProps<{ projectId?: string }>();
+
 const route = useRoute();
-const projectId = ref((route.query.projectId as string) ?? '');
+const resolvedProjectId = computed(() => props.projectId || (route.query.projectId as string) || '');
 const loading = ref(false);
 
 const hasRework = ref(false);
@@ -56,10 +58,10 @@ function truncate(text: string, max = 200) {
 }
 
 async function loadData() {
-  if (!projectId.value) return;
+  if (!resolvedProjectId.value) return;
   loading.value = true;
   try {
-    const res = await getReworkStatus(projectId.value);
+    const res = await getReworkStatus(resolvedProjectId.value);
     hasRework.value = res?.hasRework ?? false;
     reworkRounds.value = res?.reworkRounds ?? 0;
     currentStage.value = res?.currentStage ?? null;
@@ -76,7 +78,7 @@ onMounted(loadData);
   <Page auto-content-height>
     <Spin :spinning="loading">
       <Empty
-        v-if="!projectId"
+        v-if="!resolvedProjectId"
         description="请从项目列表进入查看返工状态"
         class="mt-20"
       />

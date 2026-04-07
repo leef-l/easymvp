@@ -4,13 +4,14 @@ import type { VbenFormProps } from '#/adapter/form';
 import type { VxeGridProps } from '#/adapter/vxe-table';
 
 import { Page, useVbenModal } from '@vben/common-ui';
-import { Button, message, Modal, Progress, Tag } from 'ant-design-vue';
+import { Button, Dropdown, Menu, MenuItem, message, Modal, Progress, Tag } from 'ant-design-vue';
+import { DownOutlined } from '@ant-design/icons-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getProjectList, deleteProject } from '#/api/mvp/project';
 import { confirmPlan, resumeProject, batchProjectStats } from '#/api/mvp/workflow';
 import type { ProjectItem } from '#/api/mvp/project/types';
-import { engineVersionMap, stageTypeMap } from '../consts';
+import { stageTypeMap } from '../consts';
 
 import FormModal from './modules/form.vue';
 import PauseModal from './modules/pause-modal.vue';
@@ -113,12 +114,6 @@ const gridOptions: VxeGridProps<ProjectItem> = {
       width: 120,
     },
     {
-      field: 'engineVersion',
-      title: '引擎版本',
-      width: 120,
-      slots: { default: 'col-engine-version' },
-    },
-    {
       field: 'status',
       title: '状态',
       width: 100,
@@ -151,7 +146,7 @@ const gridOptions: VxeGridProps<ProjectItem> = {
     },
     {
       title: '操作',
-      width: 280,
+      width: 200,
       fixed: 'right',
       slots: { default: 'action' },
     },
@@ -250,8 +245,22 @@ function handleConfirmPlan(row: ProjectItem) {
     content: '确认后系统将先执行方案审核（系统预检 + AI审核 + 调度优化），审核通过后自动开始执行。',
     okText: '确认方案',
     async onOk() {
-      await confirmPlan(row.id);
-      message.success('方案已提交审核，请稍候...');
+      const res = await confirmPlan(row.id);
+      if (res?.reviewPassed) {
+        message.success('方案审核通过，已进入执行阶段');
+      } else {
+        const errorList = (res?.issues || [])
+          .filter((i: any) => i.severity === 'error')
+          .map((i: any) => `• ${i.taskName ? `[${i.taskName}] ` : ''}${i.message}`)
+          .slice(0, 20);
+        Modal.error({
+          title: `方案审核未通过（${res?.errorCount || 0} 个错误，${res?.warningCount || 0} 个警告）`,
+          content: errorList.length > 0
+            ? errorList.join('\n')
+            : (res?.rejectReason || '审核未通过，请检查方案后重试'),
+          width: 600,
+        });
+      }
       gridApi.reload();
     },
   });
@@ -311,13 +320,6 @@ function handleDelete(row: ProjectItem) {
         </p>
       </template>
 
-      <!-- 引擎版本列 -->
-      <template #col-engine-version="{ row }">
-        <Tag :color="engineVersionMap[row.engineVersion ?? 'legacy']?.color ?? 'default'">
-          {{ engineVersionMap[row.engineVersion ?? 'legacy']?.label ?? 'Legacy' }}
-        </Tag>
-      </template>
-
       <!-- 状态 Tag 列 -->
       <template #col-status="{ row }">
         <Tag :color="STATUS_COLORS[row.status] ?? 'default'">
@@ -352,75 +354,34 @@ function handleDelete(row: ProjectItem) {
         <span v-else class="text-xs text-gray-300">-</span>
       </template>
 
-      <!-- 操作列：根据状态动态显示按钮 -->
+      <!-- 操作列：2 个主按钮 + 更多下拉 -->
       <template #action="{ row }">
-        <!-- 设计中：进入对话 + 确认方案 -->
-        <template v-if="row.status === 'designing'">
-          <Button type="link" size="small" @click="handleChat(row)">进入对话</Button>
-          <Button type="link" size="small" @click="handleConfirmPlan(row)">确认方案</Button>
-        </template>
+        <!-- 主按钮1：根据状态显示最关键操作 -->
+        <Button v-if="row.status === 'designing'" type="link" size="small" @click="handleChat(row)">对话</Button>
+        <Button v-else-if="row.status === 'paused'" type="link" size="small" class="text-green-600" @click="handleResume(row)">恢复</Button>
+        <Button v-else type="link" size="small" @click="handleDashboard(row)">仪表板</Button>
 
-        <!-- 审核中：查看详情（只读等待） -->
-        <template v-else-if="row.status === 'reviewing'">
-          <Button type="link" size="small" @click="handleViewStatus(row)">查看详情</Button>
-          <Tag color="cyan" class="ml-1">审核中...</Tag>
-        </template>
+        <!-- 主按钮2 -->
+        <Button v-if="row.status === 'designing'" type="link" size="small" @click="handleDashboard(row)">仪表板</Button>
+        <Button v-else-if="['running', 'executing', 'reworking'].includes(row.status)" type="link" size="small" class="text-orange-500" @click="handlePause(row)">暂停</Button>
+        <Button v-else-if="row.status === 'paused'" type="link" size="small" @click="handleDashboard(row)">仪表板</Button>
 
-        <!-- 执行中：查看详情 + 执行控制台 + 暂停 -->
-        <template v-else-if="row.status === 'running' || row.status === 'executing'">
-          <Button type="link" size="small" @click="handleViewStatus(row)">查看详情</Button>
-          <Button v-if="row.engineVersion === 'workflow_v2'" type="link" size="small" @click="handleExecution(row)">执行控制台</Button>
-          <Button type="link" size="small" class="text-orange-500" @click="handlePause(row)">暂停</Button>
-        </template>
-
-        <!-- 返工中：查看详情 + 执行控制台 + 暂停 -->
-        <template v-else-if="row.status === 'reworking'">
-          <Button type="link" size="small" @click="handleViewStatus(row)">查看详情</Button>
-          <Button type="link" size="small" @click="handleExecution(row)">执行控制台</Button>
-          <Button type="link" size="small" class="text-orange-500" @click="handlePause(row)">暂停</Button>
-        </template>
-
-        <!-- 验收中：查看详情 + 仪表板 -->
-        <template v-else-if="row.status === 'accepting'">
-          <Button type="link" size="small" @click="handleViewStatus(row)">查看详情</Button>
-          <Button type="link" size="small" @click="handleDashboard(row)">仪表板</Button>
-        </template>
-
-        <!-- 暂停中：恢复 + 进入对话 -->
-        <template v-else-if="row.status === 'paused'">
-          <Button type="link" size="small" class="text-green-600" @click="handleResume(row)">恢复</Button>
-          <Button type="link" size="small" @click="handleChat(row)">进入对话</Button>
-        </template>
-
-        <!-- 已完成：查看详情 -->
-        <template v-else-if="row.status === 'completed'">
-          <Button type="link" size="small" @click="handleViewStatus(row)">查看详情</Button>
-        </template>
-
-        <!-- V2 项目通用：仪表板 + 元认知入口 -->
-        <Button
-          v-if="row.engineVersion === 'workflow_v2'"
-          type="link"
-          size="small"
-          @click="handleDashboard(row)"
-        >仪表板</Button>
-        <Button
-          v-if="row.engineVersion === 'workflow_v2'"
-          type="link"
-          size="small"
-          @click="handleMetaCognition(row)"
-        >元认知</Button>
-
-        <!-- 编辑按钮（任何状态都可以编辑） -->
-        <Button type="link" size="small" @click="handleEdit(row)">编辑</Button>
-
-        <!-- 删除按钮（任何状态都可以删除） -->
-        <Button
-          type="link"
-          size="small"
-          danger
-          @click="handleDelete(row)"
-        >删除</Button>
+        <!-- 更多操作下拉 -->
+        <Dropdown>
+          <Button type="link" size="small">
+            更多 <DownOutlined />
+          </Button>
+          <template #overlay>
+            <Menu>
+              <MenuItem v-if="row.status === 'designing'" @click="handleConfirmPlan(row)">确认方案</MenuItem>
+              <MenuItem v-if="row.status === 'designing'" @click="handleDashboard(row)">查看详情</MenuItem>
+              <MenuItem v-if="row.status !== 'designing'" @click="handleChat(row)">进入对话</MenuItem>
+              <MenuItem v-if="row.status !== 'designing'" @click="handleDashboard(row)">仪表板</MenuItem>
+              <MenuItem @click="handleEdit(row)">编辑</MenuItem>
+              <MenuItem danger @click="handleDelete(row)">删除</MenuItem>
+            </Menu>
+          </template>
+        </Dropdown>
       </template>
     </Grid>
   </Page>

@@ -29,6 +29,14 @@ type sProjectRole struct{}
 
 // Create 创建项目角色配置表
 func (s *sProjectRole) Create(ctx context.Context, in *model.ProjectRoleCreateInput) error {
+	// 如果未传 projectCategory，从项目自动获取
+	if in.ProjectCategory == "" && in.ProjectID != 0 {
+		val, err := g.DB().Ctx(ctx).Model("mvp_project").Where("id", in.ProjectID).Where("deleted_at", nil).Value("project_category")
+		if err == nil && !val.IsEmpty() {
+			in.ProjectCategory = val.String()
+		}
+	}
+
 	id := snowflake.Generate()
 	_, err := dao.MvpProjectRole.Ctx(ctx).Data(g.Map{
 		dao.MvpProjectRole.Columns().Id:        id,
@@ -37,9 +45,10 @@ func (s *sProjectRole) Create(ctx context.Context, in *model.ProjectRoleCreateIn
 		dao.MvpProjectRole.Columns().RoleType: in.RoleType,
 		dao.MvpProjectRole.Columns().RoleLevel: in.RoleLevel,
 		dao.MvpProjectRole.Columns().ModelId: in.ModelID,
-		dao.MvpProjectRole.Columns().SystemPrompt: in.SystemPrompt,
-		dao.MvpProjectRole.Columns().Status: in.Status,
-		dao.MvpProjectRole.Columns().CreatedBy: middleware.GetUserID(ctx),
+		dao.MvpProjectRole.Columns().SystemPrompt:  in.SystemPrompt,
+		dao.MvpProjectRole.Columns().ExecutionMode: in.ExecutionMode,
+		dao.MvpProjectRole.Columns().Status:        in.Status,
+		dao.MvpProjectRole.Columns().CreatedBy:     middleware.GetUserID(ctx),
 		dao.MvpProjectRole.Columns().DeptId: middleware.GetDeptID(ctx),
 		dao.MvpProjectRole.Columns().CreatedAt: gtime.Now(),
 		dao.MvpProjectRole.Columns().UpdatedAt: gtime.Now(),
@@ -58,9 +67,10 @@ func (s *sProjectRole) Update(ctx context.Context, in *model.ProjectRoleUpdateIn
 		dao.MvpProjectRole.Columns().RoleType: in.RoleType,
 		dao.MvpProjectRole.Columns().RoleLevel: in.RoleLevel,
 		dao.MvpProjectRole.Columns().ModelId: in.ModelID,
-		dao.MvpProjectRole.Columns().SystemPrompt: in.SystemPrompt,
-		dao.MvpProjectRole.Columns().Status: in.Status,
-		dao.MvpProjectRole.Columns().UpdatedAt: gtime.Now(),
+		dao.MvpProjectRole.Columns().SystemPrompt:  in.SystemPrompt,
+		dao.MvpProjectRole.Columns().ExecutionMode: in.ExecutionMode,
+		dao.MvpProjectRole.Columns().Status:        in.Status,
+		dao.MvpProjectRole.Columns().UpdatedAt:     gtime.Now(),
 	}
 	_, err := dao.MvpProjectRole.Ctx(ctx).Where(dao.MvpProjectRole.Columns().Id, in.ID).Data(data).Update()
 	return err

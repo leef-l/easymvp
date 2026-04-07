@@ -28,17 +28,18 @@ import {
   type ExecutionStatusResult,
   type DomainTaskItem,
 } from '../../../api/mvp/workflow';
-import { stageTypeMap } from '../consts';
+import { stageTypeMap, taskStatusMap } from '../consts';
+
+const props = defineProps<{ projectId?: string }>();
 
 const route = useRoute();
 const loading = ref(false);
-const projectId = ref<string>('');
+const resolvedProjectId = computed(() => props.projectId || (route.query.projectId as string) || '');
 const data = ref<ExecutionStatusResult | null>(null);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 onMounted(() => {
-  projectId.value = (route.query.projectId as string) ?? '';
-  if (projectId.value) {
+  if (resolvedProjectId.value) {
     loadData();
     pollTimer = setInterval(loadData, 5000);
   }
@@ -50,7 +51,7 @@ onUnmounted(() => {
 
 async function loadData() {
   try {
-    const res = await getExecutionStatus(projectId.value);
+    const res = await getExecutionStatus(resolvedProjectId.value);
     data.value = res;
   } catch {
     // silent
@@ -100,21 +101,57 @@ const statusColorMap: Record<string, string> = {
 };
 
 const columns = [
-  { title: '任务名称', dataIndex: 'name', key: 'name', width: 200 },
-  { title: '状态', dataIndex: 'status', key: 'status', width: 100 },
-  { title: '角色', dataIndex: 'roleType', key: 'roleType', width: 100 },
-  { title: '执行方式', dataIndex: 'executionMode', key: 'executionMode', width: 100 },
-  { title: '影响资源', dataIndex: 'affectedResources', key: 'affectedResources', width: 200 },
-  { title: '重试次数', dataIndex: 'retryCount', key: 'retryCount', width: 80 },
-  { title: '操作', key: 'action', width: 120 },
+  { title: '任务名称', dataIndex: 'name', key: 'name', width: 180, ellipsis: true },
+  { title: '状态', dataIndex: 'status', key: 'status', width: 90 },
+  { title: '角色', dataIndex: 'roleType', key: 'roleType', width: 80 },
+  { title: '执行方式', dataIndex: 'executionMode', key: 'executionMode', width: 80 },
+  { title: '结果/错误', key: 'resultInfo', width: 200, ellipsis: true },
+  { title: '重试', dataIndex: 'retryCount', key: 'retryCount', width: 50 },
+  { title: '操作', key: 'action', width: 140 },
 ];
+
+function showDetail(task: DomainTaskItem) {
+  Modal.info({
+    title: task.name,
+    width: 700,
+    content: () => {
+      const h = (window as any).__vue_create_element__ || null;
+      // 用纯 HTML 字符串渲染
+      return undefined;
+    },
+    okText: '关闭',
+  });
+  // 用 setTimeout 替换 content（Modal.info 不支持复杂 VNode）
+  setTimeout(() => {
+    const modalBody = document.querySelector('.ant-modal-confirm-content');
+    if (modalBody) {
+      modalBody.innerHTML = `
+        <div style="max-height: 500px; overflow-y: auto; font-size: 13px; line-height: 1.6;">
+          <p><b>描述：</b></p>
+          <pre style="white-space: pre-wrap; background: #f5f5f5; padding: 8px; border-radius: 4px; max-height: 200px; overflow-y: auto;">${escapeHtml(task.description || '无')}</pre>
+          <p style="margin-top: 12px;"><b>状态：</b> ${task.status} &nbsp; <b>角色：</b> ${task.roleType}/${task.roleLevel} &nbsp; <b>执行方式：</b> ${task.executionMode || '-'}</p>
+          <p><b>批次：</b> ${task.batchNo} &nbsp; <b>重试次数：</b> ${task.retryCount}</p>
+          ${task.affectedResources?.length ? `<p><b>影响资源：</b> ${task.affectedResources.join(', ')}</p>` : ''}
+          ${task.result ? `<p style="margin-top: 12px;"><b>执行结果：</b></p><pre style="white-space: pre-wrap; background: #f0fff0; padding: 8px; border-radius: 4px; max-height: 200px; overflow-y: auto;">${escapeHtml(task.result)}</pre>` : ''}
+          ${task.errorMessage ? `<p style="margin-top: 12px;"><b>错误信息：</b></p><pre style="white-space: pre-wrap; background: #fff0f0; padding: 8px; border-radius: 4px; max-height: 200px; overflow-y: auto; color: #cf1322;">${escapeHtml(task.errorMessage)}</pre>` : ''}
+          ${task.startedAt ? `<p style="margin-top: 8px; color: #999;"><b>开始：</b> ${task.startedAt}</p>` : ''}
+          ${task.completedAt ? `<p style="color: #999;"><b>完成：</b> ${task.completedAt}</p>` : ''}
+        </div>
+      `;
+    }
+  }, 100);
+}
+
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 
 async function handleRetry(task: DomainTaskItem) {
   Modal.confirm({
     title: '确认重试',
     content: `确定要重试任务「${task.name}」吗？`,
     onOk: async () => {
-      await retryTask({ projectID: projectId.value, taskID: task.id });
+      await retryTask({ projectID: resolvedProjectId.value, taskID: task.id });
       message.success('已提交重试');
       loadData();
     },
@@ -126,7 +163,7 @@ async function handleSkip(task: DomainTaskItem) {
     title: '确认跳过',
     content: `跳过任务「${task.name}」将解除后续批次阻塞，确定跳过吗？`,
     onOk: async () => {
-      await skipTask({ projectID: projectId.value, taskID: task.id, reason: '手动跳过' });
+      await skipTask({ projectID: resolvedProjectId.value, taskID: task.id, reason: '手动跳过' });
       message.success('已跳过');
       loadData();
     },
@@ -221,22 +258,24 @@ async function handleSkip(task: DomainTaskItem) {
           >
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'status'">
-                <Badge :status="statusColorMap[record.status] ?? 'default'" :text="record.status" />
+                <Badge :status="statusColorMap[record.status] ?? 'default'" :text="taskStatusMap[record.status]?.label ?? record.status" />
               </template>
 
-              <template v-else-if="column.key === 'affectedResources'">
-                <Space v-if="record.affectedResources?.length" wrap size="small">
-                  <Tag v-for="res in record.affectedResources" :key="res" size="small">
-                    {{ res }}
-                  </Tag>
-                </Space>
-                <span v-else class="text-gray-400">-</span>
+              <template v-else-if="column.key === 'resultInfo'">
+                <span v-if="record.errorMessage" class="text-red-500 text-xs cursor-pointer" @click="showDetail(record)">
+                  {{ record.errorMessage.length > 50 ? record.errorMessage.slice(0, 50) + '...' : record.errorMessage }}
+                </span>
+                <span v-else-if="record.result" class="text-green-600 text-xs cursor-pointer" @click="showDetail(record)">
+                  {{ record.result.length > 50 ? record.result.slice(0, 50) + '...' : record.result }}
+                </span>
+                <span v-else class="text-gray-400 text-xs">-</span>
               </template>
 
               <template v-else-if="column.key === 'action'">
                 <Space>
+                  <Button type="link" size="small" @click="showDetail(record)">详情</Button>
                   <Button
-                    v-if="record.status === 'failed'"
+                    v-if="record.status === 'failed' || record.status === 'escalated'"
                     type="link"
                     size="small"
                     @click="handleRetry(record)"
@@ -244,7 +283,7 @@ async function handleSkip(task: DomainTaskItem) {
                     重试
                   </Button>
                   <Button
-                    v-if="record.status === 'failed' || record.status === 'pending'"
+                    v-if="['failed', 'escalated', 'pending'].includes(record.status)"
                     type="link"
                     size="small"
                     danger

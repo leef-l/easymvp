@@ -175,6 +175,9 @@ async function connectSSE(replyID: string, targetMessageIndex: number) {
       }, 100);
     };
 
+    // 跟踪已收到的最大 chunk index（用于重连去重）
+    let lastChunkIndex = -1;
+
     // 跟踪是否收到过失败信号，用于 done 时判断最终状态
     let hasFailed = false;
 
@@ -259,6 +262,14 @@ async function connectSSE(replyID: string, targetMessageIndex: number) {
             }
             case 'chunk':
             default: {
+              // 续写通知事件
+              if (data.event === 'continue') {
+                if (msg) {
+                  msg.streamingContent = (msg.streamingContent || '') + '\n\n> _AI 正在继续生成..._\n\n';
+                  debouncedScroll();
+                }
+                break;
+              }
               // chunk 事件或无事件类型（兼容旧格式）
               if (data.done) {
                 // 兼容：data.done 标记（无 event 类型时的结束信号）
@@ -274,6 +285,14 @@ async function connectSSE(replyID: string, targetMessageIndex: number) {
                 return;
               }
               if (data.content !== undefined && msg) {
+                // chunk 去重：跳过已收到的 chunk（重连时后端会重发已有 chunks）
+                const chunkIdx = data.index ?? -1;
+                if (chunkIdx >= 0 && chunkIdx <= lastChunkIndex) {
+                  break; // 跳过重复 chunk
+                }
+                if (chunkIdx > lastChunkIndex) {
+                  lastChunkIndex = chunkIdx;
+                }
                 msg.streamingContent = (msg.streamingContent || '') + data.content;
                 debouncedScroll();
               }
@@ -398,7 +417,14 @@ async function handleParseTasks() {
         // 第三步：实际创建
         const res = await parseTasks(projectId.value, false);
         await loadProjectStatus();
-        message.success(`已创建 ${res.taskCount} 个草案任务`);
+        if (res.message) {
+          // 异步提取中，提示用户等待
+          message.info(res.message);
+        } else if (res.taskCount > 0) {
+          message.success(`已创建 ${res.taskCount} 个草案任务`);
+        } else {
+          message.info('未提取到任务，请检查架构师回复格式');
+        }
       },
     });
   } catch (err: any) {
@@ -414,9 +440,8 @@ async function handleConfirmPlan() {
   confirmingPlan.value = true;
   try {
     await confirmPlan(projectId.value);
-    message.success('方案已确认，开始执行！');
-    projectStatus.value = 'running';
-    // 刷新项目状态
+    message.success('方案已提交审核，请等待审核结果');
+    projectStatus.value = 'reviewing';
     await loadProjectStatus();
   } catch (err: any) {
     message.error(err?.message || '确认方案失败');
@@ -452,9 +477,20 @@ async function loadHistory() {
     const result = await getChatHistory(conversationId.value);
     messages.value = (result.list || []).map((msg) => ({
       ...msg,
-      streamingContent: undefined,
+      streamingContent: msg.status === 'streaming' ? (msg.content || '') : undefined,
     }));
     await scrollToBottom();
+
+    // 自动恢复 streaming 消息的 SSE 连接
+    const streamingIdx = messages.value.findIndex((m) => m.status === 'streaming');
+    if (streamingIdx >= 0) {
+      const streamingMsg = messages.value[streamingIdx];
+      isSending.value = true;
+      connectSSE(streamingMsg.id, streamingIdx).finally(() => {
+        isSending.value = false;
+        loadProjectStatus();
+      });
+    }
   } catch (err) {
     console.error('加载历史消息失败:', err);
     message.error('加载历史消息失败');

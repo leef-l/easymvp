@@ -115,20 +115,17 @@ export const roleLevelMap: Record<string, { label: string; color: string }> = {
 
 /** 引擎版本枚举 */
 export const EngineVersion = {
-  LEGACY: 'legacy',
   WORKFLOW_V2: 'workflow_v2',
 } as const;
 
 /** 引擎版本映射 */
 export const engineVersionMap: Record<string, { label: string; color: string }> = {
-  legacy: { label: 'Legacy', color: 'default' },
   workflow_v2: { label: 'Workflow V2', color: 'green' },
 };
 
 /** 引擎版本选项 */
 export const engineVersionOptions = [
-  { label: 'Workflow V2 (推荐)', value: 'workflow_v2' },
-  { label: 'Legacy (旧引擎，不推荐)', value: 'legacy' },
+  { label: 'Workflow V2', value: 'workflow_v2' },
 ];
 
 // ==================== 工作流状态 ====================

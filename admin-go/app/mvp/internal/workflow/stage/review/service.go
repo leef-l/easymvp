@@ -21,6 +21,7 @@ import (
 type StageCompleter interface {
 	CompleteStage(ctx context.Context, stageRunID int64) error
 	FailStage(ctx context.Context, stageRunID int64, reason string) error
+	FailStageOnly(ctx context.Context, stageRunID int64, reason string)
 }
 
 // ExecuteTriggerFn 审核通过后触发执行阶段的回调。
@@ -143,13 +144,11 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 		nameToBatch[bp["name"].String()] = bp["batch_no"].Int()
 	}
 
-	// 预加载角色配置
+	// 预加载角色配置（缺失的自动从默认预设补齐）
 	availableRoles := make(map[string]bool)
-	roleConfigs, _ := g.DB().Model("mvp_project_role").Ctx(ctx).
-		Where("project_id", projectID).Where("status", 1).WhereNull("deleted_at").
-		Fields("role_type, role_level").All()
-	for _, rc := range roleConfigs {
-		availableRoles[rc["role_type"].String()+"/"+rc["role_level"].String()] = true
+	roleMap, _ := repo.GetProjectRolesMap(ctx, projectID)
+	for key := range roleMap {
+		availableRoles[key] = true
 	}
 
 	batchResources := make(map[int]map[string]string)
@@ -167,11 +166,10 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 			continue
 		}
 
-		// 描述质量
-		if len([]rune(desc)) < 10 {
-			s.createIssue(ctx, workflowRunID, stageRunID, planVersionID, bpID, "error", "short_desc", "precheck", name,
-				fmt.Sprintf("蓝图描述过短（%d字），需要至少10字的有效描述", len([]rune(desc))))
-			result.HasErrors = true
+		// 描述质量（降为 warning，不阻塞审核）
+		if len([]rune(desc)) < 5 {
+			s.createIssue(ctx, workflowRunID, stageRunID, planVersionID, bpID, "warning", "short_desc", "precheck", name,
+				fmt.Sprintf("蓝图描述较短（%d字），建议至少5字的有效描述", len([]rune(desc))))
 		}
 
 		// affected_resources
@@ -201,15 +199,14 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 			json.Unmarshal([]byte(depJSON), &depIDs)
 		}
 
-		// 资源冲突
+		// 资源冲突（降为 warning，不阻塞审核；调度器有资源锁保护）
 		if _, ok := batchResources[batchNo]; !ok {
 			batchResources[batchNo] = make(map[string]string)
 		}
 		for _, res := range resources {
 			if existingTask, conflict := batchResources[batchNo][res]; conflict {
-				s.createIssue(ctx, workflowRunID, stageRunID, planVersionID, bpID, "error", "resource_conflict", "precheck", name,
-					fmt.Sprintf("资源冲突: 同批次(%d)中 [%s] 和 [%s] 都修改 %s", batchNo, existingTask, name, res))
-				result.HasErrors = true
+				s.createIssue(ctx, workflowRunID, stageRunID, planVersionID, bpID, "warning", "resource_conflict", "precheck", name,
+					fmt.Sprintf("资源冲突: 同批次(%d)中 [%s] 和 [%s] 都修改 %s（调度器会自动串行化）", batchNo, existingTask, name, res))
 			}
 			batchResources[batchNo][res] = name
 		}
@@ -256,8 +253,17 @@ func (s *Service) runAuditorReview(ctx context.Context, stageRunID, workflowRunI
 		outputJSON, _ = json.Marshal(result)
 		if !result.Approved {
 			// 审计员未通过，记录问题
-			for _, issue := range result.Issues {
-				s.createIssue(ctx, workflowRunID, stageRunID, planVersionID, 0, issue.Severity, "auditor_issue", "auditor", issue.TaskName, issue.Message)
+			if len(result.Issues) > 0 {
+				for _, issue := range result.Issues {
+					s.createIssue(ctx, workflowRunID, stageRunID, planVersionID, 0, issue.Severity, "auditor_issue", "auditor", issue.TaskName, issue.Message)
+				}
+			} else {
+				// AI 返回 approved=false 但 issues 为空，用 suggestions 构造 issue
+				msg := result.Suggestions
+				if msg == "" {
+					msg = "审计员认为方案需要改进，但未提供具体问题描述"
+				}
+				s.createIssue(ctx, workflowRunID, stageRunID, planVersionID, 0, "error", "auditor_reject", "auditor", "", msg)
 			}
 		}
 	}
@@ -410,18 +416,30 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 
 		g.Log().Infof(ctx, "[ReviewStage] 审核通过 planVersionID=%d errors=%d warnings=%d", planVersionID, errorCount, warningCount)
 	} else {
-		// 审核不通过：回退
+		// 审核不通过：回退 plan_version + blueprints + project
 		_, _ = g.DB().Model("mvp_plan_version").Ctx(ctx).
 			Where("id", planVersionID).
-			Update(g.Map{"review_status": consts.PlanReviewStatusRejected, "rejected_at": now, "updated_at": now})
+			Update(g.Map{
+				"status":        "draft",
+				"review_status": consts.PlanReviewStatusRejected,
+				"rejected_at":   now,
+				"updated_at":    now,
+			})
+
+		// 蓝图回退 confirmed → draft（让用户可以重新编辑）
+		_, _ = g.DB().Model("mvp_task_blueprint").Ctx(ctx).
+			Where("plan_version_id", planVersionID).
+			Where("blueprint_status", consts.BlueprintStatusConfirmed).
+			Update(g.Map{"blueprint_status": consts.BlueprintStatusDraft, "updated_at": now})
 
 		// 项目状态回退 designing
 		_, _ = g.DB().Model("mvp_project").Ctx(ctx).
 			Where("id", projectID).
 			Update(g.Map{"status": "designing", "updated_at": now})
 
-		// 失败 review stage
-		_ = s.stageCompleter.FailStage(ctx, stageRunID, summary)
+		// 标记 review stage 失败（仅标记 stage_run，不级联终止 workflow）
+		// concludeReview 已自行处理 project.status 回退和 design 回滚
+		s.stageCompleter.FailStageOnly(ctx, stageRunID, summary)
 
 		// 回退 design stage（通过 orchestrator 回调）
 		if s.designRollbackFn != nil {
@@ -456,9 +474,17 @@ func (s *Service) SetExecuteTriggerFn(fn ExecuteTriggerFn) {
 
 // buildRejectNotification 构建审核驳回通知消息。
 func (s *Service) buildRejectNotification(ctx context.Context, stageRunID int64, summary string) string {
-	issues, _ := g.DB().Model("mvp_review_issue").Ctx(ctx).
+	// 查所有 error 和 warning 级别的 issue
+	errors, _ := g.DB().Model("mvp_review_issue").Ctx(ctx).
 		Where("stage_run_id", stageRunID).
 		Where("severity", "error").
+		Where("status", "open").
+		OrderDesc("created_at").
+		All()
+
+	warnings, _ := g.DB().Model("mvp_review_issue").Ctx(ctx).
+		Where("stage_run_id", stageRunID).
+		Where("severity", "warning").
 		Where("status", "open").
 		OrderDesc("created_at").
 		All()
@@ -466,18 +492,48 @@ func (s *Service) buildRejectNotification(ctx context.Context, stageRunID int64,
 	msg := "## 方案审核未通过\n\n"
 	msg += "### 原因\n" + summary + "\n\n"
 
-	if len(issues) > 0 {
-		msg += "### 错误列表\n"
-		for i, issue := range issues {
+	if len(errors) > 0 {
+		msg += "### 错误（必须修复）\n"
+		for i, issue := range errors {
 			taskRef := ""
 			if tn := issue["task_name"].String(); tn != "" {
 				taskRef = fmt.Sprintf("[%s] ", tn)
 			}
 			msg += fmt.Sprintf("%d. %s%s\n", i+1, taskRef, issue["message"].String())
 		}
+		msg += "\n"
 	}
 
-	msg += "\n请修正上述问题后重新确认方案。"
+	if len(warnings) > 0 {
+		msg += "### 警告（建议修复）\n"
+		for i, issue := range warnings {
+			taskRef := ""
+			if tn := issue["task_name"].String(); tn != "" {
+				taskRef = fmt.Sprintf("[%s] ", tn)
+			}
+			msg += fmt.Sprintf("%d. %s%s\n", i+1, taskRef, issue["message"].String())
+		}
+		msg += "\n"
+	}
+
+	// 查审计员的 suggestions（从 stage_task output_payload 中提取）
+	auditorTask, _ := g.DB().Model("mvp_stage_task").Ctx(ctx).
+		Where("stage_run_id", stageRunID).
+		Where("task_type", TaskTypeAuditorReview).
+		One()
+	if !auditorTask.IsEmpty() {
+		payload := auditorTask["output_payload"].String()
+		if payload != "" {
+			var auditorOutput struct {
+				Suggestions string `json:"suggestions"`
+			}
+			if json.Unmarshal([]byte(payload), &auditorOutput) == nil && auditorOutput.Suggestions != "" {
+				msg += "### 审计员建议\n" + auditorOutput.Suggestions + "\n\n"
+			}
+		}
+	}
+
+	msg += "请根据以上反馈修改方案后重新确认。"
 	return msg
 }
 

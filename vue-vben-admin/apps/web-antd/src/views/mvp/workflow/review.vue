@@ -33,8 +33,10 @@ import {
   type ReviewIssueItem,
 } from '#/api/mvp/workflow';
 
+const props = defineProps<{ projectId?: string }>();
+
 const route = useRoute();
-const projectID = computed(() => (route.query.projectId as string) || '');
+const projectID = computed(() => props.projectId || (route.query.projectId as string) || '');
 
 const loading = ref(false);
 const reviewStatus = ref<any>(null);

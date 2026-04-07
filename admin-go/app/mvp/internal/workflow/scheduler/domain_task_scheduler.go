@@ -295,6 +295,17 @@ func (s *DomainTaskScheduler) checkAllDone(ctx context.Context, workflowRunID in
 		Count()
 
 	if unfinished == 0 {
+		// Double-check：防止查询和回调之间有新任务插入或状态变更
+		recheck, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+			Where("workflow_run_id", workflowRunID).
+			WhereNotIn("status", g.Slice{domainTask.StatusCompleted, "skipped", domainTask.StatusEscalated}).
+			WhereNull("deleted_at").
+			Count()
+		if recheck > 0 {
+			g.Log().Infof(ctx, "[DomainTaskScheduler] checkAllDone double-check 发现未完成任务 workflowRunID=%d count=%d", workflowRunID, recheck)
+			return
+		}
+
 		g.Log().Infof(ctx, "[DomainTaskScheduler] 所有任务完成 workflowRunID=%d", workflowRunID)
 		s.Stop(workflowRunID)
 		if s.onAllDone != nil {

@@ -307,6 +307,109 @@ func (s *PlanVersionService) SubmitForReview(ctx context.Context, projectID int6
 	return nil
 }
 
+// SubmitForReviewAsync 异步提交审核。
+// 同步完成状态变更（plan_version/blueprints/project），审核流程在后台 goroutine 中执行。
+// 避免 HTTP 请求因 AI 审核耗时过长而超时。
+func (s *PlanVersionService) SubmitForReviewAsync(ctx context.Context, projectID int64) error {
+	now := gtime.Now()
+
+	// 防重复提交：检查项目是否已在审核中
+	projectStatus, _ := g.DB().Model("mvp_project").Ctx(ctx).
+		Where("id", projectID).WhereNull("deleted_at").Value("status")
+	if projectStatus.String() == "reviewing" {
+		return fmt.Errorf("方案已在审核中，请勿重复提交")
+	}
+
+	// 1. 找最新的 draft plan_version
+	pv, err := g.DB().Model("mvp_plan_version").Ctx(ctx).
+		Where("project_id", projectID).
+		Where("status", consts.PlanVersionStatusDraft).
+		WhereNull("deleted_at").
+		OrderDesc("version_no").
+		One()
+	if err != nil || pv.IsEmpty() {
+		return fmt.Errorf("没有待确认的方案版本")
+	}
+	pvID := pv["id"].Int64()
+
+	// 2. 检查蓝图数
+	bpCount, _ := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
+		Where("plan_version_id", pvID).
+		WhereNull("deleted_at").
+		Count()
+	if bpCount == 0 {
+		return fmt.Errorf("方案版本没有任务蓝图")
+	}
+
+	// 3. 事务内完成所有状态迁移（同步，快速）
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		pvResult, err := tx.Model("mvp_plan_version").Ctx(ctx).
+			Where("id", pvID).
+			Where("status", consts.PlanVersionStatusDraft).
+			Update(g.Map{"status": consts.PlanVersionStatusActive, "updated_at": now})
+		if err != nil {
+			return fmt.Errorf("更新 plan_version 状态失败: %w", err)
+		}
+		if rows, _ := pvResult.RowsAffected(); rows == 0 {
+			return fmt.Errorf("plan_version(%d) 已不在 draft 状态，无法提交审核", pvID)
+		}
+
+		bpResult, err := tx.Model("mvp_task_blueprint").Ctx(ctx).
+			Where("plan_version_id", pvID).
+			Where("blueprint_status", consts.BlueprintStatusDraft).
+			Update(g.Map{"blueprint_status": consts.BlueprintStatusConfirmed, "updated_at": now})
+		if err != nil {
+			return fmt.Errorf("确认蓝图状态失败: %w", err)
+		}
+		if rows, _ := bpResult.RowsAffected(); rows == 0 {
+			return fmt.Errorf("plan_version(%d) 下没有 draft 蓝图可确认", pvID)
+		}
+
+		projResult, err := tx.Model("mvp_project").Ctx(ctx).
+			Where("id", projectID).
+			Update(g.Map{"status": "reviewing", "pause_reason": nil, "updated_at": now})
+		if err != nil {
+			return fmt.Errorf("更新项目状态失败: %w", err)
+		}
+		if rows, _ := projResult.RowsAffected(); rows == 0 {
+			return fmt.Errorf("项目(%d) 不存在或状态更新失败", projectID)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	g.Log().Infof(ctx, "[PlanVersionService] SubmitForReviewAsync projectID=%d pvID=%d bpCount=%d", projectID, pvID, bpCount)
+
+	// 4. 异步触发 review stage
+	if s.reviewTrigger != nil {
+		go func() {
+			bgCtx := context.Background()
+			defer func() {
+				if r := recover(); r != nil {
+					g.Log().Errorf(bgCtx, "[PlanVersionService] 异步审核 panic: projectID=%d pvID=%d err=%v", projectID, pvID, r)
+				}
+			}()
+
+			if triggerErr := s.reviewTrigger(bgCtx, projectID, pvID); triggerErr != nil {
+				g.Log().Errorf(bgCtx, "[PlanVersionService] 异步审核失败，回滚状态: projectID=%d pvID=%d err=%v", projectID, pvID, triggerErr)
+				_, _ = g.DB().Model("mvp_plan_version").Ctx(bgCtx).
+					Where("id", pvID).Where("status", consts.PlanVersionStatusActive).
+					Update(g.Map{"status": consts.PlanVersionStatusDraft, "updated_at": gtime.Now()})
+				_, _ = g.DB().Model("mvp_task_blueprint").Ctx(bgCtx).
+					Where("plan_version_id", pvID).Where("blueprint_status", consts.BlueprintStatusConfirmed).
+					Update(g.Map{"blueprint_status": consts.BlueprintStatusDraft, "updated_at": gtime.Now()})
+				_, _ = g.DB().Model("mvp_project").Ctx(bgCtx).
+					Where("id", projectID).Where("status", "reviewing").
+					Update(g.Map{"status": "designing", "updated_at": gtime.Now()})
+			}
+		}()
+	}
+	return nil
+}
+
 // Approve 通过计划版本。
 func (s *PlanVersionService) Approve(ctx context.Context, planVersionID int64) error {
 	now := gtime.Now()

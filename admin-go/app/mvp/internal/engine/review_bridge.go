@@ -22,9 +22,21 @@ func RunAuditorReviewForBlueprints(ctx context.Context, projectID int64, bluepri
 		return nil, fmt.Errorf("获取审计员模型失败: %w", err)
 	}
 
-	// 将蓝图转换为任务概要（字段映射）
+	// 获取项目信息，传给审计员做整体理解
+	project, _ := g.DB().Model("mvp_project").Ctx(ctx).
+		Fields("project_category, name, description").
+		Where("id", projectID).WhereNull("deleted_at").One()
+	projectCategory := "软件开发"
+	projectName := ""
+	projectDesc := ""
+	if !project.IsEmpty() {
+		projectCategory = project["project_category"].String()
+		projectName = project["name"].String()
+		projectDesc = project["description"].String()
+	}
+
 	tasks := blueprintsToTaskRecords(blueprints)
-	return doAuditorReview(ctx, modelInfo, tasks)
+	return doAuditorReview(ctx, modelInfo, tasks, projectCategory, projectName, projectDesc)
 }
 
 // RunCoordinatorOptimizeForBlueprints 为蓝图列表执行协调员优化。

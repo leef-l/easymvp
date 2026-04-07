@@ -98,19 +98,11 @@ type judgeModelInfo struct {
 	APISecret    string
 }
 
-// resolveProjectModel 获取项目指定角色的模型配置（不依赖 engine 包，避免循环依赖）。
+// resolveProjectModel 获取项目指定角色的模型配置，缺失时自动从默认预设创建。
 func resolveProjectModel(ctx context.Context, projectID int64, roleType string) (*judgeModelInfo, error) {
-	role, err := g.DB().Model("mvp_project_role").
-		Where("project_id", projectID).
-		Where("role_type", roleType).
-		Where("deleted_at IS NULL").
-		Where("status", 1).
-		One()
+	role, err := engine.ResolveProjectRole(ctx, projectID, roleType)
 	if err != nil {
-		return nil, fmt.Errorf("查询角色配置失败: %w", err)
-	}
-	if role.IsEmpty() {
-		return nil, fmt.Errorf("项目 %d 未配置 %s 角色", projectID, roleType)
+		return nil, err
 	}
 
 	modelID := role["model_id"].Int64()

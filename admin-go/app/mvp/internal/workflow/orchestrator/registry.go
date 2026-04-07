@@ -264,7 +264,12 @@ func Init() {
 			if stageErr != nil {
 				return fmt.Errorf("重建 accept stage 失败: %w", stageErr)
 			}
-			return acceptStageSvc.Run(ctx, workflowRunID, stageRunID)
+			if runErr := acceptStageSvc.Run(ctx, workflowRunID, stageRunID); runErr != nil {
+				g.Log().Errorf(ctx, "[Registry] accept 运行失败，标记 stage 失败: workflowRunID=%d err=%v", workflowRunID, runErr)
+				_ = stageSvc.FailStage(ctx, stageRunID, runErr.Error())
+				return runErr
+			}
+			return nil
 		})
 
 		// 注册 failure_analysis 完成回调到 execute service
@@ -277,6 +282,12 @@ func Init() {
 			g.Log().Infof(ctx, "[Registry] 工作流失败，终止执行链: workflowRunID=%d", workflowRunID)
 			taskScheduler.Stop(workflowRunID)
 			runtimeMgr.Cancel(workflowRunID)
+		})
+
+		// 注册工作流暂停后的清理回调
+		workflowSvc.SetWorkflowPausedCallback(func(ctx context.Context, workflowRunID int64) {
+			g.Log().Infof(ctx, "[Registry] 工作流暂停，停止调度器: workflowRunID=%d", workflowRunID)
+			taskScheduler.Stop(workflowRunID)
 		})
 
 		// Watchdog V2: 监控 domain_task 心跳
@@ -702,25 +713,17 @@ func triggerReviewStage(ctx context.Context, projectID, planVersionID int64) err
 		return fmt.Errorf("创建 review stage 失败: %w", err)
 	}
 
-	// 异步运行审核流程（使用 runtime context 响应工作流级取消/暂停）
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				g.Log().Errorf(context.Background(), "[triggerReviewStage] RunReview panic: stageRun=%d err=%v", stageRunID, r)
-				_ = stageSvc.FailStage(context.Background(), stageRunID, fmt.Sprintf("review panic: %v", r))
-			}
-		}()
-		rtCtx := runtimeMgr.GetContext(workflowRunID)
-		if err := reviewStageSvc.RunReview(rtCtx, stageRunID, planVersionID); err != nil {
-			// 如果是 context 取消导致的错误，不标记为失败
-			if rtCtx.Err() != nil {
-				g.Log().Infof(rtCtx, "[triggerReviewStage] 审核流程被取消: stageRunID=%d", stageRunID)
-				return
-			}
-			g.Log().Errorf(rtCtx, "[triggerReviewStage] 审核流程失败: stageRunID=%d err=%v", stageRunID, err)
-			_ = stageSvc.FailStage(context.Background(), stageRunID, err.Error())
+	// 同步运行审核流程（让 ConfirmPlan 能拿到审核结果返回给前端）
+	rtCtx := runtimeMgr.GetContext(workflowRunID)
+	if err := reviewStageSvc.RunReview(rtCtx, stageRunID, planVersionID); err != nil {
+		if rtCtx.Err() != nil {
+			g.Log().Infof(rtCtx, "[triggerReviewStage] 审核流程被取消: stageRunID=%d", stageRunID)
+			return nil
 		}
-	}()
+		g.Log().Errorf(rtCtx, "[triggerReviewStage] 审核流程失败: stageRunID=%d err=%v", stageRunID, err)
+		_ = stageSvc.FailStage(context.Background(), stageRunID, err.Error())
+		// 不返回 error — 审核驳回不是系统错误，concludeReview 已处理状态回退
+	}
 
 	return nil
 }

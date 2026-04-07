@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
@@ -49,20 +50,8 @@ func (s *TaskService) InstantiateFromBlueprint(ctx context.Context, planVersionI
 	projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 		Where("id", workflowRunID).Value("project_id")
 
-	// 查项目角色配置（获取 execution_mode 和 model_id）
-	roleConfigs := make(map[string]map[string]interface{})
-	configs, _ := g.DB().Model("mvp_project_role").Ctx(ctx).
-		Where("project_id", projectID.Int64()).
-		Where("status", 1).
-		WhereNull("deleted_at").
-		All()
-	for _, rc := range configs {
-		key := rc["role_type"].String() + "/" + rc["role_level"].String()
-		roleConfigs[key] = map[string]interface{}{
-			"execution_mode": rc["execution_mode"].String(),
-			"model_id":       rc["model_id"].Int64(),
-		}
-	}
+	// 查项目角色配置（获取 execution_mode 和 model_id），缺失的自动从默认预设补齐
+	roleConfigs, _ := repo.GetProjectRolesMap(ctx, projectID.Int64())
 
 	// 2. 获取项目归属字段（继承到领域任务）
 	scope := repo.GetProjectScopeByWorkflowRun(ctx, workflowRunID)
@@ -174,7 +163,7 @@ func (s *TaskService) UpdateStatus(ctx context.Context, taskID int64, from, to s
 func (s *TaskService) Retry(ctx context.Context, taskID int64) error {
 	now := gtime.Now()
 	rows, err := s.taskRepo.UpdateStatus(ctx, taskID, StatusFailed, StatusPending, g.Map{
-		"retry_count": g.Map{"retry_count": "retry_count + 1"},
+		"retry_count": gdb.Raw("retry_count + 1"),
 		"updated_at":  now,
 	})
 	if err != nil {

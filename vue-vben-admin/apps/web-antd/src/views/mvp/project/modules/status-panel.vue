@@ -114,8 +114,22 @@ async function handleConfirmPlan() {
     content: '确认后系统将自动拆解并调度所有任务开始执行，是否继续？',
     okText: '确认执行',
     async onOk() {
-      await confirmPlan(project.value!.id);
-      message.success('方案已确认，任务开始调度执行');
+      const res = await confirmPlan(project.value!.id);
+      if (res?.reviewPassed) {
+        message.success('方案审核通过，任务开始调度执行');
+      } else {
+        const errorList = (res?.issues || [])
+          .filter((i: any) => i.severity === 'error')
+          .map((i: any) => `• ${i.taskName ? `[${i.taskName}] ` : ''}${i.message}`)
+          .slice(0, 20);
+        Modal.error({
+          title: `方案审核未通过（${res?.errorCount || 0} 个错误，${res?.warningCount || 0} 个警告）`,
+          content: errorList.length > 0
+            ? errorList.join('\n')
+            : (res?.rejectReason || '审核未通过，请检查方案后重试'),
+          width: 600,
+        });
+      }
       emit('refresh');
       await loadStatus();
     },

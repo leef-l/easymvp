@@ -96,8 +96,13 @@ func (e *ClaudeCodeExecutor) Execute(ctx context.Context, req *Request) *Result 
 	cmd := exec.CommandContext(cmdCtx, "bash", "-c", cmdStr)
 	cmd.Dir = workDir
 	cmd.Env = os.Environ()
+	// 设置 API Key 和 Base URL（支持自定义代理地址）
 	if req.ModelInfo != nil && req.ModelInfo.APIKey != "" {
 		cmd.Env = append(cmd.Env, "ANTHROPIC_API_KEY="+req.ModelInfo.APIKey)
+	}
+	baseURL := engineCfg["base_url"].String()
+	if baseURL != "" {
+		cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+baseURL)
 	}
 
 	var stdout, stderr bytes.Buffer

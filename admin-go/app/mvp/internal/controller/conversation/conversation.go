@@ -79,7 +79,9 @@ func (c *cConversation) List(ctx context.Context, req *v1.ConversationListReq) (
 		OrderDir:  req.OrderDir,
 		StartTime: req.StartTime,
 		EndTime:   req.EndTime,
-		Title: req.Title,
+		Title:     req.Title,
+		ProjectID: req.ProjectID,
+		RoleType:  req.RoleType,
 	})
 	return
 }

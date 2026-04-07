@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
-import { Card, Empty, Spin, Tag, Timeline, TimelineItem } from 'ant-design-vue';
+import { Card, Empty, Spin, Tag, Timeline, TimelineItem, Button } from 'ant-design-vue';
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
@@ -18,11 +18,18 @@ import { stageTypeMap } from '../consts';
 
 defineOptions({ name: 'WorkflowTimeline' });
 
+const props = defineProps<{ projectId?: string }>();
+
 const route = useRoute();
-const projectId = ref((route.query.projectId as string) ?? '');
+const resolvedProjectId = computed(() => props.projectId || (route.query.projectId as string) || '');
 const loading = ref(false);
 const events = ref<TimelineEvent[]>([]);
 const stages = ref<StageHistoryItem[]>([]);
+
+// 当 projectId 变化时（包括 Tab 切换激活时 prop 传入）重新加载
+watch(resolvedProjectId, (val) => {
+  if (val) loadData();
+}, { immediate: true });
 
 /** 事件类型 → 颜色/图标 */
 function eventColor(eventType: string): string {
@@ -56,12 +63,12 @@ const stageStatusColor: Record<string, string> = {
 };
 
 async function loadData() {
-  if (!projectId.value) return;
+  if (!resolvedProjectId.value) return;
   loading.value = true;
   try {
     const [timelineRes, stageRes] = await Promise.all([
-      getTimeline(projectId.value, 100),
-      getStageHistory(projectId.value),
+      getTimeline(resolvedProjectId.value, 100),
+      getStageHistory(resolvedProjectId.value),
     ]);
     events.value = timelineRes?.events ?? [];
     stages.value = stageRes?.stages ?? [];
@@ -69,15 +76,13 @@ async function loadData() {
     loading.value = false;
   }
 }
-
-onMounted(loadData);
 </script>
 
 <template>
   <Page auto-content-height>
     <Spin :spinning="loading">
       <Empty
-        v-if="!projectId"
+        v-if="!resolvedProjectId"
         description="请从项目列表进入查看工作流时间线"
         class="mt-20"
       />
@@ -113,6 +118,9 @@ onMounted(loadData);
 
           <!-- 事件时间线 -->
           <Card title="事件流" class="xl:col-span-2">
+            <template #extra>
+              <a @click="loadData"><ReloadOutlined /> 刷新</a>
+            </template>
             <Empty v-if="events.length === 0" description="暂无事件记录" />
             <Timeline v-else>
               <TimelineItem

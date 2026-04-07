@@ -158,7 +158,7 @@ const createSchema = [
   {
     component: 'Select',
     fieldName: 'engineVersion',
-    label: tooltipLabel('引擎版本', '新版（WorkflowV2）使用 plan_version + 蓝图，支持阶段化流程；旧版（Legacy）仅用于兼容历史项目'),
+    label: tooltipLabel('引擎版本', 'Workflow V2 使用 plan_version + 蓝图，支持阶段化流程'),
     componentProps: { options: engineVersionOptions, placeholder: '请选择引擎版本' },
     defaultValue: 'workflow_v2',
   },

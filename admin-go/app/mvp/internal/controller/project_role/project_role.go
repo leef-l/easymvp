@@ -19,13 +19,14 @@ type cProjectRole struct{}
 // Create 创建项目角色配置表
 func (c *cProjectRole) Create(ctx context.Context, req *v1.ProjectRoleCreateReq) (res *v1.ProjectRoleCreateRes, err error) {
 	err = service.ProjectRole().Create(ctx, &model.ProjectRoleCreateInput{
-		ProjectID: req.ProjectID,
+		ProjectID:     req.ProjectID,
 		ProjectCategory: req.ProjectCategory,
-		RoleType: req.RoleType,
-		RoleLevel: req.RoleLevel,
-		ModelID: req.ModelID,
-		SystemPrompt: req.SystemPrompt,
-		Status: req.Status,
+		RoleType:      req.RoleType,
+		RoleLevel:     req.RoleLevel,
+		ModelID:       req.ModelID,
+		SystemPrompt:  req.SystemPrompt,
+		ExecutionMode: req.ExecutionMode,
+		Status:        req.Status,
 	})
 	return
 }
@@ -33,14 +34,15 @@ func (c *cProjectRole) Create(ctx context.Context, req *v1.ProjectRoleCreateReq)
 // Update 更新项目角色配置表
 func (c *cProjectRole) Update(ctx context.Context, req *v1.ProjectRoleUpdateReq) (res *v1.ProjectRoleUpdateRes, err error) {
 	err = service.ProjectRole().Update(ctx, &model.ProjectRoleUpdateInput{
-		ID: req.ID,
-		ProjectID: req.ProjectID,
+		ID:            req.ID,
+		ProjectID:     req.ProjectID,
 		ProjectCategory: req.ProjectCategory,
-		RoleType: req.RoleType,
-		RoleLevel: req.RoleLevel,
-		ModelID: req.ModelID,
-		SystemPrompt: req.SystemPrompt,
-		Status: req.Status,
+		RoleType:      req.RoleType,
+		RoleLevel:     req.RoleLevel,
+		ModelID:       req.ModelID,
+		SystemPrompt:  req.SystemPrompt,
+		ExecutionMode: req.ExecutionMode,
+		Status:        req.Status,
 	})
 	return
 }

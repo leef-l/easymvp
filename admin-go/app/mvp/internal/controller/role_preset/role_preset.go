@@ -20,12 +20,13 @@ type cRolePreset struct{}
 func (c *cRolePreset) Create(ctx context.Context, req *v1.RolePresetCreateReq) (res *v1.RolePresetCreateRes, err error) {
 	err = service.RolePreset().Create(ctx, &model.RolePresetCreateInput{
 		ProjectCategory: req.ProjectCategory,
-		RoleType: req.RoleType,
-		RoleLevel: req.RoleLevel,
-		ModelID: req.ModelID,
-		SystemPrompt: req.SystemPrompt,
-		Status: req.Status,
-		Sort: req.Sort,
+		RoleType:        req.RoleType,
+		RoleLevel:       req.RoleLevel,
+		ModelID:         req.ModelID,
+		SystemPrompt:    req.SystemPrompt,
+		ExecutionMode:   req.ExecutionMode,
+		Status:          req.Status,
+		Sort:            req.Sort,
 	})
 	return
 }
@@ -33,14 +34,15 @@ func (c *cRolePreset) Create(ctx context.Context, req *v1.RolePresetCreateReq) (
 // Update 更新角色预设模板
 func (c *cRolePreset) Update(ctx context.Context, req *v1.RolePresetUpdateReq) (res *v1.RolePresetUpdateRes, err error) {
 	err = service.RolePreset().Update(ctx, &model.RolePresetUpdateInput{
-		ID: req.ID,
+		ID:              req.ID,
 		ProjectCategory: req.ProjectCategory,
-		RoleType: req.RoleType,
-		RoleLevel: req.RoleLevel,
-		ModelID: req.ModelID,
-		SystemPrompt: req.SystemPrompt,
-		Status: req.Status,
-		Sort: req.Sort,
+		RoleType:        req.RoleType,
+		RoleLevel:       req.RoleLevel,
+		ModelID:         req.ModelID,
+		SystemPrompt:    req.SystemPrompt,
+		ExecutionMode:   req.ExecutionMode,
+		Status:          req.Status,
+		Sort:            req.Sort,
 	})
 	return
 }

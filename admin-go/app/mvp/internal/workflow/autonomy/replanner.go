@@ -25,14 +25,16 @@ func NewReplanner(decisionRepo *repo.AutonomyDecisionRepo) *Replanner {
 
 // Evaluate 评估是否需要重规划，生成建议并写入决策表。
 func (r *Replanner) Evaluate(ctx context.Context, input *ReplanInput) (*ReplanRecommendation, error) {
-	// 检查重规划次数限制（同一项目最多 2 次全量重规划）
-	replanCount, _ := r.decisionRepo.CountByType(ctx, input.WorkflowRunID, DecisionReplan)
-	if replanCount >= 2 {
-		g.Log().Warningf(ctx, "[Replanner] 已达重规划上限(2次): workflowRun=%d", input.WorkflowRunID)
-		return &ReplanRecommendation{
-			Action:    ReplanAbort,
-			Reasoning: "已达最大重规划次数限制(2次)，建议人工介入",
-		}, nil
+	// 检查重规划次数限制（同一项目最多 2 次全量重规划，仅限自动触发；人工触发不受限）
+	if input.TriggerSource != "manual" {
+		replanCount, _ := r.decisionRepo.CountByType(ctx, input.WorkflowRunID, DecisionReplan)
+		if replanCount >= 2 {
+			g.Log().Warningf(ctx, "[Replanner] 已达重规划上限(2次): workflowRun=%d", input.WorkflowRunID)
+			return &ReplanRecommendation{
+				Action:    ReplanAbort,
+				Reasoning: "已达最大重规划次数限制(2次)，建议人工介入",
+			}, nil
+		}
 	}
 
 	// 获取项目 architect 角色的模型配置
@@ -126,19 +128,11 @@ type replanModelInfo struct {
 	APISecret    string
 }
 
-// resolveProjectModel 获取项目指定角色的模型配置。
+// resolveProjectModel 获取项目指定角色的模型配置，缺失时自动从默认预设创建。
 func resolveProjectModel(ctx context.Context, projectID int64, roleType string) (*replanModelInfo, error) {
-	role, err := g.DB().Model("mvp_project_role").
-		Where("project_id", projectID).
-		Where("role_type", roleType).
-		Where("deleted_at IS NULL").
-		Where("status", 1).
-		One()
+	role, err := repo.GetProjectRole(ctx, projectID, roleType)
 	if err != nil {
-		return nil, fmt.Errorf("查询角色配置失败: %w", err)
-	}
-	if role.IsEmpty() {
-		return nil, fmt.Errorf("项目 %d 未配置 %s 角色", projectID, roleType)
+		return nil, err
 	}
 
 	modelID := role["model_id"].Int64()

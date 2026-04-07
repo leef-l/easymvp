@@ -43,7 +43,12 @@ type WorkflowConfirmPlanReq struct {
 
 // WorkflowConfirmPlanRes 确认实施方案响应
 type WorkflowConfirmPlanRes struct {
-	g.Meta `mime:"application/json"`
+	g.Meta       `mime:"application/json"`
+	ReviewPassed bool              `json:"reviewPassed"`              // 审核是否通过
+	RejectReason string            `json:"rejectReason,omitempty"`    // 驳回原因摘要
+	Issues       []ReviewIssueItem `json:"issues,omitempty"`          // 审核问题列表
+	ErrorCount   int               `json:"errorCount"`                // error 级别问题数
+	WarningCount int               `json:"warningCount"`              // warning 级别问题数
 }
 
 // WorkflowPauseReq 暂停项目请求
@@ -129,8 +134,9 @@ type WorkflowParseTasksReq struct {
 // WorkflowParseTasksRes 手动解析任务响应
 type WorkflowParseTasksRes struct {
 	g.Meta    `mime:"application/json"`
-	HasTasks  bool `json:"hasTasks"`  // AI回复中是否包含任务清单
-	TaskCount int  `json:"taskCount"` // 解析出的任务数量
+	HasTasks  bool   `json:"hasTasks"`            // AI回复中是否包含任务清单
+	TaskCount int    `json:"taskCount"`           // 解析出的任务数量
+	Message   string `json:"message,omitempty"`   // 提示信息（如异步提取中）
 }
 
 // WorkflowRolePresetsReq 获取角色预设列表请求

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, watch, defineAsyncComponent } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
@@ -18,17 +18,33 @@ import {
   Step,
   Button,
   Space,
-  Alert,
   Divider,
+  message,
+  Modal,
+  Input,
+  Tabs,
+  TabPane,
 } from 'ant-design-vue';
 
 import {
   getProjectStatus,
   getStageHistory,
   getCompletionSummary,
+  pauseProject,
+  resumeProject,
+  confirmPlan,
+  manualApprove,
+  manualReject,
+  retryTask,
+  skipTask,
+  acceptApprove,
+  acceptRework,
+  triggerReplan,
+  getExecutionStatus,
   type ProjectStatusResult,
   type StageHistoryItem,
   type CompletionSummaryResult,
+  type DomainTaskItem,
 } from '../../../api/mvp/workflow';
 import { workflowRunStatusMap, stageTypeMap } from '../consts';
 
@@ -41,9 +57,199 @@ const statusData = ref<ProjectStatusResult | null>(null);
 const stages = ref<StageHistoryItem[]>([]);
 const summary = ref<CompletionSummaryResult | null>(null);
 
-const isV2 = computed(() => statusData.value?.engineVersion === 'workflow_v2');
 const currentStatus = computed(() => statusData.value?.workflowStatus || statusData.value?.status || '');
 const isCompleted = computed(() => currentStatus.value === 'completed');
+
+// Failed tasks for retry/skip operations
+const failedTasks = ref<DomainTaskItem[]>([]);
+
+// Load failed tasks when in execute/rework/paused state
+async function loadFailedTasks() {
+  if (!projectId.value) return;
+  try {
+    const res = await getExecutionStatus(projectId.value);
+    failedTasks.value = (res.tasks || []).filter(
+      (t: DomainTaskItem) => t.status === 'failed' || t.status === 'escalated'
+    );
+  } catch {
+    // ignore
+  }
+}
+
+// Status guide text
+const statusGuide = computed(() => {
+  const s = currentStatus.value;
+  const failCount = failedTasks.value.length;
+  const guides: Record<string, string> = {
+    designing: '当前处于设计阶段，架构师正在与你沟通需求并拆解任务。\n建议操作：进入对话与架构师沟通，方案满意后点击「确认方案」。',
+    reviewing: 'AI 审计员正在审核方案质量。通常 1-2 分钟完成。\n建议操作：等待审核结果。如果审核不合理或超时，可「手动通过审核」跳过。',
+    executing: `任务自动执行中，无需人工参与。${failCount > 0 ? `\n当前有 ${failCount} 个失败任务，建议：查看失败原因后「重试」或「跳过」。` : ''}\n建议操作：观察进度，出现问题时可「暂停项目」排查。`,
+    reworking: `返工阶段，系统正在自动分析失败原因并修复。${failCount > 0 ? `\n当前有 ${failCount} 个失败/升级任务。` : ''}\n建议操作：等待自动修复。如果卡住，可「恢复执行」或「重试」失败任务。也可「触发重规划」让架构师重新安排。`,
+    paused: `项目已暂停，所有任务停止执行。${failCount > 0 ? `\n有 ${failCount} 个失败/升级任务需要处理。` : ''}\n建议操作：点击「恢复执行」继续。如有大量失败任务，可先「全部重试」或「全部跳过」再恢复。`,
+    accepting: '验收阶段，AI 正在检查项目交付质量。\n建议操作：查看验收结果。满意可「手动放行」，不满意可「驳回返工」。',
+    completed: '项目已完成，所有任务执行结束。可查看完成总结。',
+  };
+  return guides[s] || '当前状态：' + s;
+});
+
+// Human operations
+async function handlePause() {
+  Modal.confirm({
+    title: '暂停项目',
+    content: '请输入暂停原因（可选）',
+    async onOk() {
+      await pauseProject({ projectID: projectId.value, pauseReason: '人工暂停' });
+      message.success('项目已暂停');
+      await loadAll();
+    },
+  });
+}
+
+async function handleResume() {
+  await resumeProject(projectId.value);
+  message.success('项目已恢复执行');
+  await loadAll();
+}
+
+async function handleConfirmPlan() {
+  Modal.confirm({
+    title: '确认方案',
+    content: '确认后进入审核阶段，是否继续？',
+    async onOk() {
+      await confirmPlan(projectId.value);
+      message.success('已提交审核');
+      await loadAll();
+    },
+  });
+}
+
+async function handleManualApprove() {
+  Modal.confirm({
+    title: '手动通过审核',
+    content: '跳过 AI 审核，直接通过方案进入执行阶段。确定？',
+    okType: 'primary',
+    async onOk() {
+      await manualApprove(projectId.value);
+      message.success('审核已通过，开始执行');
+      await loadAll();
+    },
+  });
+}
+
+async function handleManualReject() {
+  Modal.confirm({
+    title: '驳回方案',
+    content: '驳回后回到设计阶段，架构师可重新修改方案。',
+    okType: 'danger',
+    async onOk() {
+      await manualReject(projectId.value, '人工驳回');
+      message.success('方案已驳回');
+      await loadAll();
+    },
+  });
+}
+
+async function handleRetryTask(task: DomainTaskItem) {
+  await retryTask({ projectID: projectId.value, taskID: task.id });
+  message.success(`任务「${task.name}」已重新排队`);
+  await loadFailedTasks();
+}
+
+async function handleSkipTask(task: DomainTaskItem) {
+  Modal.confirm({
+    title: '跳过任务',
+    content: `确定跳过「${task.name}」？跳过后该任务标记为完成，不再执行。`,
+    okType: 'danger',
+    async onOk() {
+      await skipTask({ projectID: projectId.value, taskID: task.id, reason: '人工跳过' });
+      message.success(`任务「${task.name}」已跳过`);
+      await loadFailedTasks();
+    },
+  });
+}
+
+async function handleRetryAll() {
+  Modal.confirm({
+    title: '全部重试',
+    content: `将重置 ${failedTasks.value.length} 个失败/升级任务为待执行状态。调度器会按批次顺序、依赖关系依次执行，不会同时启动所有任务。`,
+    async onOk() {
+      const hide = message.loading('正在重置任务...', 0);
+      let count = 0;
+      for (const task of failedTasks.value) {
+        try {
+          await retryTask({ projectID: projectId.value, taskID: task.id });
+          count++;
+        } catch {
+          // 部分任务可能已经不在 failed/escalated 状态
+        }
+      }
+      hide();
+      message.success(`已重置 ${count} 个任务，调度器将按批次顺序依次执行`);
+      await loadFailedTasks();
+    },
+  });
+}
+
+async function handleSkipAll() {
+  Modal.confirm({
+    title: '跳过全部失败任务',
+    content: `确定跳过全部 ${failedTasks.value.length} 个失败/升级任务？跳过后这些任务标记为完成，调度器将推进到下一批次。`,
+    okType: 'danger',
+    async onOk() {
+      const hide = message.loading('正在跳过任务...', 0);
+      let count = 0;
+      for (const task of failedTasks.value) {
+        try {
+          await skipTask({ projectID: projectId.value, taskID: task.id, reason: '人工批量跳过' });
+          count++;
+        } catch {
+          // ignore
+        }
+      }
+      hide();
+      message.success(`已跳过 ${count} 个任务`);
+      await loadFailedTasks();
+    },
+  });
+}
+
+async function handleAcceptApprove() {
+  await acceptApprove(projectId.value, '人工放行');
+  message.success('验收已通过');
+  await loadAll();
+}
+
+async function handleAcceptRework() {
+  Modal.confirm({
+    title: '驳回返工',
+    content: '驳回验收并触发返工流程。',
+    okType: 'danger',
+    async onOk() {
+      await acceptRework(projectId.value, '人工驳回返工');
+      message.success('已触发返工');
+      await loadAll();
+    },
+  });
+}
+
+async function handleTriggerReplan() {
+  Modal.confirm({
+    title: '触发重规划',
+    content: '将由架构师 AI 重新分析失败原因并生成新的任务方案。此过程可能需要 1-2 分钟，请在时间线中查看进度。',
+    async onOk() {
+      const hide = message.loading('正在触发重规划...', 0);
+      try {
+        await triggerReplan(projectId.value);
+        message.success('重规划已触发，请在时间线中查看进度');
+      } catch (e: any) {
+        message.error('触发失败：' + (e?.message || '未知错误'));
+      } finally {
+        hide();
+      }
+      await loadAll();
+    },
+  });
+}
 
 // 阶段进度 Steps 的 current index
 const stageStepCurrent = computed(() => {
@@ -80,6 +286,11 @@ async function loadAll() {
     ]);
     statusData.value = statusRes;
     stages.value = stageRes.stages || [];
+
+    // Load failed tasks if in relevant state
+    if (['executing', 'reworking', 'paused'].includes(statusRes.workflowStatus || statusRes.status || '')) {
+      await loadFailedTasks();
+    }
 
     // 已完成时加载总结
     if (statusRes.workflowStatus === 'completed' || statusRes.status === 'completed') {
@@ -121,6 +332,29 @@ function goToChat() {
 function goToMetaCognition() {
   router.push({ path: '/mvp/workflow/meta-cognition', query: { projectID: projectId.value } });
 }
+
+// Tab container
+const activeTab = ref('execution');
+
+const ExecutionPanel = defineAsyncComponent(() => import('./execution.vue'));
+const ReviewPanel = defineAsyncComponent(() => import('./review.vue'));
+const ReworkPanel = defineAsyncComponent(() => import('./rework.vue'));
+const AcceptPanel = defineAsyncComponent(() => import('./accept.vue'));
+const AutonomyPanel = defineAsyncComponent(() => import('./autonomy.vue'));
+const TimelinePanel = defineAsyncComponent(() => import('./timeline.vue'));
+
+// Auto-select tab based on workflow status
+watch(currentStatus, (status) => {
+  const tabMap: Record<string, string> = {
+    reviewing: 'review',
+    executing: 'execution',
+    reworking: 'rework',
+    accepting: 'accept',
+  };
+  if (tabMap[status]) {
+    activeTab.value = tabMap[status];
+  }
+}, { immediate: true });
 </script>
 
 <template>
@@ -136,12 +370,7 @@ function goToMetaCognition() {
         <!-- 工作流概览 -->
         <Card class="mb-4">
           <template #title>
-            <Space>
-              <span>工作流仪表板</span>
-              <Tag :color="isV2 ? 'green' : 'default'" size="small">
-                {{ isV2 ? 'V2' : 'Legacy' }}
-              </Tag>
-            </Space>
+            <span>工作流仪表板</span>
           </template>
           <template #extra>
             <Button type="link" size="small" @click="goToTimeline">事件时间线</Button>
@@ -205,7 +434,7 @@ function goToMetaCognition() {
         </Card>
 
         <!-- V2 阶段流程图 -->
-        <Card v-if="isV2 && stages.length > 0" title="阶段流程" class="mb-4">
+        <Card v-if="stages.length > 0" title="阶段流程" class="mb-4">
           <Steps :current="stageStepCurrent" size="small">
             <Step title="设计" :status="stageStepStatus('design')" />
             <Step title="审核" :status="stageStepStatus('review')" />
@@ -241,53 +470,118 @@ function goToMetaCognition() {
           </Descriptions>
         </Card>
 
-        <!-- 快速操作 -->
-        <Card v-if="isV2" title="快速操作" class="mb-4" size="small">
+        <!-- 快速导航 -->
+        <Card class="mb-4" size="small">
           <Space wrap>
-            <Button @click="goToChat">
-              进入对话
-            </Button>
-            <Button
-              v-if="currentStatus === 'reviewing'"
-              type="primary"
-              @click="goToReview"
-            >
-              审核工作台
-            </Button>
-            <Button
-              v-if="currentStatus === 'executing' || currentStatus === 'reworking'"
-              type="primary"
-              @click="goToExecution"
-            >
-              执行控制台
-            </Button>
-            <Button
-              v-if="stages.some((s) => s.stageType === 'rework')"
-              @click="goToRework"
-            >
-              返工记录
-            </Button>
-            <Button
-              v-if="currentStatus === 'accepting' || stages.some((s) => s.stageType === 'accept')"
-              type="primary"
-              @click="goToAccept"
-            >
-              验收控制台
-            </Button>
-            <Button @click="goToAutonomy">
-              自治控制台
-            </Button>
-            <Button @click="goToMetaCognition">
-              元认知
-            </Button>
-            <Button @click="goToFeishu">
-              飞书协作
-            </Button>
-            <Button @click="goToTimeline">
-              事件时间线
-            </Button>
+            <Button @click="goToChat">进入对话</Button>
+            <Button @click="goToMetaCognition">元认知</Button>
+            <Button @click="goToFeishu">飞书协作</Button>
           </Space>
         </Card>
+
+        <!-- 人工介入 -->
+        <Card title="人工介入" class="mb-4" size="small">
+          <template #extra>
+            <Tag color="gold">最高权限</Tag>
+          </template>
+
+          <!-- 状态引导 -->
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+            <p class="text-sm text-blue-700 whitespace-pre-line">{{ statusGuide }}</p>
+            <p v-if="statusData?.pauseReason" class="text-sm text-orange-600 mt-2 font-medium">
+              暂停原因：{{ statusData.pauseReason }}
+            </p>
+          </div>
+
+          <!-- 操作按钮组 -->
+          <Space wrap class="mb-3">
+            <!-- 设计阶段 -->
+            <Button v-if="currentStatus === 'designing'" type="primary" @click="handleConfirmPlan">
+              确认方案
+            </Button>
+
+            <!-- 审核阶段 -->
+            <Button v-if="currentStatus === 'reviewing'" type="primary" @click="handleManualApprove">
+              手动通过审核
+            </Button>
+            <Button v-if="currentStatus === 'reviewing'" danger @click="handleManualReject">
+              驳回方案
+            </Button>
+
+            <!-- 执行/返工阶段 -->
+            <Button v-if="['executing', 'reworking'].includes(currentStatus)" danger @click="handlePause">
+              暂停项目
+            </Button>
+
+            <!-- 暂停状态 -->
+            <Button v-if="currentStatus === 'paused'" type="primary" @click="handleResume">
+              恢复执行
+            </Button>
+
+            <!-- 验收阶段 -->
+            <Button v-if="currentStatus === 'accepting'" type="primary" @click="handleAcceptApprove">
+              手动放行
+            </Button>
+            <Button v-if="currentStatus === 'accepting'" danger @click="handleAcceptRework">
+              驳回返工
+            </Button>
+
+            <!-- 通用操作 -->
+            <Button v-if="['executing', 'reworking', 'paused'].includes(currentStatus)" @click="handleTriggerReplan">
+              触发重规划
+            </Button>
+          </Space>
+
+          <!-- 失败任务列表（执行/返工/暂停时显示） -->
+          <div v-if="failedTasks.length > 0">
+            <Divider style="margin: 12px 0" />
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-sm font-medium text-gray-700">失败/升级任务（{{ failedTasks.length }}）</span>
+              <Space size="small">
+                <Button size="small" type="primary" @click="handleRetryAll">全部重试</Button>
+                <Button size="small" danger @click="handleSkipAll">全部跳过</Button>
+              </Space>
+            </div>
+            <div class="max-h-60 overflow-y-auto">
+              <div
+                v-for="task in failedTasks"
+                :key="task.id"
+                class="flex items-center justify-between py-2 px-3 bg-red-50 rounded mb-1"
+              >
+                <div class="flex-1 min-w-0">
+                  <span class="text-sm font-medium text-gray-800 truncate block">{{ task.name }}</span>
+                  <span class="text-xs text-red-500">{{ task.result || task.errorMessage || task.status }}</span>
+                </div>
+                <Space size="small" class="ml-2 flex-shrink-0">
+                  <Button size="small" @click="handleRetryTask(task)">重试</Button>
+                  <Button size="small" danger @click="handleSkipTask(task)">跳过</Button>
+                </Space>
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        <!-- 功能面板 -->
+        <Tabs v-model:activeKey="activeTab" class="mb-4" type="card">
+          <TabPane key="execution" tab="执行控制台">
+            <ExecutionPanel :project-id="projectId" />
+          </TabPane>
+          <TabPane key="review" tab="审核工作台">
+            <ReviewPanel :project-id="projectId" />
+          </TabPane>
+          <TabPane key="rework" tab="返工记录">
+            <ReworkPanel :project-id="projectId" />
+          </TabPane>
+          <TabPane key="accept" tab="验收控制台">
+            <AcceptPanel :project-id="projectId" />
+          </TabPane>
+          <TabPane key="autonomy" tab="自治控制台">
+            <AutonomyPanel :project-id="projectId" />
+          </TabPane>
+          <TabPane key="timeline" tab="事件时间线">
+            <TimelinePanel :project-id="projectId" />
+          </TabPane>
+        </Tabs>
 
         <!-- 完成总结 -->
         <Card v-if="isCompleted && summary" title="完成总结" class="mb-4">
@@ -331,29 +625,6 @@ function goToMetaCognition() {
           </div>
         </Card>
 
-        <!-- Legacy 信息 -->
-        <Card v-if="!isV2" title="Legacy 引擎信息" class="mb-4">
-          <Alert
-            message="此项目使用旧版引擎"
-            description="旧版引擎不支持阶段化流程。新项目已默认使用 Workflow V2。"
-            type="info"
-            show-icon
-            class="mb-4"
-          />
-          <Descriptions :column="3" bordered size="small">
-            <DescriptionsItem v-if="statusData.activeBatch > 0" label="活跃批次">
-              {{ statusData.activeBatch }}
-            </DescriptionsItem>
-            <DescriptionsItem label="卡住任务数">
-              {{ statusData.stalledTaskCount }}
-            </DescriptionsItem>
-            <DescriptionsItem label="实际工作中">
-              <Tag :color="statusData.isActuallyWorking ? 'green' : 'default'">
-                {{ statusData.isActuallyWorking ? '是' : '否' }}
-              </Tag>
-            </DescriptionsItem>
-          </Descriptions>
-        </Card>
       </template>
     </Spin>
   </Page>
