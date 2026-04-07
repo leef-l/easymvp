@@ -165,10 +165,13 @@ services:
       args:
         WEB_BASE_IMAGE: ${WEB_BASE_IMAGE:-node:22-bookworm}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
-    profiles: ["frontend"]
     container_name: easymvp-web
     working_dir: /workspace/vue-vben-admin
     command: ["/bin/bash", "/opt/easymvp/docker/dev/docker-web-start.sh"]
+    depends_on:
+      - system
+      - ai
+      - mvp
     environment:
       CI: "true"
       COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"

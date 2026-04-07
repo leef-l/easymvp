@@ -42,13 +42,15 @@ RUN apt-get update \
     && openhands --help >/dev/null \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 Node.js + Claude Code CLI + Codex CLI + Gemini CLI
-# 使用 apt 安装 nodejs（Bookworm 自带 18.x），然后通过 npx 或 npm 安装 CLI
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends nodejs npm \
-    && npm install -g @anthropic-ai/claude-code || true \
-    && npm install -g @openai/codex || true \
-    && npm install -g @google/gemini-cli || true \
+# 安装 Node.js 22 LTS（官方二进制） + Claude Code CLI + Codex CLI + Gemini CLI
+ARG NODE_MAJOR=22
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g --prefer-online \
+        @anthropic-ai/claude-code \
+        @openai/codex \
+        @google/gemini-cli \
+    || true \
     && (claude --version 2>/dev/null && echo "claude OK" || echo "claude not available") \
     && (codex --version 2>/dev/null && echo "codex OK" || echo "codex not available") \
     && (gemini --version 2>/dev/null && echo "gemini OK" || echo "gemini not available") \
