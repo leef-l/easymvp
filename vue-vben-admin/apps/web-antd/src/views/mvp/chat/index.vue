@@ -404,6 +404,19 @@ async function handleSend(content: string) {
   }
 }
 
+/** 强制解锁输入框（SSE 卡住时的手动恢复） */
+function forceUnlock() {
+  isSending.value = false;
+  // 将所有 streaming 状态的消息标记为 completed
+  for (const msg of messages.value) {
+    if (msg.status === 'streaming') {
+      msg.content = msg.streamingContent || msg.content || '（AI 回复中断）';
+      msg.streamingContent = undefined;
+      msg.status = 'completed';
+    }
+  }
+}
+
 // ======================== 确认方案 ========================
 
 /** 检查拆分按钮点击：先 dryRun 检查，再弹窗确认创建 */
@@ -705,6 +718,11 @@ onUnmounted(() => {
 
     <!-- ===== 输入区域 ===== -->
     <div v-if="!needsTaskEntry" class="chat-footer">
+      <!-- 卡住时显示强制解锁按钮 -->
+      <div v-if="isSending" class="unlock-bar">
+        <span class="unlock-hint">AI 正在回复中...</span>
+        <button class="unlock-btn" @click="forceUnlock">强制解锁输入框</button>
+      </div>
       <ChatInput
         :loading="isSending"
         @send="handleSend"
@@ -979,5 +997,37 @@ onUnmounted(() => {
   .confirm-btn span:not(.anticon) {
     display: none;
   }
+}
+
+/* 强制解锁栏 */
+.unlock-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 6px 16px;
+  background: #fffbe6;
+  border-top: 1px solid #ffe58f;
+}
+
+.unlock-hint {
+  font-size: 12px;
+  color: #ad8b00;
+}
+
+.unlock-btn {
+  padding: 2px 12px;
+  font-size: 12px;
+  color: #d46b08;
+  background: #fff7e6;
+  border: 1px solid #ffd591;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.unlock-btn:hover {
+  background: #fff1b8;
+  border-color: #ffc53d;
 }
 </style>

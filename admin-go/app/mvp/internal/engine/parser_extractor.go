@@ -14,6 +14,44 @@ import (
 	"easymvp/utility/provider"
 )
 
+// extractJSONFromCodeBlocks 从 markdown 代码块中提取 JSON 字符串。
+// 使用字符串分割而非正则，避免嵌套 JSON 的 } 导致非贪婪匹配提前截断。
+func extractJSONFromCodeBlocks(text string) []string {
+	var results []string
+	remaining := text
+	for {
+		// 找 ```json 或 ``` 开头
+		startIdx := strings.Index(remaining, "```json")
+		tagLen := 7
+		if startIdx == -1 {
+			startIdx = strings.Index(remaining, "```")
+			tagLen = 3
+		}
+		if startIdx == -1 {
+			break
+		}
+		// 跳过开始标记，找内容起点
+		contentStart := startIdx + tagLen
+		// 跳过开始标记后的空白和换行
+		for contentStart < len(remaining) && (remaining[contentStart] == '\n' || remaining[contentStart] == '\r' || remaining[contentStart] == ' ') {
+			contentStart++
+		}
+		// 找结束的 ```
+		endIdx := strings.Index(remaining[contentStart:], "```")
+		if endIdx == -1 {
+			break
+		}
+		block := strings.TrimSpace(remaining[contentStart : contentStart+endIdx])
+		remaining = remaining[contentStart+endIdx+3:]
+
+		// 只提取以 { 开头的 JSON 对象
+		if len(block) > 0 && block[0] == '{' {
+			results = append(results, block)
+		}
+	}
+	return results
+}
+
 // extractTaskPlan 从 AI 回复文本中提取 JSON 任务清单
 // 支持多种格式，并自动合并分布在多个 JSON 代码块中的任务：
 //  1. 标准 ```json ... ``` 代码块（支持多个，自动合并）
@@ -24,10 +62,10 @@ func (p *TaskParser) extractTaskPlan(text string) (*ArchitectTaskPlan, error) {
 	var allTasks []ArchitectTask
 
 	// 策略1：从所有 ```json 代码块中提取并合并
-	codeBlockRe := regexp.MustCompile("(?s)```(?:json)?\\s*\\n?(\\{[\\s\\S]*?\\})\\s*```")
-	matches := codeBlockRe.FindAllStringSubmatch(text, -1)
-	for _, m := range matches {
-		if plan, err := p.tryParseJSON(m[1]); err == nil && len(plan.Tasks) > 0 {
+	// 先按 ``` 分割找代码块，再从中提取 JSON，避免正则嵌套匹配问题
+	matches := extractJSONFromCodeBlocks(text)
+	for _, jsonStr := range matches {
+		if plan, err := p.tryParseJSON(jsonStr); err == nil && len(plan.Tasks) > 0 {
 			allTasks = append(allTasks, plan.Tasks...)
 		}
 	}
