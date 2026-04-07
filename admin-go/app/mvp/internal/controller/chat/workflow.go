@@ -413,53 +413,21 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 		return &v1.WorkflowParseTasksRes{HasTasks: false, TaskCount: 0}, nil
 	}
 
-	// 查找最新一轮方案：从最后一条 user 消息之后的所有 assistant 回复
+	// 收集对话中所有 completed 的 assistant 回复（任务可能分散在多轮"继续"对话中）
 	convID := conv["id"].Int64()
 
-	// 先找最后一条 user 消息的时间，作为"最新一轮"的起点
-	// 但需要跳过"继续"/"截断"等续写指令，找到真正的需求消息
-	userMsgs, err := g.DB().Model("mvp_message").
-		Where("conversation_id", convID).
-		Where("role", "user").
-		Where("status", "completed").
-		Where("deleted_at IS NULL").
-		OrderDesc("created_at").
-		Limit(10).
-		All()
-	if err != nil || len(userMsgs) == 0 {
-		return &v1.WorkflowParseTasksRes{HasTasks: false, TaskCount: 0}, nil
-	}
-
-	// 找到真正的需求消息（跳过"继续"、"截断"等短消息）
-	var anchorTime string
-	for _, um := range userMsgs {
-		content := strings.TrimSpace(um["content"].String())
-		// 短消息（<10字）且是续写指令，跳过
-		if len([]rune(content)) < 10 && isFollowUpMessage(content) {
-			continue
-		}
-		anchorTime = um["created_at"].String()
-		break
-	}
-	if anchorTime == "" {
-		// 全是短消息，用最早的那条
-		anchorTime = userMsgs[len(userMsgs)-1]["created_at"].String()
-	}
-
-	// 取该 user 消息之后的所有 assistant 回复（即最新一轮方案，可能跨多条消息）
 	allMsgs, err := g.DB().Model("mvp_message").
 		Where("conversation_id", convID).
 		Where("role", "assistant").
 		Where("status", "completed").
 		Where("deleted_at IS NULL").
-		Where("created_at >= ?", anchorTime).
 		OrderAsc("created_at").
 		All()
 	if err != nil || len(allMsgs) == 0 {
 		return &v1.WorkflowParseTasksRes{HasTasks: false, TaskCount: 0}, nil
 	}
 
-	// 拼接最新一轮的 assistant 消息内容
+	// 拼接所有 assistant 消息内容
 	var allReplies strings.Builder
 	var lastMsgID int64
 	for i, m := range allMsgs {
