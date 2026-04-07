@@ -1,3 +1,9 @@
+/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
+/*!40103 SET TIME_ZONE='+00:00' */;
+/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;
+/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
+/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
+/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `ai_engine` (
@@ -159,11 +165,11 @@ CREATE TABLE `ai_task_log` (
 CREATE TABLE `mvp_accept_evidence` (
   `id` bigint NOT NULL COMMENT '主键ID',
   `accept_run_id` bigint NOT NULL COMMENT '验收运行ID',
-  `evidence_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'task_output/file/log/diff/stage_output/handoff/summary',
-  `source_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'domain_task/stage_run/file/handoff_record/workflow_run',
+  `evidence_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'task_output/file/log/diff/stage_output/handoff/summary',
+  `source_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'domain_task/stage_run/file/handoff_record/workflow_run',
   `source_id` bigint DEFAULT NULL COMMENT '来源对象ID',
-  `content_ref` longtext COLLATE utf8mb4_unicode_ci COMMENT '证据引用或JSON',
-  `summary` text COLLATE utf8mb4_unicode_ci COMMENT '证据摘要',
+  `content_ref` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '证据引用或JSON',
+  `summary` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '证据摘要',
   `created_at` datetime NOT NULL COMMENT '创建时间',
   `updated_at` datetime NOT NULL COMMENT '更新时间',
   `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
@@ -181,16 +187,16 @@ CREATE TABLE `mvp_accept_issue` (
   `workflow_run_id` bigint NOT NULL COMMENT '工作流运行ID',
   `project_id` bigint NOT NULL COMMENT '项目ID',
   `domain_task_id` bigint DEFAULT NULL COMMENT '主关联任务ID',
-  `issue_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'artifact/process/quality/risk',
-  `rule_code` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '规则编码',
-  `severity` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'info/warn/error/blocker',
-  `title` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '问题标题',
-  `detail` text COLLATE utf8mb4_unicode_ci COMMENT '问题详情',
-  `expected_value` text COLLATE utf8mb4_unicode_ci COMMENT '预期值',
-  `actual_value` text COLLATE utf8mb4_unicode_ci COMMENT '实际值',
-  `suggested_action` text COLLATE utf8mb4_unicode_ci COMMENT '建议动作',
-  `resource_ref` text COLLATE utf8mb4_unicode_ci COMMENT '关联资源引用(JSON)',
-  `status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'open' COMMENT 'open/resolved/ignored',
+  `issue_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'artifact/process/quality/risk',
+  `rule_code` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '规则编码',
+  `severity` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'info/warn/error/blocker',
+  `title` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '问题标题',
+  `detail` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '问题详情',
+  `expected_value` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '预期值',
+  `actual_value` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '实际值',
+  `suggested_action` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '建议动作',
+  `resource_ref` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '关联资源引用(JSON)',
+  `status` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'open' COMMENT 'open/resolved/ignored',
   `created_by` bigint NOT NULL DEFAULT '0' COMMENT '创建人',
   `dept_id` bigint NOT NULL DEFAULT '0' COMMENT '部门ID',
   `created_at` datetime NOT NULL COMMENT '创建时间',
@@ -210,12 +216,12 @@ CREATE TABLE `mvp_accept_issue` (
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_accept_rule` (
   `id` bigint NOT NULL COMMENT '主键ID',
-  `project_type` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '项目类型模板',
-  `rule_code` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '规则编码',
-  `rule_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '规则名称',
-  `rule_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'artifact/process/quality',
-  `scope_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'project/task/file/stage',
-  `config_json` longtext COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '规则配置',
+  `project_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '项目类型模板',
+  `rule_code` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '规则编码',
+  `rule_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '规则名称',
+  `rule_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'artifact/process/quality',
+  `scope_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'project/task/file/stage',
+  `config_json` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '规则配置',
   `enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否启用',
   `priority` int NOT NULL DEFAULT '100' COMMENT '优先级(越小越先执行)',
   `created_at` datetime NOT NULL COMMENT '创建时间',
@@ -237,12 +243,12 @@ CREATE TABLE `mvp_accept_run` (
   `project_id` bigint NOT NULL COMMENT '项目ID',
   `plan_version_id` bigint DEFAULT NULL COMMENT '关联方案版本ID',
   `accept_round` int NOT NULL DEFAULT '1' COMMENT '第几轮验收',
-  `status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'pending/running/completed/failed/canceled',
-  `decision` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'passed/failed/manual_review',
+  `status` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'pending/running/completed/failed/canceled',
+  `decision` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'passed/failed/manual_review',
   `score` decimal(5,2) DEFAULT NULL COMMENT '验收评分',
-  `summary` text COLLATE utf8mb4_unicode_ci COMMENT '验收摘要',
-  `rules_version` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '规则版本号',
-  `rules_snapshot_ref` longtext COLLATE utf8mb4_unicode_ci COMMENT '规则快照引用或JSON',
+  `summary` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '验收摘要',
+  `rules_version` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '规则版本号',
+  `rules_snapshot_ref` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '规则快照引用或JSON',
   `created_by` bigint NOT NULL DEFAULT '0' COMMENT '创建人',
   `dept_id` bigint NOT NULL DEFAULT '0' COMMENT '部门ID',
   `started_at` datetime DEFAULT NULL COMMENT '开始时间',
@@ -266,12 +272,12 @@ CREATE TABLE `mvp_action_outcome` (
   `action_id` bigint unsigned NOT NULL COMMENT '关联 mvp_decision_action.id',
   `workflow_run_id` bigint unsigned NOT NULL COMMENT '关联 workflow_run',
   `project_id` bigint unsigned NOT NULL COMMENT '关联 project',
-  `strategy_name` varchar(64) COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '策略名称',
-  `action_type` varchar(64) COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '动作类型',
-  `decision_level` varchar(8) COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '决策级别(A/B/C)',
+  `strategy_name` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '策略名称',
+  `action_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '动作类型',
+  `decision_level` varchar(8) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '决策级别(A/B/C)',
   `sit_before` json DEFAULT NULL COMMENT '执行前态势摘要(JSON)',
   `sit_after` json DEFAULT NULL COMMENT '执行后态势摘要(JSON)',
-  `effective` varchar(16) COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'unknown' COMMENT '效果: positive/negative/neutral/unknown',
+  `effective` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'unknown' COMMENT '效果: positive/negative/neutral/unknown',
   `effect_score` decimal(5,3) NOT NULL DEFAULT '0.000' COMMENT '效果得分(-1~1)',
   `eval_delay_ms` bigint NOT NULL DEFAULT '0' COMMENT '评估延迟(毫秒)',
   `created_by` bigint unsigned NOT NULL DEFAULT '0',
@@ -302,7 +308,7 @@ CREATE TABLE `mvp_assessment_result` (
   `match_accuracy` decimal(5,3) NOT NULL DEFAULT '0.000' COMMENT '匹配准确率(0~1)',
   `cost_efficiency` decimal(5,3) NOT NULL DEFAULT '0.000' COMMENT '成本效率(0~1)',
   `drifts` json DEFAULT NULL COMMENT '参数偏差列表(JSON)',
-  `summary` text COLLATE utf8mb4_general_ci COMMENT '评估摘要',
+  `summary` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '评估摘要',
   `created_by` bigint unsigned NOT NULL DEFAULT '0',
   `dept_id` bigint unsigned NOT NULL DEFAULT '0',
   `created_at` datetime DEFAULT NULL,
@@ -320,12 +326,12 @@ CREATE TABLE `mvp_autonomy_decision` (
   `id` bigint unsigned NOT NULL,
   `workflow_run_id` bigint unsigned NOT NULL,
   `project_id` bigint unsigned NOT NULL,
-  `decision_type` varchar(32) COLLATE utf8mb4_general_ci NOT NULL COMMENT 'replan/risk_escalate/engine_switch/circuit_break/report',
-  `trigger_source` varchar(64) COLLATE utf8mb4_general_ci NOT NULL COMMENT '触发源：watchdog/accept/rework/scheduler/manual',
+  `decision_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'replan/risk_escalate/engine_switch/circuit_break/report',
+  `trigger_source` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '触发源：watchdog/accept/rework/scheduler/manual',
   `trigger_context` json DEFAULT NULL COMMENT '触发上下文',
   `recommendation` json NOT NULL COMMENT '系统建议',
-  `decision_mode` varchar(16) COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'suggest' COMMENT 'suggest/auto',
-  `human_action` varchar(16) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'approved/rejected/modified/pending',
+  `decision_mode` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'suggest' COMMENT 'suggest/auto',
+  `human_action` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'approved/rejected/modified/pending',
   `executed_at` datetime DEFAULT NULL COMMENT '实际执行时间',
   `result` json DEFAULT NULL COMMENT '执行结果',
   `created_by` bigint unsigned DEFAULT '0',
@@ -336,18 +342,19 @@ CREATE TABLE `mvp_autonomy_decision` (
   PRIMARY KEY (`id`),
   KEY `idx_workflow` (`workflow_run_id`),
   KEY `idx_project` (`project_id`),
-  KEY `idx_type` (`decision_type`)
+  KEY `idx_type` (`decision_type`),
+  KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='自治决策记录';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_config` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '自增ID',
-  `config_key` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '配置键（唯一）',
-  `config_value` text COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '配置值',
-  `config_type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'string' COMMENT '值类型：string/int/float/bool/json',
-  `category` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'general' COMMENT '分类：engine/watchdog/scheduler/general',
-  `description` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '配置说明',
+  `config_key` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '配置键（唯一）',
+  `config_value` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '配置值',
+  `config_type` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'string' COMMENT '值类型：string/int/float/bool/json',
+  `category` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'general' COMMENT '分类：engine/watchdog/scheduler/general',
+  `description` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '配置说明',
   `created_by` bigint unsigned DEFAULT '0' COMMENT '创建人',
   `dept_id` bigint unsigned DEFAULT '0' COMMENT '部门ID',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
@@ -357,7 +364,7 @@ CREATE TABLE `mvp_config` (
   UNIQUE KEY `uk_config_key` (`config_key`),
   KEY `idx_category` (`category`),
   KEY `idx_deleted_at` (`deleted_at`)
-) ENGINE=InnoDB AUTO_INCREMENT=118 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='MVP配置表';
+) ENGINE=InnoDB AUTO_INCREMENT=315200000000000101 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='MVP配置表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
@@ -376,7 +383,9 @@ CREATE TABLE `mvp_conversation` (
   PRIMARY KEY (`id`),
   KEY `idx_project` (`project_id`),
   KEY `idx_task` (`task_id`),
-  KEY `idx_deleted_at` (`deleted_at`)
+  KEY `idx_deleted_at` (`deleted_at`),
+  KEY `idx_datascope` (`dept_id`,`created_by`),
+  KEY `idx_project_role` (`project_id`,`role_type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='MVP对话表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -387,16 +396,16 @@ CREATE TABLE `mvp_decision_action` (
   `project_id` bigint unsigned NOT NULL,
   `stage_run_id` bigint unsigned DEFAULT NULL COMMENT '关联阶段运行ID',
   `domain_task_id` bigint unsigned DEFAULT NULL COMMENT '关联领域任务ID',
-  `decision_type` varchar(32) COLLATE utf8mb4_general_ci NOT NULL COMMENT '动作类型',
-  `decision_level` char(1) COLLATE utf8mb4_general_ci NOT NULL COMMENT '决策等级: A/B/C',
-  `trigger_source` varchar(64) COLLATE utf8mb4_general_ci NOT NULL COMMENT '触发源事件类型',
+  `decision_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '动作类型',
+  `decision_level` char(1) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '决策等级: A/B/C',
+  `trigger_source` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '触发源事件类型',
   `trigger_context` json DEFAULT NULL COMMENT '触发上下文',
   `matched_rule_id` bigint unsigned DEFAULT NULL COMMENT '匹配的策略规则ID',
   `matched_gate_ids` json DEFAULT NULL COMMENT '命中的闸门ID列表',
-  `action_type` varchar(64) COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '策略匹配的动作类型(闸门降级后为fallback)',
+  `action_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '策略匹配的动作类型(闸门降级后为fallback)',
   `recommendation` json DEFAULT NULL COMMENT '系统建议',
-  `final_action` varchar(64) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '最终实际执行的动作',
-  `action_status` varchar(16) COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'pending' COMMENT 'pending/auto_executed/waiting_human/approved/rejected/failed',
+  `final_action` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '最终实际执行的动作',
+  `action_status` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'pending' COMMENT 'pending/auto_executed/waiting_human/approved/rejected/failed',
   `auto_executable` tinyint NOT NULL DEFAULT '0' COMMENT '是否可自动执行',
   `human_required` tinyint NOT NULL DEFAULT '0' COMMENT '是否需要人工',
   `executed_at` datetime DEFAULT NULL COMMENT '实际执行时间',
@@ -426,13 +435,13 @@ CREATE TABLE `mvp_domain_task` (
   `depends_on_task_ids` json DEFAULT NULL COMMENT '依赖任务ID列表(JSON数组)',
   `source_task_id` bigint unsigned DEFAULT NULL COMMENT '来源任务ID(链路追踪)',
   `root_task_id` bigint unsigned DEFAULT NULL COMMENT '根任务ID(链路追踪)',
-  `task_kind` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '任务种类: implement/audit/bug_analysis/failure_analysis',
-  `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '任务名称',
-  `description` text COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '任务描述',
-  `role_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '角色类型',
-  `role_level` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '角色等级',
-  `execution_mode` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '执行方式: chat/aider/openhands',
-  `status` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '状态: pending/running/completed/failed/escalated/auditing/bug_found/bug_dispatched',
+  `task_kind` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '任务种类: implement/audit/bug_analysis/failure_analysis',
+  `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '任务名称',
+  `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '任务描述',
+  `role_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '角色类型',
+  `role_level` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '角色等级',
+  `execution_mode` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '执行方式: chat/aider/openhands',
+  `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '状态: pending/running/completed/failed/escalated/auditing/bug_found/bug_dispatched',
   `conversation_id` bigint unsigned DEFAULT NULL COMMENT '关联对话ID',
   `model_id` bigint unsigned DEFAULT NULL COMMENT '使用的AI模型ID',
   `batch_no` int NOT NULL COMMENT '批次号',
@@ -440,8 +449,8 @@ CREATE TABLE `mvp_domain_task` (
   `retry_count` int NOT NULL DEFAULT '0' COMMENT '重试次数',
   `affected_resources` json DEFAULT NULL COMMENT '影响资源列表(JSON)',
   `locked_resources` json DEFAULT NULL COMMENT '锁定资源列表(JSON)',
-  `result` longtext COLLATE utf8mb4_unicode_ci COMMENT '执行结果',
-  `context_summary` text COLLATE utf8mb4_unicode_ci COMMENT '上下文摘要',
+  `result` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '执行结果',
+  `context_summary` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '上下文摘要',
   `heartbeat_at` datetime DEFAULT NULL COMMENT '心跳时间',
   `started_at` datetime DEFAULT NULL COMMENT '开始时间',
   `completed_at` datetime DEFAULT NULL COMMENT '完成时间',
@@ -455,7 +464,9 @@ CREATE TABLE `mvp_domain_task` (
   KEY `idx_workflow_batch` (`workflow_run_id`,`batch_no`,`sort`),
   KEY `idx_stage_status` (`stage_run_id`,`status`),
   KEY `idx_root_task` (`root_task_id`),
-  KEY `idx_source_task` (`source_task_id`)
+  KEY `idx_source_task` (`source_task_id`),
+  KEY `idx_datascope` (`dept_id`,`created_by`),
+  KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='领域任务';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -465,8 +476,8 @@ CREATE TABLE `mvp_handoff_record` (
   `workflow_run_id` bigint unsigned NOT NULL COMMENT '所属工作流运行ID',
   `from_task_id` bigint unsigned DEFAULT NULL COMMENT '来源任务ID',
   `to_task_id` bigint unsigned DEFAULT NULL COMMENT '目标任务ID',
-  `handoff_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '交接类型: bug_fix/failure_escalation/rework/audit',
-  `reason` text COLLATE utf8mb4_unicode_ci COMMENT '交接原因',
+  `handoff_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '交接类型: bug_fix/failure_escalation/rework/audit',
+  `reason` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '交接原因',
   `payload` json DEFAULT NULL COMMENT '交接载荷(JSON)',
   `created_at` datetime NOT NULL COMMENT '创建时间',
   PRIMARY KEY (`id`),
@@ -480,14 +491,14 @@ CREATE TABLE `mvp_human_checkpoint` (
   `workflow_run_id` bigint unsigned NOT NULL,
   `project_id` bigint unsigned NOT NULL,
   `decision_action_id` bigint unsigned NOT NULL COMMENT '关联的决策动作ID',
-  `checkpoint_type` varchar(32) COLLATE utf8mb4_general_ci NOT NULL COMMENT '节点类型: manual_review/approval/escalation',
-  `title` varchar(256) COLLATE utf8mb4_general_ci NOT NULL COMMENT '标题',
-  `description` text COLLATE utf8mb4_general_ci COMMENT '详细描述',
-  `status` varchar(16) COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'open' COMMENT 'open/handled/expired/canceled',
+  `checkpoint_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '节点类型: manual_review/approval/escalation',
+  `title` varchar(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '标题',
+  `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '详细描述',
+  `status` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'open' COMMENT 'open/handled/expired/canceled',
   `assigned_to` bigint unsigned DEFAULT NULL COMMENT '指派给谁',
   `handled_by` bigint unsigned DEFAULT NULL COMMENT '实际处理人',
-  `handle_action` varchar(32) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '处理动作: approve/reject/retry/rework/override',
-  `handle_reason` text COLLATE utf8mb4_general_ci COMMENT '处理理由',
+  `handle_action` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '处理动作: approve/reject/retry/rework/override',
+  `handle_reason` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '处理理由',
   `handled_at` datetime DEFAULT NULL COMMENT '处理时间',
   `expires_at` datetime DEFAULT NULL COMMENT '过期时间',
   `created_by` bigint unsigned NOT NULL DEFAULT '0',
@@ -507,7 +518,7 @@ CREATE TABLE `mvp_human_checkpoint` (
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_learning_record` (
   `id` bigint unsigned NOT NULL COMMENT '雪花ID',
-  `metric_key` varchar(128) COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '指标名称(如 strategy.cost_guard.accuracy)',
+  `metric_key` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '指标名称(如 strategy.cost_guard.accuracy)',
   `project_id` bigint unsigned NOT NULL DEFAULT '0' COMMENT '关联 project(0=全局)',
   `ema_value` decimal(10,6) NOT NULL DEFAULT '0.000000' COMMENT 'EMA 当前值',
   `raw_value` decimal(10,6) NOT NULL DEFAULT '0.000000' COMMENT '最新原始值',
@@ -561,7 +572,7 @@ CREATE TABLE `mvp_message_chunk` (
   PRIMARY KEY (`id`),
   KEY `idx_message_chunk` (`message_id`,`chunk_index`),
   KEY `idx_chunk_created` (`created_at`)
-) ENGINE=InnoDB AUTO_INCREMENT=22630 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='消息分片表（流式输出）';
+) ENGINE=InnoDB AUTO_INCREMENT=262469 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='消息分片表（流式输出）';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
@@ -570,17 +581,17 @@ CREATE TABLE `mvp_observation_record` (
   `decision_action_id` bigint unsigned NOT NULL COMMENT '关联 mvp_decision_action.id',
   `workflow_run_id` bigint unsigned NOT NULL COMMENT '关联 workflow_run',
   `project_id` bigint unsigned NOT NULL COMMENT '关联 project',
-  `decision_type` varchar(64) COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '决策类型: policy_match/strategy:xxx/objective_guard',
-  `trigger_source` varchar(64) COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '触发源',
-  `decision_level` varchar(8) COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '决策级别 A/B/C',
-  `action_type` varchar(64) COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '动作类型',
+  `decision_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '决策类型: policy_match/strategy:xxx/objective_guard',
+  `trigger_source` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '触发源',
+  `decision_level` varchar(8) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '决策级别 A/B/C',
+  `action_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '动作类型',
   `input_snapshot` json DEFAULT NULL COMMENT '决策输入快照(JSON)',
   `output_snapshot` json DEFAULT NULL COMMENT '决策输出快照(JSON)',
   `meta_snapshot` json DEFAULT NULL COMMENT 'DecisionMeta 快照(JSON)',
-  `outcome` varchar(16) COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'pending' COMMENT '结果: success/failure/neutral/pending',
+  `outcome` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'pending' COMMENT '结果: success/failure/neutral/pending',
   `effect_score` decimal(5,3) NOT NULL DEFAULT '0.000' COMMENT '效果得分(-1~1)',
   `human_override` tinyint NOT NULL DEFAULT '0' COMMENT '人工是否干预(0否/1是)',
-  `override_reason` varchar(512) COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '人工干预原因',
+  `override_reason` varchar(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '人工干预原因',
   `signal_weight` decimal(3,1) NOT NULL DEFAULT '0.0' COMMENT '学习信号权重(0-1)',
   `created_by` bigint unsigned NOT NULL DEFAULT '0',
   `dept_id` bigint unsigned NOT NULL DEFAULT '0',
@@ -605,10 +616,10 @@ CREATE TABLE `mvp_plan_version` (
   `version_no` int NOT NULL COMMENT '版本号(项目内递增)',
   `source_conversation_id` bigint unsigned DEFAULT NULL COMMENT '来源对话ID',
   `source_message_id` bigint unsigned DEFAULT NULL COMMENT '来源消息ID',
-  `status` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '版本状态: draft/active/superseded',
-  `review_status` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '审核状态: pending/approved/rejected',
-  `summary` text COLLATE utf8mb4_unicode_ci COMMENT '版本摘要',
-  `diff_summary` text COLLATE utf8mb4_unicode_ci COMMENT '与上一版本的差异摘要',
+  `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '版本状态: draft/active/superseded',
+  `review_status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '审核状态: pending/approved/rejected',
+  `summary` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '版本摘要',
+  `diff_summary` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '与上一版本的差异摘要',
   `approved_at` datetime DEFAULT NULL COMMENT '审核通过时间',
   `rejected_at` datetime DEFAULT NULL COMMENT '审核驳回时间',
   `created_at` datetime NOT NULL COMMENT '创建时间',
@@ -618,20 +629,22 @@ CREATE TABLE `mvp_plan_version` (
   `dept_id` bigint NOT NULL DEFAULT '0' COMMENT '部门ID',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_project_version` (`project_id`,`version_no`),
-  KEY `idx_workflow_status` (`workflow_run_id`,`status`,`review_status`)
+  KEY `idx_workflow_status` (`workflow_run_id`,`status`,`review_status`),
+  KEY `idx_datascope` (`dept_id`,`created_by`),
+  KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='计划版本';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_policy_rule` (
   `id` bigint unsigned NOT NULL COMMENT '雪花ID',
-  `rule_code` varchar(64) COLLATE utf8mb4_general_ci NOT NULL COMMENT '规则编码(唯一)',
-  `rule_name` varchar(128) COLLATE utf8mb4_general_ci NOT NULL COMMENT '规则名称',
-  `decision_type` varchar(32) COLLATE utf8mb4_general_ci NOT NULL COMMENT '决策动作类型',
-  `decision_level` char(1) COLLATE utf8mb4_general_ci NOT NULL COMMENT '决策等级: A/B/C',
-  `trigger_source` varchar(64) COLLATE utf8mb4_general_ci NOT NULL COMMENT '触发源事件类型',
-  `project_family` varchar(32) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '适用项目家族(NULL=全局)',
-  `project_category_code` varchar(64) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '适用项目分类(NULL=全局)',
+  `rule_code` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '规则编码(唯一)',
+  `rule_name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '规则名称',
+  `decision_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '决策动作类型',
+  `decision_level` char(1) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '决策等级: A/B/C',
+  `trigger_source` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '触发源事件类型',
+  `project_family` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '适用项目家族(NULL=全局)',
+  `project_category_code` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '适用项目分类(NULL=全局)',
   `config_json` json NOT NULL COMMENT '规则配置(条件/阈值)',
   `enabled` tinyint NOT NULL DEFAULT '1' COMMENT '是否启用',
   `priority` int NOT NULL DEFAULT '100' COMMENT '优先级(越小越优先)',
@@ -653,16 +666,16 @@ CREATE TABLE `mvp_project` (
   `id` bigint unsigned NOT NULL COMMENT '雪花ID',
   `name` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '项目名称',
   `project_category` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '项目分类',
-  `category_code` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '项目分类编码',
+  `category_code` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '项目分类编码',
   `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '项目简介',
-  `status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'designing' COMMENT '项目状态: designing/reviewing/running/paused/completed',
+  `status` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'designing' COMMENT '项目状态: designing/reviewing/running/paused/completed',
   `pause_reason` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '暂停原因',
   `global_context` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '项目全局上下文（架构师需求分析+方案设计的压缩摘要）',
   `objective_json` json DEFAULT NULL COMMENT '项目目标约束(JSON): budget/deadline/risk_tolerance/autonomy_level',
   `architect_model_id` bigint unsigned DEFAULT NULL COMMENT '架构师使用的AI模型ID',
-  `work_dir` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '项目代码工作目录（Aider执行路径）',
+  `work_dir` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '项目代码工作目录（Aider执行路径）',
   `active_batch_no` int NOT NULL DEFAULT '0' COMMENT '当前活跃批次号（调度器持久化，0=无活跃批次）',
-  `engine_version` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT 'legacy' COMMENT '执行引擎版本: legacy/workflow_v2',
+  `engine_version` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT 'legacy' COMMENT '执行引擎版本: legacy/workflow_v2',
   `active_workflow_run_id` bigint unsigned DEFAULT NULL COMMENT '当前活跃工作流运行ID',
   `created_by` bigint unsigned DEFAULT NULL COMMENT '创建人ID',
   `dept_id` bigint unsigned DEFAULT NULL COMMENT '所属部门ID',
@@ -672,17 +685,18 @@ CREATE TABLE `mvp_project` (
   PRIMARY KEY (`id`),
   KEY `idx_status` (`status`),
   KEY `idx_deleted_at` (`deleted_at`),
-  KEY `idx_category_code` (`category_code`)
+  KEY `idx_category_code` (`category_code`),
+  KEY `idx_datascope` (`dept_id`,`created_by`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='MVP项目表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_project_category` (
   `id` bigint NOT NULL COMMENT '主键ID',
-  `category_code` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '稳定分类编码',
-  `display_name` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '展示名称',
-  `family_code` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '能力家族编码',
-  `description` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '分类说明',
+  `category_code` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '稳定分类编码',
+  `display_name` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '展示名称',
+  `family_code` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '能力家族编码',
+  `description` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '分类说明',
   `status` tinyint NOT NULL DEFAULT '1' COMMENT '1启用 0停用',
   `sort` int NOT NULL DEFAULT '100' COMMENT '排序',
   `created_by` bigint NOT NULL DEFAULT '0' COMMENT '创建人',
@@ -702,10 +716,10 @@ CREATE TABLE `mvp_project_report` (
   `id` bigint unsigned NOT NULL,
   `workflow_run_id` bigint unsigned NOT NULL,
   `project_id` bigint unsigned NOT NULL,
-  `report_type` varchar(16) COLLATE utf8mb4_general_ci NOT NULL COMMENT 'stage/daily/weekly/summary',
-  `stage_type` varchar(32) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '阶段类型',
-  `title` varchar(200) COLLATE utf8mb4_general_ci NOT NULL,
-  `content` text COLLATE utf8mb4_general_ci NOT NULL COMMENT 'Markdown 格式报告正文',
+  `report_type` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'stage/daily/weekly/summary',
+  `stage_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '阶段类型',
+  `title` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `content` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'Markdown 格式报告正文',
   `metrics` json DEFAULT NULL COMMENT '关键指标快照',
   `created_by` bigint unsigned DEFAULT '0',
   `dept_id` bigint unsigned DEFAULT '0',
@@ -715,7 +729,8 @@ CREATE TABLE `mvp_project_report` (
   PRIMARY KEY (`id`),
   KEY `idx_workflow` (`workflow_run_id`),
   KEY `idx_project` (`project_id`),
-  KEY `idx_type` (`report_type`)
+  KEY `idx_type` (`report_type`),
+  KEY `idx_datascope` (`dept_id`,`created_by`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='项目汇报';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -728,7 +743,7 @@ CREATE TABLE `mvp_project_role` (
   `role_level` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '角色等级：lite/pro/max',
   `model_id` bigint unsigned NOT NULL COMMENT 'AI模型ID',
   `system_prompt` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '系统提示词（角色设定）',
-  `execution_mode` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'chat' COMMENT '执行方式: auto=自动选择, chat=对话模式, aider=Aider, openhands=OpenHands, claude_code=Claude Code, codex_cli=Codex CLI, gemini_cli=Gemini CLI',
+  `execution_mode` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'chat' COMMENT '执行方式: auto=自动选择, chat=对话模式, aider=Aider, openhands=OpenHands, claude_code=Claude Code, codex_cli=Codex CLI, gemini_cli=Gemini CLI',
   `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态:0=禁用,1=启用',
   `created_by` bigint unsigned DEFAULT NULL COMMENT '创建人ID',
   `dept_id` bigint unsigned DEFAULT NULL COMMENT '所属部门ID',
@@ -738,7 +753,8 @@ CREATE TABLE `mvp_project_role` (
   PRIMARY KEY (`id`),
   KEY `idx_project` (`project_id`),
   KEY `idx_deleted_at` (`deleted_at`),
-  KEY `idx_project_role_level` (`project_id`,`role_type`,`role_level`)
+  KEY `idx_project_role_level` (`project_id`,`role_type`,`role_level`),
+  KEY `idx_datascope` (`dept_id`,`created_by`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='项目角色配置表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -749,14 +765,14 @@ CREATE TABLE `mvp_review_issue` (
   `stage_run_id` bigint unsigned NOT NULL COMMENT '所属阶段运行ID',
   `plan_version_id` bigint unsigned NOT NULL COMMENT '所属计划版本ID',
   `blueprint_id` bigint unsigned DEFAULT NULL COMMENT '关联蓝图ID',
-  `severity` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '严重级别: error/warning/info',
-  `issue_code` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '问题代码',
-  `issue_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '问题类型',
-  `source_role` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '发现角色',
-  `task_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '关联任务名',
-  `message` text COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '问题描述',
-  `suggestion` text COLLATE utf8mb4_unicode_ci COMMENT '修复建议',
-  `status` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '状态: open/resolved/ignored',
+  `severity` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '严重级别: error/warning/info',
+  `issue_code` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '问题代码',
+  `issue_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '问题类型',
+  `source_role` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '发现角色',
+  `task_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '关联任务名',
+  `message` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '问题描述',
+  `suggestion` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '修复建议',
+  `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '状态: open/resolved/ignored',
   `resolved_at` datetime DEFAULT NULL COMMENT '解决时间',
   `created_at` datetime NOT NULL COMMENT '创建时间',
   `updated_at` datetime NOT NULL COMMENT '更新时间',
@@ -765,21 +781,23 @@ CREATE TABLE `mvp_review_issue` (
   `dept_id` bigint NOT NULL DEFAULT '0' COMMENT '部门ID',
   PRIMARY KEY (`id`),
   KEY `idx_plan_issue` (`plan_version_id`,`severity`,`status`),
-  KEY `idx_blueprint_issue` (`blueprint_id`,`severity`,`status`)
+  KEY `idx_blueprint_issue` (`blueprint_id`,`severity`,`status`),
+  KEY `idx_deleted_at` (`deleted_at`),
+  KEY `idx_workflow_run` (`workflow_run_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='审核问题';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_risk_gate_rule` (
   `id` bigint unsigned NOT NULL COMMENT '雪花ID',
-  `gate_code` varchar(64) COLLATE utf8mb4_general_ci NOT NULL COMMENT '闸门编码(唯一)',
-  `gate_name` varchar(128) COLLATE utf8mb4_general_ci NOT NULL COMMENT '闸门名称',
-  `gate_type` varchar(32) COLLATE utf8mb4_general_ci NOT NULL COMMENT '闸门类型: permission/quality/cost/runtime',
-  `project_family` varchar(32) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '适用项目家族(NULL=全局)',
-  `project_category_code` varchar(64) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '适用项目分类(NULL=全局)',
+  `gate_code` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '闸门编码(唯一)',
+  `gate_name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '闸门名称',
+  `gate_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '闸门类型: permission/quality/cost/runtime',
+  `project_family` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '适用项目家族(NULL=全局)',
+  `project_category_code` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '适用项目分类(NULL=全局)',
   `trigger_expression` json NOT NULL COMMENT '触发表达式(JSON规则)',
-  `block_action` varchar(64) COLLATE utf8mb4_general_ci NOT NULL COMMENT '命中后禁止的动作',
-  `fallback_action` varchar(64) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '命中后降级动作',
+  `block_action` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '命中后禁止的动作',
+  `fallback_action` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '命中后降级动作',
   `enabled` tinyint NOT NULL DEFAULT '1' COMMENT '是否启用',
   `priority` int NOT NULL DEFAULT '100' COMMENT '优先级(越小越优先)',
   `created_by` bigint unsigned NOT NULL DEFAULT '0',
@@ -798,11 +816,11 @@ CREATE TABLE `mvp_risk_gate_rule` (
 CREATE TABLE `mvp_role_preset` (
   `id` bigint unsigned NOT NULL COMMENT '雪花ID',
   `project_category` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '项目分类',
-  `role_type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '角色类型：architect/implementer/auditor/coordinator',
-  `role_level` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '角色等级：lite/pro/max',
+  `role_type` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '角色类型：architect/implementer/auditor/coordinator',
+  `role_level` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '角色等级：lite/pro/max',
   `model_id` bigint unsigned NOT NULL COMMENT 'AI模型ID',
-  `system_prompt` text COLLATE utf8mb4_unicode_ci COMMENT '默认系统提示词（角色设定）',
-  `execution_mode` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'chat' COMMENT '执行方式: auto=自动选择, chat=对话模式, aider=Aider, openhands=OpenHands, claude_code=Claude Code, codex_cli=Codex CLI, gemini_cli=Gemini CLI',
+  `system_prompt` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '默认系统提示词（角色设定）',
+  `execution_mode` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'chat' COMMENT '执行方式: auto=自动选择, chat=对话模式, aider=Aider, openhands=OpenHands, claude_code=Claude Code, codex_cli=Codex CLI, gemini_cli=Gemini CLI',
   `is_default` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否为默认模板（1=默认，0=扩展）',
   `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态:0=禁用,1=启用',
   `sort` int NOT NULL DEFAULT '0' COMMENT '排序',
@@ -830,10 +848,10 @@ CREATE TABLE `mvp_situation_snapshot` (
   `deleted_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_workflow_run` (`workflow_run_id`),
-  KEY `idx_workflow_deleted_id` (`workflow_run_id`,`deleted_at`,`id`),
   KEY `idx_project` (`project_id`),
   KEY `idx_created_at` (`created_at`),
-  KEY `idx_deleted_at` (`deleted_at`)
+  KEY `idx_deleted_at` (`deleted_at`),
+  KEY `idx_workflow_deleted_id` (`workflow_run_id`,`deleted_at`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='态势快照';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -841,15 +859,15 @@ CREATE TABLE `mvp_situation_snapshot` (
 CREATE TABLE `mvp_stage_run` (
   `id` bigint unsigned NOT NULL COMMENT '雪花ID',
   `workflow_run_id` bigint unsigned NOT NULL COMMENT '所属工作流运行ID',
-  `stage_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '阶段类型: design/review/execute/rework/complete',
+  `stage_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '阶段类型: design/review/execute/rework/complete',
   `stage_no` int NOT NULL COMMENT '同类型阶段序号(支持多轮)',
-  `status` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '状态: pending/running/completed/failed/skipped',
+  `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '状态: pending/running/completed/failed/skipped',
   `created_by` bigint NOT NULL DEFAULT '0' COMMENT '创建人ID',
   `dept_id` bigint NOT NULL DEFAULT '0' COMMENT '部门ID',
   `input_ref` json DEFAULT NULL COMMENT '阶段输入引用(JSON)',
   `output_ref` json DEFAULT NULL COMMENT '阶段输出引用(JSON)',
   `decision` json DEFAULT NULL COMMENT '阶段决策结果(JSON)',
-  `error_message` text COLLATE utf8mb4_unicode_ci COMMENT '错误信息',
+  `error_message` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '错误信息',
   `started_at` datetime DEFAULT NULL COMMENT '开始时间',
   `finished_at` datetime DEFAULT NULL COMMENT '结束时间',
   `created_at` datetime NOT NULL COMMENT '创建时间',
@@ -857,7 +875,9 @@ CREATE TABLE `mvp_stage_run` (
   `deleted_at` datetime DEFAULT NULL COMMENT '软删除时间',
   PRIMARY KEY (`id`),
   KEY `idx_workflow_stage` (`workflow_run_id`,`stage_type`,`stage_no`),
-  KEY `idx_workflow_status` (`workflow_run_id`,`status`)
+  KEY `idx_workflow_status` (`workflow_run_id`,`status`),
+  KEY `idx_datascope` (`dept_id`,`created_by`),
+  KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='阶段运行实例';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -865,12 +885,12 @@ CREATE TABLE `mvp_stage_run` (
 CREATE TABLE `mvp_stage_task` (
   `id` bigint unsigned NOT NULL COMMENT '雪花ID',
   `stage_run_id` bigint unsigned NOT NULL COMMENT '所属阶段运行ID',
-  `task_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '任务类型: precheck/auditor_review/coordinator_optimize/review_summary',
-  `role_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '执行角色',
-  `status` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '状态: pending/running/completed/failed/skipped',
+  `task_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '任务类型: precheck/auditor_review/coordinator_optimize/review_summary',
+  `role_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '执行角色',
+  `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '状态: pending/running/completed/failed/skipped',
   `input_payload` json DEFAULT NULL COMMENT '输入载荷(JSON)',
   `output_payload` json DEFAULT NULL COMMENT '输出载荷(JSON)',
-  `error_message` text COLLATE utf8mb4_unicode_ci COMMENT '错误信息',
+  `error_message` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '错误信息',
   `started_at` datetime DEFAULT NULL COMMENT '开始时间',
   `completed_at` datetime DEFAULT NULL COMMENT '完成时间',
   `created_at` datetime NOT NULL COMMENT '创建时间',
@@ -890,12 +910,12 @@ CREATE TABLE `mvp_task` (
   `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '任务描述',
   `role_type` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '角色类型：architect/implementer/auditor/coordinator',
   `role_level` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '角色等级：lite/pro/max',
-  `task_kind` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '任务记录类型：implement/audit/bug_analysis/failure_analysis',
+  `task_kind` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '任务记录类型：implement/audit/bug_analysis/failure_analysis',
   `source_task_id` bigint unsigned DEFAULT NULL COMMENT '直接来源任务ID，原始任务为NULL',
   `root_task_id` bigint unsigned DEFAULT NULL COMMENT '所属主链根任务ID',
   `model_id` bigint unsigned DEFAULT NULL COMMENT '使用的AI模型ID',
   `conversation_id` bigint DEFAULT NULL COMMENT '任务对话ID，用于检测任务状态',
-  `status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT '任务状态: draft/pending/running/completed/failed/escalated/auditing/bug_found/bug_dispatched/submit_error',
+  `status` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT '任务状态: draft/pending/running/completed/failed/escalated/auditing/bug_found/bug_dispatched/submit_error',
   `sort` int NOT NULL DEFAULT '0' COMMENT '排序',
   `batch_no` int NOT NULL DEFAULT '0' COMMENT '执行批次号，同批次内可并行，批次间串行',
   `affected_resources` json DEFAULT NULL COMMENT '涉及的资源范围（文件/模块），用于并发冲突检测',
@@ -931,15 +951,15 @@ CREATE TABLE `mvp_task_blueprint` (
   `id` bigint unsigned NOT NULL COMMENT '雪花ID',
   `plan_version_id` bigint unsigned NOT NULL COMMENT '所属计划版本ID',
   `parent_blueprint_id` bigint unsigned DEFAULT NULL COMMENT '父蓝图ID(支持层级)',
-  `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '任务名称',
-  `description` text COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '任务描述',
-  `role_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '角色类型: architect/implementer/auditor/coordinator',
-  `role_level` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '角色等级: lite/pro/max',
+  `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '任务名称',
+  `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '任务描述',
+  `role_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '角色类型: architect/implementer/auditor/coordinator',
+  `role_level` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '角色等级: lite/pro/max',
   `batch_no` int NOT NULL COMMENT '批次号',
   `sort` int NOT NULL DEFAULT '0' COMMENT '排序',
   `affected_resources` json DEFAULT NULL COMMENT '影响资源列表(JSON)',
   `depends_on_blueprint_ids` json DEFAULT NULL COMMENT '依赖蓝图ID列表(JSON)',
-  `blueprint_status` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '蓝图状态: draft/confirmed/superseded',
+  `blueprint_status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '蓝图状态: draft/confirmed/superseded',
   `created_at` datetime NOT NULL COMMENT '创建时间',
   `updated_at` datetime NOT NULL COMMENT '更新时间',
   `deleted_at` datetime DEFAULT NULL COMMENT '软删除时间',
@@ -947,7 +967,9 @@ CREATE TABLE `mvp_task_blueprint` (
   `dept_id` bigint NOT NULL DEFAULT '0' COMMENT '部门ID',
   PRIMARY KEY (`id`),
   KEY `idx_plan_batch` (`plan_version_id`,`batch_no`,`sort`),
-  KEY `idx_plan_status` (`plan_version_id`,`blueprint_status`)
+  KEY `idx_plan_status` (`plan_version_id`,`blueprint_status`),
+  KEY `idx_datascope` (`dept_id`,`created_by`),
+  KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='任务蓝图';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -985,8 +1007,8 @@ CREATE TABLE `mvp_task_resource_lock` (
   `id` bigint unsigned NOT NULL COMMENT '雪花ID',
   `workflow_run_id` bigint unsigned NOT NULL COMMENT '所属工作流运行ID',
   `task_id` bigint unsigned NOT NULL COMMENT '持锁任务ID',
-  `resource_path` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '资源路径',
-  `lock_status` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '锁状态: held/released/leaked',
+  `resource_path` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '资源路径',
+  `lock_status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '锁状态: held/released/leaked',
   `locked_at` datetime DEFAULT NULL COMMENT '加锁时间',
   `released_at` datetime DEFAULT NULL COMMENT '释放时间',
   PRIMARY KEY (`id`),
@@ -1001,13 +1023,13 @@ CREATE TABLE `mvp_task_workspace` (
   `task_id` bigint unsigned NOT NULL COMMENT '任务ID(domain_task或mvp_task)',
   `workflow_run_id` bigint unsigned DEFAULT NULL COMMENT '所属工作流运行ID',
   `project_id` bigint unsigned NOT NULL COMMENT '项目ID',
-  `workspace_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'git_worktree' COMMENT '工作空间类型: git_worktree',
-  `workspace_path` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '工作空间绝对路径',
-  `base_ref` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '基线引用(commit hash/branch)',
-  `status` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'creating' COMMENT '状态: creating/ready/running/completed/failed/canceled',
-  `cleanup_status` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT '清理状态: pending/done/retained/failed',
-  `diff_summary` longtext COLLATE utf8mb4_unicode_ci COMMENT '变更摘要(diff统计)',
-  `error_message` text COLLATE utf8mb4_unicode_ci COMMENT '错误信息',
+  `workspace_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'git_worktree' COMMENT '工作空间类型: git_worktree',
+  `workspace_path` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '工作空间绝对路径',
+  `base_ref` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '基线引用(commit hash/branch)',
+  `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'creating' COMMENT '状态: creating/ready/running/completed/failed/canceled',
+  `cleanup_status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT '清理状态: pending/done/retained/failed',
+  `diff_summary` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '变更摘要(diff统计)',
+  `error_message` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '错误信息',
   `created_at` datetime NOT NULL COMMENT '创建时间',
   `updated_at` datetime NOT NULL COMMENT '更新时间',
   `deleted_at` datetime DEFAULT NULL COMMENT '软删除时间',
@@ -1024,15 +1046,15 @@ CREATE TABLE `mvp_tune_recommendation` (
   `id` bigint unsigned NOT NULL COMMENT '雪花ID',
   `assessment_id` bigint unsigned NOT NULL DEFAULT '0' COMMENT '关联评估结果',
   `project_id` bigint unsigned NOT NULL DEFAULT '0' COMMENT '关联 project(0=全局)',
-  `parameter` varchar(128) COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '参数名',
-  `current_value` varchar(256) COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '当前值',
-  `suggested_value` varchar(256) COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '建议值',
-  `direction` varchar(16) COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT 'conservative/aggressive',
-  `reasoning` text COLLATE utf8mb4_general_ci COMMENT '建议理由',
+  `parameter` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '参数名',
+  `current_value` varchar(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '当前值',
+  `suggested_value` varchar(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '建议值',
+  `direction` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT 'conservative/aggressive',
+  `reasoning` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '建议理由',
   `confidence` decimal(5,3) NOT NULL DEFAULT '0.000' COMMENT '置信度(0~1)',
   `auto_applicable` tinyint NOT NULL DEFAULT '0' COMMENT '是否可自动应用(0否/1是)',
-  `risk_level` varchar(16) COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'low' COMMENT 'low/medium/high',
-  `status` varchar(16) COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'pending' COMMENT 'pending/applied/rejected/expired',
+  `risk_level` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'low' COMMENT 'low/medium/high',
+  `status` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'pending' COMMENT 'pending/applied/rejected/expired',
   `applied_at` datetime DEFAULT NULL COMMENT '应用时间',
   `applied_by` bigint unsigned NOT NULL DEFAULT '0' COMMENT '应用人',
   `created_by` bigint unsigned NOT NULL DEFAULT '0',
@@ -1053,9 +1075,9 @@ CREATE TABLE `mvp_tune_recommendation` (
 CREATE TABLE `mvp_user_collab_binding` (
   `id` bigint unsigned NOT NULL COMMENT '雪花ID',
   `user_id` bigint unsigned NOT NULL COMMENT '关联 system_users.id',
-  `platform` varchar(32) COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'feishu' COMMENT '平台: feishu/dingtalk/wecom',
-  `platform_user_id` varchar(128) COLLATE utf8mb4_general_ci NOT NULL COMMENT '平台用户标识(飞书 open_id)',
-  `platform_name` varchar(128) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '平台显示名',
+  `platform` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'feishu' COMMENT '平台: feishu/dingtalk/wecom',
+  `platform_user_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '平台用户标识(飞书 open_id)',
+  `platform_name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '平台显示名',
   `created_by` bigint unsigned NOT NULL DEFAULT '0',
   `dept_id` bigint unsigned NOT NULL DEFAULT '0',
   `created_at` datetime DEFAULT NULL,
@@ -1073,9 +1095,9 @@ CREATE TABLE `mvp_workflow_event` (
   `id` bigint unsigned NOT NULL COMMENT '雪花ID',
   `workflow_run_id` bigint unsigned NOT NULL COMMENT '所属工作流运行ID',
   `stage_run_id` bigint unsigned DEFAULT NULL COMMENT '关联阶段运行ID',
-  `entity_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '实体类型: workflow_run/stage_run/plan_version/domain_task/review_issue',
+  `entity_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '实体类型: workflow_run/stage_run/plan_version/domain_task/review_issue',
   `entity_id` bigint unsigned DEFAULT NULL COMMENT '实体ID',
-  `event_type` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '事件类型: workflow.created/stage.started/task.completed等',
+  `event_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '事件类型: workflow.created/stage.started/task.completed等',
   `payload` json DEFAULT NULL COMMENT '事件载荷(JSON)',
   `created_at` datetime NOT NULL COMMENT '创建时间',
   PRIMARY KEY (`id`),
@@ -1089,16 +1111,16 @@ CREATE TABLE `mvp_workflow_run` (
   `id` bigint unsigned NOT NULL COMMENT '雪花ID',
   `project_id` bigint unsigned NOT NULL COMMENT '所属项目ID',
   `run_no` int NOT NULL COMMENT '项目内运行序号(从1递增)',
-  `status` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '状态: designing/reviewing/executing/reworking/paused/completed/failed/canceled',
+  `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '状态: designing/reviewing/executing/reworking/paused/completed/failed/canceled',
   `tokens_consumed` bigint NOT NULL DEFAULT '0' COMMENT '已消耗Token总量',
   `replan_count` int NOT NULL DEFAULT '0' COMMENT '重规划次数',
-  `current_stage` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '当前阶段: design/review/execute/rework/complete',
+  `current_stage` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '当前阶段: design/review/execute/rework/complete',
   `current_stage_run_id` bigint unsigned DEFAULT NULL COMMENT '当前阶段运行ID',
   `active_plan_version_id` bigint unsigned DEFAULT NULL COMMENT '当前活跃计划版本ID',
-  `pause_reason` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '暂停原因',
-  `status_before_pause` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '暂停前的阶段状态（恢复时回退）',
-  `cancel_reason` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '取消原因',
-  `runtime_token` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '运行时令牌(防重入)',
+  `pause_reason` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '暂停原因',
+  `status_before_pause` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '暂停前的阶段状态（恢复时回退）',
+  `cancel_reason` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '取消原因',
+  `runtime_token` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '运行时令牌(防重入)',
   `started_at` datetime DEFAULT NULL COMMENT '开始时间',
   `finished_at` datetime DEFAULT NULL COMMENT '结束时间',
   `created_by` bigint unsigned DEFAULT '0' COMMENT '创建人ID',
@@ -1108,9 +1130,26 @@ CREATE TABLE `mvp_workflow_run` (
   `deleted_at` datetime DEFAULT NULL COMMENT '软删除时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_project_run_no` (`project_id`,`run_no`),
+  KEY `idx_project_status` (`project_id`,`status`),
   KEY `idx_project_deleted_id` (`project_id`,`deleted_at`,`id`),
-  KEY `idx_project_status` (`project_id`,`status`)
+  KEY `idx_datascope` (`dept_id`,`created_by`),
+  KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流运行实例';
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `sys_delete_queue` (
+  `id` bigint unsigned NOT NULL COMMENT '雪花ID',
+  `entity` varchar(64) NOT NULL COMMENT '实体类型，如 mvp_task',
+  `ids` json NOT NULL COMMENT '待删除的主键列表',
+  `status` varchar(16) NOT NULL DEFAULT 'pending' COMMENT 'pending/processing/done/failed',
+  `retry_count` int NOT NULL DEFAULT '0',
+  `error_msg` text,
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_status` (`status`,`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='异步删除队列';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
@@ -1244,16 +1283,10 @@ CREATE TABLE `system_users` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
-CREATE TABLE `sys_delete_queue` (
-  `id` bigint unsigned NOT NULL COMMENT '雪花ID',
-  `entity` varchar(64) NOT NULL COMMENT '实体类型，如 mvp_task',
-  `ids` json NOT NULL COMMENT '待删除的主键列表',
-  `status` varchar(16) NOT NULL DEFAULT 'pending' COMMENT 'pending/processing/done/failed',
-  `retry_count` int NOT NULL DEFAULT 0,
-  `error_msg` text,
-  `created_at` datetime DEFAULT NULL,
-  `updated_at` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  KEY `idx_status` (`status`,`created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='异步删除队列';
+/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
+/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
+/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;
+/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
+
