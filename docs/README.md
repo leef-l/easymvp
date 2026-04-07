@@ -1,50 +1,37 @@
-# 文档目录
+# EasyMVP 文档目录
 
-- `AI应用使用指南.md`
-- `EasyMVP使用文档.md`
-- `EasyMVP对接Aider实现文档.md`
-- `EasyMVP对接OpenHands与Aider引擎设计实现文档.md`
-- `EasyMVP架构设计文档.md`
-- `EasyMVP七层自治模型第一批实施设计文档.md`
-- `EasyMVP自治系统终极基线：七层自治模型.md`
-- `EasyMVP自治系统终极架构：六层自治模型设计方案.md`
-- `EasyMVP七层自治模型第一批实施设计文档.md`
-- `Docker开发环境说明.md`
-- `Docker生产环境变量说明.md`
-- `流水线架构重构设计文档.md`
-- `WorkflowRun阶段化工作流引擎重构架构设计文档.md`
-- `WorkflowRun数据库升级与迁移实施设计文档.md`
-- `WorkflowRun后端模块拆分与目录重构设计文档.md`
-- `WorkflowRun前端页面与事件协议设计文档.md`
-- `WorkflowRun分阶段实施排期与任务拆解文档.md`
-- `WorkflowRun架构偏移与校准清单文档.md`
-- `WorkflowRun测试验收与回滚预案文档.md`
-- `WorkflowRun已实现模块数据权限补强清单.md`
-- `项目分类配置化改造设计方案.md`
-- `L3.5到L4自动化与少人值守演进方案.md`
-- `追平第3层与逼近第4层的半年路线图.md`
-- `执行器接入架构设计文档.md`
-- `执行器统一抽象与生命周期设计文档.md`
-- `执行器能力矩阵与选型文档.md`
-- `OpenHands接入设计与实施文档.md`
-- `Claude Code接入设计与实施文档.md`
-- `Codex CLI接入设计与实施文档.md`
-- `Gemini CLI接入设计与实施文档.md`
-- `GitWorktree任务级环境隔离设计文档.md`
-- `AcceptStage自动验收阶段设计文档.md`
-- `执行器配置中心与密钥管理设计文档.md`
-- `执行器调度隔离与并发控制设计文档.md`
-- `执行器结果回写与日志事件协议文档.md`
-- `执行器失败分类、重试与降级策略文档.md`
-- `执行器权限与审计设计文档.md`
-- `执行器接入实施排期与任务拆解文档.md`
-- `执行器测试验收与回滚预案文档.md`
-- `执行器生产部署与容量规划文档.md`
-- `飞书机器人接入与移动端控制设计文档.md`
-- `腾讯云CodingPlan模型测试报告.md`
-- `超前理念文档/`
-  - `EasyMVP目标驱动自治控制操作系统方案-架构师B.md`
-  - `EasyMVP七层自治操作系统终极基线方案-架构师A.md`
-  - `EasyMVP自治宪法操作系统终版方案-架构师B.md`
+## 系统架构
+- [EasyMVP架构设计文档](EasyMVP架构设计文档.md) — 系统全局设计
+- [EasyMVP V2终极演进方案](EasyMVP%20V2终极演进方案.md) — V2 演进路线与审计基线
+- [WorkflowRun阶段化工作流引擎重构架构设计文档](WorkflowRun阶段化工作流引擎重构架构设计文档.md) — V2 六阶段流水线核心架构
+- [WorkflowRun数据库升级与迁移实施设计文档](WorkflowRun数据库升级与迁移实施设计文档.md) — 数据库 schema 设计
 
-本地 Docker 开发配置位于 `../docker/dev/`。
+## 执行引擎
+- [EasyMVP对接OpenHands与Aider引擎设计实现文档](EasyMVP对接OpenHands与Aider引擎设计实现文档.md) — 多引擎架构设计
+- [EasyMVP对接Aider实现文档](EasyMVP对接Aider实现文档.md) — Aider 执行器实现细节
+- [执行器接入架构设计文档](执行器接入架构设计文档.md) — 统一执行器接口设计
+- [GitWorktree任务级环境隔离设计文档](GitWorktree任务级环境隔离设计文档.md) — 任务级 worktree 隔离
+
+## 工作流阶段
+- [AcceptStage自动验收阶段设计文档](AcceptStage自动验收阶段设计文档.md) — 验收阶段设计
+- [CompleteStage收尾闭环设计文档](CompleteStage收尾闭环设计文档.md) — 完成阶段设计
+- [WorkflowRun前端页面与事件协议设计文档](WorkflowRun前端页面与事件协议设计文档.md) — 前端页面与 SSE 事件协议
+
+## 自治系统
+- [EasyMVP自治系统终极基线：七层自治模型](EasyMVP自治系统终极基线：七层自治模型.md) — 七层自治模型完整设计
+- [EasyMVP七层自治模型第一批实施设计文档](EasyMVP七层自治模型第一批实施设计文档.md) — Phase A 实施方案
+- [L3.5到L4自动化与少人值守演进方案](L3.5到L4自动化与少人值守演进方案.md) — L3.5→L4 演进路线
+- [L4项目级自治能力设计方案](L4项目级自治能力设计方案.md) — L4 项目级自治设计
+- [M6前端控制台与旧链退役设计文档](M6前端控制台与旧链退役设计文档.md) — M6 里程碑前端设计
+- [M6自治项目管理初版设计文档](M6自治项目管理初版设计文档.md) — M6 自治管理设计
+
+## 协作与集成
+- [飞书机器人接入与移动端控制设计文档](飞书机器人接入与移动端控制设计文档.md) — 飞书 Bot 接入设计
+- [EasyMVP飞书Bot能力说明](EasyMVP飞书Bot能力说明.md) — 飞书 Bot 功能说明
+- [项目分类配置化改造设计方案](项目分类配置化改造设计方案.md) — 项目分类动态配置
+
+## 使用指南
+- [EasyMVP使用文档](EasyMVP使用文档.md) — 用户操作流程
+- [AI应用使用指南](AI应用使用指南.md) — AI 配置指南
+- [Docker开发环境说明](Docker开发环境说明.md) — 本地开发环境搭建
+- [Docker生产环境变量说明](Docker生产环境变量说明.md) — 生产环境配置
