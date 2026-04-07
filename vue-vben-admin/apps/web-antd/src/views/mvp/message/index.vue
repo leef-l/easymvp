@@ -240,7 +240,7 @@ async function handleDownloadTemplate() {
     a.href = url;
     a.download = 'MVP消息表导入模板.csv';
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   } catch {
     message.error('下载模板失败');
   }

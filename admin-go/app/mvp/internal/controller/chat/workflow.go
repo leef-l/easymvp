@@ -279,25 +279,33 @@ func (c *cWorkflow) ConfirmPlan(ctx context.Context, req *v1.WorkflowConfirmPlan
 		wfRunID := wfRun["id"].Int64()
 		// 软删除旧的领域任务、阶段任务、阶段实例、审核问题、验收记录
 		for _, table := range []string{"mvp_domain_task", "mvp_stage_task", "mvp_stage_run", "mvp_review_issue", "mvp_accept_run"} {
-			_, _ = g.DB().Model(table).Ctx(ctx).
+			if _, delErr := g.DB().Model(table).Ctx(ctx).
 				Where("workflow_run_id", wfRunID).WhereNull("deleted_at").
-				Update(g.Map{"deleted_at": now, "updated_at": now})
+				Update(g.Map{"deleted_at": now, "updated_at": now}); delErr != nil {
+				g.Log().Errorf(ctx, "[ConfirmPlan] 清理 %s 失败: wfRun=%d err=%v", table, wfRunID, delErr)
+			}
 		}
 		// 清理 worktree 记录
-		_, _ = g.DB().Model("mvp_task_workspace").Ctx(ctx).
+		if _, wsErr := g.DB().Model("mvp_task_workspace").Ctx(ctx).
 			Where("project_id", projectID).WhereNull("deleted_at").
-			Update(g.Map{"deleted_at": now, "updated_at": now})
+			Update(g.Map{"deleted_at": now, "updated_at": now}); wsErr != nil {
+			g.Log().Errorf(ctx, "[ConfirmPlan] 清理 workspace 失败: project=%d err=%v", projectID, wsErr)
+		}
 		// workflow_run 回到 designing（SubmitForReviewAsync 会再改成 reviewing）
-		_, _ = g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		if _, wfErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 			Where("id", wfRunID).
 			Update(g.Map{
 				"status": "designing", "current_stage": "design",
 				"pause_reason": nil, "status_before_pause": nil, "updated_at": now,
-			})
+			}); wfErr != nil {
+			g.Log().Errorf(ctx, "[ConfirmPlan] 回退 workflow_run 状态失败: wfRun=%d err=%v", wfRunID, wfErr)
+		}
 		// project 状态也先回到 designing
-		_, _ = g.DB().Model("mvp_project").Ctx(ctx).
+		if _, pErr := g.DB().Model("mvp_project").Ctx(ctx).
 			Where("id", projectID).
-			Update(g.Map{"status": "designing", "pause_reason": nil, "updated_at": now})
+			Update(g.Map{"status": "designing", "pause_reason": nil, "updated_at": now}); pErr != nil {
+			g.Log().Errorf(ctx, "[ConfirmPlan] 回退 project 状态失败: project=%d err=%v", projectID, pErr)
+		}
 
 		g.Log().Infof(ctx, "[ConfirmPlan] 已清理旧执行数据: projectID=%d wfRunID=%d", projectID, wfRunID)
 	}
@@ -1041,10 +1049,17 @@ func buildConfirmPlanResult(ctx context.Context, projectID int64) *v1.WorkflowCo
 	stageRunID := stageRun["id"].Int64()
 
 	// 统计 issue
-	res.ErrorCount, _ = g.DB().Model("mvp_review_issue").Ctx(ctx).
+	var countErr error
+	res.ErrorCount, countErr = g.DB().Model("mvp_review_issue").Ctx(ctx).
 		Where("stage_run_id", stageRunID).Where("severity", "error").Where("status", "open").Count()
-	res.WarningCount, _ = g.DB().Model("mvp_review_issue").Ctx(ctx).
+	if countErr != nil {
+		g.Log().Warningf(ctx, "[ReviewStatus] 统计 error issue 失败: stageRun=%d err=%v", stageRunID, countErr)
+	}
+	res.WarningCount, countErr = g.DB().Model("mvp_review_issue").Ctx(ctx).
 		Where("stage_run_id", stageRunID).Where("severity", "warning").Where("status", "open").Count()
+	if countErr != nil {
+		g.Log().Warningf(ctx, "[ReviewStatus] 统计 warning issue 失败: stageRun=%d err=%v", stageRunID, countErr)
+	}
 
 	// 查 issue 列表（error 优先，最多 50 条）
 	issues, _ := g.DB().Model("mvp_review_issue").Ctx(ctx).
@@ -1810,7 +1825,9 @@ func buildDomainTaskItem(t gdb.Record) v1.DomainTaskItem {
 	var resources []string
 	resJSON := t["affected_resources"].String()
 	if resJSON != "" && resJSON != "[]" && resJSON != "null" {
-		_ = json.Unmarshal([]byte(resJSON), &resources)
+		if umErr := json.Unmarshal([]byte(resJSON), &resources); umErr != nil {
+			g.Log().Warningf(context.Background(), "[buildDomainTaskItem] 解析 affected_resources 失败: task=%d err=%v", t["id"].Int64(), umErr)
+		}
 	}
 	return v1.DomainTaskItem{
 		ID:                snowflake.JsonInt64(t["id"].Int64()),

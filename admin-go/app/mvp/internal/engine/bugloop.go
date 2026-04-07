@@ -355,9 +355,10 @@ func normalizePatchResources(values []string) ([]string, []string) {
 	}()).Resources, nil
 }
 
+var linkedTaskIDRe = regexp.MustCompile(`关联任务ID：(\d+)`)
+
 func parseLinkedTaskID(desc string) int64 {
-	re := regexp.MustCompile(`关联任务ID：(\d+)`)
-	match := re.FindStringSubmatch(desc)
+	match := linkedTaskIDRe.FindStringSubmatch(desc)
 	if len(match) != 2 {
 		return 0
 	}
@@ -377,8 +378,7 @@ func parseArchitectTaskPatch(content string) (*architectTaskPatch, error) {
 		return &patch, nil
 	}
 
-	re := regexp.MustCompile("(?s)```json\\s*(\\{.*?\\})\\s*```")
-	match := re.FindStringSubmatch(content)
+	match := jsonCodeBlockRe.FindStringSubmatch(content)
 	if len(match) == 2 {
 		if err := json.Unmarshal([]byte(match[1]), &patch); err == nil {
 			return &patch, nil

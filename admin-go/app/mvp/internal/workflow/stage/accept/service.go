@@ -179,10 +179,12 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 	}
 
 	// 写入规则快照
-	_, _ = g.DB().Model("mvp_accept_run").Ctx(ctx).
+	if _, snapErr := g.DB().Model("mvp_accept_run").Ctx(ctx).
 		Where("id", acceptRunID).
 		Data(g.Map{"rules_snapshot_ref": rulesSnapshot, "updated_at": gtime.Now()}).
-		Update()
+		Update(); snapErr != nil {
+		g.Log().Errorf(ctx, "[AcceptService] 写入规则快照失败: acceptRun=%d err=%v", acceptRunID, snapErr)
+	}
 
 	// 6. 裁决归并
 	decision, reduceErr := s.reducer.Reduce(ctx, acceptCtx, hits, evidence)

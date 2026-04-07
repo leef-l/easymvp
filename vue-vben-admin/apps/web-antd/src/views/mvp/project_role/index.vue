@@ -211,7 +211,7 @@ async function handleExport() {
     a.href = url;
     a.download = '项目角色配置表.csv';
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     message.success('导出成功');
   } catch {
     message.error('导出失败');
@@ -251,7 +251,7 @@ async function handleDownloadTemplate() {
     a.href = url;
     a.download = '项目角色配置表导入模板.csv';
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   } catch {
     message.error('下载模板失败');
   }

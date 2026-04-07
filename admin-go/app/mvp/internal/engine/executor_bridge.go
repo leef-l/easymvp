@@ -69,10 +69,13 @@ func EnsureDomainTaskConversation(ctx context.Context, projectID, taskID int64, 
 	}
 
 	// 查项目所有者
-	project, _ := g.DB().Model("mvp_project").Ctx(ctx).
+	project, projErr := g.DB().Model("mvp_project").Ctx(ctx).
 		Where("id", projectID).Fields("created_by, dept_id").One()
+	if projErr != nil {
+		return 0, fmt.Errorf("查询项目 %d 失败: %w", projectID, projErr)
+	}
 	if project.IsEmpty() {
-		return 0, fmt.Errorf("项目不存在")
+		return 0, fmt.Errorf("项目 %d 不存在", projectID)
 	}
 
 	convID := int64(snowflake.Generate())

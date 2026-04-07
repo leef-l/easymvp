@@ -12,6 +12,8 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 )
 
+var jsonCodeBlockRe = regexp.MustCompile("(?s)```json\\s*\\n?(\\{[\\s\\S]*?\\})\\s*```")
+
 // getReviewRoleModel 获取审核角色的 AI 模型信息
 func getReviewRoleModel(ctx context.Context, projectID int64, roleType string) (*ModelInfo, error) {
 	role, err := ResolveProjectRole(ctx, projectID, roleType)
@@ -222,8 +224,7 @@ func parseJSONFromAI(content string, v interface{}) error {
 	}
 
 	// 从 ```json 代码块中提取
-	re := regexp.MustCompile("(?s)```json\\s*\\n?(\\{[\\s\\S]*?\\})\\s*```")
-	if match := re.FindStringSubmatch(content); len(match) == 2 {
+	if match := jsonCodeBlockRe.FindStringSubmatch(content); len(match) == 2 {
 		if err := json.Unmarshal([]byte(match[1]), v); err == nil {
 			return nil
 		}
