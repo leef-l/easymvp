@@ -18,6 +18,8 @@ import (
 	"easymvp/utility/snowflake"
 )
 
+var reworkJsonBlockRe = regexp.MustCompile("(?s)```json\\s*(\\{.*?\\})\\s*```")
+
 // StageCompleter 阶段操作回调（避免循环依赖）。
 type StageCompleter interface {
 	CompleteStage(ctx context.Context, stageRunID int64) error
@@ -301,7 +303,7 @@ func parseTaskPatch(content string) (*taskPatch, error) {
 		return &patch, nil
 	}
 
-	re := regexp.MustCompile("(?s)```json\\s*(\\{.*?\\})\\s*```")
+	re := reworkJsonBlockRe
 	match := re.FindStringSubmatch(content)
 	if len(match) == 2 {
 		if err := json.Unmarshal([]byte(match[1]), &patch); err == nil {

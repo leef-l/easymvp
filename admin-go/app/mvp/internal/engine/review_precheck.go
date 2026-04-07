@@ -215,7 +215,12 @@ func systemPrecheck(ctx context.Context, projectID int64, tasks gdb.Result, work
 		var dependsOn []string
 		depJSON := t["depends_on"].String()
 		if depJSON != "" && depJSON != "[]" && depJSON != "null" {
-			json.Unmarshal([]byte(depJSON), &dependsOn)
+			if jsonErr := json.Unmarshal([]byte(depJSON), &dependsOn); jsonErr != nil {
+				result.Warnings = append(result.Warnings, ReviewIssue{
+					TaskName: name, Severity: "warning",
+					Message: fmt.Sprintf("depends_on JSON 格式异常: %v", jsonErr),
+				})
+			}
 		}
 		for _, dep := range dependsOn {
 			if !taskNames[dep] {

@@ -130,13 +130,20 @@ func HandleReviewSuccess(ctx context.Context, projectID int64, result *ReviewRes
 			for _, msg := range msgs {
 				suffix += fmt.Sprintf("\n\n⚠️ 审核警告: %s", msg)
 			}
-			if _, err := tx.Model("mvp_task").
+			task, qErr := tx.Model("mvp_task").
 				Where("project_id", projectID).
 				Where("name", taskName).
 				Where("status", "pending").
 				Where("deleted_at IS NULL").
+				Fields("id,description").One()
+			if qErr != nil || task.IsEmpty() {
+				continue
+			}
+			newDesc := task["description"].String() + suffix
+			if _, err := tx.Model("mvp_task").
+				Where("id", task["id"].Int64()).
 				Update(g.Map{
-					"description": gdb.Raw(fmt.Sprintf("CONCAT(description, '%s')", strings.ReplaceAll(suffix, "'", "''"))),
+					"description": newDesc,
 					"updated_at":  gtime.Now(),
 				}); err != nil {
 				return fmt.Errorf("附加审核警告失败: task=%s, err=%w", taskName, err)

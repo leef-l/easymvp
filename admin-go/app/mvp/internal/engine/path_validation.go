@@ -76,11 +76,11 @@ func ensureWorkDir(path string, autoCreate bool) (string, bool, error) {
 	return path, true, nil
 }
 
-// checkPathBlacklist 检查路径是否在系统黑名单中
+// checkPathBlacklist 检查路径是否在系统黑名单中（含子目录）
 func checkPathBlacklist(path string) error {
 	cleaned := filepath.Clean(path)
 	for _, blocked := range systemPathBlacklist {
-		if cleaned == blocked {
+		if cleaned == blocked || strings.HasPrefix(cleaned, blocked+string(filepath.Separator)) {
 			return fmt.Errorf("禁止使用系统目录作为工作目录: %s", path)
 		}
 	}

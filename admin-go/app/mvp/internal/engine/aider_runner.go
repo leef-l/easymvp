@@ -356,7 +356,7 @@ func (r *AiderRunner) writeMessageFile(message string) (string, error) {
 	}
 
 	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("aider-message-%d.txt", time.Now().UnixNano()))
-	if err := os.WriteFile(tmpFile, []byte(message), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(message), 0600); err != nil {
 		return "", err
 	}
 	return tmpFile, nil

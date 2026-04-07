@@ -97,7 +97,7 @@ func sanitizePath(rawPath string, baseDir string) (string, error) {
 		return "", fmt.Errorf("路径不在项目目录内")
 	}
 
-	return absPath, nil
+	return realPath, nil
 }
 
 // readPath 读取文件或目录，返回格式化的内容和字节数
@@ -197,7 +197,9 @@ func readDir(dir string, remaining int) (string, int) {
 		}
 		return nil
 	})
-	_ = walkErr
+	if walkErr != nil {
+		blocks = append(blocks, fmt.Sprintf("\n> 目录遍历出错: %v", walkErr))
+	}
 
 	if fileCount >= dirMaxFiles {
 		blocks = append(blocks, fmt.Sprintf("\n> 文件数超过 %d 个上限，后续文件跳过", dirMaxFiles))
