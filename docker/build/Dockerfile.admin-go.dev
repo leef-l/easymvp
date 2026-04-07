@@ -42,6 +42,15 @@ RUN apt-get update \
     && openhands --help >/dev/null \
     && rm -rf /var/lib/apt/lists/*
 
+# 安装 Node.js 22.x + Claude Code CLI + Codex CLI + Gemini CLI
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli \
+    && claude --version \
+    && codex --version \
+    && (gemini --version 2>/dev/null || true) \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN go install -tags 'mysql' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 
 COPY go.mod go.sum ./
