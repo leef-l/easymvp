@@ -259,29 +259,47 @@ func (c *cWorkflow) CreateProject(ctx context.Context, req *v1.WorkflowCreatePro
 	}, nil
 }
 
-// ConfirmPlan 确认实施方案
+// ConfirmPlan 确认实施方案。
+// 每次确认前先清理该项目所有旧的执行数据（domain_task、stage_run 等），
+// 确保每次确认都像第一次一样干净。
 func (c *cWorkflow) ConfirmPlan(ctx context.Context, req *v1.WorkflowConfirmPlanReq) (res *v1.WorkflowConfirmPlanRes, err error) {
 	projectID := int64(req.ProjectID)
 	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
 	}
 
-	// 前置检查：auditor 角色的 AI 模型是否可用（审核阶段需要）
-	auditorRole, _ := g.DB().Model("mvp_project_role").Ctx(ctx).
+	now := gtime.Now()
+
+	// 清理旧的执行数据，让每次确认方案都从干净状态开始
+	wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 		Where("project_id", projectID).
-		Where("role_type", "auditor").
-		WhereNull("deleted_at").One()
-	if auditorRole.IsEmpty() || auditorRole["model_id"].Int64() == 0 {
-		g.Log().Warningf(ctx, "[ConfirmPlan] 项目未配置 auditor 角色，跳过 AI 审核直接通过: projectID=%d", projectID)
-	} else {
-		modelRow, _ := g.DB().Model("ai_model m").Ctx(ctx).
-			LeftJoin("ai_plan p", "p.id = m.plan_id").
-			Where("m.id", auditorRole["model_id"].Int64()).
-			Where("m.deleted_at IS NULL").
-			Fields("m.model_code, p.api_key").One()
-		if modelRow.IsEmpty() || modelRow["api_key"].String() == "" {
-			g.Log().Warningf(ctx, "[ConfirmPlan] auditor 模型不可用，跳过 AI 审核直接通过: projectID=%d", projectID)
+		WhereNotIn("status", g.Slice{"completed", "canceled"}).
+		WhereNull("deleted_at").OrderDesc("run_no").One()
+	if !wfRun.IsEmpty() {
+		wfRunID := wfRun["id"].Int64()
+		// 软删除旧的领域任务、阶段任务、阶段实例、审核问题、验收记录
+		for _, table := range []string{"mvp_domain_task", "mvp_stage_task", "mvp_stage_run", "mvp_review_issue", "mvp_accept_run"} {
+			_, _ = g.DB().Model(table).Ctx(ctx).
+				Where("workflow_run_id", wfRunID).WhereNull("deleted_at").
+				Update(g.Map{"deleted_at": now, "updated_at": now})
 		}
+		// 清理 worktree 记录
+		_, _ = g.DB().Model("mvp_task_workspace").Ctx(ctx).
+			Where("project_id", projectID).WhereNull("deleted_at").
+			Update(g.Map{"deleted_at": now, "updated_at": now})
+		// workflow_run 回到 designing（SubmitForReviewAsync 会再改成 reviewing）
+		_, _ = g.DB().Model("mvp_workflow_run").Ctx(ctx).
+			Where("id", wfRunID).
+			Update(g.Map{
+				"status": "designing", "current_stage": "design",
+				"pause_reason": nil, "status_before_pause": nil, "updated_at": now,
+			})
+		// project 状态也先回到 designing
+		_, _ = g.DB().Model("mvp_project").Ctx(ctx).
+			Where("id", projectID).
+			Update(g.Map{"status": "designing", "pause_reason": nil, "updated_at": now})
+
+		g.Log().Infof(ctx, "[ConfirmPlan] 已清理旧执行数据: projectID=%d wfRunID=%d", projectID, wfRunID)
 	}
 
 	submitErr := orchestrator.GetPlanVersionService().SubmitForReviewAsync(ctx, projectID)
