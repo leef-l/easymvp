@@ -365,11 +365,14 @@ func (s *DomainTaskScheduler) Pause(ctx context.Context, workflowRunID int64) {
 	s.Stop(workflowRunID)
 
 	// 查 running 任务
-	runningTasks, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+	runningTasks, qErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("workflow_run_id", workflowRunID).
 		Where("status", domainTask.StatusRunning).
 		WhereNull("deleted_at").
 		Fields("id").All()
+	if qErr != nil {
+		g.Log().Errorf(ctx, "[Scheduler] Pause 查询 running 任务失败: wfRun=%d err=%v", workflowRunID, qErr)
+	}
 
 	s.mu.Lock()
 	for _, t := range runningTasks {
@@ -386,11 +389,13 @@ func (s *DomainTaskScheduler) Pause(ctx context.Context, workflowRunID int64) {
 	// 释放 DB 资源锁 + 回退状态
 	for _, t := range runningTasks {
 		tid := t["id"].Int64()
-		_ = s.lockMgr.ReleaseLocks(ctx, tid)
+		if lockErr := s.lockMgr.ReleaseLocks(ctx, tid); lockErr != nil {
+			g.Log().Warningf(ctx, "[Scheduler] Pause 释放资源锁失败: task=%d err=%v", tid, lockErr)
+		}
 	}
 
-	// running → pending
-	_, _ = g.DB().Model("mvp_domain_task").Ctx(ctx).
+	// running → pending（CAS 保证只回退 running 状态的任务）
+	result, pauseErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("workflow_run_id", workflowRunID).
 		Where("status", domainTask.StatusRunning).
 		Update(g.Map{
@@ -399,6 +404,11 @@ func (s *DomainTaskScheduler) Pause(ctx context.Context, workflowRunID int64) {
 			"heartbeat_at":     nil,
 			"updated_at":       gtime.Now(),
 		})
+	if pauseErr != nil {
+		g.Log().Errorf(ctx, "[Scheduler] Pause 回退任务状态失败: wfRun=%d err=%v", workflowRunID, pauseErr)
+	} else if rows, _ := result.RowsAffected(); rows > 0 {
+		g.Log().Infof(ctx, "[Scheduler] Pause 回退 %d 个 running 任务为 pending: wfRun=%d", rows, workflowRunID)
+	}
 }
 
 // allDepsCompleted 检查任务的所有依赖是否已完成。
