@@ -500,6 +500,9 @@ async function loadHistory() {
         isSending.value = false;
         loadProjectStatus();
       });
+    } else {
+      // 没有 streaming 消息，确保输入框可用（防止上次 isSending 残留）
+      isSending.value = false;
     }
   } catch (err) {
     console.error('加载历史消息失败:', err);
