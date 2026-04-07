@@ -76,6 +76,11 @@ export function resumeProject(projectID: string) {
   return requestClient.post(`${PREFIX}/resume`, { projectID });
 }
 
+/** 回到设计阶段（清理已有方案和任务，重新拆分） */
+export function resetToDesign(projectID: string) {
+  return requestClient.post<{ message: string }>(`${PREFIX}/reset-to-design`, { projectID });
+}
+
 /** 重试失败的任务 */
 export function retryTask(data: { projectID: string; taskID: string }) {
   return requestClient.post(`${PREFIX}/retry-task`, data);

@@ -40,6 +40,7 @@ import {
   acceptApprove,
   acceptRework,
   triggerReplan,
+  resetToDesign,
   getExecutionStatus,
   type ProjectStatusResult,
   type StageHistoryItem,
@@ -243,6 +244,27 @@ async function handleTriggerReplan() {
         message.success('重规划已触发，请在时间线中查看进度');
       } catch (e: any) {
         message.error('触发失败：' + (e?.message || '未知错误'));
+      } finally {
+        hide();
+      }
+      await loadAll();
+    },
+  });
+}
+
+async function handleResetToDesign() {
+  Modal.confirm({
+    title: '回到设计阶段',
+    content: '将清理已有的方案、任务和工作空间，项目回到设计阶段重新拆分。此操作不可撤销，确定继续？',
+    okText: '确定',
+    okType: 'danger',
+    async onOk() {
+      const hide = message.loading('正在重置...', 0);
+      try {
+        const res = await resetToDesign(projectId.value);
+        message.success(res.message || '已回到设计阶段');
+      } catch (e: any) {
+        message.error('重置失败：' + (e?.message || '未知错误'));
       } finally {
         hide();
       }
@@ -516,6 +538,9 @@ watch(currentStatus, (status) => {
             <!-- 暂停状态 -->
             <Button v-if="currentStatus === 'paused'" type="primary" @click="handleResume">
               恢复执行
+            </Button>
+            <Button v-if="currentStatus === 'paused'" danger @click="handleResetToDesign">
+              回到设计
             </Button>
 
             <!-- 验收阶段 -->

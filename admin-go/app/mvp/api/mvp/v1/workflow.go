@@ -78,6 +78,18 @@ type WorkflowResumeRes struct {
 	g.Meta `mime:"application/json"`
 }
 
+// WorkflowResetToDesignReq 回到设计阶段请求（暂停状态下可用，清理已有方案和任务）
+type WorkflowResetToDesignReq struct {
+	g.Meta    `path:"/workflow/reset-to-design" method:"post" tags:"项目流程" summary:"回到设计阶段"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// WorkflowResetToDesignRes 回到设计阶段响应
+type WorkflowResetToDesignRes struct {
+	g.Meta  `mime:"application/json"`
+	Message string `json:"message"`
+}
+
 // WorkflowRetryTaskReq 重新执行失败任务请求
 type WorkflowRetryTaskReq struct {
 	g.Meta    `path:"/workflow/retry-task" method:"post" tags:"项目流程" summary:"重新执行失败任务"`
