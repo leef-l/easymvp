@@ -33,7 +33,9 @@ func (e *AiderExecutor) Execute(ctx context.Context, req *Request) *Result {
 	// 如果有 workspace 隔离，使用 worktree 路径
 	if req.Workspace != nil {
 		workDir = req.Workspace.WorkspacePath
-		_ = e.wsMgr.MarkRunning(ctx, req.TaskID)
+		if mrErr := e.wsMgr.MarkRunning(ctx, req.TaskID); mrErr != nil {
+			g.Log().Warningf(ctx, "[AiderExecutor] MarkRunning 失败: task=%d err=%v", req.TaskID, mrErr)
+		}
 		g.Log().Infof(ctx, "[AiderExecutor] 使用 worktree 隔离: task=%d path=%s", req.TaskID, workDir)
 	}
 
@@ -61,10 +63,12 @@ func (e *AiderExecutor) Execute(ctx context.Context, req *Request) *Result {
 	if aiderResult.Error != nil {
 		// workspace finalize: 标记失败
 		if req.Workspace != nil && e.wsMgr != nil {
-			_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{
+			if fErr := e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{
 				Success: false,
 				Error:   aiderResult.Error.Error(),
-			})
+			}); fErr != nil {
+				g.Log().Warningf(ctx, "[AiderExecutor] workspace finalize(失败) 失败: task=%d err=%v", req.TaskID, fErr)
+			}
 		}
 		return &Result{Success: false, Error: aiderResult.Error}
 	}

@@ -290,6 +290,16 @@ func Init() {
 			taskScheduler.Stop(workflowRunID)
 		})
 
+		// 注册工作流恢复后的回调（重启调度器）
+		workflowSvc.SetWorkflowResumedCallback(func(ctx context.Context, workflowRunID int64, resumeStatus string) {
+			if resumeStatus == consts.WorkflowRunStatusExecuting || resumeStatus == consts.WorkflowRunStatusReworking {
+				g.Log().Infof(ctx, "[Registry] 工作流恢复，重启调度器: workflowRunID=%d status=%s", workflowRunID, resumeStatus)
+				if err := taskScheduler.Start(ctx, workflowRunID); err != nil {
+					g.Log().Errorf(ctx, "[Registry] 工作流恢复后调度器启动失败: workflowRunID=%d err=%v", workflowRunID, err)
+				}
+			}
+		})
+
 		// Watchdog V2: 监控 domain_task 心跳
 		domainWatchdog = watchdogV2.New()
 		domainWatchdog.SetScheduler(taskScheduler)

@@ -51,7 +51,9 @@ func (e *GeminiCLIExecutor) Execute(ctx context.Context, req *Request) *Result {
 	workDir := project["work_dir"].String()
 	if req.Workspace != nil {
 		workDir = req.Workspace.WorkspacePath
-		_ = e.wsMgr.MarkRunning(ctx, req.TaskID)
+		if mrErr := e.wsMgr.MarkRunning(ctx, req.TaskID); mrErr != nil {
+			g.Log().Warningf(ctx, "[GeminiCLIExecutor] MarkRunning 失败: task=%d err=%v", req.TaskID, mrErr)
+		}
 	}
 
 	// 构建任务指令

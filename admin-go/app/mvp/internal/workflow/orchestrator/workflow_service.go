@@ -20,18 +20,27 @@ import (
 // WorkflowPausedCallback 工作流暂停后的清理回调（停调度器等）。
 type WorkflowPausedCallback func(ctx context.Context, workflowRunID int64)
 
+// WorkflowResumedCallback 工作流恢复后的回调（重启调度器等）。
+type WorkflowResumedCallback func(ctx context.Context, workflowRunID int64, resumeStatus string)
+
 // WorkflowService 工作流编排服务。
 type WorkflowService struct {
-	runtimeMgr       *runtime.Manager
-	publisher        *event.Publisher
-	wfRepo           *repo.WorkflowRunRepo
-	stageRepo        *repo.StageRunRepo
-	onWorkflowPaused WorkflowPausedCallback
+	runtimeMgr        *runtime.Manager
+	publisher         *event.Publisher
+	wfRepo            *repo.WorkflowRunRepo
+	stageRepo         *repo.StageRunRepo
+	onWorkflowPaused  WorkflowPausedCallback
+	onWorkflowResumed WorkflowResumedCallback
 }
 
 // SetWorkflowPausedCallback 注册工作流暂停后的清理回调。
 func (s *WorkflowService) SetWorkflowPausedCallback(fn WorkflowPausedCallback) {
 	s.onWorkflowPaused = fn
+}
+
+// SetWorkflowResumedCallback 注册工作流恢复后的回调（重启调度器等）。
+func (s *WorkflowService) SetWorkflowResumedCallback(fn WorkflowResumedCallback) {
+	s.onWorkflowResumed = fn
 }
 
 // NewWorkflowService 创建工作流服务。
@@ -273,6 +282,11 @@ func (s *WorkflowService) Resume(ctx context.Context, workflowRunID int64) error
 		_, _ = g.DB().Model("mvp_project").Ctx(ctx).
 			Where("id", projectID).
 			Update(g.Map{"status": resumeStatus, "pause_reason": nil, "updated_at": now})
+	}
+
+	// 恢复后重启调度器（execute/rework 阶段需要调度器推进任务）
+	if s.onWorkflowResumed != nil {
+		s.onWorkflowResumed(ctx, workflowRunID, resumeStatus)
 	}
 
 	if s.publisher != nil {

@@ -33,6 +33,7 @@ func RecoverActiveWorkflows(ctx context.Context) error {
 	}
 
 	restartedSchedulers := 0
+	var failedWorkflows []int64
 	for _, run := range runs {
 		// 检查启动 ctx 是否已取消，防止无限恢复
 		if ctx.Err() != nil {
@@ -51,8 +52,9 @@ func RecoverActiveWorkflows(ctx context.Context) error {
 		case consts.StageTypeExecute, consts.StageTypeRework:
 			// 调度器用独立 ctx，生命周期不跟随启动流程
 			if err := taskScheduler.Start(context.Background(), workflowRunID); err != nil {
-				g.Log().Warningf(ctx, "[WorkflowRecovery] 重启调度失败: workflowRunID=%d stage=%s status=%s err=%v",
+				g.Log().Errorf(ctx, "[WorkflowRecovery] 重启调度失败: workflowRunID=%d stage=%s status=%s err=%v",
 					workflowRunID, stage, status, err)
+				failedWorkflows = append(failedWorkflows, workflowRunID)
 				continue
 			}
 			restartedSchedulers++
@@ -62,7 +64,10 @@ func RecoverActiveWorkflows(ctx context.Context) error {
 		}
 	}
 
-	g.Log().Infof(ctx, "[WorkflowRecovery] 恢复活跃工作流完成: total=%d restartedSchedulers=%d",
-		len(runs), restartedSchedulers)
+	if len(failedWorkflows) > 0 {
+		g.Log().Errorf(ctx, "[WorkflowRecovery] 以下工作流调度器恢复失败，需要人工检查: %v", failedWorkflows)
+	}
+	g.Log().Infof(ctx, "[WorkflowRecovery] 恢复活跃工作流完成: total=%d restartedSchedulers=%d failedSchedulers=%d",
+		len(runs), restartedSchedulers, len(failedWorkflows))
 	return nil
 }
