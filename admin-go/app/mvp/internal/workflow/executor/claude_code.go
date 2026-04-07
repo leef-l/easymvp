@@ -47,7 +47,10 @@ func (e *ClaudeCodeExecutor) Execute(ctx context.Context, req *Request) *Result 
 	}
 
 	// 确定工作目录
-	project, _ := g.DB().Model("mvp_project").Ctx(ctx).Where("id", req.ProjectID).One()
+	project, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", req.ProjectID).One()
+	if projErr != nil || project.IsEmpty() {
+		return &Result{Success: false, Error: fmt.Errorf("项目 %d 不存在或查询失败: %v", req.ProjectID, projErr)}
+	}
 	workDir := project["work_dir"].String()
 	if req.Workspace != nil {
 		workDir = req.Workspace.WorkspacePath
@@ -129,8 +132,13 @@ func (e *ClaudeCodeExecutor) Execute(ctx context.Context, req *Request) *Result 
 			g.Log().Warningf(ctx, "[ClaudeCodeExecutor] workspace finalize 失败: task=%d err=%v", req.TaskID, fErr)
 		} else {
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						g.Log().Errorf(context.Background(), "[ClaudeCodeExecutor] workspace cleanup panic: task=%d err=%v", req.TaskID, r)
+					}
+				}()
 				if cleanErr := e.wsMgr.Cleanup(context.Background(), req.TaskID); cleanErr != nil {
-					g.Log().Warningf(ctx, "[ClaudeCodeExecutor] workspace cleanup 失败: task=%d err=%v", req.TaskID, cleanErr)
+					g.Log().Warningf(context.Background(), "[ClaudeCodeExecutor] workspace cleanup 失败: task=%d err=%v", req.TaskID, cleanErr)
 				}
 			}()
 		}
