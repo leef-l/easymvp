@@ -171,6 +171,7 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req *ChatRequest, ha
 
 		var event anthropicStreamEvent
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			// SSE 流中偶有非 JSON 事件（ping 等），跳过不阻断
 			continue
 		}
 

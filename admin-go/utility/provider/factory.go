@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"sync"
 )
@@ -98,7 +100,9 @@ func (f *Factory) create(cfg Config) (Provider, error) {
 	}
 }
 
-// cacheKey 生成缓存 key
+// cacheKey 生成缓存 key（API Key 使用 SHA256 摘要，避免明文驻留内存）
 func cacheKey(cfg Config) string {
-	return cfg.ProviderType + ":" + cfg.BaseURL + ":" + cfg.APIKey
+	h := sha256.Sum256([]byte(cfg.APIKey))
+	keyHash := hex.EncodeToString(h[:8]) // 前 8 字节足够区分
+	return cfg.ProviderType + ":" + cfg.BaseURL + ":" + keyHash
 }

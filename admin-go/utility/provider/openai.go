@@ -154,6 +154,7 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req *ChatRequest, handl
 
 		var streamResp openaiResponse
 		if err := json.Unmarshal([]byte(data), &streamResp); err != nil {
+			// 流式数据偶有非标准行（如注释、空事件），仅跳过不阻断
 			continue
 		}
 
