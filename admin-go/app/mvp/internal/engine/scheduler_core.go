@@ -382,7 +382,14 @@ func (s *Scheduler) checkProjectDone(projectID int64) {
 		})
 
 		// 飞书推送：项目完成通知
-		go feishuNotifyProjectCompleted(context.Background(), projectID)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					g.Log().Errorf(context.Background(), "[Scheduler] feishuNotifyProjectCompleted panic: project=%d err=%v", projectID, r)
+				}
+			}()
+			feishuNotifyProjectCompleted(context.Background(), projectID)
+		}()
 
 		s.mu.Lock()
 		if rt, ok := s.projectCtx[projectID]; ok {

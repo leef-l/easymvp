@@ -129,13 +129,13 @@ function showDetail(task: DomainTaskItem) {
         <div style="max-height: 500px; overflow-y: auto; font-size: 13px; line-height: 1.6;">
           <p><b>描述：</b></p>
           <pre style="white-space: pre-wrap; background: #f5f5f5; padding: 8px; border-radius: 4px; max-height: 200px; overflow-y: auto;">${escapeHtml(task.description || '无')}</pre>
-          <p style="margin-top: 12px;"><b>状态：</b> ${task.status} &nbsp; <b>角色：</b> ${task.roleType}/${task.roleLevel} &nbsp; <b>执行方式：</b> ${task.executionMode || '-'}</p>
-          <p><b>批次：</b> ${task.batchNo} &nbsp; <b>重试次数：</b> ${task.retryCount}</p>
-          ${task.affectedResources?.length ? `<p><b>影响资源：</b> ${task.affectedResources.join(', ')}</p>` : ''}
+          <p style="margin-top: 12px;"><b>状态：</b> ${escapeHtml(String(task.status || ''))} &nbsp; <b>角色：</b> ${escapeHtml(String(task.roleType || ''))}/${escapeHtml(String(task.roleLevel || ''))} &nbsp; <b>执行方式：</b> ${escapeHtml(String(task.executionMode || '-'))}</p>
+          <p><b>批次：</b> ${escapeHtml(String(task.batchNo ?? ''))} &nbsp; <b>重试次数：</b> ${escapeHtml(String(task.retryCount ?? ''))}</p>
+          ${task.affectedResources?.length ? `<p><b>影响资源：</b> ${escapeHtml(task.affectedResources.join(', '))}</p>` : ''}
           ${task.result ? `<p style="margin-top: 12px;"><b>执行结果：</b></p><pre style="white-space: pre-wrap; background: #f0fff0; padding: 8px; border-radius: 4px; max-height: 200px; overflow-y: auto;">${escapeHtml(task.result)}</pre>` : ''}
           ${task.errorMessage ? `<p style="margin-top: 12px;"><b>错误信息：</b></p><pre style="white-space: pre-wrap; background: #fff0f0; padding: 8px; border-radius: 4px; max-height: 200px; overflow-y: auto; color: #cf1322;">${escapeHtml(task.errorMessage)}</pre>` : ''}
-          ${task.startedAt ? `<p style="margin-top: 8px; color: #999;"><b>开始：</b> ${task.startedAt}</p>` : ''}
-          ${task.completedAt ? `<p style="color: #999;"><b>完成：</b> ${task.completedAt}</p>` : ''}
+          ${task.startedAt ? `<p style="margin-top: 8px; color: #999;"><b>开始：</b> ${escapeHtml(String(task.startedAt))}</p>` : ''}
+          ${task.completedAt ? `<p style="color: #999;"><b>完成：</b> ${escapeHtml(String(task.completedAt))}</p>` : ''}
         </div>
       `;
     }

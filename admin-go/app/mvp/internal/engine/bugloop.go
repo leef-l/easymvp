@@ -52,7 +52,14 @@ func (s *Scheduler) ReportBug(ctx context.Context, projectID int64, auditorTaskI
 	logTaskAction(implTaskID, "bug_found", "completed", "bug_found", "审计员发现bug: "+bugDescription, "auditor")
 
 	// 4. 创建架构师分析任务（使用项目级 context）
-	go s.createBugAnalysisTask(s.getProjectContext(projectID), projectID, implTaskID, auditorTaskID, bugDescription)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[BugLoop] createBugAnalysisTask panic: project=%d implTask=%d err=%v", projectID, implTaskID, r)
+			}
+		}()
+		s.createBugAnalysisTask(s.getProjectContext(projectID), projectID, implTaskID, auditorTaskID, bugDescription)
+	}()
 
 	return nil
 }

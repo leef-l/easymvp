@@ -182,7 +182,7 @@ async function handleImport() {
   input.accept = '.csv,.xlsx,.xls';
   input.onchange = async () => {
     const file = input.files?.[0];
-    if (!file) return;
+    if (!file) { input.remove(); return; }
     const formData = new FormData();
     formData.append('file', file);
     try {
@@ -191,8 +191,11 @@ async function handleImport() {
       gridApi.reload();
     } catch {
       message.error('导入失败');
+    } finally {
+      input.remove();
     }
   };
+  document.body.appendChild(input);
   input.click();
 }
 

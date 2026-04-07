@@ -18,6 +18,13 @@ import (
 func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *ModelInfo) {
 	ctx := context.Background()
 
+	defer func() {
+		if r := recover(); r != nil {
+			g.Log().Errorf(ctx, "[ChatEngine] runAICall panic: conversationID=%d replyID=%d err=%v", conversationID, replyID, r)
+			e.failMessage(ctx, replyID, fmt.Sprintf("AI 调用内部错误: %v", r))
+		}
+	}()
+
 	// 1. 获取对话历史
 	messages, err := e.loadHistory(ctx, conversationID, replyID)
 	if err != nil {

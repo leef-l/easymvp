@@ -298,10 +298,10 @@ func systemPrecheck(ctx context.Context, projectID int64, tasks gdb.Result, work
 	return result
 }
 
+var garbageRe = regexp.MustCompile(`[\x00-\x1f]|[^\x00-\x7f]{10,}|[!@#$%^&*()+=\[\]{}|\\;':",<>?]{3,}`)
+
 // containsGarbage 检测路径是否包含疑似乱码
 func containsGarbage(path string) bool {
-	// 检测不可打印字符、连续特殊符号等
-	garbageRe := regexp.MustCompile(`[\x00-\x1f]|[^\x00-\x7f]{10,}|[!@#$%^&*()+=\[\]{}|\\;':",<>?]{3,}`)
 	return garbageRe.MatchString(path)
 }
 

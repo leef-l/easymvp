@@ -92,10 +92,16 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 	taskPrompt := e.buildAiderTaskPrompt(task, resources)
 
 	// 4. 创建对话记录（用于前端展示 Aider 过程）
-	conversationID, _ := e.ensureConversation(ctx, projectID, taskID, "implementer")
-	g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+	conversationID, convErr := e.ensureConversation(ctx, projectID, taskID, "implementer")
+	if convErr != nil {
+		e.handleTaskFailure(ctx, projectID, taskID, "implementer", taskFailureExecution, "创建对话失败: "+convErr.Error())
+		return
+	}
+	if _, upErr := g.DB().Model("mvp_task").Ctx(ctx).Where("id", taskID).Update(g.Map{
 		"conversation_id": conversationID,
-	})
+	}); upErr != nil {
+		g.Log().Warningf(ctx, "[Executor] 回写 conversation_id 失败: task=%d err=%v", taskID, upErr)
+	}
 	activity.TouchTaskActivity(ctx, taskID)
 	activity.TouchConversationActivity(ctx, conversationID)
 

@@ -200,7 +200,7 @@ async function handleExport() {
     a.href = url;
     a.download = 'MVP消息表.csv';
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     message.success('导出成功');
   } catch {
     message.error('导出失败');
@@ -214,7 +214,7 @@ async function handleImport() {
   input.accept = '.csv,.xlsx,.xls';
   input.onchange = async () => {
     const file = input.files?.[0];
-    if (!file) return;
+    if (!file) { input.remove(); return; }
     const formData = new FormData();
     formData.append('file', file);
     try {
@@ -223,8 +223,11 @@ async function handleImport() {
       gridApi.reload();
     } catch {
       message.error('导入失败');
+    } finally {
+      input.remove();
     }
   };
+  document.body.appendChild(input);
   input.click();
 }
 
