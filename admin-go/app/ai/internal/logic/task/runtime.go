@@ -1159,7 +1159,7 @@ func (s *sTask) validateTaskWorkspaceChanges(ctx context.Context, snapshot *work
 	if output != nil {
 		*output = strings.TrimSpace(*output + "\n\n[guard] " + summary)
 	}
-	return fmt.Errorf(summary)
+	return fmt.Errorf("%s", summary)
 }
 
 func ensureDirExists(path string) error {

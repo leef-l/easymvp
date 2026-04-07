@@ -144,16 +144,17 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 			}
 		}
 
-		// 6. 更新 workflow_run 的 active_plan_version_id（CAS 校验）
+		// 6. 更新 workflow_run 的 active_plan_version_id（CAS：仅 designing/reviewing 状态可更新）
 		if workflowRunID > 0 {
 			wfResult, err := tx.Model("mvp_workflow_run").Ctx(ctx).
 				Where("id", workflowRunID).
+				WhereIn("status", g.Slice{consts.WorkflowRunStatusDesigning, consts.WorkflowRunStatusReviewing}).
 				Update(g.Map{"active_plan_version_id": pvID, "updated_at": now})
 			if err != nil {
 				return fmt.Errorf("更新 active_plan_version_id 失败: %w", err)
 			}
 			if rows, _ := wfResult.RowsAffected(); rows == 0 {
-				return fmt.Errorf("workflow_run(%d) 不存在，无法关联 plan_version", workflowRunID)
+				return fmt.Errorf("workflow_run(%d) 不存在或已进入后续阶段，无法关联 plan_version", workflowRunID)
 			}
 		}
 
@@ -181,33 +182,39 @@ func (s *PlanVersionService) SupersedePreviousVersions(ctx context.Context, proj
 
 // doSupersede 核心 supersede 逻辑，事务和非事务场景共用。
 // GoFrame 的 ctx 事务传播机制会自动路由到当前事务（如有）。
+// 使用单次 UPDATE + 状态 CAS 条件，避免查询-更新间的并发风险。
 func (s *PlanVersionService) doSupersede(ctx context.Context, projectID int64, exceptVersionID int64) error {
 	now := gtime.Now()
-	q := g.DB().Model("mvp_plan_version").Ctx(ctx).
+
+	// 单次 UPDATE 直接按状态条件更新，无需先查 ID 列表
+	pvQuery := g.DB().Model("mvp_plan_version").Ctx(ctx).
 		Where("project_id", projectID).
 		WhereIn("status", g.Slice{consts.PlanVersionStatusDraft, consts.PlanVersionStatusActive}).
 		WhereNull("deleted_at")
 	if exceptVersionID > 0 {
-		q = q.WhereNot("id", exceptVersionID)
+		pvQuery = pvQuery.WhereNot("id", exceptVersionID)
 	}
 
-	oldIDs, err := q.Fields("id").Array()
+	// 先查出受影响的 ID 列表（供蓝图级联更新使用）
+	oldIDs, err := pvQuery.Clone().Fields("id").Array()
 	if err != nil || len(oldIDs) == 0 {
 		return err
 	}
-
 	idList := make([]int64, 0, len(oldIDs))
 	for _, v := range oldIDs {
 		idList = append(idList, v.Int64())
 	}
 
+	// plan_version 状态更新（CAS：仅更新 draft/active 状态的记录）
 	_, err = g.DB().Model("mvp_plan_version").Ctx(ctx).
 		WhereIn("id", idList).
+		WhereIn("status", g.Slice{consts.PlanVersionStatusDraft, consts.PlanVersionStatusActive}).
 		Update(g.Map{"status": consts.PlanVersionStatusSuperseded, "updated_at": now})
 	if err != nil {
 		return err
 	}
 
+	// 级联更新蓝图状态
 	_, err = g.DB().Model("mvp_task_blueprint").Ctx(ctx).
 		WhereIn("plan_version_id", idList).
 		WhereNot("blueprint_status", consts.BlueprintStatusSuperseded).

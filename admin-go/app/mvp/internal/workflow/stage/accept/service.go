@@ -194,20 +194,19 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 		return nil
 	}
 
-	// 7. 写入决策
+	// 7. 写入决策（先不标记 completed，等后续操作成功再标记）
 	if err := s.acceptRunRepo.UpdateDecision(ctx, acceptRunID, decision.Decision, decision.Score, decision.Summary); err != nil {
 		g.Log().Warningf(ctx, "[AcceptStage] 写入决策失败: %v", err)
 	}
-	// 更新 accept_run 为 completed
-	_, _ = s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "running", "completed", g.Map{})
 
-	g.Log().Infof(ctx, "[AcceptStage] 验收完成: acceptRunID=%d decision=%s score=%.1f",
+	g.Log().Infof(ctx, "[AcceptStage] 验收裁决完成: acceptRunID=%d decision=%s score=%.1f",
 		acceptRunID, decision.Decision, decision.Score)
 
-	// 8. 决定走向
+	// 8. 决定走向（先执行后续操作，成功后再标记 accept_run completed）
 	switch decision.Decision {
 	case acceptance.DecisionPassed:
-		// 完成 accept stage → 推进到 complete
+		// 标记 accept_run completed → 完成 accept stage → 推进到 complete
+		_, _ = s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "running", "completed", g.Map{})
 		if s.stageCompleter != nil {
 			if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
 				g.Log().Errorf(ctx, "[AcceptStage] CompleteStage 失败: %v", err)
@@ -222,7 +221,7 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 		}
 
 	case acceptance.DecisionFailed:
-		// 先尝试触发 rework
+		// 先尝试触发 rework，成功后再标记 accept_run completed
 		if s.reworkTrigger != nil {
 			if err := s.reworkTrigger(ctx, workflowRunID, acceptRunID, decision.Issues); err != nil {
 				if errors.Is(err, ErrManualReviewRequired) {
@@ -230,11 +229,17 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 					g.Log().Infof(ctx, "[AcceptStage] 无法自动返工，保持 accept running 等待人工: acceptRunID=%d", acceptRunID)
 					return nil
 				}
+				// 其他返工错误 → 标记 accept_run failed，stage 失败
 				g.Log().Errorf(ctx, "[AcceptStage] 触发返工失败: %v", err)
-				return err
+				s.failAcceptRun(ctx, acceptRunID, "触发返工异常: "+err.Error())
+				if s.stageCompleter != nil {
+					_ = s.stageCompleter.FailStage(ctx, stageRunID, "触发返工异常: "+err.Error())
+				}
+				return nil
 			}
 		}
-		// rework 已成功触发 → 完成 accept stage
+		// rework 已成功触发 → 标记 accept_run completed + 完成 accept stage
+		_, _ = s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "running", "completed", g.Map{})
 		if s.stageCompleter != nil {
 			if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
 				g.Log().Errorf(ctx, "[AcceptStage] CompleteStage 失败: %v", err)
@@ -243,7 +248,7 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 		}
 
 	case acceptance.DecisionManualReview:
-		// 保持 accept stage running，等待人工介入
+		// 保持 accept stage running，等待人工介入（accept_run 保持 running）
 		g.Log().Infof(ctx, "[AcceptStage] 需要人工审核: acceptRunID=%d", acceptRunID)
 	}
 

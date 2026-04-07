@@ -358,9 +358,12 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 		// 完成 review stage
 		if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
 			g.Log().Errorf(ctx, "[ReviewStage] CompleteStage 失败，回滚 review_status: %v", err)
-			_, _ = g.DB().Model("mvp_plan_version").Ctx(ctx).
+			if _, rbErr := g.DB().Model("mvp_plan_version").Ctx(ctx).
 				Where("id", planVersionID).
-				Update(g.Map{"review_status": consts.PlanReviewStatusPending, "approved_at": nil, "updated_at": gtime.Now()})
+				Where("review_status", consts.PlanReviewStatusApproved).
+				Update(g.Map{"review_status": consts.PlanReviewStatusPending, "approved_at": nil, "updated_at": gtime.Now()}); rbErr != nil {
+				g.Log().Errorf(ctx, "[ReviewStage] 回滚 plan_version 也失败: pv=%d err=%v", planVersionID, rbErr)
+			}
 			return fmt.Errorf("完成审核阶段失败: %w", err)
 		}
 
@@ -370,35 +373,43 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 			if err := s.executeTriggerFn(ctx, workflowRunID, planVersionID); err != nil {
 				g.Log().Errorf(ctx, "[ReviewStage] 推进执行阶段失败，回滚审核状态: %v", err)
 
-				// 回滚 plan_version review_status → pending
-				_, _ = g.DB().Model("mvp_plan_version").Ctx(ctx).
+				// 回滚 plan_version review_status → pending（CAS：仅回滚已通过的）
+				if _, rbErr := g.DB().Model("mvp_plan_version").Ctx(ctx).
 					Where("id", planVersionID).
-					Update(g.Map{"review_status": consts.PlanReviewStatusPending, "approved_at": nil, "updated_at": gtime.Now()})
+					Where("review_status", consts.PlanReviewStatusApproved).
+					Update(g.Map{"review_status": consts.PlanReviewStatusPending, "approved_at": nil, "updated_at": gtime.Now()}); rbErr != nil {
+					g.Log().Errorf(ctx, "[ReviewStage] 回滚 plan_version 失败: pv=%d err=%v", planVersionID, rbErr)
+				}
 
 				// 回滚 review stage: completed → running（CAS 防并发）
-				_, _ = g.DB().Model("mvp_stage_run").Ctx(ctx).
+				if _, rbErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
 					Where("id", stageRunID).
 					Where("status", consts.StageStatusCompleted).
-					Update(g.Map{"status": consts.StageStatusRunning, "finished_at": nil, "updated_at": gtime.Now()})
+					Update(g.Map{"status": consts.StageStatusRunning, "finished_at": nil, "updated_at": gtime.Now()}); rbErr != nil {
+					g.Log().Errorf(ctx, "[ReviewStage] 回滚 stage_run 失败: stage=%d err=%v", stageRunID, rbErr)
+				}
 
-				// 回滚 workflow_run 状态 → reviewing
-				// StartStage("execute") 会将状态推到 executing；若 InstantiateAndStart 失败后
-				// FailStageOnly 不级联 workflow，状态仍为 executing。覆盖两种可能。
+				// 回滚 workflow_run 状态 → reviewing（CAS：仅回滚 executing/failed）
 				wfRollback := g.Map{
 					"status":               consts.WorkflowRunStatusReviewing,
 					"current_stage":        "review",
 					"current_stage_run_id": stageRunID,
 					"updated_at":           gtime.Now(),
 				}
-				_, _ = g.DB().Model("mvp_workflow_run").Ctx(ctx).
+				if _, rbErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 					Where("id", workflowRunID).
 					WhereIn("status", g.Slice{consts.WorkflowRunStatusExecuting, consts.WorkflowRunStatusFailed}).
-					Update(wfRollback)
+					Update(wfRollback); rbErr != nil {
+					g.Log().Errorf(ctx, "[ReviewStage] 回滚 workflow_run 失败: wfRun=%d err=%v", workflowRunID, rbErr)
+				}
 
-				// 同步 mvp_project.status 回 reviewing（清除可能被写入的 pause_reason）
-				_, _ = g.DB().Model("mvp_project").Ctx(ctx).
+				// 同步 mvp_project.status 回 reviewing（CAS：仅回滚 executing 状态的项目）
+				if _, rbErr := g.DB().Model("mvp_project").Ctx(ctx).
 					Where("id", projectID).
-					Update(g.Map{"status": consts.WorkflowRunStatusReviewing, "pause_reason": nil, "updated_at": gtime.Now()})
+					WhereIn("status", g.Slice{consts.WorkflowRunStatusExecuting, consts.WorkflowRunStatusFailed}).
+					Update(g.Map{"status": consts.WorkflowRunStatusReviewing, "pause_reason": nil, "updated_at": gtime.Now()}); rbErr != nil {
+					g.Log().Errorf(ctx, "[ReviewStage] 回滚 project 状态失败: project=%d err=%v", projectID, rbErr)
+				}
 
 				engine.NotifyProjectArchitectConversation(ctx, projectID,
 					fmt.Sprintf("## 方案审核通过但执行启动失败\n\n错误: %d，警告: %d\n\n⚠️ 执行阶段启动失败，已自动回滚到审核状态。请检查日志后重新确认方案。\n\n失败原因: %v", errorCount, warningCount, err))
