@@ -107,18 +107,16 @@ func (c *cPlan) Export(ctx context.Context, req *v1.PlanExportReq) (res *v1.Plan
 	r.Response.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	r.Response.Header().Set("Content-Disposition", `attachment; filename="plan.csv"`)
 	r.Response.Write("\xEF\xBB\xBF") // UTF-8 BOM
-	// 表头
-	r.Response.Writeln("供应商ID,套餐名称,套餐代码,API Key,API Secret,状态,排序,创建时间")
+	// 表头（不导出 API Key/Secret，防止敏感信息泄露）
+	r.Response.Writeln("供应商ID,套餐名称,套餐代码,状态,排序,创建时间")
 	// 数据行
 	for _, item := range list {
-		r.Response.Writefln("%v,%v,%v,%v,%v,%v,%v,%v",
+		r.Response.Writefln("%v,%v,%v,%v,%v,%v",
 			item.ProviderName,
-			 item.Name,
-			 item.Code,
-			 item.ApiKey,
-			 item.ApiSecret,
-			 item.Status,
-			 item.Sort,
+			item.Name,
+			item.Code,
+			item.Status,
+			item.Sort,
 			item.CreatedAt,
 		)
 	}

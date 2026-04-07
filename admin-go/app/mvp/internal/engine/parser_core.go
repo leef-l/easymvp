@@ -15,6 +15,11 @@ import (
 	"easymvp/utility/snowflake"
 )
 
+var (
+	dryParseCodeBlockRe = regexp.MustCompile("(?s)```(?:json)?\\s*\\n?[\\{\\[][\\s\\S]*?[\\}\\]]\\s*```")
+	dryParseInnerRe     = regexp.MustCompile("(?s)```(?:json)?\\s*\\n?([\\s\\S]*?)\\s*```")
+)
+
 // TaskParser 任务解析器
 // 从架构师 AI 回复中提取 JSON 任务清单，解析后写入 mvp_task（status=draft）
 type TaskParser struct{}
@@ -289,13 +294,12 @@ func (p *TaskParser) DryParseTaskCount(aiReply string) int {
 	g.Log().Infof(ctx, "[DryParseTaskCount] extractTaskPlan 失败: err=%v tasks=%d", err, func() int { if plan != nil { return len(plan.Tasks) }; return 0 }())
 
 	// 正则失败，检测是否有 JSON 代码块（意味着实际创建时 AI 二次提取大概率能成功）
-	codeBlockRe := regexp.MustCompile("(?s)```(?:json)?\\s*\\n?[\\{\\[][\\s\\S]*?[\\}\\]]\\s*```")
-	if matches := codeBlockRe.FindAllString(aiReply, -1); len(matches) > 0 {
+	if matches := dryParseCodeBlockRe.FindAllString(aiReply, -1); len(matches) > 0 {
 		// 尝试从代码块中解析出实际任务数（而非代码块数）
 		total := 0
 		for _, m := range matches {
 			// 去掉 ``` 标记
-			inner := regexp.MustCompile("(?s)```(?:json)?\\s*\\n?([\\s\\S]*?)\\s*```").FindStringSubmatch(m)
+			inner := dryParseInnerRe.FindStringSubmatch(m)
 			if len(inner) < 2 {
 				continue
 			}

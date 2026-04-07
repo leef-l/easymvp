@@ -412,7 +412,14 @@ func (e *Executor) handleTaskFailure(ctx context.Context, projectID int64, taskI
 			"error_message": errMsg,
 		})
 		e.scheduler.OnTaskEscalated(projectID, taskID, errMsg)
-		go e.scheduler.EscalateFailedTask(e.scheduler.getProjectContext(projectID), projectID, taskID, roleType, errMsg)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					g.Log().Errorf(context.Background(), "[Executor] EscalateFailedTask panic: project=%d task=%d err=%v", projectID, taskID, r)
+				}
+			}()
+			e.scheduler.EscalateFailedTask(e.scheduler.getProjectContext(projectID), projectID, taskID, roleType, errMsg)
+		}()
 	default:
 		e.failTask(ctx, projectID, taskID, errMsg)
 	}

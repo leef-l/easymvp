@@ -379,6 +379,10 @@ func (r *AiderRunner) formatModel(cfg *AiderConfig) string {
 
 // BuildConfigFromModel 从数据库模型信息构建 AiderConfig
 func (r *AiderRunner) BuildConfigFromModel(ctx context.Context, modelInfo *ModelInfo, workDir string) *AiderConfig {
+	if modelInfo == nil {
+		g.Log().Errorf(ctx, "[AiderRunner] BuildConfigFromModel: modelInfo 为 nil")
+		return &AiderConfig{WorkDir: workDir}
+	}
 	// 处理 base URL：腾讯云的 anthropic URL 末尾是 /v1，Aider 需要去掉
 	baseURL := modelInfo.BaseURL
 	baseURL = strings.TrimSuffix(baseURL, "/v1")

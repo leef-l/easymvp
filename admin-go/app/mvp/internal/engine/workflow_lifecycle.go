@@ -50,7 +50,14 @@ func (s *Scheduler) ConfirmPlan(ctx context.Context, projectID int64) error {
 
 	// 4. 异步执行审核流程（不阻塞 API 响应）
 	// 使用独立后台 context，避免请求返回后 ctx 被回收导致审核链中断
-	go s.runReviewAsync(context.Background(), projectID)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[Workflow] runReviewAsync panic: project=%d err=%v", projectID, r)
+			}
+		}()
+		s.runReviewAsync(context.Background(), projectID)
+	}()
 
 	return nil
 }

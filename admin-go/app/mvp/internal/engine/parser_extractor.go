@@ -14,6 +14,15 @@ import (
 	"easymvp/utility/provider"
 )
 
+var (
+	tasksRe          = regexp.MustCompile(`(?s)\{\s*"tasks"\s*:\s*\[.*?\]\s*\}`)
+	tasksGreedyRe    = regexp.MustCompile(`(?s)\{\s*"tasks"\s*:\s*\[[\s\S]*\]\s*\}`)
+	arrayRe          = regexp.MustCompile(`(?s)\[\s*\{[\s\S]*\}\s*\]`)
+	multiCommentRe   = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	trailingCommaRe  = regexp.MustCompile(`,\s*([\]\}])`)
+	codeBlockReParserExt = regexp.MustCompile("(?s)```(?:json)?\\s*\\n?([\\{\\[][\\s\\S]*?[\\}\\]])\\s*```")
+)
+
 // extractJSONFromCodeBlocks 从 markdown 代码块中提取 JSON 字符串。
 // 使用字符串分割而非正则，避免嵌套 JSON 的 } 导致非贪婪匹配提前截断。
 func extractJSONFromCodeBlocks(text string) []string {
@@ -76,7 +85,6 @@ func (p *TaskParser) extractTaskPlan(text string) (*ArchitectTaskPlan, error) {
 	}
 
 	// 策略2：查找所有 { "tasks": [...] } 格式的 JSON 块
-	tasksRe := regexp.MustCompile(`(?s)\{\s*"tasks"\s*:\s*\[.*?\]\s*\}`)
 	tasksMatches := tasksRe.FindAllString(text, -1)
 	for _, m := range tasksMatches {
 		if plan, err := p.tryParseJSON(m); err == nil && len(plan.Tasks) > 0 {
@@ -88,7 +96,6 @@ func (p *TaskParser) extractTaskPlan(text string) (*ArchitectTaskPlan, error) {
 	}
 
 	// 策略3：贪婪匹配单个大 JSON（兼容旧的单块输出）
-	tasksGreedyRe := regexp.MustCompile(`(?s)\{\s*"tasks"\s*:\s*\[[\s\S]*\]\s*\}`)
 	if m := tasksGreedyRe.FindString(text); m != "" {
 		if plan, err := p.tryParseJSON(m); err == nil && len(plan.Tasks) > 0 {
 			return plan, nil
@@ -96,7 +103,6 @@ func (p *TaskParser) extractTaskPlan(text string) (*ArchitectTaskPlan, error) {
 	}
 
 	// 策略4：查找独立的 JSON 数组 [{ ... }]（直接就是 tasks 数组）
-	arrayRe := regexp.MustCompile(`(?s)\[\s*\{[\s\S]*\}\s*\]`)
 	if m := arrayRe.FindString(text); m != "" {
 		cleaned := p.cleanJSON(m)
 		var tasks []ArchitectTask
@@ -178,11 +184,9 @@ func (p *TaskParser) cleanJSON(s string) string {
 	s = strings.Join(lines, "\n")
 
 	// 移除多行注释 /* ... */
-	multiCommentRe := regexp.MustCompile(`(?s)/\*.*?\*/`)
 	s = multiCommentRe.ReplaceAllString(s, "")
 
 	// 移除尾随逗号（数组或对象最后一个元素后的逗号）
-	trailingCommaRe := regexp.MustCompile(`,\s*([\]\}])`)
 	s = trailingCommaRe.ReplaceAllString(s, "$1")
 
 	return s
@@ -267,8 +271,7 @@ func (p *TaskParser) aiExtractTasks(ctx context.Context, aiReply, projectCategor
 // extractJSONSummary 从 AI 回复中提取 JSON 代码块的结构摘要。
 // 只保留 key 结构和前几个元素，大幅缩减内容。
 func (p *TaskParser) extractJSONSummary(text string) string {
-	codeBlockRe := regexp.MustCompile("(?s)```(?:json)?\\s*\\n?([\\{\\[][\\s\\S]*?[\\}\\]])\\s*```")
-	matches := codeBlockRe.FindAllStringSubmatch(text, -1)
+	matches := codeBlockReParserExt.FindAllStringSubmatch(text, -1)
 	if len(matches) == 0 {
 		return ""
 	}

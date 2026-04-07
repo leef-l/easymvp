@@ -335,7 +335,15 @@ func (s *Scheduler) scheduleOnce(ctx context.Context, projectID int64) {
 		logTaskAction(taskID, "started", "pending", "running",
 			fmt.Sprintf("任务开始执行 (batch=%d)", task["batch_no"].Int()), "system")
 
-		go s.executor.Execute(ctx, projectID, taskID)
+		go func(pID, tID int64) {
+			defer func() {
+				if r := recover(); r != nil {
+					g.Log().Errorf(context.Background(), "[Scheduler] executor.Execute panic: project=%d task=%d err=%v", pID, tID, r)
+					s.OnTaskFailed(pID, tID, fmt.Sprintf("executor panic: %v", r))
+				}
+			}()
+			s.executor.Execute(ctx, pID, tID)
+		}(projectID, taskID)
 	}
 }
 

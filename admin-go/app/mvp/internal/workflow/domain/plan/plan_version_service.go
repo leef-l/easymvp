@@ -101,7 +101,10 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 
 		// 4. 创建蓝图
 		for i, task := range tasks {
-			affectedJSON, _ := json.Marshal(task.AffectedResources)
+			affectedJSON, jsonErr := json.Marshal(task.AffectedResources)
+			if jsonErr != nil {
+				return fmt.Errorf("序列化 affected_resources 失败: task=%s err=%w", task.Name, jsonErr)
+			}
 			_, err = tx.Model("mvp_task_blueprint").Ctx(ctx).Insert(g.Map{
 				"id":                 blueprintIDs[i],
 				"plan_version_id":    pvID,
@@ -135,7 +138,10 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 				}
 			}
 			if len(depIDs) > 0 {
-				depJSON, _ := json.Marshal(depIDs)
+				depJSON, depJSONErr := json.Marshal(depIDs)
+				if depJSONErr != nil {
+					return fmt.Errorf("序列化依赖ID失败: task=%s err=%w", task.Name, depJSONErr)
+				}
 				if _, err := tx.Model("mvp_task_blueprint").Ctx(ctx).
 					Where("id", blueprintIDs[i]).
 					Update(g.Map{"depends_on_blueprint_ids": string(depJSON)}); err != nil {

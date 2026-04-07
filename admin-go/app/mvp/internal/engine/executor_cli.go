@@ -225,7 +225,15 @@ func (e *Executor) escalateImplementerResourceIssue(ctx context.Context, project
 	})
 
 	e.scheduler.OnTaskEscalated(projectID, taskID, errMsg)
-	go e.scheduler.EscalateFailedTask(e.scheduler.getProjectContext(projectID), projectID, taskID, task["role_type"].String(), errMsg)
+	roleType := task["role_type"].String()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[ExecutorCLI] EscalateFailedTask panic: project=%d task=%d err=%v", projectID, taskID, r)
+			}
+		}()
+		e.scheduler.EscalateFailedTask(e.scheduler.getProjectContext(projectID), projectID, taskID, roleType, errMsg)
+	}()
 }
 
 // --- 文件快照：检测 Aider 假成功 ---
