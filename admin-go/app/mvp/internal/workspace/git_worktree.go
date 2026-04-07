@@ -25,10 +25,25 @@ func NewGitWorktreeManager() *GitWorktreeManager {
 
 // Prepare 为任务创建独立的 git worktree。
 func (m *GitWorktreeManager) Prepare(ctx context.Context, req PrepareRequest) (*TaskWorkspace, error) {
-	// 1. 校验主工作区是否是合法 Git 仓库
-	if !isGitRepo(req.WorkDir) {
-		return nil, fmt.Errorf("工作目录不是 Git 仓库: %s", req.WorkDir)
+	// 1. 校验主工作区是否是合法 Git 仓库；不存在则自动创建
+	workDir := filepath.Clean(req.WorkDir)
+	if !isGitRepo(workDir) {
+		// 目录不存在或不是 git 仓库，自动初始化
+		if err := os.MkdirAll(workDir, 0755); err != nil {
+			return nil, fmt.Errorf("创建工作目录失败: %s: %w", workDir, err)
+		}
+		initCmd := exec.Command("git", "init", workDir)
+		if output, err := initCmd.CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("git init 失败: %s: %s", workDir, string(output))
+		}
+		// 创建初始提交（git worktree 要求至少有一个 commit）
+		addCmd := exec.Command("git", "-C", workDir, "commit", "--allow-empty", "-m", "init: project workspace")
+		if output, err := addCmd.CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("初始提交失败: %s: %s", workDir, string(output))
+		}
+		g.Log().Infof(ctx, "[Workspace] 自动初始化 git 仓库: %s", workDir)
 	}
+	req.WorkDir = workDir
 
 	worktreePath := filepath.Join(req.WorkDir, worktreeDir, fmt.Sprintf("task-%d", req.TaskID))
 	branchName := fmt.Sprintf("mvp-task-%d", req.TaskID)
