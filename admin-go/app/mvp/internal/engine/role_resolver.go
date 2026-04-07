@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/frame/g"
 
 	"easymvp/app/mvp/internal/workflow/repo"
 )
@@ -50,7 +51,14 @@ func ResolveProjectModelInfo(ctx context.Context, projectID int64, roleType stri
 // ResolveProjectExecutionMode 统一解析项目角色执行方式。
 func ResolveProjectExecutionMode(ctx context.Context, projectID int64, roleType string, roleLevel string) string {
 	role, err := ResolveProjectRoleByLevel(ctx, projectID, roleType, roleLevel)
-	if err != nil || role == nil {
+	if err != nil {
+		g.Log().Warningf(ctx, "[RoleResolver] 解析执行模式失败，回退 chat: project=%d role=%s/%s err=%v",
+			projectID, roleType, roleLevel, err)
+		return "chat"
+	}
+	if role == nil {
+		g.Log().Debugf(ctx, "[RoleResolver] 未找到角色配置，回退 chat: project=%d role=%s/%s",
+			projectID, roleType, roleLevel)
 		return "chat"
 	}
 

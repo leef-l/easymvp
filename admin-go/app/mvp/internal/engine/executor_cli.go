@@ -198,7 +198,7 @@ func (e *Executor) escalateImplementerResourceIssue(ctx context.Context, project
 	conversationID, err := e.ensureConversation(ctx, projectID, taskID, "implementer")
 	if err == nil {
 		replyID := int64(snowflake.Generate())
-		_, _ = g.DB().Model("mvp_message").Insert(g.Map{
+		if _, insErr := g.DB().Model("mvp_message").Insert(g.Map{
 			"id":              replyID,
 			"conversation_id": conversationID,
 			"role":            "assistant",
@@ -209,7 +209,9 @@ func (e *Executor) escalateImplementerResourceIssue(ctx context.Context, project
 			"dept_id":         0,
 			"created_at":      gtime.Now(),
 			"updated_at":      gtime.Now(),
-		})
+		}); insErr != nil {
+			g.Log().Warningf(ctx, "[ExecutorCLI] 保存错误消息失败: conv=%d err=%v", conversationID, insErr)
+		}
 	}
 
 	updateTaskStatus(ctx, taskID, "running", "escalated", g.Map{

@@ -60,9 +60,11 @@ func ApplyCoordinatorOptimizationsToBlueprints(ctx context.Context, planVersionI
 		name := bp["name"].String()
 		if batch, ok := opt.OptimizedBatches[name]; ok {
 			if batch.BatchNo > 0 && batch.BatchNo != bp["batch_no"].Int() {
-				_, _ = g.DB().Model("mvp_task_blueprint").Ctx(ctx).
+				if _, upErr := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
 					Where("id", bp["id"].Int64()).
-					Update(g.Map{"batch_no": batch.BatchNo, "updated_at": gtime.Now()})
+					Update(g.Map{"batch_no": batch.BatchNo, "updated_at": gtime.Now()}); upErr != nil {
+					g.Log().Warningf(ctx, "[ReviewBridge] 更新蓝图批次失败: bp=%d err=%v", bp["id"].Int64(), upErr)
+				}
 			}
 		}
 	}

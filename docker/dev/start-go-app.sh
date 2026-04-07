@@ -49,7 +49,7 @@ ${REDIS_CONFIG}
 
 logger:
   path: "${LOG_DIR}"
-  level: "${GF_LOG_LEVEL:-info|warning|error|critical|panic|fatal}"
+  level: "${GF_LOG_LEVEL:-all}"
   stdout: ${GF_LOG_STDOUT:-false}
   rotateSize: "${GF_LOG_ROTATE_SIZE:-100M}"
   rotateExpire: "${GF_LOG_ROTATE_EXPIRE:-7d}"

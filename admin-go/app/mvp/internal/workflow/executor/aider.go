@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 
@@ -43,8 +44,18 @@ func (e *AiderExecutor) Execute(ctx context.Context, req *Request) *Result {
 		json.Unmarshal([]byte(resJSON), &files)
 	}
 
+	// 从引擎配置读取超时，与其他执行器保持一致
+	timeoutSeconds := 1800
+	engineCfg, cfgErr := g.DB().Model("ai_engine_config").Ctx(ctx).
+		Where("engine_code", "aider").Where("status", 1).WhereNull("deleted_at").One()
+	if cfgErr == nil && !engineCfg.IsEmpty() && engineCfg["timeout_seconds"].Int() > 0 {
+		timeoutSeconds = engineCfg["timeout_seconds"].Int()
+	}
+	execCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+	defer cancel()
+
 	runner := engine.GetAiderRunner()
-	aiderResult := runner.RunTask(ctx, req.ProjectID, req.TaskID, req.ModelInfo,
+	aiderResult := runner.RunTask(execCtx, req.ProjectID, req.TaskID, req.ModelInfo,
 		req.TaskRecord["description"].String(), workDir, files, nil)
 
 	if aiderResult.Error != nil {

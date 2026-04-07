@@ -60,11 +60,13 @@ func (e *ChatEngine) SendMessage(ctx context.Context, conversationID int64, cont
 	projectID := conv["project_id"].Int64()
 
 	// 清理卡住的 streaming 消息（AI 调用中断导致）
-	_, _ = g.DB().Model("mvp_message").Ctx(ctx).
+	if _, cleanErr := g.DB().Model("mvp_message").Ctx(ctx).
 		Where("conversation_id", conversationID).
 		Where("status", "streaming").
 		Where("updated_at < ?", gtime.Now().Add(-5*time.Minute)). // 超过5分钟的 streaming 视为卡住
-		Update(g.Map{"status": "failed", "content": "AI 调用中断，消息未完成", "updated_at": gtime.Now()})
+		Update(g.Map{"status": "failed", "content": "AI 调用中断，消息未完成", "updated_at": gtime.Now()}); cleanErr != nil {
+		g.Log().Warningf(ctx, "[ChatEngine] 清理卡住的 streaming 消息失败: conv=%d err=%v", conversationID, cleanErr)
+	}
 
 	// 2. 查找该对话角色对应的 AI 模型配置
 	modelInfo, err := e.resolveModel(ctx, projectID, conv["role_type"].String())

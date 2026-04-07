@@ -153,10 +153,14 @@ func (s *Scheduler) tryLockResources(taskID int64, resources []string) bool {
 
 	// 持久化到 DB
 	if len(resources) > 0 {
-		resJSON, _ := json.Marshal(resources)
-		g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+		resJSON, jsonErr := json.Marshal(resources)
+		if jsonErr != nil {
+			g.Log().Warningf(context.Background(), "[Scheduler] 序列化资源锁信息失败: task=%d err=%v", taskID, jsonErr)
+		} else if _, upErr := g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
 			"locked_resources": string(resJSON),
-		})
+		}); upErr != nil {
+			g.Log().Warningf(context.Background(), "[Scheduler] 更新任务资源锁失败: task=%d err=%v", taskID, upErr)
+		}
 	}
 
 	return true

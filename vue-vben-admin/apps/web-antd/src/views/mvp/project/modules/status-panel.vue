@@ -34,6 +34,7 @@ const loading = ref(false);
 /** 状态对应的中文名称 */
 const STATUS_LABELS: Record<string, string> = {
   designing: '设计中',
+  reviewing: '方案审核中',
   running: '执行中',
   paused: '已暂停',
   completed: '已完成',
@@ -42,6 +43,7 @@ const STATUS_LABELS: Record<string, string> = {
 /** 状态对应的 Tag 颜色 */
 const STATUS_COLORS: Record<string, string> = {
   designing: 'blue',
+  reviewing: 'cyan',
   running: 'green',
   paused: 'orange',
   completed: 'default',
@@ -261,6 +263,12 @@ const [StatusDrawer, modalApi] = useVbenModal({
         class="text-center text-gray-400 text-sm py-4"
       >
         方案确认后将自动生成并调度 AI 任务
+      </div>
+      <div
+        v-else-if="statusData?.status === 'reviewing' && totalTasks === 0"
+        class="text-center text-gray-400 text-sm py-4"
+      >
+        方案正在审核中，审核通过后将自动开始执行
       </div>
 
       <!-- 操作按钮区 -->

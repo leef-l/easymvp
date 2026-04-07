@@ -286,10 +286,13 @@ func (c *cWorkflow) Pause(ctx context.Context, req *v1.WorkflowPauseReq) (res *v
 		return nil, err
 	}
 
-	wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+	wfRun, qErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 		Where("project_id", projectID).
 		WhereNotIn("status", g.Slice{"completed", "canceled", "paused"}).
 		WhereNull("deleted_at").OrderDesc("run_no").One()
+	if qErr != nil {
+		return nil, fmt.Errorf("查询工作流运行失败: %w", qErr)
+	}
 	if wfRun.IsEmpty() {
 		return nil, fmt.Errorf("没有活跃的工作流运行")
 	}
@@ -310,10 +313,13 @@ func (c *cWorkflow) Resume(ctx context.Context, req *v1.WorkflowResumeReq) (res 
 		return nil, err
 	}
 
-	wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+	wfRun, qErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 		Where("project_id", projectID).
 		Where("status", "paused").
 		WhereNull("deleted_at").OrderDesc("run_no").One()
+	if qErr != nil {
+		return nil, fmt.Errorf("查询暂停的工作流失败: %w", qErr)
+	}
 	if wfRun.IsEmpty() {
 		return nil, fmt.Errorf("没有暂停的工作流运行")
 	}
@@ -382,7 +388,9 @@ func (c *cWorkflow) SkipTask(ctx context.Context, req *v1.WorkflowSkipTaskReq) (
 	if rows == 0 {
 		return nil, fmt.Errorf("任务不在可跳过的状态")
 	}
-	_ = orchestrator.GetTaskScheduler().OnTaskCompleted(ctx, taskID)
+	if completeErr := orchestrator.GetTaskScheduler().OnTaskCompleted(ctx, taskID); completeErr != nil {
+		g.Log().Warningf(ctx, "[SkipTask] 通知调度器任务完成失败: task=%d err=%v", taskID, completeErr)
+	}
 	return &v1.WorkflowSkipTaskRes{}, nil
 }
 
@@ -649,14 +657,16 @@ func projectStatusV2(ctx context.Context, project gdb.Record) (*v1.WorkflowProje
 		Count  int    `json:"count"`
 	}
 	var counts []StatusCount
-	_ = g.DB().Model("mvp_task_blueprint AS bp").
+	if scanErr := g.DB().Model("mvp_task_blueprint AS bp").
 		InnerJoin("mvp_plan_version AS pv", "pv.id = bp.plan_version_id").
 		Where("pv.project_id", projectID).
 		WhereIn("pv.status", g.Slice{"draft", "active"}).
 		WhereNull("bp.deleted_at").
 		Fields("bp.blueprint_status AS status, COUNT(*) AS count").
 		Group("bp.blueprint_status").
-		Scan(&counts)
+		Scan(&counts); scanErr != nil {
+		g.Log().Warningf(ctx, "[ProjectStatus] 蓝图统计查询失败: project=%d err=%v", projectID, scanErr)
+	}
 
 	statusCounts := make(map[string]int)
 	bpTotal := 0
@@ -1188,9 +1198,11 @@ func (c *cWorkflow) ManualReject(ctx context.Context, req *v1.WorkflowManualReje
 	}
 
 	// 项目状态回退 designing
-	_, _ = g.DB().Model("mvp_project").Ctx(ctx).
+	if _, upErr := g.DB().Model("mvp_project").Ctx(ctx).
 		Where("id", projectID).
-		Update(g.Map{"status": "designing", "updated_at": gdb.Raw("NOW()")})
+		Update(g.Map{"status": "designing", "updated_at": gdb.Raw("NOW()")}); upErr != nil {
+		g.Log().Errorf(ctx, "[ManualReject] 项目状态回退失败: project=%d err=%v", projectID, upErr)
+	}
 
 	return &v1.WorkflowManualRejectRes{}, nil
 }
@@ -1508,24 +1520,30 @@ func (c *cWorkflow) ExecutionStatus(ctx context.Context, req *v1.WorkflowExecuti
 	res.WorkflowRunID = snowflake.JsonInt64(wfRunID)
 
 	// 查 execute stage_run
-	stageRun, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).
+	stageRun, stageErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
 		Where("workflow_run_id", wfRunID).
 		Where("stage_type", "execute").
 		WhereNull("deleted_at").
 		OrderDesc("stage_no").
 		One()
+	if stageErr != nil {
+		g.Log().Warningf(ctx, "[ExecutionStatus] 查询 stage_run 失败: wfRun=%d err=%v", wfRunID, stageErr)
+	}
 	if !stageRun.IsEmpty() {
 		res.StageRunID = snowflake.JsonInt64(stageRun["id"].Int64())
 		res.StageStatus = stageRun["status"].String()
 	}
 
 	// 查领域任务
-	tasks, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+	tasks, taskErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("workflow_run_id", wfRunID).
 		WhereNull("deleted_at").
 		OrderAsc("batch_no").
 		OrderAsc("sort").
 		All()
+	if taskErr != nil {
+		g.Log().Warningf(ctx, "[ExecutionStatus] 查询领域任务失败: wfRun=%d err=%v", wfRunID, taskErr)
+	}
 
 	for _, t := range tasks {
 		res.Tasks = append(res.Tasks, buildDomainTaskItem(t))
@@ -1588,11 +1606,14 @@ func (c *cWorkflow) DomainTasks(ctx context.Context, req *v1.WorkflowDomainTasks
 	}
 
 	// 查 workflow_run
-	wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+	wfRun, wfErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 		Where("project_id", projectID).
 		WhereNull("deleted_at").
 		OrderDesc("run_no").
 		One()
+	if wfErr != nil {
+		return nil, fmt.Errorf("查询工作流运行失败: %w", wfErr)
+	}
 	if wfRun.IsEmpty() {
 		return &v1.WorkflowDomainTasksRes{Tasks: []v1.DomainTaskItem{}}, nil
 	}
@@ -2067,15 +2088,20 @@ func (c *cWorkflow) TriggerReplan(ctx context.Context, req *v1.WorkflowTriggerRe
 				g.Log().Infof(bgCtx, "[TriggerReplan] 重规划完成: projectID=%d action=%s", projectID, result.Action)
 			}
 		}
-		payloadJSON, _ := json.Marshal(payloadMap)
-		_, _ = g.DB().Model("mvp_workflow_event").Ctx(bgCtx).Insert(g.Map{
+		payloadJSON, jsonErr := json.Marshal(payloadMap)
+		if jsonErr != nil {
+			g.Log().Warningf(bgCtx, "[TriggerReplan] 序列化事件 payload 失败: %v", jsonErr)
+		}
+		if _, insErr := g.DB().Model("mvp_workflow_event").Ctx(bgCtx).Insert(g.Map{
 			"id":              int64(snowflake.Generate()),
 			"workflow_run_id": wfRunID,
 			"entity_type":     "workflow",
 			"event_type":      eventType,
 			"payload":         string(payloadJSON),
 			"created_at":      gtime.Now(),
-		})
+		}); insErr != nil {
+			g.Log().Warningf(bgCtx, "[TriggerReplan] 记录重规划事件失败: wfRun=%d err=%v", wfRunID, insErr)
+		}
 	}()
 
 	return &v1.WorkflowTriggerReplanRes{}, nil
@@ -2181,26 +2207,29 @@ func (c *cWorkflow) BatchProjectStats(ctx context.Context, req *v1.WorkflowBatch
 		ids = append(ids, int64(id))
 	}
 
-	// 权限过滤：只保留用户有权访问的项目
-	userID := middleware.GetUserID(ctx)
-	if userID != 1 { // 超管跳过
-		ownedProjects, _ := g.DB().Model("mvp_project").Ctx(ctx).
+	// 权限过滤：通过 ApplyDataScope 五级数据权限过滤，只保留用户有权访问的项目
+	scopedQuery := middleware.ApplyDataScope(ctx,
+		g.DB().Model("mvp_project").Ctx(ctx).
 			WhereIn("id", ids).
-			Where("created_by", userID).
 			WhereNull("deleted_at").
-			Fields("id").All()
-		allowedIDs := make(map[int64]bool)
-		for _, p := range ownedProjects {
-			allowedIDs[p["id"].Int64()] = true
-		}
-		filtered := ids[:0]
-		for _, id := range ids {
-			if allowedIDs[id] {
-				filtered = append(filtered, id)
-			}
-		}
-		ids = filtered
+			Fields("id"),
+		"created_by", "dept_id",
+	)
+	allowedRecords, err := scopedQuery.All()
+	if err != nil {
+		return nil, fmt.Errorf("权限过滤查询失败: %w", err)
 	}
+	allowedIDs := make(map[int64]bool, len(allowedRecords))
+	for _, p := range allowedRecords {
+		allowedIDs[p["id"].Int64()] = true
+	}
+	filtered := ids[:0]
+	for _, id := range ids {
+		if allowedIDs[id] {
+			filtered = append(filtered, id)
+		}
+	}
+	ids = filtered
 	if len(ids) == 0 {
 		return &v1.WorkflowBatchProjectStatsRes{Stats: []v1.ProjectRuntimeStat{}}, nil
 	}
