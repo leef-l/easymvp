@@ -2110,6 +2110,26 @@ func (c *cWorkflow) TriggerReplan(ctx context.Context, req *v1.WorkflowTriggerRe
 		return nil, fmt.Errorf("无活跃的工作流运行")
 	}
 
+	// 前置检查：architect 角色的 AI 模型是否可用
+	projRole, _ := g.DB().Model("mvp_project_role").Ctx(ctx).
+		Where("project_id", projectID).
+		Where("role_type", "architect").
+		WhereNull("deleted_at").One()
+	if projRole.IsEmpty() || projRole["model_id"].Int64() == 0 {
+		return nil, fmt.Errorf("项目未配置架构师(architect)角色或模型，无法执行重规划。请先在项目角色中配置架构师。")
+	}
+	modelRow, _ := g.DB().Model("ai_model m").Ctx(ctx).
+		LeftJoin("ai_plan p", "p.id = m.plan_id").
+		Where("m.id", projRole["model_id"].Int64()).
+		Where("m.deleted_at IS NULL").
+		Fields("m.model_code, p.api_key").One()
+	if modelRow.IsEmpty() {
+		return nil, fmt.Errorf("架构师角色关联的 AI 模型(ID=%d)不存在或已删除", projRole["model_id"].Int64())
+	}
+	if modelRow["api_key"].String() == "" {
+		return nil, fmt.Errorf("架构师角色关联的 AI 模型(%s)没有配置 API Key，无法调用", modelRow["model_code"].String())
+	}
+
 	decisionRepo := repo.NewAutonomyDecisionRepo()
 	replanner := autonomy.NewReplanner(decisionRepo)
 
