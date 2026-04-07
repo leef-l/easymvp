@@ -276,11 +276,17 @@ func (p *TaskParser) AIExtractTasks(ctx context.Context, aiReply, projectCategor
 // DryParseTaskCount 仅解析AI回复，返回任务数量（不写入数据库）。
 // 使用与实际创建相同的提取逻辑（正则 + AI 二次提取），确保 dryRun 和实际创建结果一致。
 func (p *TaskParser) DryParseTaskCount(aiReply string) int {
+	ctx := context.Background()
+	g.Log().Infof(ctx, "[DryParseTaskCount] aiReply length=%d runes", len([]rune(aiReply)))
+
 	// 先用正则快速提取
 	plan, err := p.extractTaskPlan(aiReply)
 	if err == nil && len(plan.Tasks) > 0 {
-		return len(p.normalizeTasks(context.Background(), plan.Tasks, ""))
+		normalized := p.normalizeTasks(ctx, plan.Tasks, "")
+		g.Log().Infof(ctx, "[DryParseTaskCount] extractTaskPlan 成功: raw=%d normalized=%d", len(plan.Tasks), len(normalized))
+		return len(normalized)
 	}
+	g.Log().Infof(ctx, "[DryParseTaskCount] extractTaskPlan 失败: err=%v tasks=%d", err, func() int { if plan != nil { return len(plan.Tasks) }; return 0 }())
 
 	// 正则失败，检测是否有 JSON 代码块（意味着实际创建时 AI 二次提取大概率能成功）
 	codeBlockRe := regexp.MustCompile("(?s)```(?:json)?\\s*\\n?[\\{\\[][\\s\\S]*?[\\}\\]]\\s*```")
