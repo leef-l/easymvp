@@ -426,27 +426,28 @@ async function handleParseTasks() {
   try {
     // 第一步：dryRun 仅检查
     const check = await parseTasks(projectId.value, true);
-    if (!check.hasTasks) {
+    if (!check.hasTasks && check.taskCount === 0) {
       message.info('架构师回复中未检测到任务清单，请先让AI完成任务拆分');
       return;
     }
     // 第二步：弹窗确认
+    const countText =
+      check.taskCount > 0
+        ? `解析出 ${check.taskCount} 个任务`
+        : '检测到任务内容（需要 AI 辅助提取）';
     Modal.confirm({
       title: '检测到任务清单',
-      content: `架构师回复中解析出 ${check.taskCount} 个任务，是否创建为草案任务？`,
+      content: `架构师回复中${countText}，是否创建为草案任务？`,
       okText: '确定创建',
       cancelText: '取消',
       async onOk() {
-        // 第三步：实际创建
+        // 第三步：实际创建（同步，可能需要几十秒 AI 提取）
         const res = await parseTasks(projectId.value, false);
         await loadProjectStatus();
-        if (res.message) {
-          // 异步提取中，提示用户等待
-          message.info(res.message);
-        } else if (res.taskCount > 0) {
+        if (res.taskCount > 0) {
           message.success(`已创建 ${res.taskCount} 个草案任务`);
         } else {
-          message.info('未提取到任务，请检查架构师回复格式');
+          message.warning(res.message || '未提取到任务，请检查架构师回复格式');
         }
       },
     });

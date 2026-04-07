@@ -274,17 +274,41 @@ func (p *TaskParser) AIExtractTasks(ctx context.Context, aiReply, projectCategor
 }
 
 // DryParseTaskCount 仅解析AI回复，返回任务数量（不写入数据库）。
-// 先尝试正则提取，失败则检测是否有 JSON 代码块（可能是非标准格式，实际创建时会走 AI 二次提取）。
+// 使用与实际创建相同的提取逻辑（正则 + AI 二次提取），确保 dryRun 和实际创建结果一致。
 func (p *TaskParser) DryParseTaskCount(aiReply string) int {
+	// 先用正则快速提取
 	plan, err := p.extractTaskPlan(aiReply)
 	if err == nil && len(plan.Tasks) > 0 {
 		return len(p.normalizeTasks(context.Background(), plan.Tasks, ""))
 	}
 
-	// 正则提取失败，检测是否有 JSON 代码块（非标准格式如 chapters/novel_info 等）
-	codeBlockRe := regexp.MustCompile("(?s)```(?:json)?\\s*\\n?\\{[\\s\\S]*?\\}\\s*```")
+	// 正则失败，检测是否有 JSON 代码块（意味着实际创建时 AI 二次提取大概率能成功）
+	codeBlockRe := regexp.MustCompile("(?s)```(?:json)?\\s*\\n?[\\{\\[][\\s\\S]*?[\\}\\]]\\s*```")
 	if matches := codeBlockRe.FindAllString(aiReply, -1); len(matches) > 0 {
-		return len(matches)
+		// 尝试从代码块中解析出实际任务数（而非代码块数）
+		total := 0
+		for _, m := range matches {
+			// 去掉 ``` 标记
+			inner := regexp.MustCompile("(?s)```(?:json)?\\s*\\n?([\\s\\S]*?)\\s*```").FindStringSubmatch(m)
+			if len(inner) < 2 {
+				continue
+			}
+			if tryPlan, tryErr := p.tryParseJSON(inner[1]); tryErr == nil && len(tryPlan.Tasks) > 0 {
+				total += len(tryPlan.Tasks)
+			}
+		}
+		if total > 0 {
+			return total
+		}
+		// 代码块存在但解析不出来，返回 -1 表示"有内容但需要 AI 提取"
+		// 前端可根据此值提示用户
+		return -1
+	}
+
+	// 检测是否有足够长的文本内容（纯文本描述场景，AI 可能能提取）
+	if len([]rune(aiReply)) > 200 {
+		// 有足够内容但无 JSON 代码块，返回 -1 表示需要 AI 提取
+		return -1
 	}
 
 	return 0

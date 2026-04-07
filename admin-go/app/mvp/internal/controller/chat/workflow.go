@@ -478,61 +478,34 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 
 	if req.DryRun {
 		count := engine.GetParser().DryParseTaskCount(aiReply)
+		// count > 0: 正则提取成功，精确数量
+		// count == -1: 有内容但需要 AI 提取，前端显示为"检测到任务内容"
+		// count == 0: 确实没有任务
 		return &v1.WorkflowParseTasksRes{
-			HasTasks:  count > 0,
+			HasTasks:  count != 0,
 			TaskCount: count,
 		}, nil
 	}
 
-	// V2 主路径：先尝试正则快速提取，失败则异步走 AI 二次提取
+	// V2 主路径：先尝试正则快速提取，失败则同步走 AI 二次提取
 	projectCategory, _ := g.DB().Model("mvp_project").Ctx(ctx).
 		Where("id", projectID).Value("project_category")
 
-	// 快速正则提取（毫秒级）
-	plan, _ := engine.GetParser().FastExtract(aiReply)
-	if plan != nil && len(plan.Tasks) > 0 {
-		tasks := engine.GetParser().NormalizeTasks(ctx, plan.Tasks, projectCategory.String())
-		if len(tasks) > 0 {
-			count, err := createBlueprints(ctx, projectID, convID, lastMsgID, tasks)
-			if err != nil {
-				return nil, err
-			}
-			return &v1.WorkflowParseTasksRes{HasTasks: count > 0, TaskCount: count}, nil
-		}
+	// 统一使用 ExtractAndNormalize：内部先正则、失败再 AI 二次提取（同步，90s 超时）
+	tasks, extractErr := engine.GetParser().ExtractAndNormalize(ctx, aiReply, projectCategory.String())
+	if extractErr != nil {
+		g.Log().Warningf(ctx, "[ParseTasks] 提取失败: projectID=%d err=%v", projectID, extractErr)
+	}
+	if len(tasks) == 0 {
+		return &v1.WorkflowParseTasksRes{HasTasks: false, TaskCount: 0,
+			Message: "未能从回复中提取任务，请让架构师用标准 JSON 格式重新输出任务列表"}, nil
 	}
 
-	// 正则提取失败，异步走 AI 二次提取
-	go func() {
-		bgCtx := context.Background()
-		defer func() {
-			if r := recover(); r != nil {
-				g.Log().Errorf(bgCtx, "[ParseTasks] AI 异步提取 panic: projectID=%d err=%v", projectID, r)
-			}
-		}()
-
-		tasks, err := engine.GetParser().AIExtractTasks(bgCtx, aiReply, projectCategory.String())
-		if err != nil || len(tasks) == 0 {
-			g.Log().Warningf(bgCtx, "[ParseTasks] AI 异步提取失败或无结果: projectID=%d err=%v", projectID, err)
-			engine.NotifyProjectArchitectConversation(bgCtx, projectID,
-				"## 任务提取失败\n\n未能从回复中自动提取任务清单。请让架构师用标准 JSON 格式（`{\"tasks\": [...]}`）重新输出任务列表。")
-			return
-		}
-
-		count, createErr := createBlueprints(bgCtx, projectID, convID, lastMsgID, tasks)
-		if createErr != nil {
-			g.Log().Errorf(bgCtx, "[ParseTasks] AI 提取后创建蓝图失败: projectID=%d err=%v", projectID, createErr)
-			return
-		}
-		g.Log().Infof(bgCtx, "[ParseTasks] AI 异步提取成功: projectID=%d count=%d", projectID, count)
-		engine.NotifyProjectArchitectConversation(bgCtx, projectID,
-			fmt.Sprintf("## 任务提取完成\n\n已从回复中提取 %d 个任务蓝图，请检查后确认方案。", count))
-	}()
-
-	return &v1.WorkflowParseTasksRes{
-		HasTasks:  true,
-		TaskCount: 0, // 异步提取中，前端通过状态轮询获取最终结果
-		Message:   "正在通过 AI 提取任务，请稍候刷新查看",
-	}, nil
+	count, err := createBlueprints(ctx, projectID, convID, lastMsgID, tasks)
+	if err != nil {
+		return nil, err
+	}
+	return &v1.WorkflowParseTasksRes{HasTasks: count > 0, TaskCount: count}, nil
 }
 
 // RolePresets 获取角色预设列表（前端创建项目时读取默认模型）
