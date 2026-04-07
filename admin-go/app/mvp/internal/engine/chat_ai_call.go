@@ -181,6 +181,11 @@ func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *M
 
 	// 7. 飞书主动推送：将 AI 回复发给对话绑定用户（异步，不阻塞）
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[ChatEngine] feishuNotifyAIReply panic: %v", r)
+			}
+		}()
 		feishuNotifyAIReply(ctx, conversationID, fullContent.String())
 	}()
 

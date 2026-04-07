@@ -31,6 +31,11 @@ func StartTelegramPolling(ctx context.Context) {
 	g.Log().Infof(ctx, "[TGBot] Polling 启动: bot=@%s", bot.Self.UserName)
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(ctx, "[TGBot] Polling goroutine panic: %v", r)
+			}
+		}()
 		for {
 			if err := runPolling(ctx, bot); err != nil {
 				g.Log().Warningf(ctx, "[TGBot] Polling 异常: %v，5s 后重试", err)

@@ -30,6 +30,11 @@ var hub = &SSEHub{
 func init() {
 	// 启动僵尸订阅清理协程：每 60 秒清理超过 10 分钟未关闭的订阅
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[SSEHub] 清理协程 panic: %v", r)
+			}
+		}()
 		ticker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {

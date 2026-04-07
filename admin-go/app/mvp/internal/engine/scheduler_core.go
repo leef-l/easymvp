@@ -99,17 +99,19 @@ func (s *Scheduler) recoverResourceLocks() {
 	}
 }
 
-// 全局调度器（延迟初始化，等数据库就绪后读取配置）
-var defaultScheduler *Scheduler
+var (
+	defaultScheduler     *Scheduler
+	defaultSchedulerOnce sync.Once
+)
 
 // GetScheduler 获取全局调度器（首次调用时从配置加载参数）
 func GetScheduler() *Scheduler {
-	if defaultScheduler == nil {
+	defaultSchedulerOnce.Do(func() {
 		ctx := context.Background()
 		maxConcurrent := GetConfigInt(ctx, "scheduler.max_concurrent", "engine.scheduler.maxConcurrent", 20)
 		defaultScheduler = NewScheduler(maxConcurrent)
 		g.Log().Infof(ctx, "[Scheduler] 配置加载: maxConcurrent=%d", maxConcurrent)
-	}
+	})
 	return defaultScheduler
 }
 

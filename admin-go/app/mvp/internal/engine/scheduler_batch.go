@@ -106,6 +106,11 @@ func (s *Scheduler) OnTaskCompleted(projectID int64, taskID int64) {
 	logTaskAction(taskID, "completed", "running", "completed", "任务执行完成", "system")
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[Scheduler] OnTaskCompleted panic: projectID=%d taskID=%d err=%v", projectID, taskID, r)
+			}
+		}()
 		ctx := s.getProjectContext(projectID)
 		s.advanceBatchIfDone(projectID, taskID)
 		s.scheduleOnce(ctx, projectID)
@@ -120,6 +125,11 @@ func (s *Scheduler) OnTaskFailed(projectID int64, taskID int64, errMsg string) {
 
 	// 飞书推送：任务失败通知
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[Scheduler] feishuNotify panic: %v", r)
+			}
+		}()
 		ctx := s.getProjectContext(projectID)
 		task, _ := g.DB().Ctx(ctx).Model("mvp_task").Where("id", taskID).Fields("name").One()
 		taskName := ""
@@ -129,7 +139,14 @@ func (s *Scheduler) OnTaskFailed(projectID int64, taskID int64, errMsg string) {
 		feishuNotifyTaskFailed(ctx, projectID, taskID, taskName, errMsg)
 	}()
 
-	go s.scheduleOnce(s.getProjectContext(projectID), projectID)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[Scheduler] scheduleOnce panic: %v", r)
+			}
+		}()
+		s.scheduleOnce(s.getProjectContext(projectID), projectID)
+	}()
 }
 
 // OnTaskEscalated 任务升级给架构师后的回调

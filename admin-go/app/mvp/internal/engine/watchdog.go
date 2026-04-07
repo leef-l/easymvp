@@ -37,12 +37,14 @@ func NewWatchdog(checkInterval time.Duration, maxStaleCount int, maxRetries int)
 	}
 }
 
-// 全局看门狗（延迟初始化，等数据库就绪后读取配置）
-var defaultWatchdog *Watchdog
+var (
+	defaultWatchdog     *Watchdog
+	defaultWatchdogOnce sync.Once
+)
 
 // GetWatchdog 获取全局看门狗（首次调用时从配置加载参数）
 func GetWatchdog() *Watchdog {
-	if defaultWatchdog == nil {
+	defaultWatchdogOnce.Do(func() {
 		ctx := context.Background()
 		checkInterval := GetConfigInt(ctx, "watchdog.check_interval", "engine.watchdog.checkInterval", 120)
 		maxStaleCount := GetConfigInt(ctx, "watchdog.max_stale_count", "engine.watchdog.maxStaleCount", 3)
@@ -54,7 +56,7 @@ func GetWatchdog() *Watchdog {
 		)
 		g.Log().Infof(ctx, "[Watchdog] 配置加载: checkInterval=%ds, maxStaleCount=%d, maxRetries=%d",
 			checkInterval, maxStaleCount, maxRetries)
-	}
+	})
 	return defaultWatchdog
 }
 

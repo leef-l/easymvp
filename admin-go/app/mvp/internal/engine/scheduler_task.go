@@ -69,6 +69,11 @@ func (s *Scheduler) SkipTask(ctx context.Context, projectID int64, taskID int64,
 
 	// 尝试推进批次（单 goroutine 顺序执行，避免回调风暴）
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[Scheduler] SkipTask goroutine panic: %v", r)
+			}
+		}()
 		s.advanceBatchIfDone(projectID, taskID)
 		s.scheduleOnce(s.getProjectContext(projectID), projectID)
 		s.checkProjectDone(projectID)

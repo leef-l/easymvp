@@ -72,6 +72,11 @@ func (r *CategoryResolver) ResolveByProject(ctx context.Context, projectID int64
 		if err == nil && info != nil {
 			// 异步回填 category_code
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						g.Log().Errorf(context.Background(), "[CategoryResolver] 回填 category_code panic: %v", r)
+					}
+				}()
 				_, _ = g.DB().Model("mvp_project").
 					Where("id", projectID).
 					Where("category_code IS NULL OR category_code = ''").

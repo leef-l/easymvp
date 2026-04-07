@@ -74,7 +74,14 @@ func (s *DomainTaskScheduler) Start(ctx context.Context, workflowRunID int64) er
 
 	g.Log().Infof(ctx, "[DomainTaskScheduler] Start workflowRunID=%d", workflowRunID)
 
-	go s.scheduleLoop(schedCtx, workflowRunID)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[DomainTaskScheduler] scheduleLoop panic: workflowRunID=%d err=%v", workflowRunID, r)
+			}
+		}()
+		s.scheduleLoop(schedCtx, workflowRunID)
+	}()
 	return nil
 }
 
@@ -101,6 +108,11 @@ func (s *DomainTaskScheduler) OnTaskCompleted(ctx context.Context, taskID int64)
 	}
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[DomainTaskScheduler] OnTaskCompleted panic: task=%d err=%v", taskID, r)
+			}
+		}()
 		s.scheduleOnce(context.Background(), wfRunID.Int64())
 		s.checkAllDone(context.Background(), wfRunID.Int64())
 	}()
@@ -116,7 +128,14 @@ func (s *DomainTaskScheduler) OnTaskFailed(ctx context.Context, taskID int64, er
 		g.Log().Errorf(ctx, "[Scheduler] OnTaskFailed 查询 workflow_run_id 失败: task=%d err=%v", taskID, err)
 		return
 	}
-	go s.scheduleOnce(context.Background(), wfRunID.Int64())
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[DomainTaskScheduler] OnTaskFailed panic: task=%d err=%v", taskID, r)
+			}
+		}()
+		s.scheduleOnce(context.Background(), wfRunID.Int64())
+	}()
 }
 
 // scheduleLoop 调度主循环。
@@ -252,7 +271,14 @@ func (s *DomainTaskScheduler) scheduleOnce(ctx context.Context, workflowRunID in
 
 		// 执行
 		if s.executor != nil {
-			go s.executor.ExecuteDomainTask(context.Background(), workflowRunID, taskID)
+			go func(wfID, tID int64) {
+				defer func() {
+					if r := recover(); r != nil {
+						g.Log().Errorf(context.Background(), "[DomainTaskScheduler] ExecuteDomainTask panic: task=%d err=%v", tID, r)
+					}
+				}()
+				s.executor.ExecuteDomainTask(context.Background(), wfID, tID)
+			}(workflowRunID, taskID)
 		}
 	}
 }
@@ -361,7 +387,14 @@ func (s *DomainTaskScheduler) GetLockedResources() map[string]int64 {
 // Wakeup 唤醒一次调度扫描（不重建调度循环，仅触发单次 scheduleOnce）。
 // 用于单任务重试后让调度器拾取，比 Start() 更轻量。
 func (s *DomainTaskScheduler) Wakeup(ctx context.Context, workflowRunID int64) {
-	go s.scheduleOnce(ctx, workflowRunID)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[DomainTaskScheduler] Wakeup panic: %v", r)
+			}
+		}()
+		s.scheduleOnce(ctx, workflowRunID)
+	}()
 }
 
 // HasUnfinished 检查是否还有未完成任务（供外部查询）。

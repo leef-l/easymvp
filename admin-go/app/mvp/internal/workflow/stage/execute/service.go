@@ -89,7 +89,14 @@ func (s *Service) InstantiateAndStart(ctx context.Context, stageRunID int64, pla
 
 		// 延时清理：扫描已超过保留期的 workspace（失败/取消态的 worktree 依赖此机制）。
 		// 注意：刚完成的 workspace 不会被清理（尚在保留期内），这是预期行为。
-		go workspace.RunCleanup(context.Background(), cleanupMgr, workspace.DefaultCleanupConfig())
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					g.Log().Errorf(context.Background(), "[ExecuteStage] RunCleanup panic: %v", r)
+				}
+			}()
+			workspace.RunCleanup(context.Background(), cleanupMgr, workspace.DefaultCleanupConfig())
+		}()
 
 		// 完成 execute stage 并推进工作流到下一阶段（complete）
 		if s.stageCompleter != nil {

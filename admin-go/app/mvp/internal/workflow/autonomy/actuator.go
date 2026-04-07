@@ -87,7 +87,10 @@ func (a *Actuator) EvaluateAfter(ctx context.Context, outcomeID int64, sitAfter 
 	sitAfterSummary := a.summarizeSituation(sitAfter)
 	effective, score := a.compareOutcome(record.GMap().MapStrAny(), sitAfter)
 
-	evalDelay := gtime.Now().TimestampMilli() - record["created_at"].GTime().TimestampMilli()
+	var evalDelay int64
+	if ct := record["created_at"].GTime(); ct != nil {
+		evalDelay = gtime.Now().TimestampMilli() - ct.TimestampMilli()
+	}
 
 	_, err = g.DB().Model("mvp_action_outcome").Ctx(ctx).Where("id", outcomeID).Update(g.Map{
 		"sit_after":    sitAfterSummary,
