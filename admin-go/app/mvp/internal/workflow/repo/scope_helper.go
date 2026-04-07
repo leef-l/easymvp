@@ -20,7 +20,12 @@ func GetProjectScopeByWorkflowRun(ctx context.Context, workflowRunID int64) *Pro
 		Fields("p.created_by, p.dept_id").
 		Where("wr.id", workflowRunID).
 		One()
-	if err != nil || row.IsEmpty() {
+	if err != nil {
+		g.Log().Errorf(ctx, "[ScopeHelper] 查询 workflow_run(%d) 归属信息失败: %v", workflowRunID, err)
+		return &ProjectScope{}
+	}
+	if row.IsEmpty() {
+		g.Log().Warningf(ctx, "[ScopeHelper] workflow_run(%d) 未找到关联项目的归属信息", workflowRunID)
 		return &ProjectScope{}
 	}
 	return &ProjectScope{
@@ -35,7 +40,12 @@ func GetProjectScopeByProject(ctx context.Context, projectID int64) *ProjectScop
 		Fields("created_by, dept_id").
 		Where("id", projectID).
 		One()
-	if err != nil || row.IsEmpty() {
+	if err != nil {
+		g.Log().Errorf(ctx, "[ScopeHelper] 查询 project(%d) 归属信息失败: %v", projectID, err)
+		return &ProjectScope{}
+	}
+	if row.IsEmpty() {
+		g.Log().Warningf(ctx, "[ScopeHelper] project(%d) 不存在", projectID)
 		return &ProjectScope{}
 	}
 	return &ProjectScope{

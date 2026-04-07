@@ -44,7 +44,7 @@ func ensureWorkDir(path string, autoCreate bool) (string, bool, error) {
 		return "", false, fmt.Errorf("代码工作目录不能为空")
 	}
 
-	// 系统路径黑名单检查
+	// 系统路径黑名单检查（先检查原始路径）
 	if err := checkPathBlacklist(path); err != nil {
 		return "", false, err
 	}
@@ -53,6 +53,14 @@ func ensureWorkDir(path string, autoCreate bool) (string, bool, error) {
 	if err == nil {
 		if !info.IsDir() {
 			return "", false, fmt.Errorf("代码工作目录不是目录: %s", path)
+		}
+		// 解析符号链接后再次检查黑名单，防止 symlink 绕过
+		if realPath, evalErr := filepath.EvalSymlinks(path); evalErr == nil {
+			realPath = filepath.Clean(realPath)
+			if blErr := checkPathBlacklist(realPath); blErr != nil {
+				return "", false, fmt.Errorf("代码工作目录通过符号链接指向系统目录: %s → %s", path, realPath)
+			}
+			path = realPath
 		}
 		return path, false, nil
 	}

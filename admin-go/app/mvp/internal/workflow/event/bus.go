@@ -40,20 +40,19 @@ func (b *Bus) Subscribe(pattern string, handler Handler) {
 }
 
 // Publish 发布事件，同步通知所有匹配的处理函数。
+// 先在锁内复制 handler 列表，再在锁外调用，避免 handler 内部 Subscribe 导致死锁。
 func (b *Bus) Publish(evt Event) {
 	b.mu.RLock()
-	defer b.mu.RUnlock()
-
-	// 精确匹配
+	var matched []Handler
 	if handlers, ok := b.handlers[evt.EventType]; ok {
-		for _, h := range handlers {
-			h(evt)
-		}
+		matched = append(matched, handlers...)
 	}
-	// 全局匹配
 	if handlers, ok := b.handlers["*"]; ok {
-		for _, h := range handlers {
-			h(evt)
-		}
+		matched = append(matched, handlers...)
+	}
+	b.mu.RUnlock()
+
+	for _, h := range matched {
+		h(evt)
 	}
 }

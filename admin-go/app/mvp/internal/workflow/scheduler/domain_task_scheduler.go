@@ -59,12 +59,18 @@ func (s *DomainTaskScheduler) SetCompletionCallback(fn CompletionCallback) { s.o
 func (s *DomainTaskScheduler) Start(ctx context.Context, workflowRunID int64) error {
 	schedCtx, cancel := context.WithCancel(ctx)
 
+	var oldCancel context.CancelFunc
 	s.mu.Lock()
-	if oldCancel, ok := s.cancelFns[workflowRunID]; ok {
-		oldCancel()
+	if oc, ok := s.cancelFns[workflowRunID]; ok {
+		oldCancel = oc
 	}
 	s.cancelFns[workflowRunID] = cancel
 	s.mu.Unlock()
+
+	// 在锁外调用 oldCancel，避免 panic 导致死锁
+	if oldCancel != nil {
+		oldCancel()
+	}
 
 	g.Log().Infof(ctx, "[DomainTaskScheduler] Start workflowRunID=%d", workflowRunID)
 
@@ -87,8 +93,12 @@ func (s *DomainTaskScheduler) OnTaskCompleted(ctx context.Context, taskID int64)
 	s.releaseTaskResources(taskID)
 
 	// 查 workflow_run_id
-	wfRunID, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+	wfRunID, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("id", taskID).Value("workflow_run_id")
+	if err != nil || wfRunID.Int64() == 0 {
+		g.Log().Errorf(ctx, "[Scheduler] OnTaskCompleted 查询 workflow_run_id 失败: task=%d err=%v", taskID, err)
+		return fmt.Errorf("查询任务 %d 的 workflow_run_id 失败: %w", taskID, err)
+	}
 
 	go func() {
 		s.scheduleOnce(context.Background(), wfRunID.Int64())
@@ -100,8 +110,12 @@ func (s *DomainTaskScheduler) OnTaskCompleted(ctx context.Context, taskID int64)
 // OnTaskFailed 任务失败回调。
 func (s *DomainTaskScheduler) OnTaskFailed(ctx context.Context, taskID int64, errMsg string) {
 	s.releaseTaskResources(taskID)
-	wfRunID, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+	wfRunID, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("id", taskID).Value("workflow_run_id")
+	if err != nil || wfRunID.Int64() == 0 {
+		g.Log().Errorf(ctx, "[Scheduler] OnTaskFailed 查询 workflow_run_id 失败: task=%d err=%v", taskID, err)
+		return
+	}
 	go s.scheduleOnce(context.Background(), wfRunID.Int64())
 }
 

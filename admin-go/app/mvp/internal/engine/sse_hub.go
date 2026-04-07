@@ -88,15 +88,8 @@ func (h *SSEHub) Subscribe(messageID int64) (ch chan string, unsubscribe func())
 	h.mu.Unlock()
 
 	unsubscribe = func() {
-		sub.mu.Lock()
-		defer sub.mu.Unlock()
-		if !sub.closed {
-			sub.closed = true
-			close(sub.ch)
-		}
-
+		// 锁顺序统一为 h.mu → sub.mu，与 cleanupStaleSubscribers 一致，避免死锁
 		h.mu.Lock()
-		defer h.mu.Unlock()
 		subs := h.channels[messageID]
 		for i, s := range subs {
 			if s == sub {
@@ -107,6 +100,14 @@ func (h *SSEHub) Subscribe(messageID int64) (ch chan string, unsubscribe func())
 		if len(h.channels[messageID]) == 0 {
 			delete(h.channels, messageID)
 		}
+		h.mu.Unlock()
+
+		sub.mu.Lock()
+		if !sub.closed {
+			sub.closed = true
+			close(sub.ch)
+		}
+		sub.mu.Unlock()
 	}
 
 	return sub.ch, unsubscribe

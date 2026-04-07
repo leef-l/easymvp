@@ -46,6 +46,12 @@ func RecoverActiveWorkflows(ctx context.Context) error {
 		status := run["status"].String()
 		stage := run["current_stage"].String()
 
+		if projectID == 0 {
+			g.Log().Errorf(ctx, "[WorkflowRecovery] workflow_run(%d) project_id 为 0，跳过恢复", workflowRunID)
+			failedWorkflows = append(failedWorkflows, workflowRunID)
+			continue
+		}
+
 		runtimeMgr.Create(workflowRunID, projectID)
 
 		switch stage {

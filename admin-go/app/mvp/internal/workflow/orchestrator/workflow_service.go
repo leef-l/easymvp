@@ -136,8 +136,11 @@ func (s *WorkflowService) StartDesign(ctx context.Context, workflowRunID int64) 
 	now := gtime.Now()
 
 	// 查 project_id（runtime 需要真实 projectID，不能传 0）
-	projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+	projectID, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 		Where("id", workflowRunID).Value("project_id")
+	if err != nil || projectID.Int64() == 0 {
+		return fmt.Errorf("查询 workflow_run(%d) 的 project_id 失败: %v", workflowRunID, err)
+	}
 
 	// workflow_run 已在 CreateRun 中设为 designing，补 started_at（CAS 校验）
 	wfResult, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).

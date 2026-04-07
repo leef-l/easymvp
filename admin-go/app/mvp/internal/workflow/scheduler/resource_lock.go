@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 
@@ -23,7 +24,7 @@ func (m *ResourceLockManager) AcquireLocks(ctx context.Context, workflowRunID, t
 			"task_id":         taskID,
 			"resource_path":   res,
 			"lock_status":     "held",
-			"locked_at":       "now()",
+			"locked_at":       time.Now(),
 		})
 		if err != nil {
 			return err
@@ -37,7 +38,7 @@ func (m *ResourceLockManager) ReleaseLocks(ctx context.Context, taskID int64) er
 	_, err := g.DB().Model("mvp_task_resource_lock").Ctx(ctx).
 		Where("task_id", taskID).
 		Where("lock_status", "held").
-		Data(g.Map{"lock_status": "released", "released_at": "now()"}).
+		Data(g.Map{"lock_status": "released", "released_at": time.Now()}).
 		Update()
 	return err
 }

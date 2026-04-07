@@ -251,9 +251,11 @@ func (w *Watchdog) checkRunningTasks(ctx context.Context) {
 
 // TouchHeartbeat 更新任务心跳时间戳（执行器定期调用）
 func TouchHeartbeat(ctx context.Context, taskID int64) {
-	g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+	if _, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", taskID).Update(g.Map{
 		"heartbeat_at": gtime.Now(),
-	})
+	}); err != nil {
+		g.Log().Warningf(ctx, "[Watchdog] TouchHeartbeat 失败: task=%d err=%v", taskID, err)
+	}
 }
 
 // getLatestChunkID 获取任务关联的最新 chunk ID

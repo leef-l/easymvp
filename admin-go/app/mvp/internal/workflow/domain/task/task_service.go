@@ -139,14 +139,20 @@ func (s *TaskService) InstantiateFromBlueprint(ctx context.Context, planVersionI
 
 		// 完整依赖列表写入 depends_on_task_ids，parent_task_id 保留第一个（向后兼容）
 		taskID := bpIDToTaskID[bp["id"].Int64()]
-		depJSON2, _ := json.Marshal(depTaskIDs)
-		_, _ = g.DB().Model("mvp_domain_task").Ctx(ctx).
+		depJSON2, jsonErr := json.Marshal(depTaskIDs)
+		if jsonErr != nil {
+			g.Log().Errorf(ctx, "[TaskService] 序列化依赖任务ID失败: task=%d err=%v", taskID, jsonErr)
+			continue
+		}
+		if _, upErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
 			Where("id", taskID).
 			Update(g.Map{
 				"parent_task_id":      depTaskIDs[0],
 				"depends_on_task_ids": string(depJSON2),
 				"updated_at":          now,
-			})
+			}); upErr != nil {
+			g.Log().Errorf(ctx, "[TaskService] 更新任务依赖关系失败: task=%d err=%v", taskID, upErr)
+		}
 	}
 
 	g.Log().Infof(ctx, "[TaskService] InstantiateFromBlueprint planVersionID=%d created=%d tasks, workflowRunID=%d",
