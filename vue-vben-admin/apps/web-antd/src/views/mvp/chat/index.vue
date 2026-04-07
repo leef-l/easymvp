@@ -441,13 +441,16 @@ async function handleParseTasks() {
       okText: '确定创建',
       cancelText: '取消',
       async onOk() {
-        // 第三步：实际创建（同步，可能需要几十秒 AI 提取）
-        const res = await parseTasks(projectId.value, false);
-        await loadProjectStatus();
-        if (res.taskCount > 0) {
-          message.success(`已创建 ${res.taskCount} 个草案任务`);
-        } else {
-          message.warning(res.message || '未提取到任务，请检查架构师回复格式');
+        try {
+          const res = await parseTasks(projectId.value, false);
+          await loadProjectStatus();
+          if (res.taskCount > 0) {
+            message.success(`已创建 ${res.taskCount} 个草案任务`);
+          } else {
+            message.warning(res.message || '未提取到任务，请检查架构师回复格式');
+          }
+        } catch (e: any) {
+          message.error('创建草案失败：' + (e?.message || '请求超时或服务异常'));
         }
       },
     });

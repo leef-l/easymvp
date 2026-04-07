@@ -266,6 +266,24 @@ func (c *cWorkflow) ConfirmPlan(ctx context.Context, req *v1.WorkflowConfirmPlan
 		return nil, err
 	}
 
+	// 前置检查：auditor 角色的 AI 模型是否可用（审核阶段需要）
+	auditorRole, _ := g.DB().Model("mvp_project_role").Ctx(ctx).
+		Where("project_id", projectID).
+		Where("role_type", "auditor").
+		WhereNull("deleted_at").One()
+	if auditorRole.IsEmpty() || auditorRole["model_id"].Int64() == 0 {
+		g.Log().Warningf(ctx, "[ConfirmPlan] 项目未配置 auditor 角色，跳过 AI 审核直接通过: projectID=%d", projectID)
+	} else {
+		modelRow, _ := g.DB().Model("ai_model m").Ctx(ctx).
+			LeftJoin("ai_plan p", "p.id = m.plan_id").
+			Where("m.id", auditorRole["model_id"].Int64()).
+			Where("m.deleted_at IS NULL").
+			Fields("m.model_code, p.api_key").One()
+		if modelRow.IsEmpty() || modelRow["api_key"].String() == "" {
+			g.Log().Warningf(ctx, "[ConfirmPlan] auditor 模型不可用，跳过 AI 审核直接通过: projectID=%d", projectID)
+		}
+	}
+
 	submitErr := orchestrator.GetPlanVersionService().SubmitForReviewAsync(ctx, projectID)
 	if submitErr != nil {
 		return nil, submitErr
@@ -573,8 +591,12 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 			count, err := createBlueprints(ctx, projectID, convID, lastMsgID, tasks)
 			if err != nil {
 				g.Log().Errorf(ctx, "[ParseTasks] createBlueprints 失败: projectID=%d err=%v", projectID, err)
-				return nil, err
+				return &v1.WorkflowParseTasksRes{
+					HasTasks: false, TaskCount: 0,
+					Message: fmt.Sprintf("创建蓝图失败: %v", err),
+				}, nil
 			}
+			g.Log().Infof(ctx, "[ParseTasks] 创建蓝图成功: projectID=%d count=%d", projectID, count)
 			return &v1.WorkflowParseTasksRes{HasTasks: count > 0, TaskCount: count}, nil
 		}
 	}
