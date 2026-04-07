@@ -36,6 +36,9 @@ func (m *GitWorktreeManager) Prepare(ctx context.Context, req PrepareRequest) (*
 		if output, err := initCmd.CombinedOutput(); err != nil {
 			return nil, fmt.Errorf("git init 失败: %s: %s", workDir, string(output))
 		}
+		// 配置本地 git user（容器内可能没有全局配置）
+		_ = exec.Command("git", "-C", workDir, "config", "user.name", "EasyMVP").Run()
+		_ = exec.Command("git", "-C", workDir, "config", "user.email", "mvp@easymvp.local").Run()
 		// 创建初始提交（git worktree 要求至少有一个 commit）
 		addCmd := exec.Command("git", "-C", workDir, "commit", "--allow-empty", "-m", "init: project workspace")
 		if output, err := addCmd.CombinedOutput(); err != nil {
