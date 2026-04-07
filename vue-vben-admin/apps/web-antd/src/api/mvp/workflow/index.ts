@@ -23,7 +23,7 @@ export function createProject(data: {
   categoryCode?: string;
   description: string;
   workDir: string;
-  architectModelID: string;
+  architectModelID?: string;
   engineVersion?: string;
   selectedRoles?: { presetID: string }[];
 }) {
@@ -35,8 +35,24 @@ export function createProject(data: {
 }
 
 /** 确认实施方案（由设计阶段进入执行阶段） */
+export interface ConfirmPlanResult {
+  submitted?: boolean;
+  reviewPassed: boolean;
+  reviewStatus?: string;
+  stageStatus?: string;
+  message?: string;
+  rejectReason?: string;
+  issues?: Array<{
+    severity: string;
+    taskName?: string;
+    message: string;
+  }>;
+  errorCount?: number;
+  warningCount?: number;
+}
+
 export function confirmPlan(projectID: string) {
-  return requestClient.post(`${PREFIX}/confirm-plan`, { projectID });
+  return requestClient.post<ConfirmPlanResult>(`${PREFIX}/confirm-plan`, { projectID });
 }
 
 /** 手动解析架构师回复中的任务清单（托底机制） */

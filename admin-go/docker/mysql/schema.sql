@@ -830,6 +830,7 @@ CREATE TABLE `mvp_situation_snapshot` (
   `deleted_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_workflow_run` (`workflow_run_id`),
+  KEY `idx_workflow_deleted_id` (`workflow_run_id`,`deleted_at`,`id`),
   KEY `idx_project` (`project_id`),
   KEY `idx_created_at` (`created_at`),
   KEY `idx_deleted_at` (`deleted_at`)
@@ -1107,6 +1108,7 @@ CREATE TABLE `mvp_workflow_run` (
   `deleted_at` datetime DEFAULT NULL COMMENT '软删除时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_project_run_no` (`project_id`,`run_no`),
+  KEY `idx_project_deleted_id` (`project_id`,`deleted_at`,`id`),
   KEY `idx_project_status` (`project_id`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流运行实例';
 /*!40101 SET character_set_client = @saved_cs_client */;

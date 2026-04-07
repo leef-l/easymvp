@@ -366,6 +366,7 @@ func (s *sProject) List(ctx context.Context, in *model.ProjectListInput) (list [
 		return
 	}
 	s.fillRefFields(ctx, list)
+	s.fillWorkflowStatuses(ctx, list)
 	return
 }
 
@@ -377,6 +378,7 @@ func (s *sProject) Export(ctx context.Context, in *model.ProjectListInput) (list
 		return
 	}
 	s.fillRefFields(ctx, list)
+	s.fillWorkflowStatuses(ctx, list)
 	return
 }
 
@@ -408,6 +410,63 @@ func (s *sProject) fillRefFields(ctx context.Context, list []*model.ProjectListO
 					item.ArchitectModelName = val
 				}
 			}
+		}
+	}
+}
+
+// fillWorkflowStatuses 用最新 workflow_run.status 覆盖项目列表状态，避免项目表状态滞后误导前端。
+func (s *sProject) fillWorkflowStatuses(ctx context.Context, list []*model.ProjectListOutput) {
+	projectIDs := make([]int64, 0, len(list))
+	for _, item := range list {
+		if item == nil || item.ID == 0 {
+			continue
+		}
+		projectIDs = append(projectIDs, int64(item.ID))
+	}
+	if len(projectIDs) == 0 {
+		return
+	}
+
+	type latestRunID struct {
+		ProjectID int64 `orm:"project_id"`
+		ID        int64 `orm:"id"`
+	}
+	var latestRunIDs []latestRunID
+	if err := g.DB().Ctx(ctx).Model("mvp_workflow_run").
+		WhereIn("project_id", projectIDs).
+		WhereNull("deleted_at").
+		Fields("project_id, MAX(id) AS id").
+		Group("project_id").
+		Scan(&latestRunIDs); err != nil || len(latestRunIDs) == 0 {
+		return
+	}
+
+	runIDs := make([]int64, 0, len(latestRunIDs))
+	for _, item := range latestRunIDs {
+		if item.ID > 0 {
+			runIDs = append(runIDs, item.ID)
+		}
+	}
+	if len(runIDs) == 0 {
+		return
+	}
+
+	runs, err := g.DB().Ctx(ctx).Model("mvp_workflow_run").
+		WhereIn("id", runIDs).
+		WhereNull("deleted_at").
+		Fields("id, project_id, status").
+		All()
+	if err != nil || len(runs) == 0 {
+		return
+	}
+
+	statusByProjectID := make(map[int64]string, len(runs))
+	for _, run := range runs {
+		statusByProjectID[run["project_id"].Int64()] = run["status"].String()
+	}
+	for _, item := range list {
+		if status, ok := statusByProjectID[int64(item.ID)]; ok && status != "" {
+			item.Status = status
 		}
 	}
 }

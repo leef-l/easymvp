@@ -26,7 +26,7 @@ func NewCodexCLIExecutor(wsMgr workspace.Manager) *CodexCLIExecutor {
 	return &CodexCLIExecutor{wsMgr: wsMgr}
 }
 
-func (e *CodexCLIExecutor) Name() string        { return "codex_cli" }
+func (e *CodexCLIExecutor) Name() string         { return "codex_cli" }
 func (e *CodexCLIExecutor) NeedsWorkspace() bool { return true }
 
 // Execute 执行 Codex CLI 任务。
@@ -79,13 +79,12 @@ func (e *CodexCLIExecutor) Execute(ctx context.Context, req *Request) *Result {
 		if req.ModelInfo != nil {
 			envVars["AI_MODEL_API_KEY"] = req.ModelInfo.APIKey
 			envVars["AI_MODEL_CODE"] = req.ModelInfo.ModelCode
-			envVars["AI_MODEL_BASE_URL"] = req.ModelInfo.BaseURL
+			envVars["AI_MODEL_BASE_URL"] = resolveModelBaseURL(req.ModelInfo, engineCfg["base_url"].String())
 		}
 		cmdStr = renderCommandTemplate(cmdTemplate, envVars)
 	} else {
-		// 默认：codex --approval-mode full-auto "instruction"
-		escapedInstruction := strings.ReplaceAll(taskInstruction, "'", "'\\''")
-		cmdStr = fmt.Sprintf("codex --approval-mode full-auto '%s'", escapedInstruction)
+		// 默认：Codex CLI 非交互执行，并显式使用任务模型。
+		cmdStr = buildCodexDefaultCommand(workDir, taskInstruction, req.ModelInfo)
 	}
 
 	g.Log().Infof(ctx, "[CodexCLIExecutor] 启动: task=%d workDir=%s", req.TaskID, workDir)
@@ -98,6 +97,9 @@ func (e *CodexCLIExecutor) Execute(ctx context.Context, req *Request) *Result {
 	cmd.Env = os.Environ()
 	if req.ModelInfo != nil && req.ModelInfo.APIKey != "" {
 		cmd.Env = append(cmd.Env, "OPENAI_API_KEY="+req.ModelInfo.APIKey)
+	}
+	if baseURL := resolveModelBaseURL(req.ModelInfo, engineCfg["base_url"].String()); baseURL != "" {
+		cmd.Env = append(cmd.Env, "OPENAI_BASE_URL="+baseURL)
 	}
 
 	var stdout, stderr bytes.Buffer

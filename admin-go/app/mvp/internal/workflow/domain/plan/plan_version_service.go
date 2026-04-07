@@ -395,15 +395,33 @@ func (s *PlanVersionService) SubmitForReviewAsync(ctx context.Context, projectID
 
 			if triggerErr := s.reviewTrigger(bgCtx, projectID, pvID); triggerErr != nil {
 				g.Log().Errorf(bgCtx, "[PlanVersionService] 异步审核失败，回滚状态: projectID=%d pvID=%d err=%v", projectID, pvID, triggerErr)
+				rollbackNow := gtime.Now()
 				_, _ = g.DB().Model("mvp_plan_version").Ctx(bgCtx).
 					Where("id", pvID).Where("status", consts.PlanVersionStatusActive).
-					Update(g.Map{"status": consts.PlanVersionStatusDraft, "updated_at": gtime.Now()})
+					Update(g.Map{"status": consts.PlanVersionStatusDraft, "updated_at": rollbackNow})
 				_, _ = g.DB().Model("mvp_task_blueprint").Ctx(bgCtx).
 					Where("plan_version_id", pvID).Where("blueprint_status", consts.BlueprintStatusConfirmed).
-					Update(g.Map{"blueprint_status": consts.BlueprintStatusDraft, "updated_at": gtime.Now()})
+					Update(g.Map{"blueprint_status": consts.BlueprintStatusDraft, "updated_at": rollbackNow})
+
+				// 查找关联的 workflow_run 并回退状态
+				wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(bgCtx).
+					Where("project_id", projectID).
+					WhereIn("status", g.Slice{"reviewing", "failed"}).
+					WhereNull("deleted_at").
+					OrderDesc("id").
+					Fields("id").
+					One()
+				if !wfRun.IsEmpty() {
+					_, _ = g.DB().Model("mvp_workflow_run").Ctx(bgCtx).
+						Where("id", wfRun["id"].Int64()).
+						WhereIn("status", g.Slice{"reviewing", "failed"}).
+						Update(g.Map{"status": "designing", "current_stage": "design", "updated_at": rollbackNow})
+				}
+
 				_, _ = g.DB().Model("mvp_project").Ctx(bgCtx).
-					Where("id", projectID).Where("status", "reviewing").
-					Update(g.Map{"status": "designing", "updated_at": gtime.Now()})
+					Where("id", projectID).
+					WhereIn("status", g.Slice{"reviewing", "failed"}).
+					Update(g.Map{"status": "designing", "updated_at": rollbackNow})
 			}
 		}()
 	}

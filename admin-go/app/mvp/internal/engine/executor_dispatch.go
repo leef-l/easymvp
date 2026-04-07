@@ -353,12 +353,6 @@ func (e *Executor) executeChatMode(ctx context.Context, projectID int64, taskID 
 
 // resolveTaskModel 解析任务使用的 AI 模型
 func (e *Executor) resolveTaskModel(ctx context.Context, projectID int64, taskID int64, roleType string, modelID int64) (*ModelInfo, error) {
-	// 如果任务自身指定了 model_id，优先使用
-	if modelID > 0 {
-		return e.getModelInfo(ctx, modelID, "")
-	}
-
-	// 否则从项目角色配置中查找
 	task, err := g.DB().Model("mvp_task").Where("id", taskID).Fields("role_level").One()
 	if err != nil {
 		g.Log().Warningf(ctx, "[Executor] 查询 task role_level 失败: task=%d, err=%v", taskID, err)
@@ -368,31 +362,7 @@ func (e *Executor) resolveTaskModel(ctx context.Context, projectID int64, taskID
 		roleLevel = task["role_level"].String()
 	}
 
-	// 查找角色配置（匹配 role_type + role_level）
-	roleQuery := g.DB().Model("mvp_project_role").
-		Where("project_id", projectID).
-		Where("role_type", roleType).
-		Where("status", 1).
-		Where("deleted_at IS NULL")
-	if roleLevel != "" {
-		roleQuery = roleQuery.Where("role_level", roleLevel)
-	}
-
-	role, err := roleQuery.One()
-	if err != nil || role.IsEmpty() {
-		// 没有匹配等级的，用该角色类型的任意一个
-		role, err = g.DB().Model("mvp_project_role").
-			Where("project_id", projectID).
-			Where("role_type", roleType).
-			Where("status", 1).
-			Where("deleted_at IS NULL").
-			One()
-		if err != nil || role.IsEmpty() {
-			return nil, fmt.Errorf("项目未配置 %s 角色模型", roleType)
-		}
-	}
-
-	return e.getModelInfo(ctx, role["model_id"].Int64(), role["system_prompt"].String())
+	return ResolveProjectModelInfo(ctx, projectID, roleType, roleLevel, modelID)
 }
 
 // getModelInfo 查询模型详情
@@ -427,35 +397,7 @@ func (e *Executor) getModelInfo(ctx context.Context, modelID int64, systemPrompt
 
 // getExecutionMode 从项目角色配置中获取执行方式
 func (e *Executor) getExecutionMode(ctx context.Context, projectID int64, roleType string, roleLevel string) string {
-	query := g.DB().Model("mvp_project_role").
-		Where("project_id", projectID).
-		Where("role_type", roleType).
-		Where("status", 1).
-		Where("deleted_at IS NULL")
-	if roleLevel != "" {
-		query = query.Where("role_level", roleLevel)
-	}
-
-	role, err := query.Fields("execution_mode").One()
-	if err != nil || role.IsEmpty() {
-		// 无匹配等级时，忽略等级再查一次
-		role, err = g.DB().Model("mvp_project_role").
-			Where("project_id", projectID).
-			Where("role_type", roleType).
-			Where("status", 1).
-			Where("deleted_at IS NULL").
-			Fields("execution_mode").
-			One()
-		if err != nil || role.IsEmpty() {
-			return "chat"
-		}
-	}
-
-	mode := role["execution_mode"].String()
-	if mode == "" {
-		return "chat"
-	}
-	return mode
+	return ResolveProjectExecutionMode(ctx, projectID, roleType, roleLevel)
 }
 
 // handleTaskFailure 处理任务失败，根据错误分类决定升级还是直接失败

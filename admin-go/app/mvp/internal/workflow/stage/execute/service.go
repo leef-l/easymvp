@@ -10,10 +10,10 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"easymvp/app/mvp/internal/engine"
-	"easymvp/app/mvp/internal/workspace"
 	domainTask "easymvp/app/mvp/internal/workflow/domain/task"
 	"easymvp/app/mvp/internal/workflow/executor"
 	"easymvp/app/mvp/internal/workflow/scheduler"
+	"easymvp/app/mvp/internal/workspace"
 )
 
 // StageCompleter 阶段完成回调（避免循环依赖）。
@@ -151,7 +151,7 @@ func (e *domainTaskExecutor) ExecuteDomainTask(ctx context.Context, workflowRunI
 	}
 
 	// 获取模型信息
-	modelInfo, err := engine.ResolveModelInfo(ctx, projectID.Int64(), roleType, modelID)
+	modelInfo, err := engine.ResolveProjectModelInfo(ctx, projectID.Int64(), roleType, taskRecord["role_level"].String(), modelID)
 	if err != nil {
 		e.handleFailure(ctx, taskID, err.Error())
 		return
@@ -251,7 +251,7 @@ func (e *domainTaskExecutor) handleFailure(ctx context.Context, taskID int64, er
 		Update(g.Map{
 			"status":     "failed",
 			"result":     errMsg,
-			"updated_at": g.Map{"updated_at": "NOW()"},
+			"updated_at": gtime.Now(),
 		})
 	e.scheduler.OnTaskFailed(ctx, taskID, errMsg)
 }

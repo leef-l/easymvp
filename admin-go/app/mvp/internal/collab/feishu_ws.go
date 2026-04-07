@@ -102,11 +102,11 @@ func (c *FeishuWSClient) handleRawPayload(ctx context.Context, body []byte) {
 		return
 	}
 
-	g.Log().Infof(ctx, "[FeishuWS] 原始payload: %s", string(body))
+	g.Log().Debugf(ctx, "[FeishuWS] 收到原始payload: size=%d", len(body))
 
 	var raw map[string]interface{}
 	if err := json.Unmarshal(body, &raw); err != nil {
-		g.Log().Warningf(ctx, "[FeishuWS] payload JSON 解析失败: %v, body=%s", err, string(body))
+		g.Log().Warningf(ctx, "[FeishuWS] payload JSON 解析失败: %v, body_len=%d", err, len(body))
 		return
 	}
 
@@ -115,7 +115,7 @@ func (c *FeishuWSClient) handleRawPayload(ctx context.Context, body []byte) {
 
 	if header != nil {
 		et, _ := header["event_type"].(string)
-		g.Log().Infof(ctx, "[FeishuWS] 收到事件: event_type=%s", et)
+		g.Log().Debugf(ctx, "[FeishuWS] 收到事件: event_type=%s", et)
 	}
 
 	if c.OnEvent != nil && (header != nil || event != nil) {

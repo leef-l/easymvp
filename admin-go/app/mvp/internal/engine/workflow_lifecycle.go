@@ -8,6 +8,8 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"easymvp/app/mvp/internal/workflow/presetutil"
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/utility/snowflake"
 )
 
@@ -96,6 +98,7 @@ func (s *Scheduler) Pause(ctx context.Context, projectID int64, reason string) e
 	s.PauseProject(projectID)
 	return nil
 }
+
 // Resume 恢复项目（重新开始调度）
 // 如果已有 pending 任务，直接进入 running（跳过审核）
 // 如果只有 draft 任务，走审核流程
@@ -131,8 +134,9 @@ func (s *Scheduler) Resume(ctx context.Context, projectID int64) error {
 	// 只有 draft 任务，走审核流程
 	return s.ConfirmPlan(ctx, projectID)
 }
-// CreateProject 创建项目并初始化架构师对话
-// selectedPresetIDs 为前端选择的角色预设 ID 列表，为空则按分类读取默认预设（兼容）
+
+// CreateProject 创建项目并初始化架构师对话。
+// selectedPresetIDs 为用户显式选择的项目角色预设；为空时不生成项目角色配置，运行时直接回退到分类默认预设。
 func CreateProject(ctx context.Context, name, projectCategory, description, workDir string, architectModelID int64, userID int64, deptID int64, selectedPresetIDs []int64, engineVersion ...string) (int64, int64, error) {
 	// 1.5 默认分类
 	if projectCategory == "" {
@@ -160,35 +164,24 @@ func CreateProject(ctx context.Context, name, projectCategory, description, work
 		}
 	}
 
-	// 1. 读取角色预设：优先按前端选择的 ID 列表，否则按分类默认
+	// 1. 读取用户显式选择的项目角色预设；未选择时不在创建阶段生成项目角色配置
 	var presets gdb.Result
 	var err error
 	if len(selectedPresetIDs) > 0 {
-		presets, err = g.DB().Model("mvp_role_preset").
-			WhereIn("id", selectedPresetIDs).
-			Where("status", 1).
-			Where("deleted_at IS NULL").
-			OrderAsc("sort").
-			All()
-	} else {
-		presets, err = g.DB().Model("mvp_role_preset").
-			Where("status", 1).
-			Where("project_category", projectCategory).
-			Where("is_default", 1).
-			Where("deleted_at IS NULL").
-			OrderAsc("sort").
-			All()
+		presets, err = repo.ListRolePresets(ctx, repo.RolePresetQuery{
+			IDs:             selectedPresetIDs,
+			CategoryCode:    categoryCode,
+			ProjectCategory: projectCategory,
+		})
 	}
 	if err != nil {
 		return 0, 0, fmt.Errorf("读取角色预设失败: %w", err)
 	}
-// PLACEHOLDER_CREATEPROJECT_CONT
-
-	// 找到预设中的架构师模型作为兜底
-	if architectModelID == 0 {
+	projectArchitectModelID := architectModelID
+	if projectArchitectModelID == 0 {
 		for _, p := range presets {
 			if p["role_type"].String() == "architect" && p["model_id"].Int64() > 0 {
-				architectModelID = p["model_id"].Int64()
+				projectArchitectModelID = p["model_id"].Int64()
 				break
 			}
 		}
@@ -210,7 +203,7 @@ func CreateProject(ctx context.Context, name, projectCategory, description, work
 		"status":             "designing",
 		"engine_version":     ev,
 		"work_dir":           workDir,
-		"architect_model_id": architectModelID,
+		"architect_model_id": projectArchitectModelID,
 		"created_by":         userID,
 		"dept_id":            deptID,
 		"created_at":         gtime.Now(),
@@ -241,27 +234,23 @@ func CreateProject(ctx context.Context, name, projectCategory, description, work
 			modelPromptMap[m["id"].Int64()] = m["role_prompt"].String()
 		}
 	}
-// PLACEHOLDER_CREATEPROJECT_CONT2
 
-	// 4. 根据预设模板创建项目角色配置
+	// 4. 只为用户显式选择的预设创建项目角色配置
 	for _, p := range presets {
 		roleType := p["role_type"].String()
 		modelID := p["model_id"].Int64()
 
-		// 架构师角色：优先用前端传入的模型
+		// 架构师角色：若用户手动选择了模型，则覆盖预设模型
 		if roleType == "architect" {
 			modelID = architectModelID
+			if modelID == 0 {
+				modelID = p["model_id"].Int64()
+			}
 		}
 
-		// 系统提示词优先级：模型 role_prompt > 预设 system_prompt
-		// 架构师特殊处理：动态拼接项目信息
-		systemPrompt := ""
+		systemPrompt := presetutil.BuildRoleSystemPrompt(categoryCode, roleType, p["role_level"].String(), p["system_prompt"].String(), modelPromptMap[modelID])
 		if roleType == "architect" {
-			systemPrompt = buildArchitectPromptWithCategory(name, description, modelPromptMap[modelID], projectCategory)
-		} else if rp, ok := modelPromptMap[modelID]; ok && rp != "" {
-			systemPrompt = rp
-		} else {
-			systemPrompt = p["system_prompt"].String()
+			systemPrompt = presetutil.BuildArchitectSystemPrompt(name, description, categoryCode, systemPrompt)
 		}
 
 		// 复制执行方式，默认 chat
@@ -289,15 +278,37 @@ func CreateProject(ctx context.Context, name, projectCategory, description, work
 			return 0, 0, fmt.Errorf("创建角色配置(%s)失败: %w", roleType, err)
 		}
 	}
-	// 如果预设为空，至少创建架构师角色（兼容无预设场景）
+	// 仅当用户显式选择了架构师模型时，创建架构师项目角色覆盖
 	if len(presets) == 0 && architectModelID > 0 {
+		roleLevel := "max"
+		executionMode := "chat"
+		architectPreset, presetErr := repo.GetRolePreset(ctx, repo.RolePresetQuery{
+			CategoryCode:    categoryCode,
+			ProjectCategory: projectCategory,
+			RoleType:        "architect",
+			DefaultOnly:     true,
+		})
+		if presetErr == nil && architectPreset != nil {
+			if architectPreset["role_level"].String() != "" {
+				roleLevel = architectPreset["role_level"].String()
+			}
+			if architectPreset["execution_mode"].String() != "" {
+				executionMode = architectPreset["execution_mode"].String()
+			}
+		}
+
+		systemPrompt := presetutil.BuildRoleSystemPrompt(categoryCode, "architect", roleLevel, "", modelPromptMap[architectModelID])
+		systemPrompt = presetutil.BuildArchitectSystemPrompt(name, description, categoryCode, systemPrompt)
+
 		_, err = g.DB().Model("mvp_project_role").Insert(g.Map{
 			"id":               int64(snowflake.Generate()),
 			"project_id":       projectID,
 			"project_category": projectCategory,
 			"role_type":        "architect",
+			"role_level":       roleLevel,
 			"model_id":         architectModelID,
-			"system_prompt":    buildArchitectPrompt(name, description, modelPromptMap[architectModelID]),
+			"system_prompt":    systemPrompt,
+			"execution_mode":   executionMode,
 			"status":           1,
 			"created_by":       userID,
 			"dept_id":          deptID,

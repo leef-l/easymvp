@@ -17,8 +17,23 @@ fi
 
 CONFIG_DIR="/workspace/admin-go/.runtime-config"
 CONFIG_FILE="${CONFIG_DIR}/${APP_NAME}.yaml"
+LOG_BASE_PATH="${GF_LOG_PATH:-/workspace/admin-go/logs}"
+LOG_DIR="${LOG_BASE_PATH}/${APP_NAME}"
 
-mkdir -p "${CONFIG_DIR}"
+mkdir -p "${CONFIG_DIR}" "${LOG_DIR}"
+
+REDIS_CONFIG=""
+if [[ -n "${REDIS_ADDR:-}" ]]; then
+  REDIS_CONFIG=$(cat <<EOF
+
+redis:
+  default:
+    address: "${REDIS_ADDR}"
+    pass: "${REDIS_PASS:-}"
+    db: 0
+EOF
+)
+fi
 
 cat > "${CONFIG_FILE}" <<EOF
 server:
@@ -30,10 +45,16 @@ database:
   default:
     link: "mysql:${DB_USER}:${DB_PASSWORD}@tcp(${DB_HOST}:${DB_PORT:-3306})/${DB_NAME}?charset=utf8mb4&loc=Local&parseTime=true"
     debug: false
+${REDIS_CONFIG}
 
 logger:
-  level: "all"
-  stdout: true
+  path: "${LOG_DIR}"
+  level: "${GF_LOG_LEVEL:-info|warning|error|critical|panic|fatal}"
+  stdout: ${GF_LOG_STDOUT:-false}
+  rotateSize: "${GF_LOG_ROTATE_SIZE:-100M}"
+  rotateExpire: "${GF_LOG_ROTATE_EXPIRE:-7d}"
+  rotateBackupLimit: ${GF_LOG_ROTATE_BACKUP_LIMIT:-10}
+  stStatus: 0
 
 jwt:
   secret: "${JWT_SECRET:-easymvp-secret-key}"

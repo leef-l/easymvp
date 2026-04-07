@@ -26,7 +26,7 @@ func NewGeminiCLIExecutor(wsMgr workspace.Manager) *GeminiCLIExecutor {
 	return &GeminiCLIExecutor{wsMgr: wsMgr}
 }
 
-func (e *GeminiCLIExecutor) Name() string        { return "gemini_cli" }
+func (e *GeminiCLIExecutor) Name() string         { return "gemini_cli" }
 func (e *GeminiCLIExecutor) NeedsWorkspace() bool { return true }
 
 // Execute 执行 Gemini CLI 任务。
@@ -79,13 +79,12 @@ func (e *GeminiCLIExecutor) Execute(ctx context.Context, req *Request) *Result {
 		if req.ModelInfo != nil {
 			envVars["AI_MODEL_API_KEY"] = req.ModelInfo.APIKey
 			envVars["AI_MODEL_CODE"] = req.ModelInfo.ModelCode
-			envVars["AI_MODEL_BASE_URL"] = req.ModelInfo.BaseURL
+			envVars["AI_MODEL_BASE_URL"] = resolveModelBaseURL(req.ModelInfo, engineCfg["base_url"].String())
 		}
 		cmdStr = renderCommandTemplate(cmdTemplate, envVars)
 	} else {
-		// 默认：gemini -p "instruction"
-		escapedInstruction := strings.ReplaceAll(taskInstruction, "'", "'\\''")
-		cmdStr = fmt.Sprintf("gemini -p '%s'", escapedInstruction)
+		// 默认：Gemini CLI 非交互执行，并显式使用任务模型。
+		cmdStr = buildGeminiDefaultCommand(taskInstruction, req.ModelInfo)
 	}
 
 	g.Log().Infof(ctx, "[GeminiCLIExecutor] 启动: task=%d workDir=%s", req.TaskID, workDir)

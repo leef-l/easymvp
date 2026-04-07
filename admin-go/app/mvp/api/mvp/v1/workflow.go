@@ -17,9 +17,9 @@ type WorkflowCreateProjectReq struct {
 	CategoryCode     string              `json:"categoryCode" v:"max-length:64" dc:"项目分类编码（优先使用）"`
 	Description      string              `json:"description" dc:"项目简介"`
 	WorkDir          string              `json:"workDir" v:"max-length:500" dc:"代码工作目录（编码类项目必填，非编码类可留空由系统自动生成）"`
-	ArchitectModelID snowflake.JsonInt64  `json:"architectModelID" v:"required" dc:"架构师AI模型ID"`
-	EngineVersion    string               `json:"engineVersion" dc:"引擎版本: legacy(默认) / workflow_v2"`
-	SelectedRoles    []SelectedRoleItem   `json:"selectedRoles" dc:"用户选择的角色预设ID列表，为空则使用默认预设"`
+	ArchitectModelID snowflake.JsonInt64 `json:"architectModelID" dc:"架构师AI模型ID（可选，选择后会生成项目级架构师配置）"`
+	EngineVersion    string              `json:"engineVersion" dc:"引擎版本: legacy(默认) / workflow_v2"`
+	SelectedRoles    []SelectedRoleItem  `json:"selectedRoles" dc:"用户选择的角色预设ID列表；为空则不生成项目级角色配置，运行时直接走分类默认预设"`
 }
 
 // SelectedRoleItem 用户选择的角色预设
@@ -31,8 +31,8 @@ type SelectedRoleItem struct {
 type WorkflowCreateProjectRes struct {
 	g.Meta         `mime:"application/json"`
 	ProjectID      snowflake.JsonInt64 `json:"projectID"`
-	ConversationID snowflake.JsonInt64 `json:"conversationID"`    // 架构师对话 ID
-	WorkflowRunID  snowflake.JsonInt64 `json:"workflowRunID"`     // V2 工作流运行 ID（legacy 为 0）
+	ConversationID snowflake.JsonInt64 `json:"conversationID"` // 架构师对话 ID
+	WorkflowRunID  snowflake.JsonInt64 `json:"workflowRunID"`  // V2 工作流运行 ID（legacy 为 0）
 }
 
 // WorkflowConfirmPlanReq 确认实施方案请求
@@ -44,11 +44,15 @@ type WorkflowConfirmPlanReq struct {
 // WorkflowConfirmPlanRes 确认实施方案响应
 type WorkflowConfirmPlanRes struct {
 	g.Meta       `mime:"application/json"`
-	ReviewPassed bool              `json:"reviewPassed"`              // 审核是否通过
-	RejectReason string            `json:"rejectReason,omitempty"`    // 驳回原因摘要
-	Issues       []ReviewIssueItem `json:"issues,omitempty"`          // 审核问题列表
-	ErrorCount   int               `json:"errorCount"`                // error 级别问题数
-	WarningCount int               `json:"warningCount"`              // warning 级别问题数
+	Submitted    bool              `json:"submitted"`              // 是否已成功提交审核
+	ReviewPassed bool              `json:"reviewPassed"`           // 审核是否通过
+	ReviewStatus string            `json:"reviewStatus,omitempty"` // pending/approved/rejected
+	StageStatus  string            `json:"stageStatus,omitempty"`  // pending/running/completed/failed
+	Message      string            `json:"message,omitempty"`      // 结果说明
+	RejectReason string            `json:"rejectReason,omitempty"` // 驳回原因摘要
+	Issues       []ReviewIssueItem `json:"issues,omitempty"`       // 审核问题列表
+	ErrorCount   int               `json:"errorCount"`             // error 级别问题数
+	WarningCount int               `json:"warningCount"`           // warning 级别问题数
 }
 
 // WorkflowPauseReq 暂停项目请求
@@ -134,9 +138,9 @@ type WorkflowParseTasksReq struct {
 // WorkflowParseTasksRes 手动解析任务响应
 type WorkflowParseTasksRes struct {
 	g.Meta    `mime:"application/json"`
-	HasTasks  bool   `json:"hasTasks"`            // AI回复中是否包含任务清单
-	TaskCount int    `json:"taskCount"`           // 解析出的任务数量
-	Message   string `json:"message,omitempty"`   // 提示信息（如异步提取中）
+	HasTasks  bool   `json:"hasTasks"`          // AI回复中是否包含任务清单
+	TaskCount int    `json:"taskCount"`         // 解析出的任务数量
+	Message   string `json:"message,omitempty"` // 提示信息（如异步提取中）
 }
 
 // WorkflowRolePresetsReq 获取角色预设列表请求
@@ -149,20 +153,20 @@ type WorkflowRolePresetsReq struct {
 
 // WorkflowRolePresetsRes 获取角色预设列表响应
 type WorkflowRolePresetsRes struct {
-	g.Meta  `mime:"application/json"`
-	List    []RolePresetItem `json:"list"`
+	g.Meta `mime:"application/json"`
+	List   []RolePresetItem `json:"list"`
 }
 
 // RolePresetItem 角色预设项
 type RolePresetItem struct {
 	ID            snowflake.JsonInt64 `json:"id"`
-	RoleType      string             `json:"roleType"`
-	RoleLevel     string             `json:"roleLevel"`
+	RoleType      string              `json:"roleType"`
+	RoleLevel     string              `json:"roleLevel"`
 	ModelID       snowflake.JsonInt64 `json:"modelID"`
-	ModelName     string             `json:"modelName"`
-	ExecutionMode string             `json:"executionMode"`
-	SystemPrompt  string             `json:"systemPrompt"`
-	IsDefault     bool               `json:"isDefault"`
+	ModelName     string              `json:"modelName"`
+	ExecutionMode string              `json:"executionMode"`
+	SystemPrompt  string              `json:"systemPrompt"`
+	IsDefault     bool                `json:"isDefault"`
 }
 
 // SystemCheckReq 系统配置检测请求
@@ -181,9 +185,9 @@ type SystemCheckRes struct {
 type SystemCheckItem struct {
 	Key     string `json:"key"`
 	Name    string `json:"name"`
-	Status  string `json:"status"`  // ok / warning / error
+	Status  string `json:"status"` // ok / warning / error
 	Message string `json:"message"`
-	Link    string `json:"link"`    // 前端跳转路径
+	Link    string `json:"link"` // 前端跳转路径
 }
 
 // ==================== 项目分类 API ====================
@@ -217,26 +221,26 @@ type WorkflowReviewStatusReq struct {
 
 // WorkflowReviewStatusRes 获取审核状态响应
 type WorkflowReviewStatusRes struct {
-	g.Meta          `mime:"application/json"`
-	PlanVersionID   snowflake.JsonInt64 `json:"planVersionID"`
-	ReviewStatus    string              `json:"reviewStatus"`    // pending/approved/rejected
-	StageRunID      snowflake.JsonInt64 `json:"stageRunID"`
-	StageStatus     string              `json:"stageStatus"`     // pending/running/completed/failed
-	StageTasks      []ReviewStageTask   `json:"stageTasks"`
-	ErrorCount      int                 `json:"errorCount"`
-	WarningCount    int                 `json:"warningCount"`
-	BlueprintCount  int                 `json:"blueprintCount"`
+	g.Meta         `mime:"application/json"`
+	PlanVersionID  snowflake.JsonInt64 `json:"planVersionID"`
+	ReviewStatus   string              `json:"reviewStatus"` // pending/approved/rejected
+	StageRunID     snowflake.JsonInt64 `json:"stageRunID"`
+	StageStatus    string              `json:"stageStatus"` // pending/running/completed/failed
+	StageTasks     []ReviewStageTask   `json:"stageTasks"`
+	ErrorCount     int                 `json:"errorCount"`
+	WarningCount   int                 `json:"warningCount"`
+	BlueprintCount int                 `json:"blueprintCount"`
 }
 
 // ReviewStageTask 审核阶段子任务
 type ReviewStageTask struct {
-	ID        snowflake.JsonInt64 `json:"id"`
-	TaskType  string              `json:"taskType"`
-	RoleType  string              `json:"roleType"`
-	Status    string              `json:"status"`
-	StartedAt *gtime.Time         `json:"startedAt,omitempty"`
-	CompletedAt *gtime.Time       `json:"completedAt,omitempty"`
-	ErrorMessage string           `json:"errorMessage,omitempty"`
+	ID           snowflake.JsonInt64 `json:"id"`
+	TaskType     string              `json:"taskType"`
+	RoleType     string              `json:"roleType"`
+	Status       string              `json:"status"`
+	StartedAt    *gtime.Time         `json:"startedAt,omitempty"`
+	CompletedAt  *gtime.Time         `json:"completedAt,omitempty"`
+	ErrorMessage string              `json:"errorMessage,omitempty"`
 }
 
 // WorkflowReviewIssuesReq 获取审核问题列表请求
@@ -253,15 +257,15 @@ type WorkflowReviewIssuesRes struct {
 
 // ReviewIssueItem 审核问题项
 type ReviewIssueItem struct {
-	ID          snowflake.JsonInt64 `json:"id"`
-	Severity    string              `json:"severity"`
-	IssueCode   string              `json:"issueCode"`
-	SourceRole  string              `json:"sourceRole"`
-	TaskName    string              `json:"taskName"`
-	Message     string              `json:"message"`
-	Suggestion  string              `json:"suggestion,omitempty"`
-	Status      string              `json:"status"`
-	CreatedAt   *gtime.Time         `json:"createdAt"`
+	ID         snowflake.JsonInt64 `json:"id"`
+	Severity   string              `json:"severity"`
+	IssueCode  string              `json:"issueCode"`
+	SourceRole string              `json:"sourceRole"`
+	TaskName   string              `json:"taskName"`
+	Message    string              `json:"message"`
+	Suggestion string              `json:"suggestion,omitempty"`
+	Status     string              `json:"status"`
+	CreatedAt  *gtime.Time         `json:"createdAt"`
 }
 
 // WorkflowManualApproveReq 手动审批请求（跳过 AI 审核，人工通过）
@@ -304,15 +308,15 @@ type WorkflowTimelineRes struct {
 
 // TimelineEvent 时间线事件
 type TimelineEvent struct {
-	ID            snowflake.JsonInt64 `json:"id"`
-	WorkflowRunID snowflake.JsonInt64 `json:"workflowRunID"`
+	ID            snowflake.JsonInt64  `json:"id"`
+	WorkflowRunID snowflake.JsonInt64  `json:"workflowRunID"`
 	StageRunID    *snowflake.JsonInt64 `json:"stageRunID,omitempty"`
-	EntityType    string              `json:"entityType"`
+	EntityType    string               `json:"entityType"`
 	EntityID      *snowflake.JsonInt64 `json:"entityID,omitempty"`
-	EventType     string              `json:"eventType"`
-	Label         string              `json:"label"`
-	Payload       string              `json:"payload,omitempty"`
-	CreatedAt     *gtime.Time         `json:"createdAt"`
+	EventType     string               `json:"eventType"`
+	Label         string               `json:"label"`
+	Payload       string               `json:"payload,omitempty"`
+	CreatedAt     *gtime.Time          `json:"createdAt"`
 }
 
 // WorkflowReworkStatusReq 返工状态请求
@@ -324,9 +328,9 @@ type WorkflowReworkStatusReq struct {
 // WorkflowReworkStatusRes 返工状态响应
 type WorkflowReworkStatusRes struct {
 	g.Meta       `mime:"application/json"`
-	HasRework    bool         `json:"hasRework"`
-	ReworkRounds int          `json:"reworkRounds"`
-	CurrentStage *ReworkStageInfo `json:"currentStage,omitempty"`
+	HasRework    bool              `json:"hasRework"`
+	ReworkRounds int               `json:"reworkRounds"`
+	CurrentStage *ReworkStageInfo  `json:"currentStage,omitempty"`
 	History      []ReworkRoundInfo `json:"history"`
 }
 
@@ -339,14 +343,14 @@ type ReworkStageInfo struct {
 
 // ReworkRoundInfo 返工轮次信息
 type ReworkRoundInfo struct {
-	Round          int                 `json:"round"`
-	FailedTaskID   snowflake.JsonInt64 `json:"failedTaskID"`
-	FailedTaskName string              `json:"failedTaskName"`
-	FailedReason   string              `json:"failedReason"`
+	Round          int                  `json:"round"`
+	FailedTaskID   snowflake.JsonInt64  `json:"failedTaskID"`
+	FailedTaskName string               `json:"failedTaskName"`
+	FailedReason   string               `json:"failedReason"`
 	AnalysisTaskID *snowflake.JsonInt64 `json:"analysisTaskID,omitempty"`
-	AnalysisResult string              `json:"analysisResult,omitempty"`
-	HandoffType    string              `json:"handoffType"`
-	CreatedAt      *gtime.Time         `json:"createdAt"`
+	AnalysisResult string               `json:"analysisResult,omitempty"`
+	HandoffType    string               `json:"handoffType"`
+	CreatedAt      *gtime.Time          `json:"createdAt"`
 }
 
 // WorkflowStageHistoryReq 阶段历史请求
@@ -524,7 +528,7 @@ type AcceptIssueItem struct {
 	ExpectedValue   string              `json:"expectedValue"`
 	ActualValue     string              `json:"actualValue"`
 	SuggestedAction string              `json:"suggestedAction"`
-	DomainTaskID    snowflake.JsonInt64  `json:"domainTaskID,omitempty"`
+	DomainTaskID    snowflake.JsonInt64 `json:"domainTaskID,omitempty"`
 	ResourceRef     string              `json:"resourceRef,omitempty"`
 	Status          string              `json:"status"`
 	CreatedAt       *gtime.Time         `json:"createdAt"`
@@ -679,13 +683,13 @@ type WorkflowProjectReportsReq struct {
 
 // ProjectReportItem 项目报告条目
 type ProjectReportItem struct {
-	ID            snowflake.JsonInt64 `json:"id"`
-	ReportType    string              `json:"reportType"`
-	StageType     string              `json:"stageType,omitempty"`
-	Title         string              `json:"title"`
-	Content       string              `json:"content"`
-	Metrics       string              `json:"metrics,omitempty"`
-	CreatedAt     *gtime.Time         `json:"createdAt"`
+	ID         snowflake.JsonInt64 `json:"id"`
+	ReportType string              `json:"reportType"`
+	StageType  string              `json:"stageType,omitempty"`
+	Title      string              `json:"title"`
+	Content    string              `json:"content"`
+	Metrics    string              `json:"metrics,omitempty"`
+	CreatedAt  *gtime.Time         `json:"createdAt"`
 }
 
 // WorkflowProjectReportsRes 项目报告列表响应
@@ -783,33 +787,33 @@ type CheckpointDTO struct {
 
 // DecisionActionDTO 决策动作 DTO（camelCase 输出给前端）
 type DecisionActionDTO struct {
-	ID              snowflake.JsonInt64 `json:"id"`
-	WorkflowRunID   snowflake.JsonInt64 `json:"workflowRunId"`
-	ProjectID       snowflake.JsonInt64 `json:"projectId"`
-	StageRunID      snowflake.JsonInt64 `json:"stageRunId,omitempty"`
-	DomainTaskID    snowflake.JsonInt64 `json:"domainTaskId,omitempty"`
-	DecisionType    string              `json:"decisionType"`
-	DecisionLevel   string              `json:"decisionLevel"`
-	TriggerSource   string              `json:"triggerSource"`
-	TriggerContext  string              `json:"triggerContext,omitempty"`
-	MatchedRuleID   snowflake.JsonInt64 `json:"matchedRuleId,omitempty"`
-	MatchedGateIDs  string              `json:"matchedGateIds,omitempty"`
-	ActionType      string              `json:"actionType"`
-	Recommendation  string              `json:"recommendation,omitempty"`
-	FinalAction     string              `json:"finalAction,omitempty"`
-	ActionStatus    string              `json:"actionStatus"`
-	AutoExecutable  int                 `json:"autoExecutable"`
-	HumanRequired   int                 `json:"humanRequired"`
-	ExecutedAt      *gtime.Time         `json:"executedAt,omitempty"`
-	Result          string              `json:"result,omitempty"`
-	CreatedAt       *gtime.Time         `json:"createdAt"`
+	ID             snowflake.JsonInt64 `json:"id"`
+	WorkflowRunID  snowflake.JsonInt64 `json:"workflowRunId"`
+	ProjectID      snowflake.JsonInt64 `json:"projectId"`
+	StageRunID     snowflake.JsonInt64 `json:"stageRunId,omitempty"`
+	DomainTaskID   snowflake.JsonInt64 `json:"domainTaskId,omitempty"`
+	DecisionType   string              `json:"decisionType"`
+	DecisionLevel  string              `json:"decisionLevel"`
+	TriggerSource  string              `json:"triggerSource"`
+	TriggerContext string              `json:"triggerContext,omitempty"`
+	MatchedRuleID  snowflake.JsonInt64 `json:"matchedRuleId,omitempty"`
+	MatchedGateIDs string              `json:"matchedGateIds,omitempty"`
+	ActionType     string              `json:"actionType"`
+	Recommendation string              `json:"recommendation,omitempty"`
+	FinalAction    string              `json:"finalAction,omitempty"`
+	ActionStatus   string              `json:"actionStatus"`
+	AutoExecutable int                 `json:"autoExecutable"`
+	HumanRequired  int                 `json:"humanRequired"`
+	ExecutedAt     *gtime.Time         `json:"executedAt,omitempty"`
+	Result         string              `json:"result,omitempty"`
+	CreatedAt      *gtime.Time         `json:"createdAt"`
 }
 
 // WorkflowAutonomyCheckpointsRes 查询待处理人工节点响应
 type WorkflowAutonomyCheckpointsRes struct {
 	g.Meta      `mime:"application/json"`
-	Checkpoints []CheckpointDTO      `json:"checkpoints"`
-	Actions     []DecisionActionDTO  `json:"actions"`
+	Checkpoints []CheckpointDTO     `json:"checkpoints"`
+	Actions     []DecisionActionDTO `json:"actions"`
 }
 
 // WorkflowAutonomyApproveReq 审批通过决策动作

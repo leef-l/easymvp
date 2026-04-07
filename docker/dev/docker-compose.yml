@@ -21,6 +21,12 @@ x-admin-go-env: &admin-go-env
   REDIS_PASS: ${REDIS_PASS:-}
   JWT_SECRET: ${JWT_SECRET:-easymvp-secret-key}
   GOPROXY: ${GO_PROXY:-https://goproxy.cn,direct}
+  GF_LOG_PATH: ${GF_LOG_PATH:-/workspace/admin-go/logs}
+  GF_LOG_LEVEL: ${GF_LOG_LEVEL:-info|warning|error|critical|panic|fatal}
+  GF_LOG_STDOUT: ${GF_LOG_STDOUT:-false}
+  GF_LOG_ROTATE_SIZE: ${GF_LOG_ROTATE_SIZE:-100M}
+  GF_LOG_ROTATE_EXPIRE: ${GF_LOG_ROTATE_EXPIRE:-7d}
+  GF_LOG_ROTATE_BACKUP_LIMIT: ${GF_LOG_ROTATE_BACKUP_LIMIT:-10}
   PATH: /usr/local/go/bin:/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.local/share/uv/tools/aider-chat/bin:/root/.local/share/uv/tools/openhands/bin
 
 services:

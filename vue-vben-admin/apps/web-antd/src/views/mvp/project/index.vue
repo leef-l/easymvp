@@ -248,6 +248,8 @@ function handleConfirmPlan(row: ProjectItem) {
       const res = await confirmPlan(row.id);
       if (res?.reviewPassed) {
         message.success('方案审核通过，已进入执行阶段');
+      } else if (res?.submitted || res?.reviewStatus === 'pending') {
+        message.success(res?.message || '方案已提交审核，请到审核工作台查看进度');
       } else {
         const errorList = (res?.issues || [])
           .filter((i: any) => i.severity === 'error')

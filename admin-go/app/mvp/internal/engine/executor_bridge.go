@@ -20,22 +20,7 @@ func GetModelInfoByID(ctx context.Context, modelID int64) (*ModelInfo, error) {
 // ResolveModelInfo 根据 projectID + roleType + modelID 解析模型信息。
 // 如果 modelID > 0，直接查模型；否则从角色配置中查找。
 func ResolveModelInfo(ctx context.Context, projectID int64, roleType string, modelID int64) (*ModelInfo, error) {
-	if modelID > 0 {
-		return getModelInfoStatic(ctx, modelID, "")
-	}
-
-	// 从角色配置查找
-	role, err := g.DB().Model("mvp_project_role").Ctx(ctx).
-		Where("project_id", projectID).
-		Where("role_type", roleType).
-		Where("status", 1).
-		WhereNull("deleted_at").
-		One()
-	if err != nil || role.IsEmpty() {
-		return nil, fmt.Errorf("项目未配置 %s 角色模型", roleType)
-	}
-
-	return getModelInfoStatic(ctx, role["model_id"].Int64(), role["system_prompt"].String())
+	return ResolveProjectModelInfo(ctx, projectID, roleType, "", modelID)
 }
 
 // getModelInfoStatic 静态版模型查询（不依赖 Executor 实例）。

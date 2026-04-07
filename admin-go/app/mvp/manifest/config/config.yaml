@@ -7,8 +7,8 @@ server:
 # https://goframe.org/docs/core/glog-config
 logger:
   path:              "/www/wwwroot/project/easymvp/admin-go/logs/mvp"
-  level:             "all"
-  stdout:            true
+  level:             "info|warning|error|critical|panic|fatal"
+  stdout:            false
   rotateSize:        "100M"
   rotateExpire:      "7d"
   rotateBackupLimit: 10

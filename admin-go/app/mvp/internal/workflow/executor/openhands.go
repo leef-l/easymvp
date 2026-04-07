@@ -26,7 +26,7 @@ func NewOpenHandsExecutor(wsMgr workspace.Manager) *OpenHandsExecutor {
 	return &OpenHandsExecutor{wsMgr: wsMgr}
 }
 
-func (e *OpenHandsExecutor) Name() string        { return "openhands" }
+func (e *OpenHandsExecutor) Name() string         { return "openhands" }
 func (e *OpenHandsExecutor) NeedsWorkspace() bool { return true }
 
 // Execute 执行 OpenHands 任务。
@@ -44,6 +44,9 @@ func (e *OpenHandsExecutor) Execute(ctx context.Context, req *Request) *Result {
 	cmdTemplate := engineCfg["command_template"].String()
 	if cmdTemplate == "" {
 		return &Result{Success: false, Error: fmt.Errorf("OpenHands command_template 未配置")}
+	}
+	if commandTemplateUsesDocker(cmdTemplate) {
+		return &Result{Success: false, Error: fmt.Errorf("OpenHands command_template 依赖 Docker，当前环境已禁用 Docker，请改用非 Docker 模板或切换其他执行模式")}
 	}
 
 	timeoutSeconds := engineCfg["timeout_seconds"].Int()
@@ -75,7 +78,7 @@ func (e *OpenHandsExecutor) Execute(ctx context.Context, req *Request) *Result {
 	if req.ModelInfo != nil {
 		envVars["AI_MODEL_API_KEY"] = req.ModelInfo.APIKey
 		envVars["AI_MODEL_CODE"] = req.ModelInfo.ModelCode
-		envVars["AI_MODEL_BASE_URL"] = req.ModelInfo.BaseURL
+		envVars["AI_MODEL_BASE_URL"] = resolveModelBaseURL(req.ModelInfo, engineCfg["base_url"].String())
 	}
 
 	// 解析 affected_resources 附加到指令
@@ -110,7 +113,7 @@ func (e *OpenHandsExecutor) Execute(ctx context.Context, req *Request) *Result {
 		cmd.Env = append(cmd.Env,
 			"AI_MODEL_API_KEY="+req.ModelInfo.APIKey,
 			"AI_MODEL_CODE="+req.ModelInfo.ModelCode,
-			"AI_MODEL_BASE_URL="+req.ModelInfo.BaseURL,
+			"AI_MODEL_BASE_URL="+resolveModelBaseURL(req.ModelInfo, engineCfg["base_url"].String()),
 		)
 	}
 

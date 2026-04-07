@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
@@ -25,10 +26,189 @@ var Workflow = cWorkflow{}
 
 type cWorkflow struct{}
 
+const projectRuntimeSnapshotFreshWindow = 2 * time.Minute
+
+type projectRuntimeTaskStat struct {
+	WorkflowRunID  int64 `orm:"workflow_run_id"`
+	TotalTasks     int   `orm:"total_tasks"`
+	CompletedTasks int   `orm:"completed_tasks"`
+	FailedTasks    int   `orm:"failed_tasks"`
+	RunningTasks   int   `orm:"running_tasks"`
+}
+
+type projectRuntimeSnapshot struct {
+	CreatedAt *gtime.Time
+	Situation autonomy.Situation
+}
+
+type projectRuntimeLatestID struct {
+	ProjectID int64 `orm:"project_id"`
+	ID        int64 `orm:"id"`
+}
+
+type workflowRuntimeSnapshotLatestID struct {
+	WorkflowRunID int64 `orm:"workflow_run_id"`
+	ID            int64 `orm:"id"`
+}
+
 // checkProjectOwnership 校验项目访问权限（支持 owner/同部门/超管三级）。
 // 兼容别名：旧调用不需要改名。
 func checkProjectOwnership(ctx context.Context, projectID int64) error {
 	return middleware.CheckProjectAccess(ctx, projectID)
+}
+
+func loadLatestWorkflowRuns(ctx context.Context, projectIDs []int64) (map[int64]gdb.Record, error) {
+	result := make(map[int64]gdb.Record, len(projectIDs))
+	if len(projectIDs) == 0 {
+		return result, nil
+	}
+
+	// workflow_run 使用雪花 ID 递增写入，MAX(id) 可稳定代表项目下最近一次创建的 run。
+	var latestIDs []projectRuntimeLatestID
+	if err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		WhereIn("project_id", projectIDs).
+		WhereNull("deleted_at").
+		Fields("project_id, MAX(id) AS id").
+		Group("project_id").
+		Scan(&latestIDs); err != nil {
+		return nil, err
+	}
+	if len(latestIDs) == 0 {
+		return result, nil
+	}
+
+	runIDs := make([]int64, 0, len(latestIDs))
+	for _, item := range latestIDs {
+		if item.ID > 0 {
+			runIDs = append(runIDs, item.ID)
+		}
+	}
+	if len(runIDs) == 0 {
+		return result, nil
+	}
+
+	runs, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		WhereIn("id", runIDs).
+		WhereNull("deleted_at").
+		Fields("id, project_id, current_stage, status").
+		All()
+	if err != nil {
+		return nil, err
+	}
+	for _, run := range runs {
+		result[run["project_id"].Int64()] = run
+	}
+	return result, nil
+}
+
+func loadLatestSituationSnapshots(ctx context.Context, workflowRunIDs []int64) (map[int64]*projectRuntimeSnapshot, error) {
+	result := make(map[int64]*projectRuntimeSnapshot, len(workflowRunIDs))
+	if len(workflowRunIDs) == 0 {
+		return result, nil
+	}
+
+	var latestIDs []workflowRuntimeSnapshotLatestID
+	if err := g.DB().Model("mvp_situation_snapshot").Ctx(ctx).
+		WhereIn("workflow_run_id", workflowRunIDs).
+		WhereNull("deleted_at").
+		Fields("workflow_run_id, MAX(id) AS id").
+		Group("workflow_run_id").
+		Scan(&latestIDs); err != nil {
+		return nil, err
+	}
+	if len(latestIDs) == 0 {
+		return result, nil
+	}
+
+	snapshotIDs := make([]int64, 0, len(latestIDs))
+	for _, item := range latestIDs {
+		if item.ID > 0 {
+			snapshotIDs = append(snapshotIDs, item.ID)
+		}
+	}
+	if len(snapshotIDs) == 0 {
+		return result, nil
+	}
+
+	snapshots, err := g.DB().Model("mvp_situation_snapshot").Ctx(ctx).
+		WhereIn("id", snapshotIDs).
+		WhereNull("deleted_at").
+		Fields("id, workflow_run_id, snapshot_data, created_at").
+		All()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, item := range snapshots {
+		var sit autonomy.Situation
+		if err := json.Unmarshal([]byte(item["snapshot_data"].String()), &sit); err != nil {
+			continue
+		}
+		result[item["workflow_run_id"].Int64()] = &projectRuntimeSnapshot{
+			CreatedAt: item["created_at"].GTime(),
+			Situation: sit,
+		}
+	}
+	return result, nil
+}
+
+func loadTaskStats(ctx context.Context, workflowRunIDs []int64) (map[int64]projectRuntimeTaskStat, error) {
+	result := make(map[int64]projectRuntimeTaskStat, len(workflowRunIDs))
+	if len(workflowRunIDs) == 0 {
+		return result, nil
+	}
+
+	var rows []projectRuntimeTaskStat
+	if err := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		WhereIn("workflow_run_id", workflowRunIDs).
+		WhereNull("deleted_at").
+		Fields(`
+			workflow_run_id,
+			COUNT(*) AS total_tasks,
+			SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_tasks,
+			SUM(CASE WHEN status IN ('failed', 'escalated') THEN 1 ELSE 0 END) AS failed_tasks,
+			SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_tasks`).
+		Group("workflow_run_id").
+		Scan(&rows); err != nil {
+		return nil, err
+	}
+
+	for _, row := range rows {
+		result[row.WorkflowRunID] = row
+	}
+	return result, nil
+}
+
+func shouldUseRuntimeSnapshot(snapshot *projectRuntimeSnapshot, workflowStatus string) bool {
+	if snapshot == nil || snapshot.Situation.Progress == nil {
+		return false
+	}
+	if snapshot.Situation.WorkflowStatus == workflowStatus {
+		switch workflowStatus {
+		case "completed", "failed", "canceled", "paused":
+			return true
+		}
+	}
+	if snapshot.CreatedAt == nil {
+		return false
+	}
+	ageMillis := gtime.Now().TimestampMilli() - snapshot.CreatedAt.TimestampMilli()
+	if ageMillis < 0 {
+		ageMillis = 0
+	}
+	return time.Duration(ageMillis)*time.Millisecond <= projectRuntimeSnapshotFreshWindow
+}
+
+func taskStatFromProgress(progress *autonomy.ProgressMetrics) projectRuntimeTaskStat {
+	if progress == nil {
+		return projectRuntimeTaskStat{}
+	}
+	return projectRuntimeTaskStat{
+		TotalTasks:     progress.TotalTasks,
+		CompletedTasks: progress.CompletedTasks,
+		FailedTasks:    progress.FailedTasks,
+		RunningTasks:   progress.RunningTasks,
+	}
 }
 
 // CreateProject 创建项目
@@ -91,7 +271,12 @@ func (c *cWorkflow) ConfirmPlan(ctx context.Context, req *v1.WorkflowConfirmPlan
 		return nil, submitErr
 	}
 
-	return &v1.WorkflowConfirmPlanRes{ReviewPassed: false}, nil
+	return &v1.WorkflowConfirmPlanRes{
+		Submitted:    true,
+		ReviewStatus: "pending",
+		StageStatus:  "pending",
+		Message:      "方案已提交审核，请稍候查看审核进度",
+	}, nil
 }
 
 // Pause 暂停项目
@@ -157,11 +342,11 @@ func (c *cWorkflow) RetryTask(ctx context.Context, req *v1.WorkflowRetryTaskReq)
 	result, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("id", taskID).WhereIn("status", g.Slice{"failed", "escalated"}).
 		Update(g.Map{
-			"status":      "pending",
-			"retry_count": gdb.Raw("retry_count + 1"),
-			"result":      nil,
+			"status":        "pending",
+			"retry_count":   gdb.Raw("retry_count + 1"),
+			"result":        nil,
 			"error_message": nil,
-			"updated_at":  gdb.Raw("NOW()"),
+			"updated_at":    gdb.Raw("NOW()"),
 		})
 	if err != nil {
 		return nil, err
@@ -344,28 +529,12 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 
 // RolePresets 获取角色预设列表（前端创建项目时读取默认模型）
 func (c *cWorkflow) RolePresets(ctx context.Context, req *v1.WorkflowRolePresetsReq) (res *v1.WorkflowRolePresetsRes, err error) {
-	// 解析分类过滤条件：优先 categoryCode → 转为 displayName 查预设
-	filterCategory := req.ProjectCategory
-	if req.CategoryCode != "" {
-		resolver := engine.GetCategoryResolver()
-		catInfo, _ := resolver.ResolveByCode(ctx, req.CategoryCode)
-		if catInfo != nil {
-			filterCategory = catInfo.DisplayName
-		}
-	}
-
-	m := g.DB().Model("mvp_role_preset AS p").
-		LeftJoin("ai_model AS m", "m.id = p.model_id").
-		Fields("p.id, p.role_type, p.role_level, p.model_id, m.name AS model_name, p.system_prompt, p.execution_mode, p.is_default").
-		Where("p.status", 1).
-		Where("p.deleted_at IS NULL")
-	if filterCategory != "" {
-		m = m.Where("p.project_category", filterCategory)
-	}
-	if !req.All {
-		m = m.Where("p.is_default", 1)
-	}
-	presets, err := m.OrderAsc("p.sort").All()
+	presets, err := repo.ListRolePresets(ctx, repo.RolePresetQuery{
+		CategoryCode:     req.CategoryCode,
+		ProjectCategory:  req.ProjectCategory,
+		DefaultOnly:      !req.All,
+		IncludeModelName: true,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -433,38 +602,42 @@ func (c *cWorkflow) ProjectStatus(ctx context.Context, req *v1.WorkflowProjectSt
 func projectStatusV2(ctx context.Context, project gdb.Record) (*v1.WorkflowProjectStatusRes, error) {
 	projectID := project["id"].Int64()
 
-	// 查最新 workflow_run
-	wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		OrderDesc("run_no").
-		One()
-
 	var wfStatus, currentStage string
 	var progressPercent int
 	var totalTasks, completedTasks, failedTasks, runningTasks int
 
+	wfRuns, err := loadLatestWorkflowRuns(ctx, []int64{projectID})
+	if err != nil {
+		return nil, err
+	}
+	wfRun := wfRuns[projectID]
 	if !wfRun.IsEmpty() {
 		wfRunID := wfRun["id"].Int64()
 		wfStatus = wfRun["status"].String()
 		currentStage = wfRun["current_stage"].String()
 
-		// 统计领域任务
-		tasks, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
-			Where("workflow_run_id", wfRunID).
-			WhereNull("deleted_at").
-			Fields("status").All()
-		for _, t := range tasks {
-			totalTasks++
-			switch t["status"].String() {
-			case "completed":
-				completedTasks++
-			case "failed", "escalated":
-				failedTasks++
-			case "running":
-				runningTasks++
-			}
+		stats := projectRuntimeTaskStat{}
+		snapshots, snapshotErr := loadLatestSituationSnapshots(ctx, []int64{wfRunID})
+		if snapshotErr != nil {
+			g.Log().Warningf(ctx, "[ProjectStatus] 读取态势快照失败，回退实时聚合: workflowRunID=%d, err=%v", wfRunID, snapshotErr)
 		}
+		if snapshot := snapshots[wfRunID]; shouldUseRuntimeSnapshot(snapshot, wfStatus) {
+			stats = taskStatFromProgress(snapshot.Situation.Progress)
+			if currentStage == "" {
+				currentStage = snapshot.Situation.ActiveStage
+			}
+		} else {
+			taskStats, taskErr := loadTaskStats(ctx, []int64{wfRunID})
+			if taskErr != nil {
+				return nil, taskErr
+			}
+			stats = taskStats[wfRunID]
+		}
+
+		totalTasks = stats.TotalTasks
+		completedTasks = stats.CompletedTasks
+		failedTasks = stats.FailedTasks
+		runningTasks = stats.RunningTasks
 		if totalTasks > 0 {
 			progressPercent = completedTasks * 100 / totalTasks
 		}
@@ -582,10 +755,8 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 	}
 
 	// 5. 角色预设
-	architectCount, _ := g.DB().Model("mvp_role_preset").
-		Where("role_type", "architect").Where("status", 1).Where("deleted_at IS NULL").Count()
-	implementerCount, _ := g.DB().Model("mvp_role_preset").
-		Where("role_type", "implementer").Where("status", 1).Where("deleted_at IS NULL").Count()
+	architectCount, _ := repo.CountRolePresets(ctx, repo.RolePresetQuery{RoleType: "architect"})
+	implementerCount, _ := repo.CountRolePresets(ctx, repo.RolePresetQuery{RoleType: "implementer"})
 	if architectCount == 0 || implementerCount == 0 {
 		addItem("role_preset", "角色预设", "/mvp/role-preset", "error",
 			fmt.Sprintf("缺少角色预设：架构师=%d，实施员=%d（各需至少 1 条）", architectCount, implementerCount))
@@ -1019,7 +1190,7 @@ func (c *cWorkflow) ManualReject(ctx context.Context, req *v1.WorkflowManualReje
 	// 项目状态回退 designing
 	_, _ = g.DB().Model("mvp_project").Ctx(ctx).
 		Where("id", projectID).
-		Update(g.Map{"status": "designing", "updated_at": g.Map{"updated_at": "NOW()"}})
+		Update(g.Map{"status": "designing", "updated_at": gdb.Raw("NOW()")})
 
 	return &v1.WorkflowManualRejectRes{}, nil
 }
@@ -1028,29 +1199,29 @@ func (c *cWorkflow) ManualReject(ctx context.Context, req *v1.WorkflowManualReje
 
 // eventLabelMap 事件类型 → 可读标签
 var eventLabelMap = map[string]string{
-	"workflow.created":        "工作流已创建",
-	"workflow.paused":         "工作流已暂停",
-	"workflow.resumed":        "工作流已恢复",
-	"workflow.canceled":       "工作流已取消",
-	"workflow.completed":      "工作流已完成",
-	"stage.started":           "阶段已启动",
-	"stage.completed":         "阶段已完成",
-	"stage.failed":            "阶段失败",
-	"plan_version.created":    "方案版本已创建",
-	"plan_version.submitted":  "方案已提交审核",
-	"plan_version.approved":   "方案审核通过",
-	"plan_version.rejected":   "方案被驳回",
-	"review.issue_created":    "发现审核问题",
-	"review.decision_ready":   "审核决策就绪",
-	"task.created":            "任务已创建",
-	"task.started":            "任务已启动",
-	"task.completed":          "任务已完成",
-	"task.failed":             "任务失败",
-	"task.escalated":          "任务已升级",
-	"task.retried":            "任务已重试",
-	"replan.completed":        "重规划完成",
-	"replan.failed":           "重规划失败",
-	"replan.aborted":          "重规划中止",
+	"workflow.created":       "工作流已创建",
+	"workflow.paused":        "工作流已暂停",
+	"workflow.resumed":       "工作流已恢复",
+	"workflow.canceled":      "工作流已取消",
+	"workflow.completed":     "工作流已完成",
+	"stage.started":          "阶段已启动",
+	"stage.completed":        "阶段已完成",
+	"stage.failed":           "阶段失败",
+	"plan_version.created":   "方案版本已创建",
+	"plan_version.submitted": "方案已提交审核",
+	"plan_version.approved":  "方案审核通过",
+	"plan_version.rejected":  "方案被驳回",
+	"review.issue_created":   "发现审核问题",
+	"review.decision_ready":  "审核决策就绪",
+	"task.created":           "任务已创建",
+	"task.started":           "任务已启动",
+	"task.completed":         "任务已完成",
+	"task.failed":            "任务失败",
+	"task.escalated":         "任务已升级",
+	"task.retried":           "任务已重试",
+	"replan.completed":       "重规划完成",
+	"replan.failed":          "重规划失败",
+	"replan.aborted":         "重规划中止",
 }
 
 // Timeline 工作流事件时间线
@@ -2034,60 +2205,37 @@ func (c *cWorkflow) BatchProjectStats(ctx context.Context, req *v1.WorkflowBatch
 		return &v1.WorkflowBatchProjectStatsRes{Stats: []v1.ProjectRuntimeStat{}}, nil
 	}
 
-	// 批量查 workflow_run（排除已完成/已取消的旧 run，只取活跃或最新的）
-	wfRuns, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		WhereIn("project_id", ids).
-		WhereNull("deleted_at").
-		Fields("id, project_id, current_stage, status").
-		OrderDesc("run_no").
-		All()
+	// 批量查每个项目最新的 workflow_run
+	wfMap, err := loadLatestWorkflowRuns(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
 
-	// project_id → workflow_run 映射（取最新的）
-	wfMap := make(map[int64]gdb.Record)
-	for _, r := range wfRuns {
-		pid := r["project_id"].Int64()
-		if _, exists := wfMap[pid]; !exists {
-			wfMap[pid] = r
-		}
-	}
-
 	// 收集所有 workflow_run_id
 	wfRunIDs := make([]int64, 0, len(wfMap))
+	wfStatusByRunID := make(map[int64]string, len(wfMap))
 	for _, r := range wfMap {
-		wfRunIDs = append(wfRunIDs, r["id"].Int64())
+		wfID := r["id"].Int64()
+		wfRunIDs = append(wfRunIDs, wfID)
+		wfStatusByRunID[wfID] = r["status"].String()
 	}
 
-	// 批量统计 domain_task（按 workflow_run_id 分组）
-	type taskStat struct {
-		total, completed, failed, running int
+	// 优先读取最新态势快照；快照缺失或过旧时再回退到实时聚合。
+	snapshotMap, snapshotErr := loadLatestSituationSnapshots(ctx, wfRunIDs)
+	if snapshotErr != nil {
+		g.Log().Warningf(ctx, "[BatchProjectStats] 读取态势快照失败，回退实时聚合: err=%v", snapshotErr)
 	}
-	taskStats := make(map[int64]*taskStat)
 
-	if len(wfRunIDs) > 0 {
-		tasks, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
-			WhereIn("workflow_run_id", wfRunIDs).
-			WhereNull("deleted_at").
-			Fields("workflow_run_id, status").
-			All()
-		for _, t := range tasks {
-			wfID := t["workflow_run_id"].Int64()
-			if taskStats[wfID] == nil {
-				taskStats[wfID] = &taskStat{}
-			}
-			s := taskStats[wfID]
-			s.total++
-			switch t["status"].String() {
-			case "completed":
-				s.completed++
-			case "failed", "escalated":
-				s.failed++
-			case "running":
-				s.running++
-			}
+	fallbackRunIDs := make([]int64, 0, len(wfRunIDs))
+	for _, wfID := range wfRunIDs {
+		if !shouldUseRuntimeSnapshot(snapshotMap[wfID], wfStatusByRunID[wfID]) {
+			fallbackRunIDs = append(fallbackRunIDs, wfID)
 		}
+	}
+
+	taskStats, err := loadTaskStats(ctx, fallbackRunIDs)
+	if err != nil {
+		return nil, err
 	}
 
 	// 组装结果
@@ -2099,11 +2247,20 @@ func (c *cWorkflow) BatchProjectStats(ctx context.Context, req *v1.WorkflowBatch
 		if wf, ok := wfMap[pid]; ok {
 			stat.CurrentStage = wf["current_stage"].String()
 			wfID := wf["id"].Int64()
-			if ts, exists := taskStats[wfID]; exists {
-				stat.TotalTasks = ts.total
-				stat.CompletedTasks = ts.completed
-				stat.FailedTasks = ts.failed
-				stat.RunningTasks = ts.running
+			if snapshot := snapshotMap[wfID]; shouldUseRuntimeSnapshot(snapshot, wf["status"].String()) {
+				if stat.CurrentStage == "" {
+					stat.CurrentStage = snapshot.Situation.ActiveStage
+				}
+				ts := taskStatFromProgress(snapshot.Situation.Progress)
+				stat.TotalTasks = ts.TotalTasks
+				stat.CompletedTasks = ts.CompletedTasks
+				stat.FailedTasks = ts.FailedTasks
+				stat.RunningTasks = ts.RunningTasks
+			} else if ts, exists := taskStats[wfID]; exists {
+				stat.TotalTasks = ts.TotalTasks
+				stat.CompletedTasks = ts.CompletedTasks
+				stat.FailedTasks = ts.FailedTasks
+				stat.RunningTasks = ts.RunningTasks
 			}
 		}
 		stats = append(stats, stat)

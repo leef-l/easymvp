@@ -17,13 +17,13 @@ import (
 	"easymvp/app/mvp/internal/controller/task"
 	"easymvp/app/mvp/internal/controller/task_log"
 
-
-	"easymvp/app/mvp/internal/middleware"
 	"easymvp/app/mvp/internal/collab"
 	"easymvp/app/mvp/internal/collab/notifier"
 	"easymvp/app/mvp/internal/controller/chat"
 	"easymvp/app/mvp/internal/engine"
+	"easymvp/app/mvp/internal/middleware"
 	"easymvp/app/mvp/internal/worker"
+	"easymvp/app/mvp/internal/workflow/orchestrator"
 )
 
 // autoStartFeishuWS 服务启动时自动从 DB 读取飞书配置，若启用了 websocket 模式则拉起长连接。
@@ -52,6 +52,11 @@ var (
 		Usage: "main",
 		Brief: "start mvp http server",
 		Func: func(ctx context.Context, parser *gcmd.Parser) (err error) {
+			orchestrator.Init()
+			if recoverErr := orchestrator.RecoverActiveWorkflows(ctx); recoverErr != nil {
+				g.Log().Warningf(ctx, "[Startup] 恢复活跃工作流失败: %v", recoverErr)
+			}
+
 			// 注册飞书通知钩子
 			n := notifier.GetNotifier()
 			engine.RegisterFeishuNotifyAIReply(n.NotifyAIReply)

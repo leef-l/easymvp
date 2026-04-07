@@ -34,9 +34,9 @@ func GetCompressor() *ContextCompressor {
 
 // compressionParams 分类族压缩参数
 type compressionParams struct {
-	ShortThreshold  int // 短文本阈值（原文保留）
-	MediumThreshold int // 中等文本阈值（规则截取）
-	GlobalLimit     int // 全局上下文上限
+	ShortThreshold  int    // 短文本阈值（原文保留）
+	MediumThreshold int    // 中等文本阈值（规则截取）
+	GlobalLimit     int    // 全局上下文上限
 	TaskPrompt      string // AI 压缩任务的系统提示词
 	ProjectPrompt   string // AI 压缩项目的系统提示词
 }
@@ -47,7 +47,7 @@ func getCompressionParams(projectCategory string) compressionParams {
 	switch family {
 	case CategoryFamilyCreative:
 		return compressionParams{
-			ShortThreshold:  800,  // 创意内容阈值更高（保留更多原文细节）
+			ShortThreshold:  800, // 创意内容阈值更高（保留更多原文细节）
 			MediumThreshold: 5000,
 			GlobalLimit:     5000, // 创意项目需要更多上下文（世界观/人物/风格一致性）
 			TaskPrompt:      `将以下创意任务内容压缩为300字以内的摘要。保留：创意产出（章节/场景/人物）、风格约束、剧情走向、世界观/设定变更。纯文本输出。`,
@@ -401,8 +401,8 @@ func (c *ContextCompressor) aiMergeGlobal(ctx context.Context, modelInfo *ModelI
 	}
 
 	resp, err := p.Chat(ctx, &provider.ChatRequest{
-		Model:     modelInfo.ModelCode,
-		MaxTokens: 2000,
+		Model:        modelInfo.ModelCode,
+		MaxTokens:    2000,
 		SystemPrompt: fmt.Sprintf(`将以下项目全局上下文重新压缩为%d字以内。这是项目的完整知识库，包含需求、方案和所有已完成工作。必须保留所有关键信息，不能丢失任何对后续任务有影响的决策和产出。`, globalLimit),
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Content: fmt.Sprintf("项目：%s\n\n当前全局上下文：\n%s", projectName, truncate(merged, 15000))},
@@ -439,14 +439,9 @@ func (c *ContextCompressor) collectTaskDialog(ctx context.Context, taskID int64)
 }
 
 func (c *ContextCompressor) getCompressModel(ctx context.Context, projectID int64) (*ModelInfo, error) {
-	role, err := g.DB().Model("mvp_project_role").
-		Where("project_id", projectID).
-		Where("role_type", "architect").
-		Where("status", 1).
-		Where("deleted_at IS NULL").
-		One()
-	if err != nil || role.IsEmpty() {
-		return nil, fmt.Errorf("找不到架构师模型配置")
+	role, err := ResolveProjectRole(ctx, projectID, "architect")
+	if err != nil {
+		return nil, fmt.Errorf("找不到架构师模型配置: %w", err)
 	}
 
 	model, err := g.DB().Model("ai_model m").

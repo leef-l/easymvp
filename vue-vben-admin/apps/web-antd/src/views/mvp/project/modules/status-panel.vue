@@ -111,12 +111,14 @@ async function handleConfirmPlan() {
   if (!project.value?.id) return;
   Modal.confirm({
     title: '确认实施方案',
-    content: '确认后系统将自动拆解并调度所有任务开始执行，是否继续？',
+    content: '确认后系统将先执行方案审核（系统预检 + AI审核 + 调度优化），审核通过后自动开始执行。',
     okText: '确认执行',
     async onOk() {
       const res = await confirmPlan(project.value!.id);
       if (res?.reviewPassed) {
         message.success('方案审核通过，任务开始调度执行');
+      } else if (res?.submitted || res?.reviewStatus === 'pending') {
+        message.success(res?.message || '方案已提交审核，请到审核工作台查看进度');
       } else {
         const errorList = (res?.issues || [])
           .filter((i: any) => i.severity === 'error')

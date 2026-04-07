@@ -60,6 +60,10 @@ func (e *AutoExecutor) Execute(ctx context.Context, req *Request) *Result {
 		if !enabledEngines[mode] {
 			continue
 		}
+		if engineConfiguredWithDocker(ctx, mode) {
+			g.Log().Warningf(ctx, "[AutoExecutor] 跳过执行器: %s（命令模板依赖 Docker，当前已禁用）", mode)
+			continue
+		}
 		exec := e.registry.Get(mode)
 		if exec == nil {
 			continue

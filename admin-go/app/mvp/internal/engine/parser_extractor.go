@@ -10,6 +10,7 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/utility/provider"
 )
 
@@ -238,22 +239,27 @@ func (p *TaskParser) extractJSONSummary(text string) string {
 
 // getDefaultReviewModel 获取一个可用的 AI 模型用于辅助提取。
 func getDefaultReviewModel(ctx context.Context) *ModelInfo {
-	// 优先找 auditor 角色的模型（因为它通常配置了较好的模型）
-	model, err := g.DB().Model("mvp_project_role pr").Ctx(ctx).
-		LeftJoin("ai_model m", "m.id = pr.model_id").
+	// 优先使用默认 auditor 预设，避免依赖项目级角色配置。
+	preset, err := repo.GetRolePreset(ctx, repo.RolePresetQuery{
+		RoleType:    "auditor",
+		DefaultOnly: true,
+	})
+	if err != nil || preset == nil {
+		return nil
+	}
+
+	model, err := g.DB().Model("ai_model m").Ctx(ctx).
 		LeftJoin("ai_plan p", "p.id = m.plan_id").
 		LeftJoin("ai_provider pv", "pv.id = m.provider_id").
-		Fields("m.model_code, m.max_tokens, pv.provider_type, pv.base_url, p.api_key, p.api_secret, pr.system_prompt, m.role_prompt").
-		Where("pr.status", 1).
-		Where("pr.deleted_at IS NULL").
+		Fields("m.model_code, m.max_tokens, pv.provider_type, pv.base_url, p.api_key, p.api_secret, m.role_prompt").
 		Where("m.deleted_at IS NULL").
-		OrderAsc("pr.id").
+		Where("m.id", preset["model_id"].Int64()).
 		One()
 	if err != nil || model.IsEmpty() {
 		return nil
 	}
 
-	sp := model["system_prompt"].String()
+	sp := preset["system_prompt"].String()
 	if sp == "" {
 		sp = model["role_prompt"].String()
 	}

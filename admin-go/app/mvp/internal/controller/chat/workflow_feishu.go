@@ -544,7 +544,7 @@ func feishuWSEventHandler(ctx context.Context, header map[string]interface{}, ev
 		chatID, _ := messageMap["chat_id"].(string)
 		msgType, _ := messageMap["message_type"].(string)
 		contentStr, _ := messageMap["content"].(string)
-		g.Log().Infof(ctx, "[FeishuWSBot] 收到消息: openID=%s messageID=%s type=%s", openID, messageID, msgType)
+		g.Log().Debugf(ctx, "[FeishuWSBot] 收到消息: openID=%s messageID=%s type=%s", openID, messageID, msgType)
 
 		// 非文本消息：直接回复提示
 		if msgType != "" && msgType != "text" {
@@ -583,7 +583,7 @@ func feishuWSEventHandler(ctx context.Context, header map[string]interface{}, ev
 			chatID, _ = chatMap["chat_id"].(string)
 		}
 		eventKey, _ := event["event_key"].(string)
-		g.Log().Infof(ctx, "[FeishuMenuClick] openID=%s chatID=%s key=%s", openID, chatID, eventKey)
+		g.Log().Debugf(ctx, "[FeishuMenuClick] openID=%s chatID=%s key=%s", openID, chatID, eventKey)
 		if openID != "" && eventKey != "" {
 			cmdText := botMenuKeyToCommand(eventKey)
 			DispatchFeishuCommand(ctx, openID, "", chatID, `{"text":"`+cmdText+`"}`)

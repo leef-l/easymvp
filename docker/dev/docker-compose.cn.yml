@@ -17,8 +17,16 @@ x-admin-go-env: &admin-go-env
   DB_USER: ${DB_USER:-easymvp}
   DB_PASSWORD: ${DB_PASSWORD:-JKcHFJYXnkrB6BXE}
   DB_NAME: ${DB_NAME:-easymvp}
+  REDIS_ADDR: ${REDIS_ADDR:-127.0.0.1:6379}
+  REDIS_PASS: ${REDIS_PASS:-}
   JWT_SECRET: ${JWT_SECRET:-easymvp-secret-key}
   GOPROXY: ${GO_PROXY:-https://goproxy.cn,direct}
+  GF_LOG_PATH: ${GF_LOG_PATH:-/workspace/admin-go/logs}
+  GF_LOG_LEVEL: ${GF_LOG_LEVEL:-info|warning|error|critical|panic|fatal}
+  GF_LOG_STDOUT: ${GF_LOG_STDOUT:-false}
+  GF_LOG_ROTATE_SIZE: ${GF_LOG_ROTATE_SIZE:-100M}
+  GF_LOG_ROTATE_EXPIRE: ${GF_LOG_ROTATE_EXPIRE:-7d}
+  GF_LOG_ROTATE_BACKUP_LIMIT: ${GF_LOG_ROTATE_BACKUP_LIMIT:-10}
 
 services:
   mysql:

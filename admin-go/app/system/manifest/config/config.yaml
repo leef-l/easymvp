@@ -8,7 +8,7 @@ server:
 logger:
   path:              "/www/wwwroot/project/easymvp/admin-go/logs/system"
   level:             "info|warning|error|critical|panic|fatal"
-  stdout:            true
+  stdout:            false
   rotateSize:        "100M"
   rotateExpire:      "7d"
   rotateBackupLimit: 10
@@ -25,4 +25,3 @@ database:
 jwt:
   secret: "easymvp-secret-key-2026"
   expire: 24  # Token 过期时间（小时）
-

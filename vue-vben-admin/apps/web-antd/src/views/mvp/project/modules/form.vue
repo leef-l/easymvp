@@ -19,8 +19,6 @@ const router = useRouter();
 const architectModelOptions = ref<{ label: string; value: string }[]>([]);
 /** 所有模型选项（编辑时用） */
 const allModelOptions = ref<{ label: string; value: string }[]>([]);
-/** 预设中的架构师默认模型ID */
-const presetArchitectModelID = ref<string>('');
 /** 当前选择的项目分类 categoryCode */
 const selectedCategoryCode = ref<string>('software_dev');
 /** 当前分类的默认角色预设（用于只读展示） */
@@ -29,14 +27,9 @@ const defaultPresets = ref<RolePresetItem[]>([]);
 const selectedPresetIDs = ref<Set<string>>(new Set());
 
 /** 切换预设选中状态 */
-function togglePreset(presetId: string, roleType: string) {
+function togglePreset(presetId: string) {
   const newSet = new Set(selectedPresetIDs.value);
   if (newSet.has(presetId)) {
-    // 架构师不允许取消
-    if (roleType === 'architect') {
-      message.warning('架构师角色为必选');
-      return;
-    }
     newSet.delete(presetId);
   } else {
     newSet.add(presetId);
@@ -83,24 +76,8 @@ async function loadPresetsForCategory(categoryCode: string) {
     const presetRes = await getRolePresets(categoryCode);
     const presets = presetRes?.list ?? [];
     defaultPresets.value = presets;
-    // 默认勾选 isDefault=true 的预设
-    selectedPresetIDs.value = new Set(
-      presets.filter((p) => p.isDefault).map((p) => p.id),
-    );
-    // 从预设中提取架构师模型
-    const architectPreset = presets.find((p) => p.roleType === 'architect');
-    if (architectPreset?.modelID) {
-      // 确保预设中的模型在下拉列表中
-      const exists = architectModelOptions.value.some((o) => o.value === architectPreset.modelID);
-      if (!exists) {
-        architectModelOptions.value.push({
-          label: `${architectPreset.modelName || '预设模型'}`,
-          value: architectPreset.modelID,
-        });
-      }
-      presetArchitectModelID.value = architectPreset.modelID;
-      formApi.setValues({ architectModelID: architectPreset.modelID });
-    }
+    selectedPresetIDs.value = new Set();
+    formApi.setValues({ architectModelID: undefined });
   } catch { /* ignore */ }
 }
 
@@ -151,9 +128,8 @@ const createSchema = [
   {
     component: 'Select',
     fieldName: 'architectModelID',
-    label: tooltipLabel('架构师AI模型', '默认值来自角色预设模板，可修改。仅显示角色为「架构师」的模型'),
-    rules: 'selectRequired',
-    componentProps: { options: architectModelOptions, placeholder: '请选择架构师使用的AI模型', allowClear: true, showSearch: true, optionFilterProp: 'label', class: 'w-full' },
+    label: tooltipLabel('架构师AI模型', '可选。选择后会生成项目级架构师配置；不选则项目对话和任务直接走分类默认预设。'),
+    componentProps: { options: architectModelOptions, placeholder: '可不选；需要项目级架构师配置时再选择', allowClear: true, showSearch: true, optionFilterProp: 'label', class: 'w-full' },
   },
   {
     component: 'Select',
@@ -305,18 +281,8 @@ const [Modal, modalApi] = useVbenModal({
           }));
           // 保存默认预设列表用于展示
           defaultPresets.value = presetRes?.list ?? [];
-          // 默认勾选 isDefault=true 的预设
-          selectedPresetIDs.value = new Set(
-            defaultPresets.value.filter((p) => p.isDefault).map((p) => p.id),
-          );
-          // 读取预设中架构师的默认模型
-          const architectPreset = defaultPresets.value.find(
-            (p) => p.roleType === 'architect',
-          );
-          if (architectPreset?.modelID) {
-            presetArchitectModelID.value = architectPreset.modelID;
-            formApi.setValues({ architectModelID: architectPreset.modelID });
-          }
+          selectedPresetIDs.value = new Set();
+          formApi.setValues({ architectModelID: undefined });
         } catch { /* ignore */ }
       }
     }
@@ -331,21 +297,20 @@ const [Modal, modalApi] = useVbenModal({
     <div v-if="!isEdit && defaultPresets.length > 0" class="mt-4 rounded border border-gray-200 bg-gray-50 p-3">
       <div class="mb-2 flex items-center text-sm font-medium text-gray-600">
         <TeamOutlined class="mr-1" />
-        AI 团队角色配置
-        <span class="ml-2 text-xs font-normal text-gray-400">勾选要加入项目的角色</span>
+        项目角色配置
+        <span class="ml-2 text-xs font-normal text-gray-400">可选。仅勾选需要落为项目级覆盖配置的角色；不勾选则运行时走分类默认预设</span>
       </div>
       <div class="flex flex-col gap-2">
         <div
           v-for="preset in defaultPresets"
           :key="preset.id"
           class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 transition-colors hover:bg-gray-100"
-          @click="togglePreset(preset.id, preset.roleType)"
+          @click="togglePreset(preset.id)"
         >
           <Checkbox
             :checked="selectedPresetIDs.has(preset.id)"
-            :disabled="preset.roleType === 'architect'"
             @click.stop
-            @change="togglePreset(preset.id, preset.roleType)"
+            @change="togglePreset(preset.id)"
           />
           <Tag :color="roleTypeMap[preset.roleType]?.color || 'default'">
             {{ roleTypeMap[preset.roleType]?.label || preset.roleType }}

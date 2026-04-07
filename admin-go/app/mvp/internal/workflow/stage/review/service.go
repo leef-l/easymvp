@@ -416,7 +416,7 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 
 		g.Log().Infof(ctx, "[ReviewStage] 审核通过 planVersionID=%d errors=%d warnings=%d", planVersionID, errorCount, warningCount)
 	} else {
-		// 审核不通过：回退 plan_version + blueprints + project
+		// 审核不通过：回退 plan_version + blueprints + workflow + project
 		_, _ = g.DB().Model("mvp_plan_version").Ctx(ctx).
 			Where("id", planVersionID).
 			Update(g.Map{
@@ -432,25 +432,39 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 			Where("blueprint_status", consts.BlueprintStatusConfirmed).
 			Update(g.Map{"blueprint_status": consts.BlueprintStatusDraft, "updated_at": now})
 
-		// 项目状态回退 designing
-		_, _ = g.DB().Model("mvp_project").Ctx(ctx).
-			Where("id", projectID).
-			Update(g.Map{"status": "designing", "updated_at": now})
-
 		// 标记 review stage 失败（仅标记 stage_run，不级联终止 workflow）
-		// concludeReview 已自行处理 project.status 回退和 design 回滚
 		s.stageCompleter.FailStageOnly(ctx, stageRunID, summary)
 
-		// 回退 design stage（通过 orchestrator 回调）
+		// 回退到 design 阶段（StartStage("design") 会同时更新 workflow_run.status 和 project.status）
+		designRollbackOK := false
 		if s.designRollbackFn != nil {
-			_ = s.designRollbackFn(ctx, workflowRunID)
+			if rollbackErr := s.designRollbackFn(ctx, workflowRunID); rollbackErr != nil {
+				g.Log().Errorf(ctx, "[ReviewStage] designRollbackFn 失败，执行 fallback: workflowRunID=%d err=%v", workflowRunID, rollbackErr)
+			} else {
+				designRollbackOK = true
+			}
+		}
+
+		// fallback：如果 designRollbackFn 失败或未注册，直接更新 workflow_run + project 状态
+		if !designRollbackOK {
+			_, _ = g.DB().Model("mvp_workflow_run").Ctx(ctx).
+				Where("id", workflowRunID).
+				WhereIn("status", g.Slice{"reviewing", "failed"}).
+				Update(g.Map{
+					"status":        "designing",
+					"current_stage": "design",
+					"updated_at":    now,
+				})
+			_, _ = g.DB().Model("mvp_project").Ctx(ctx).
+				Where("id", projectID).
+				Update(g.Map{"status": "designing", "updated_at": now})
 		}
 
 		// 通知架构师对话
 		notifyMsg := s.buildRejectNotification(ctx, stageRunID, summary)
 		engine.NotifyProjectArchitectConversation(ctx, projectID, notifyMsg)
 
-		g.Log().Infof(ctx, "[ReviewStage] 审核不通过 planVersionID=%d reason=%s", planVersionID, summary)
+		g.Log().Infof(ctx, "[ReviewStage] 审核不通过 planVersionID=%d reason=%s designRollbackOK=%v", planVersionID, summary, designRollbackOK)
 	}
 
 	return nil

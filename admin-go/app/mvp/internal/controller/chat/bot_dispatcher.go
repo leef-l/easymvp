@@ -39,9 +39,9 @@ func DispatchBotCommand(ctx context.Context, bc *BotContext) {
 
 	startTime := time.Now()
 	text := strings.TrimSpace(bc.Content)
-	g.Log().Infof(ctx, "[Bot/%s] 收到文本: openID=%s text=%q", bc.Platform.PlatformName(), bc.OpenID, text)
+	g.Log().Debugf(ctx, "[Bot/%s] 收到文本: openID=%s text_len=%d", bc.Platform.PlatformName(), bc.OpenID, len(text))
 	defer func() {
-		g.Log().Infof(ctx, "[Bot/%s] 处理完成: openID=%s text=%q 耗时=%dms", bc.Platform.PlatformName(), bc.OpenID, text, time.Since(startTime).Milliseconds())
+		g.Log().Debugf(ctx, "[Bot/%s] 处理完成: openID=%s text_len=%d 耗时=%dms", bc.Platform.PlatformName(), bc.OpenID, len(text), time.Since(startTime).Milliseconds())
 	}()
 	if text == "" {
 		reply(botHelpText())

@@ -8,7 +8,7 @@ server:
 logger:
   path:              "/www/wwwroot/project/easymvp/admin-go/logs/ai"
   level:             "info|warning|error|critical|panic|fatal"
-  stdout:            true
+  stdout:            false
   rotateSize:        "100M"
   rotateExpire:      "7d"
   rotateBackupLimit: 10

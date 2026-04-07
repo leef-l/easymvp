@@ -24,7 +24,7 @@ type tgBotPlatform struct {
 }
 
 func (t *tgBotPlatform) Reply(ctx context.Context, text string) {
-	g.Log().Infof(ctx, "[TGBot] 发送消息: chatID=%d text=%q", t.chatID, text)
+	g.Log().Debugf(ctx, "[TGBot] 发送消息: chatID=%d text_len=%d", t.chatID, len(text))
 	msg := tgbotapi.NewMessage(t.chatID, text)
 	if _, err := t.bot.Send(msg); err != nil {
 		g.Log().Warningf(ctx, "[TGBot] 发送消息失败: chatID=%d err=%v", t.chatID, err)
@@ -52,7 +52,7 @@ func DispatchTelegramUpdate(ctx context.Context, bot *tgbotapi.BotAPI, update tg
 	}
 
 	text := normalizeTGCommand(msg.Text, bot.Self.UserName)
-	g.Log().Infof(ctx, "[TGBot] 收到消息: chatID=%d text=%q", chatID, text)
+	g.Log().Debugf(ctx, "[TGBot] 收到消息: chatID=%d text_len=%d", chatID, len(text))
 
 	DispatchBotCommand(ctx, &BotContext{
 		OpenID:  chatIDStr,

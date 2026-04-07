@@ -136,15 +136,9 @@ func systemPrecheck(ctx context.Context, projectID int64, tasks gdb.Result, work
 	}
 
 	// 预加载项目角色配置（消除 N+1）
-	roleConfigs, _ := g.DB().Model("mvp_project_role").
-		Where("project_id", projectID).
-		Where("status", 1).
-		Where("deleted_at IS NULL").
-		Fields("role_type, role_level").
-		All()
+	roleConfigs, _ := ResolveProjectRolesMap(ctx, projectID)
 	availableRoles := make(map[string]bool, len(roleConfigs))
-	for _, rc := range roleConfigs {
-		key := rc["role_type"].String() + "/" + rc["role_level"].String()
+	for key := range roleConfigs {
 		availableRoles[key] = true
 	}
 
