@@ -49,7 +49,7 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 	}()
 
 	// 1. 查询任务信息
-	task, err := g.DB().Model("mvp_task").Where("id", taskID).One()
+	task, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", taskID).One()
 	if err != nil || task.IsEmpty() {
 		e.scheduler.OnTaskFailed(projectID, taskID, "任务不存在")
 		return
@@ -99,7 +99,7 @@ func (e *Executor) executeChatMode(ctx context.Context, projectID int64, taskID 
 	}
 
 	// 回写 conversation_id 到 task，方便前端和 watchdog 检测
-	if _, err := g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+	if _, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", taskID).Update(g.Map{
 		"conversation_id": conversationID,
 	}); err != nil {
 		g.Log().Errorf(ctx, "[Executor] 回写 conversation_id 失败: task=%d, err=%v", taskID, err)
@@ -208,7 +208,7 @@ func (e *Executor) executeChatMode(ctx context.Context, projectID int64, taskID 
 			lastFinishReason = chunk.FinishReason
 			if chunk.Usage != nil {
 				usageJSON, _ := json.Marshal(chunk.Usage)
-				if _, err := g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
+				if _, err := g.DB().Model("mvp_message").Ctx(ctx).Where("id", replyID).Update(g.Map{
 					"token_usage": string(usageJSON),
 				}); err != nil {
 					g.Log().Errorf(ctx, "[Executor] 更新 token_usage 失败: msg=%d, err=%v", replyID, err)
@@ -275,7 +275,7 @@ func (e *Executor) executeChatMode(ctx context.Context, projectID int64, taskID 
 
 	if callErr != nil {
 		// AI 调用失败
-		if _, dbErr := g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
+		if _, dbErr := g.DB().Model("mvp_message").Ctx(ctx).Where("id", replyID).Update(g.Map{
 			"content":      "AI调用失败: " + callErr.Error(),
 			"message_type": mvpmodel.MessageTypePoison,
 			"status":       "failed",
@@ -290,7 +290,7 @@ func (e *Executor) executeChatMode(ctx context.Context, projectID int64, taskID 
 	// 空内容检测：AI 返回空内容视为失败
 	result := fullContent.String()
 	if strings.TrimSpace(result) == "" {
-		if _, dbErr := g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
+		if _, dbErr := g.DB().Model("mvp_message").Ctx(ctx).Where("id", replyID).Update(g.Map{
 			"content":      "AI返回空内容",
 			"message_type": mvpmodel.MessageTypePoison,
 			"status":       "failed",
@@ -305,7 +305,7 @@ func (e *Executor) executeChatMode(ctx context.Context, projectID int64, taskID 
 	}
 
 	// 完成消息
-	if _, err := g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
+	if _, err := g.DB().Model("mvp_message").Ctx(ctx).Where("id", replyID).Update(g.Map{
 		"content":    result,
 		"status":     "completed",
 		"updated_at": gtime.Now(),
@@ -357,7 +357,7 @@ func (e *Executor) executeChatMode(ctx context.Context, projectID int64, taskID 
 
 // resolveTaskModel 解析任务使用的 AI 模型
 func (e *Executor) resolveTaskModel(ctx context.Context, projectID int64, taskID int64, roleType string, modelID int64) (*ModelInfo, error) {
-	task, err := g.DB().Model("mvp_task").Where("id", taskID).Fields("role_level").One()
+	task, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", taskID).Fields("role_level").One()
 	if err != nil {
 		g.Log().Warningf(ctx, "[Executor] 查询 task role_level 失败: task=%d, err=%v", taskID, err)
 	}

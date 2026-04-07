@@ -35,7 +35,7 @@ type ReviewIssue struct {
 // 返回审核结果。调用者根据结果决定是进入 running 还是回退 designing
 func RunReview(ctx context.Context, projectID int64) (*ReviewResult, error) {
 	// 获取项目信息
-	project, err := g.DB().Model("mvp_project").Where("id", projectID).One()
+	project, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).One()
 	if err != nil {
 		return nil, fmt.Errorf("查询项目信息失败: %w", err)
 	}
