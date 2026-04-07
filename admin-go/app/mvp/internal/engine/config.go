@@ -42,11 +42,13 @@ func ClearConfigCache() {
 func (c *configCache) get(key string) (string, bool) {
 	c.mu.RLock()
 	entry, ok := c.entries[key]
-	c.mu.RUnlock()
 	if !ok || time.Now().After(entry.expiresAt) {
+		c.mu.RUnlock()
 		return "", false
 	}
-	return entry.value, true
+	val := entry.value
+	c.mu.RUnlock()
+	return val, true
 }
 
 // set 写入缓存

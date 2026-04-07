@@ -36,8 +36,12 @@ const STATUS_LABELS: Record<string, string> = {
   designing: '设计中',
   reviewing: '方案审核中',
   running: '执行中',
+  executing: '执行中',
+  reworking: '返工中',
+  accepting: '验收中',
   paused: '已暂停',
   completed: '已完成',
+  failed: '已失败',
 };
 
 /** 状态对应的 Tag 颜色 */
@@ -45,8 +49,12 @@ const STATUS_COLORS: Record<string, string> = {
   designing: 'blue',
   reviewing: 'cyan',
   running: 'green',
+  executing: 'green',
+  reworking: 'orange',
+  accepting: 'purple',
   paused: 'orange',
   completed: 'default',
+  failed: 'red',
 };
 
 /** 当前状态标签文字 */
