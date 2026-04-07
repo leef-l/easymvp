@@ -386,6 +386,12 @@ cd admin-go/app/mvp && gf gen dao
 # 代码生成器
 cd admin-go/codegen && go run . -table mvp_xxx -force -menu
 
+# 数据库迁移（golang-migrate）
+cd admin-go && make db-up              # 执行所有待迁移
+cd admin-go && make db-down STEPS=1    # 回滚 1 步
+cd admin-go && make db-version         # 查看当前版本
+cd admin-go && make db-create NAME=add_xxx  # 创建新迁移文件
+
 # 前端（需手动执行，AI 环境禁止运行 pnpm/npm/yarn）
 cd vue-vben-admin && pnpm dev
 ```
@@ -433,36 +439,57 @@ cd vue-vben-admin && pnpm dev
 
 ---
 
-## 十四、铁律：数据库变更必须同步初始化 SQL，且不得引入中文乱码
+## 十四、铁律：数据库变更必须通过 golang-migrate 迁移文件
 
-**凡是数据库结构、索引、初始化数据、默认配置发生变更，必须同步到本地初始化 SQL，且必须保证其他电脑用 Docker 首次启动时中文内容不乱码。**
+**所有数据库结构变更（DDL）必须通过 golang-migrate 迁移文件管理。禁止手动改库不写迁移文件。**
+
+### 迁移工具
+
+| 命令 | 用途 |
+|------|------|
+| `make db-create NAME=add_xxx` | 创建新迁移文件（自动编号） |
+| `make db-up` | 执行所有待迁移 |
+| `make db-down STEPS=1` | 回滚 1 步 |
+| `make db-version` | 查看当前版本 |
+| `make db-force VERSION=N` | 强制设置版本（修复脏状态） |
+| `make db-bootstrap` | 首次初始化（migrate up + seed） |
+
+### 迁移文件位置
+
+- **迁移文件**：`admin-go/manifest/sql/mysql/NNNNNN_描述.up.sql` / `.down.sql`
+- **种子数据**：`admin-go/manifest/sql/seed/mysql_seed.sql`
+- **快照备份**：`admin-go/docker/mysql/init.sql`（完整导出，供 Docker 首次初始化）
+- **结构备份**：`admin-go/docker/mysql/schema.sql`（纯结构导出）
 
 ### 强制规则
 
-1. **先改库，必须回写初始化文件**
-   - 本地库执行过的 DDL / DML，如果会影响新环境初始化，必须同步回 `admin-go/docker/mysql/init.sql`
-   - 纯表结构变更，必须同步回 `admin-go/docker/mysql/schema.sql`
-   - 禁止只改本机数据库、不改初始化 SQL
+1. **所有 DDL 必须写迁移文件**
+   - 建表、加字段、改字段、加索引、加约束、改默认值——全部通过 `make db-create` 创建迁移文件
+   - 禁止直接手动执行 DDL 而不写迁移文件
+   - 每个迁移文件必须同时包含 `.up.sql`（升级）和 `.down.sql`（回滚）
 
-2. **新增索引也属于数据库变更**
-   - 索引、唯一约束、默认值、字符集、排序规则、种子数据，都算数据库变更
-   - 不能因为“只是加索引”就跳过 `init.sql`
+2. **Docker 自动执行迁移**
+   - mvp 服务启动时自动执行 `migrate up`（`start-go-app.sh` 中实现）
+   - 其他电脑 `docker compose up` 后自动获得最新数据库结构
+   - 禁止依赖”手动执行 SQL”来同步数据库
 
-3. **字符集铁律：统一使用 utf8mb4**
+3. **迁移后同步快照**
+   - 每次新增迁移文件后，需同步更新 `admin-go/docker/mysql/init.sql` 和 `schema.sql`
+   - 执行：`mysqldump --no-tablespaces -u easymvp -pJKcHFJYXnkrB6BXE -h 127.0.0.1 easymvp --result-file=docker/mysql/init.sql`
+   - 这保证 Docker 首次启动时 init.sql 和 migrate 的最终状态一致
+
+4. **字符集铁律：统一使用 utf8mb4**
    - 禁止把库、表、字段、连接串改成 `utf8`、`latin1` 或其他会导致中文风险的编码
    - MySQL Docker 配置必须保持 `utf8mb4` / `utf8mb4_unicode_ci`
    - 应用连接串必须显式带 `charset=utf8mb4`
 
-4. **改库后必须考虑其他电脑的首次 Docker 启动**
-   - 你的本机库能跑不算完成，必须保证别人 `docker compose up` 后也能拿到同样的库结构和初始数据
-   - 任何可能导致中文乱码的改动都视为阻断问题，禁止提交
-
 ### 最低检查清单
 
-- [ ] 本地数据库变更是否已同步到 `admin-go/docker/mysql/init.sql`？
-- [ ] 表结构变更是否已同步到 `admin-go/docker/mysql/schema.sql`？
-- [ ] MySQL Docker 字符集是否仍保持 `docker/dev/docker-compose.yml` 的 `utf8mb4` 配置？
-- [ ] 应用数据库连接是否仍保持 `docker/dev/start-go-app.sh` 的 `charset=utf8mb4`？
+- [ ] 数据库变更是否已写成迁移文件（`manifest/sql/mysql/`）？
+- [ ] 迁移文件是否包含 `.up.sql` 和 `.down.sql`？
+- [ ] 本地执行 `make db-up` 是否成功？
+- [ ] 是否已同步更新 `docker/mysql/init.sql` 和 `schema.sql`？
+- [ ] 字符集是否仍为 `utf8mb4`？
 
 ---
 

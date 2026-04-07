@@ -77,5 +77,27 @@ if [[ -x "/root/.local/share/uv/tools/openhands/bin/openhands-acp" ]]; then
   ln -sf /root/.local/share/uv/tools/openhands/bin/openhands-acp /usr/local/bin/openhands-acp
 fi
 
+# mvp 服务启动前自动执行数据库迁移（仅 mvp 服务负责迁移，避免并发冲突）
+if [[ "${APP_NAME}" == "mvp" ]]; then
+  MIGRATE_DIR="/workspace/admin-go/manifest/sql/mysql"
+  MIGRATE_URL="mysql://${DB_USER}:${DB_PASSWORD}@tcp(${DB_HOST}:${DB_PORT:-3306})/${DB_NAME}?multiStatements=true"
+  if command -v migrate >/dev/null 2>&1 && [[ -d "${MIGRATE_DIR}" ]]; then
+    echo "[migrate] Running database migrations..."
+    if migrate -path "${MIGRATE_DIR}" -database "${MIGRATE_URL}" up 2>&1; then
+      echo "[migrate] Migrations applied successfully."
+    else
+      MIGRATE_EXIT=$?
+      # exit code 1 = "no change"（已是最新版本），不视为错误
+      if [[ ${MIGRATE_EXIT} -ne 1 ]]; then
+        echo "[migrate] WARNING: Migration failed (exit=${MIGRATE_EXIT}), continuing startup..."
+      else
+        echo "[migrate] No new migrations to apply."
+      fi
+    fi
+  else
+    echo "[migrate] migrate binary or migrations dir not found, skipping."
+  fi
+fi
+
 cd "/workspace/admin-go/app/${APP_NAME}"
 exec go run main.go
