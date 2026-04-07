@@ -85,19 +85,36 @@ if [[ "${APP_NAME}" == "mvp" ]]; then
 
   if command -v migrate >/dev/null 2>&1 && [[ -d "${MIGRATE_DIR}" ]]; then
     echo "[migrate] Running database migrations..."
-    MIGRATE_OUTPUT=$(migrate -path "${MIGRATE_DIR}" -database "${MIGRATE_URL}" up 2>&1) || true
-    MIGRATE_EXIT=${PIPESTATUS[0]:-$?}
 
-    if echo "${MIGRATE_OUTPUT}" | grep -q "no change"; then
-      echo "[migrate] No new migrations to apply."
-    elif echo "${MIGRATE_OUTPUT}" | grep -qiE "^[0-9]+/"; then
-      echo "[migrate] Migrations applied: ${MIGRATE_OUTPUT}"
+    # 先查当前版本
+    CURRENT_VER=$(migrate -path "${MIGRATE_DIR}" -database "${MIGRATE_URL}" version 2>&1) || true
+
+    # 执行迁移
+    MIGRATE_OUTPUT=$(migrate -path "${MIGRATE_DIR}" -database "${MIGRATE_URL}" up 2>&1)
+    MIGRATE_EXIT=$?
+
+    if [[ ${MIGRATE_EXIT} -eq 0 ]]; then
+      echo "[migrate] Migrations applied successfully."
+      echo "[migrate] Output: ${MIGRATE_OUTPUT}"
       SCHEMA_CHANGED=true
     else
-      echo "[migrate] ${MIGRATE_OUTPUT}"
+      # exit code 非 0：可能是 "no change" 或真正的错误
+      if echo "${MIGRATE_OUTPUT}" | grep -qi "no change"; then
+        echo "[migrate] No new migrations to apply."
+      elif echo "${MIGRATE_OUTPUT}" | grep -qi "dirty"; then
+        echo "[migrate] ERROR: Database is dirty! Manual fix needed: make db-force VERSION=N"
+        echo "[migrate] ${MIGRATE_OUTPUT}"
+      else
+        echo "[migrate] WARNING: Migration returned exit=${MIGRATE_EXIT}"
+        echo "[migrate] ${MIGRATE_OUTPUT}"
+      fi
     fi
 
-    # 首次建表后自动导入种子数据
+    # 查迁移后版本
+    NEW_VER=$(migrate -path "${MIGRATE_DIR}" -database "${MIGRATE_URL}" version 2>&1) || true
+    echo "[migrate] Version: ${CURRENT_VER} -> ${NEW_VER}"
+
+    # 首次建表后自动导入种子数据（SCHEMA_CHANGED 且 seed 文件存在）
     if [[ "${SCHEMA_CHANGED:-}" == "true" ]] && [[ -f "${SEED_FILE}" ]]; then
       echo "[seed] Checking if seed data is needed..."
       cd /workspace/admin-go
