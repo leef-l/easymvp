@@ -22,7 +22,7 @@ import (
 //	reviewing → (审核不通过) → designing
 func (s *Scheduler) ConfirmPlan(ctx context.Context, projectID int64) error {
 	// 1. 检查项目状态
-	project, err := g.DB().Model("mvp_project").Where("id", projectID).Where("deleted_at IS NULL").One()
+	project, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Where("deleted_at IS NULL").One()
 	if err != nil || project.IsEmpty() {
 		return fmt.Errorf("项目不存在")
 	}
@@ -39,7 +39,7 @@ func (s *Scheduler) ConfirmPlan(ctx context.Context, projectID int64) error {
 	}
 
 	// 3. 更新项目状态为 reviewing
-	_, err = g.DB().Model("mvp_project").Where("id", projectID).Update(g.Map{
+	_, err = g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Update(g.Map{
 		"status":       "reviewing",
 		"pause_reason": nil,
 		"updated_at":   gtime.Now(),
@@ -93,7 +93,7 @@ func (s *Scheduler) runReviewAsync(ctx context.Context, projectID int64) {
 
 // Pause 暂停项目（回到设计阶段，可以和架构师沟通），记录暂停原因
 func (s *Scheduler) Pause(ctx context.Context, projectID int64, reason string) error {
-	_, err := g.DB().Model("mvp_project").Where("id", projectID).Update(g.Map{
+	_, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Update(g.Map{
 		"status":       "paused",
 		"pause_reason": reason,
 		"updated_at":   gtime.Now(),
@@ -110,7 +110,7 @@ func (s *Scheduler) Pause(ctx context.Context, projectID int64, reason string) e
 // 如果已有 pending 任务，直接进入 running（跳过审核）
 // 如果只有 draft 任务，走审核流程
 func (s *Scheduler) Resume(ctx context.Context, projectID int64) error {
-	project, err := g.DB().Model("mvp_project").Where("id", projectID).Where("deleted_at IS NULL").One()
+	project, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Where("deleted_at IS NULL").One()
 	if err != nil || project.IsEmpty() {
 		return fmt.Errorf("项目不存在")
 	}
@@ -126,7 +126,7 @@ func (s *Scheduler) Resume(ctx context.Context, projectID int64) error {
 		Count()
 	if pendingCount > 0 {
 		// 直接恢复执行
-		_, err = g.DB().Model("mvp_project").Where("id", projectID).Update(g.Map{
+		_, err = g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Update(g.Map{
 			"status":       "running",
 			"pause_reason": nil,
 			"updated_at":   gtime.Now(),

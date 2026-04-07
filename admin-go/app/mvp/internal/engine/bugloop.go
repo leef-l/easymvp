@@ -74,7 +74,7 @@ func (s *Scheduler) createBugAnalysisTask(ctx context.Context, projectID int64, 
 	}
 
 	// 获取原实施任务信息
-	implTask, err := g.DB().Model("mvp_task").Where("id", implTaskID).One()
+	implTask, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", implTaskID).One()
 	if err != nil || implTask.IsEmpty() {
 		g.Log().Errorf(ctx, "查询实施任务失败: %v", err)
 		return
@@ -126,7 +126,7 @@ func (s *Scheduler) EscalateFailedTask(ctx context.Context, projectID int64, fai
 	default:
 	}
 
-	failedTask, err := g.DB().Model("mvp_task").Where("id", failedTaskID).One()
+	failedTask, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", failedTaskID).One()
 	if err != nil || failedTask.IsEmpty() {
 		g.Log().Errorf(ctx, "[EscalateFailedTask] 查询失败任务 %d 出错: %v", failedTaskID, err)
 		return
@@ -184,13 +184,13 @@ func (s *Scheduler) DispatchBugFix(ctx context.Context, projectID int64, analysi
 	}
 
 	// 1. 获取架构师分析结果
-	analysisTask, err := g.DB().Model("mvp_task").Where("id", analysisTaskID).One()
+	analysisTask, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", analysisTaskID).One()
 	if err != nil || analysisTask.IsEmpty() {
 		return fmt.Errorf("架构师分析任务不存在")
 	}
 
 	// 2. 获取原实施任务
-	implTask, err := g.DB().Model("mvp_task").Where("id", implTaskID).One()
+	implTask, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", implTaskID).One()
 	if err != nil || implTask.IsEmpty() {
 		return fmt.Errorf("原实施任务不存在")
 	}
@@ -228,7 +228,7 @@ func (s *Scheduler) AutoDispatchBugFix(ctx context.Context, projectID int64, ana
 	default:
 	}
 
-	analysisTask, err := g.DB().Model("mvp_task").Where("id", analysisTaskID).One()
+	analysisTask, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", analysisTaskID).One()
 	if err != nil || analysisTask.IsEmpty() {
 		return
 	}
@@ -252,7 +252,7 @@ func (s *Scheduler) AutoDispatchBugFix(ctx context.Context, projectID int64, ana
 	}
 
 	// 第二跳：从审计任务找到原实施任务
-	auditTask, err := g.DB().Model("mvp_task").Where("id", auditTaskID).One()
+	auditTask, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", auditTaskID).One()
 	if err != nil || auditTask.IsEmpty() {
 		return
 	}
@@ -284,7 +284,7 @@ func (s *Scheduler) AutoDispatchFailureFix(ctx context.Context, projectID int64,
 	default:
 	}
 
-	analysisTask, err := g.DB().Model("mvp_task").Where("id", analysisTaskID).One()
+	analysisTask, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", analysisTaskID).One()
 	if err != nil || analysisTask.IsEmpty() {
 		return
 	}

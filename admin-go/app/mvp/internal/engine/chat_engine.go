@@ -236,7 +236,7 @@ func (e *ChatEngine) resolveModel(ctx context.Context, projectID int64, roleType
 func (e *ChatEngine) failMessage(ctx context.Context, replyID int64, errMsg string) {
 	g.Log().Errorf(ctx, "AI 调用失败 (messageID=%d): %s", replyID, errMsg)
 
-	g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
+	g.DB().Model("mvp_message").Ctx(ctx).Where("id", replyID).Update(g.Map{
 		"message_type": mvpmodel.MessageTypePoison,
 		"status":       "failed",
 		"content":      "AI 调用失败: " + errMsg,

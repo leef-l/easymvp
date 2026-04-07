@@ -243,7 +243,7 @@ func (s *Scheduler) scheduleOnce(ctx context.Context, projectID int64) {
 
 	// --- 阶段 1.5：阶段锁 —— 按项目状态过滤允许执行的角色 ---
 	projectStatus := ""
-	proj, _ := g.DB().Model("mvp_project").Where("id", projectID).Fields("status").One()
+	proj, _ := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Fields("status").One()
 	if !proj.IsEmpty() {
 		projectStatus = proj["status"].String()
 	}

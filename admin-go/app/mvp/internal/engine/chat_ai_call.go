@@ -93,7 +93,7 @@ func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *M
 			// 更新 token 用量
 			if chunk.Usage != nil {
 				usageJSON, _ := json.Marshal(chunk.Usage)
-				if _, err := g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
+				if _, err := g.DB().Model("mvp_message").Ctx(ctx).Where("id", replyID).Update(g.Map{
 					"token_usage": string(usageJSON),
 				}); err != nil {
 					g.Log().Errorf(ctx, "[ChatEngine] 更新 token_usage 失败: msg=%d, err=%v", replyID, err)
@@ -164,7 +164,7 @@ func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *M
 	}
 
 	// 5. 更新消息为完成状态
-	_, updateErr := g.DB().Model("mvp_message").Where("id", replyID).Update(g.Map{
+	_, updateErr := g.DB().Model("mvp_message").Ctx(ctx).Where("id", replyID).Update(g.Map{
 		"content":    fullContent.String(),
 		"status":     "completed",
 		"updated_at": gtime.Now(),
@@ -197,7 +197,7 @@ func (e *ChatEngine) tryParseArchitectTasks(conversationID int64, aiReply string
 	ctx := context.Background()
 
 	// 查对话的角色类型和项目ID
-	conv, err := g.DB().Model("mvp_conversation").Where("id", conversationID).One()
+	conv, err := g.DB().Model("mvp_conversation").Ctx(ctx).Where("id", conversationID).One()
 	if err != nil || conv.IsEmpty() {
 		return
 	}
@@ -210,7 +210,7 @@ func (e *ChatEngine) tryParseArchitectTasks(conversationID int64, aiReply string
 	projectID := conv["project_id"].Int64()
 
 	// 判断引擎版本
-	ev, _ := g.DB().Model("mvp_project").Where("id", projectID).Value("engine_version")
+	ev, _ := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Value("engine_version")
 	if ev.String() == "workflow_v2" {
 		e.tryParseArchitectBlueprints(ctx, projectID, conv["id"].Int64(), conversationID, aiReply)
 		return
