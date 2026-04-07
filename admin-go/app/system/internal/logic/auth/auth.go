@@ -62,7 +62,10 @@ func (s *sAuth) Login(ctx context.Context, in *model.AuthLoginInput) (out *model
 
 	// 查询用户是否为超管（通过角色的 is_admin 标记）
 	isAdmin := false
-	profile, _ := support.LoadUserAccessProfile(ctx, snowflake.JsonInt64(user.Id))
+	profile, profileErr := support.LoadUserAccessProfile(ctx, snowflake.JsonInt64(user.Id))
+	if profileErr != nil {
+		g.Log().Warningf(ctx, "[Auth] 加载用户权限配置失败 (login): userID=%d err=%v", user.Id, profileErr)
+	}
 	if profile != nil {
 		isAdmin = profile.IsAdmin
 	}
@@ -115,7 +118,10 @@ func (s *sAuth) Info(ctx context.Context, userID snowflake.JsonInt64) (out *mode
 	}
 
 	// 加载用户权限配置
-	profile, _ := support.LoadUserAccessProfile(ctx, userID)
+	profile, profileErr := support.LoadUserAccessProfile(ctx, userID)
+	if profileErr != nil {
+		g.Log().Warningf(ctx, "[Auth] 加载用户权限配置失败 (info): userID=%d err=%v", int64(userID), profileErr)
+	}
 	if profile == nil || len(profile.RoleIDs) == 0 {
 		return out, nil
 	}
@@ -130,11 +136,22 @@ func (s *sAuth) Info(ctx context.Context, userID snowflake.JsonInt64) (out *mode
 	// 权限处理
 	if profile.IsAdmin {
 		// 超级管理员获取所有权限
-		out.Perms, _ = support.LoadAllMenuPermissions(ctx)
+		perms, permErr := support.LoadAllMenuPermissions(ctx)
+		if permErr != nil {
+			g.Log().Warningf(ctx, "[Auth] 加载超管权限失败: userID=%d err=%v", int64(userID), permErr)
+		}
+		out.Perms = perms
 	} else {
 		// 普通用户：查询角色授权的菜单权限
-		menuIDs, _ := support.LoadRoleMenuIDs(ctx, profile.RoleIDs)
-		out.Perms, _ = support.LoadMenuPermissions(ctx, menuIDs)
+		menuIDs, menuErr := support.LoadRoleMenuIDs(ctx, profile.RoleIDs)
+		if menuErr != nil {
+			g.Log().Warningf(ctx, "[Auth] 加载角色菜单失败: userID=%d err=%v", int64(userID), menuErr)
+		}
+		perms, permErr := support.LoadMenuPermissions(ctx, menuIDs)
+		if permErr != nil {
+			g.Log().Warningf(ctx, "[Auth] 加载菜单权限失败: userID=%d err=%v", int64(userID), permErr)
+		}
+		out.Perms = perms
 	}
 
 	return

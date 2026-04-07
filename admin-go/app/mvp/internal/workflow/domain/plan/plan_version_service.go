@@ -154,7 +154,8 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 				return fmt.Errorf("更新 active_plan_version_id 失败: %w", err)
 			}
 			if rows, _ := wfResult.RowsAffected(); rows == 0 {
-				return fmt.Errorf("workflow_run(%d) 不存在或已进入后续阶段，无法关联 plan_version", workflowRunID)
+				// workflow_run 不在 designing/reviewing 状态，跳过关联但不回滚蓝图创建
+				g.Log().Warningf(ctx, "[PlanVersionService] workflow_run(%d) 不在可关联状态，跳过 active_plan_version_id 更新", workflowRunID)
 			}
 		}
 

@@ -327,7 +327,7 @@ func (s *sTask) markTaskSuccess(ctx context.Context, taskID int64, result *taskE
 	if result == nil {
 		result = &taskExecutionResult{}
 	}
-	_, _ = g.DB().Ctx(ctx).Model("ai_task").
+	if _, upErr := g.DB().Ctx(ctx).Model("ai_task").
 		Where("id", taskID).
 		Where("deleted_at IS NULL").
 		Where("status", "running").
@@ -338,7 +338,9 @@ func (s *sTask) markTaskSuccess(ctx context.Context, taskID int64, result *taskE
 			"finished_at":      gtime.Now(),
 			"updated_at":       gtime.Now(),
 		}).
-		Update()
+		Update(); upErr != nil {
+		g.Log().Errorf(ctx, "[AITask] 标记任务成功失败: task=%d err=%v", taskID, upErr)
+	}
 	if strings.TrimSpace(result.Output) != "" {
 		_ = s.appendTaskLog(ctx, taskID, "stdout", result.Output)
 	}
@@ -346,7 +348,7 @@ func (s *sTask) markTaskSuccess(ctx context.Context, taskID int64, result *taskE
 }
 
 func (s *sTask) markTaskFailed(ctx context.Context, taskID int64, output string, errMessage string) {
-	_, _ = g.DB().Ctx(ctx).Model("ai_task").
+	if _, upErr := g.DB().Ctx(ctx).Model("ai_task").
 		Where("id", taskID).
 		Where("deleted_at IS NULL").
 		WhereIn("status", []string{"pending", "running"}).
@@ -357,7 +359,9 @@ func (s *sTask) markTaskFailed(ctx context.Context, taskID int64, output string,
 			"finished_at":      gtime.Now(),
 			"updated_at":       gtime.Now(),
 		}).
-		Update()
+		Update(); upErr != nil {
+		g.Log().Errorf(ctx, "[AITask] 标记任务失败失败: task=%d err=%v", taskID, upErr)
+	}
 	if strings.TrimSpace(output) != "" {
 		_ = s.appendTaskLog(ctx, taskID, "stderr", output)
 	}

@@ -238,10 +238,14 @@ func (e *Executor) executeChatMode(ctx context.Context, projectID int64, taskID 
 			if callErr == nil {
 				break
 			}
+			// context canceled/deadline exceeded 不重试，直接退出
+			if ctx.Err() != nil {
+				g.Log().Debugf(ctx, "[Executor] AI 调用因 context 取消而中断 (task=%d): %v", taskID, callErr)
+				break
+			}
 			errMsg := callErr.Error()
 			isRetryable := strings.Contains(errMsg, "status 500") ||
 				strings.Contains(errMsg, "EOF") ||
-				strings.Contains(errMsg, "deadline exceeded") ||
 				strings.Contains(errMsg, "connection reset")
 			if !isRetryable {
 				break

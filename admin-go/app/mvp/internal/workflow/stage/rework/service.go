@@ -71,17 +71,15 @@ func (s *Service) HandleReworkWithSource(ctx context.Context, stageRunID int64, 
 		return fmt.Errorf("failed domain_task(%d) 不存在", failedTaskID)
 	}
 
-	// 3. 查项目 ID（用于日志）
-	projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("id", workflowRunID).Value("project_id")
-	_ = projectID
-
-	// 4. 检查返工轮次是否超限
+	// 3. 检查返工轮次是否超限
 	maxRounds := engine.GetConfigInt(ctx, "failure_handoff.max_rounds", "engine.failureHandoff.maxRounds", 3)
-	reworkCount, _ := g.DB().Model("mvp_handoff_record").Ctx(ctx).
+	reworkCount, countErr := g.DB().Model("mvp_handoff_record").Ctx(ctx).
 		Where("workflow_run_id", workflowRunID).
 		Where("from_task_id", failedTaskID).
 		Count()
+	if countErr != nil {
+		g.Log().Warningf(ctx, "[ReworkStage] 查询返工次数失败: wfRun=%d task=%d err=%v", workflowRunID, failedTaskID, countErr)
+	}
 	if reworkCount >= maxRounds {
 		reason := fmt.Sprintf("任务 %d 返工已达上限 %d 次", failedTaskID, maxRounds)
 		g.Log().Errorf(ctx, "[ReworkStage] %s, 标记阶段失败", reason)
@@ -135,8 +133,11 @@ func (s *Service) HandleReworkWithSource(ctx context.Context, stageRunID int64, 
 
 	// 6. 写 handoff_record（payload 中记录来源阶段，用于返工完成后决定回流目标）
 	handoffID := int64(snowflake.Generate())
-	payloadJSON, _ := json.Marshal(map[string]string{"source_stage": sourceStage})
-	_, _ = g.DB().Model("mvp_handoff_record").Ctx(ctx).Insert(g.Map{
+	payloadJSON, jsonErr := json.Marshal(map[string]string{"source_stage": sourceStage})
+	if jsonErr != nil {
+		g.Log().Warningf(ctx, "[ReworkStage] 序列化 handoff payload 失败: %v", jsonErr)
+	}
+	if _, insErr := g.DB().Model("mvp_handoff_record").Ctx(ctx).Insert(g.Map{
 		"id":              handoffID,
 		"workflow_run_id": workflowRunID,
 		"from_task_id":    failedTaskID,
@@ -145,7 +146,9 @@ func (s *Service) HandleReworkWithSource(ctx context.Context, stageRunID int64, 
 		"reason":          failedTask["result"].String(),
 		"payload":         string(payloadJSON),
 		"created_at":      now,
-	})
+	}); insErr != nil {
+		g.Log().Errorf(ctx, "[ReworkStage] 写入 handoff_record 失败: wfRun=%d task=%d err=%v", workflowRunID, failedTaskID, insErr)
+	}
 
 	g.Log().Infof(ctx, "[ReworkStage] 创建分析任务: stageRunID=%d failedTask=%d analysisTask=%d round=%d/%d",
 		stageRunID, failedTaskID, analysisTaskID, reworkCount+1, maxRounds)
@@ -190,8 +193,12 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 		updateData["description"] = patch.Description
 	}
 	if len(patch.AffectedResources) > 0 {
-		resJSON, _ := json.Marshal(patch.AffectedResources)
-		updateData["affected_resources"] = string(resJSON)
+		resJSON, jsonErr := json.Marshal(patch.AffectedResources)
+		if jsonErr != nil {
+			g.Log().Warningf(ctx, "[ReworkStage] 序列化 affected_resources 失败: %v", jsonErr)
+		} else {
+			updateData["affected_resources"] = string(resJSON)
+		}
 	}
 
 	res, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
@@ -214,7 +221,7 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 
 	// 5. 写 handoff_record（分析 → 原任务）
 	handoffID := int64(snowflake.Generate())
-	_, _ = g.DB().Model("mvp_handoff_record").Ctx(ctx).Insert(g.Map{
+	if _, insErr := g.DB().Model("mvp_handoff_record").Ctx(ctx).Insert(g.Map{
 		"id":              handoffID,
 		"workflow_run_id": analysisTask["workflow_run_id"].Int64(),
 		"from_task_id":    analysisTaskID,
@@ -223,7 +230,9 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 		"reason":          patch.Reason,
 		"payload":         analysisTask["result"].String(),
 		"created_at":      gtime.Now(),
-	})
+	}); insErr != nil {
+		g.Log().Errorf(ctx, "[ReworkStage] 写入 handoff_record(rework) 失败: analysis=%d target=%d err=%v", analysisTaskID, failedTaskID, insErr)
+	}
 
 	g.Log().Infof(ctx, "[ReworkStage] 回写完成: analysis=%d → original=%d reason=%s", analysisTaskID, failedTaskID, patch.Reason)
 

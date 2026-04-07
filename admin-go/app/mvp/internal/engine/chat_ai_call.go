@@ -112,10 +112,14 @@ func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *M
 			if lastErr == nil {
 				break
 			}
+			// context canceled/deadline exceeded 不重试，直接退出
+			if ctx.Err() != nil {
+				g.Log().Debugf(ctx, "[ChatEngine] AI 调用因 context 取消而中断 (messageID=%d): %v", replyID, lastErr)
+				break
+			}
 			errMsg := lastErr.Error()
 			isRetryable := strings.Contains(errMsg, "status 500") ||
 				strings.Contains(errMsg, "EOF") ||
-				strings.Contains(errMsg, "deadline exceeded") ||
 				strings.Contains(errMsg, "connection reset")
 			if !isRetryable {
 				break
