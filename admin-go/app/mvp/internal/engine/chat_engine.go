@@ -49,7 +49,7 @@ type ModelInfo struct {
 // 返回用户消息 ID 和 AI 回复消息 ID
 func (e *ChatEngine) SendMessage(ctx context.Context, conversationID int64, content string, userID int64, deptID int64) (msgID int64, replyID int64, err error) {
 	// 1. 查询对话信息
-	conv, err := g.DB().Model("mvp_conversation").Where("id", conversationID).Where("deleted_at IS NULL").One()
+	conv, err := g.DB().Model("mvp_conversation").Ctx(ctx).Where("id", conversationID).Where("deleted_at IS NULL").One()
 	if err != nil {
 		return 0, 0, fmt.Errorf("查询对话失败: %w", err)
 	}
@@ -75,7 +75,7 @@ func (e *ChatEngine) SendMessage(ctx context.Context, conversationID int64, cont
 	}
 
 	// 3. 展开消息中的 "读取：路径" 指令（限制在项目工作目录内）
-	project, _ := g.DB().Model("mvp_project").Where("id", projectID).Fields("work_dir").One()
+	project, _ := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Fields("work_dir").One()
 	workDir := project["work_dir"].String()
 	if workDir == "" {
 		workDir = "/www/wwwroot/project/easymvp"
@@ -129,7 +129,7 @@ func (e *ChatEngine) SendMessage(ctx context.Context, conversationID int64, cont
 // 返回 AI 回复消息的 ID（用于轮询结果）。
 func (e *ChatEngine) SendFeishuMessage(ctx context.Context, conversationID, projectID int64, content string, userID, deptID int64) (int64, error) {
 	// 1. 查询对话信息（校验存在）
-	conv, err := g.DB().Model("mvp_conversation").Where("id", conversationID).Where("deleted_at IS NULL").One()
+	conv, err := g.DB().Model("mvp_conversation").Ctx(ctx).Where("id", conversationID).Where("deleted_at IS NULL").One()
 	if err != nil {
 		return 0, fmt.Errorf("查询对话失败: %w", err)
 	}
@@ -144,7 +144,7 @@ func (e *ChatEngine) SendFeishuMessage(ctx context.Context, conversationID, proj
 	}
 
 	// 3. 展开消息中的 "读取：路径" 指令
-	project, _ := g.DB().Model("mvp_project").Where("id", projectID).Fields("work_dir").One()
+	project, _ := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Fields("work_dir").One()
 	workDir := project["work_dir"].String()
 	if workDir == "" {
 		workDir = "/www/wwwroot/project/easymvp"

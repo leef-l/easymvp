@@ -135,12 +135,15 @@ func loadProjectPresetContext(ctx context.Context, projectID int64) (*projectPre
 	categoryCode := project["category_code"].String()
 	projectCategory := project["project_category"].String()
 	if categoryCode == "" && projectCategory != "" {
-		category, _ := g.DB().Model("mvp_project_category").Ctx(ctx).
+		category, catErr := g.DB().Model("mvp_project_category").Ctx(ctx).
 			Fields("category_code").
 			Where("display_name", projectCategory).
 			Where("status", 1).
 			WhereNull("deleted_at").
 			One()
+		if catErr != nil {
+			g.Log().Warningf(ctx, "[ProjectRoleRepo] 查询分类编码失败: category=%s err=%v", projectCategory, catErr)
+		}
 		if !category.IsEmpty() {
 			categoryCode = category["category_code"].String()
 		}
@@ -267,11 +270,14 @@ func loadModelRolePrompt(ctx context.Context, modelID int64) string {
 	if modelID == 0 {
 		return ""
 	}
-	modelRec, _ := g.DB().Model("ai_model").Ctx(ctx).
+	modelRec, err := g.DB().Model("ai_model").Ctx(ctx).
 		Fields("role_prompt").
 		Where("id", modelID).
 		WhereNull("deleted_at").
 		One()
+	if err != nil {
+		g.Log().Warningf(ctx, "[ProjectRoleRepo] 加载模型 role_prompt 失败: model=%d err=%v", modelID, err)
+	}
 	if modelRec.IsEmpty() {
 		return ""
 	}

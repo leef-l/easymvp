@@ -196,7 +196,9 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 		var depIDs []int64
 		depJSON := bp["depends_on_blueprint_ids"].String()
 		if depJSON != "" && depJSON != "[]" && depJSON != "null" {
-			json.Unmarshal([]byte(depJSON), &depIDs)
+			if umErr := json.Unmarshal([]byte(depJSON), &depIDs); umErr != nil {
+				g.Log().Warningf(ctx, "[ReviewPrecheck] 解析蓝图依赖失败: bp=%d err=%v", bp["id"].Int64(), umErr)
+			}
 		}
 
 		// 资源冲突（降为 warning，不阻塞审核；调度器有资源锁保护）
@@ -324,7 +326,11 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 	now := gtime.Now()
 
 	// 统计问题
-	stageRun, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).One()
+	stageRun, srErr := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).One()
+	if srErr != nil || stageRun.IsEmpty() {
+		g.Log().Errorf(ctx, "[ReviewService] concludeReview 查询 stage_run 失败: stageRun=%d err=%v", stageRunID, srErr)
+		return fmt.Errorf("查询 stage_run(%d) 失败: %v", stageRunID, srErr)
+	}
 	workflowRunID := stageRun["workflow_run_id"].Int64()
 
 	errorCount, _ := g.DB().Model("mvp_review_issue").Ctx(ctx).
@@ -542,10 +548,13 @@ func (s *Service) buildRejectNotification(ctx context.Context, stageRunID int64,
 	}
 
 	// 查审计员的 suggestions（从 stage_task output_payload 中提取）
-	auditorTask, _ := g.DB().Model("mvp_stage_task").Ctx(ctx).
+	auditorTask, atErr := g.DB().Model("mvp_stage_task").Ctx(ctx).
 		Where("stage_run_id", stageRunID).
 		Where("task_type", TaskTypeAuditorReview).
 		One()
+	if atErr != nil {
+		g.Log().Warningf(ctx, "[ReviewService] 查询 auditor stage_task 失败: stageRun=%d err=%v", stageRunID, atErr)
+	}
 	if !auditorTask.IsEmpty() {
 		payload := auditorTask["output_payload"].String()
 		if payload != "" {

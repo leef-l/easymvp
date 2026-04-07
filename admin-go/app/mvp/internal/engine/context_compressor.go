@@ -74,7 +74,7 @@ func getCompressionParams(projectCategory string) compressionParams {
 
 // CompressTaskContext 压缩单个任务的上下文
 func (c *ContextCompressor) CompressTaskContext(ctx context.Context, projectID int64, taskID int64) error {
-	task, err := g.DB().Model("mvp_task").Where("id", taskID).One()
+	task, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", taskID).One()
 	if err != nil {
 		return fmt.Errorf("查询任务失败: %w", err)
 	}
@@ -127,7 +127,7 @@ func (c *ContextCompressor) CompressTaskContext(ctx context.Context, projectID i
 
 // getProjectCompressionParams 获取项目的压缩参数
 func (c *ContextCompressor) getProjectCompressionParams(ctx context.Context, projectID int64) compressionParams {
-	project, err := g.DB().Model("mvp_project").Where("id", projectID).Fields("project_category").One()
+	project, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Fields("project_category").One()
 	if err != nil || project.IsEmpty() {
 		return getCompressionParams("")
 	}
@@ -193,7 +193,7 @@ func (c *ContextCompressor) mergeIntoGlobalContext(ctx context.Context, projectI
 	mu := c.getProjectLock(projectID)
 	mu.Lock()
 	defer mu.Unlock()
-	project, err := g.DB().Model("mvp_project").Where("id", projectID).
+	project, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).
 		Fields("global_context, name, project_category").One()
 	if err != nil || project.IsEmpty() {
 		return
@@ -263,7 +263,7 @@ func (c *ContextCompressor) CompressProjectContext(ctx context.Context, projectI
 		return nil
 	}
 
-	project, _ := g.DB().Model("mvp_project").Where("id", projectID).Fields("name").One()
+	project, _ := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Fields("name").One()
 	projectName := ""
 	if !project.IsEmpty() {
 		projectName = project["name"].String()
@@ -466,17 +466,21 @@ func (c *ContextCompressor) getCompressModel(ctx context.Context, projectID int6
 }
 
 func (c *ContextCompressor) saveSummary(ctx context.Context, taskID int64, summary string) {
-	g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+	if _, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", taskID).Update(g.Map{
 		"context_summary": summary,
 		"updated_at":      gtime.Now(),
-	})
+	}); err != nil {
+		g.Log().Errorf(ctx, "[ContextCompressor] saveSummary 失败: task=%d err=%v", taskID, err)
+	}
 }
 
 func (c *ContextCompressor) saveProjectContext(ctx context.Context, projectID int64, globalCtx string) {
-	g.DB().Model("mvp_project").Where("id", projectID).Update(g.Map{
+	if _, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Update(g.Map{
 		"global_context": globalCtx,
 		"updated_at":     gtime.Now(),
-	})
+	}); err != nil {
+		g.Log().Errorf(ctx, "[ContextCompressor] saveProjectContext 失败: project=%d err=%v", projectID, err)
+	}
 }
 
 func truncate(s string, maxLen int) string {
