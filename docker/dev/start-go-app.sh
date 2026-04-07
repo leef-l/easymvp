@@ -89,9 +89,9 @@ if [[ "${APP_NAME}" == "mvp" ]]; then
     # 先查当前版本
     CURRENT_VER=$(migrate -path "${MIGRATE_DIR}" -database "${MIGRATE_URL}" version 2>&1) || true
 
-    # 执行迁移
-    MIGRATE_OUTPUT=$(migrate -path "${MIGRATE_DIR}" -database "${MIGRATE_URL}" up 2>&1)
-    MIGRATE_EXIT=$?
+    # 执行迁移（migrate up 在 "no change" 时也返回非 0，必须用 || true 避免 set -e 终止脚本）
+    MIGRATE_OUTPUT=$(migrate -path "${MIGRATE_DIR}" -database "${MIGRATE_URL}" up 2>&1) || MIGRATE_EXIT=$?
+    MIGRATE_EXIT=${MIGRATE_EXIT:-0}
 
     if [[ ${MIGRATE_EXIT} -eq 0 ]]; then
       echo "[migrate] Migrations applied successfully."

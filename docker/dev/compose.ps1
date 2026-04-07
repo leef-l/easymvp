@@ -74,9 +74,8 @@ function Test-ProfileEnabled {
 
 function Write-StartupGuide {
     Write-Host 'Docker dev services started.' -ForegroundColor Green
-    Write-Host 'Default command starts core services: mysql, system, ai, mvp.' -ForegroundColor Yellow
-    Write-Host 'Start frontend too: .\docker\dev\compose.ps1 --profile frontend up -d' -ForegroundColor Yellow
-    Write-Host 'Start all services: .\docker\dev\compose.ps1 --profile frontend --profile ai-runtime up -d' -ForegroundColor Yellow
+    Write-Host 'Default command starts all services: redis, mysql, system, ai, mvp, web.' -ForegroundColor Yellow
+    Write-Host 'Start AI runtime too: .\docker\dev\compose.ps1 --profile ai-runtime up -d' -ForegroundColor Yellow
 }
 
 function Invoke-DevBuild {
@@ -144,13 +143,13 @@ try {
     $envMap = Get-EnvMap -Path $sourceEnv
 
     if ($ComposeArgs.Count -eq 0) {
-        Invoke-DevBuild -EnvMap $envMap
+        Invoke-DevBuild -EnvMap $envMap -BuildFrontend:$true
         & docker @dockerArgs 'up' '-d'
         if ($LASTEXITCODE -eq 0) {
             Write-StartupGuide
         }
     } elseif ($ComposeArgs -contains 'up') {
-        Invoke-DevBuild -EnvMap $envMap -BuildFrontend:(Test-ProfileEnabled -Args $ComposeArgs -ProfileName 'frontend') -BuildAiRuntime:(Test-ProfileEnabled -Args $ComposeArgs -ProfileName 'ai-runtime')
+        Invoke-DevBuild -EnvMap $envMap -BuildFrontend:$true -BuildAiRuntime:(Test-ProfileEnabled -Args $ComposeArgs -ProfileName 'ai-runtime')
         & docker @dockerArgs @ComposeArgs
         if ($LASTEXITCODE -eq 0) {
             Write-StartupGuide
