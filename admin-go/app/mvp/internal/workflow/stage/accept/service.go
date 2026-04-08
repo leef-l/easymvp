@@ -275,9 +275,9 @@ func (s *Service) GetLatestIssues(ctx context.Context, acceptRunID int64) ([]acc
 	var hits []acceptance.RuleHit
 	for _, r := range records {
 		hits = append(hits, acceptance.RuleHit{
-			RuleCode:        r["rule_code"].(string),
-			Severity:        r["severity"].(string),
-			Title:           r["title"].(string),
+			RuleCode:        fmt.Sprintf("%v", r["rule_code"]),
+			Severity:        fmt.Sprintf("%v", r["severity"]),
+			Title:           fmt.Sprintf("%v", r["title"]),
 			Detail:          fmt.Sprintf("%v", r["detail"]),
 			ExpectedValue:   fmt.Sprintf("%v", r["expected_value"]),
 			ActualValue:     fmt.Sprintf("%v", r["actual_value"]),

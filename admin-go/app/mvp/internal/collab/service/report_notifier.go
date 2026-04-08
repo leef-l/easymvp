@@ -25,6 +25,11 @@ func NewReportNotifier(adapter collab.MessageAdapter, bindingRepo *collabRepo.Bi
 // OnStageCompleted 阶段完成时推送阶段报告卡片。
 func (n *ReportNotifier) OnStageCompleted(evt event.Event) {
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[ReportNotifier] OnStageCompleted panic: %v", r)
+			}
+		}()
 		ctx := context.Background()
 		if !n.adapter.IsEnabled(ctx) {
 			return
@@ -60,6 +65,11 @@ func (n *ReportNotifier) OnStageCompleted(evt event.Event) {
 // OnWorkflowCompleted 项目完成时推送汇总卡片。
 func (n *ReportNotifier) OnWorkflowCompleted(evt event.Event) {
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[ReportNotifier] OnWorkflowCompleted panic: %v", r)
+			}
+		}()
 		ctx := context.Background()
 		if !n.adapter.IsEnabled(ctx) {
 			return

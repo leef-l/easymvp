@@ -269,7 +269,11 @@ func (a *MetaAssessor) detectDrifts(ctx context.Context, projectID int64, policy
 // save 持久化评估结果。
 func (a *MetaAssessor) save(ctx context.Context, result *AssessmentResult) error {
 	id := int64(snowflake.Generate())
-	driftsJSON, _ := json.Marshal(result.Drifts)
+	driftsJSON, marshalErr := json.Marshal(result.Drifts)
+	if marshalErr != nil {
+		g.Log().Warningf(ctx, "[MetaAssessor] drifts 序列化失败: %v", marshalErr)
+		driftsJSON = []byte("[]")
+	}
 
 	_, err := g.DB().Model("mvp_assessment_result").Ctx(ctx).Insert(g.Map{
 		"id":                  id,

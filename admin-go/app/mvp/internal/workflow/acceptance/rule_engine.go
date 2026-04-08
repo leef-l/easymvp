@@ -55,11 +55,14 @@ func (e *RuleEngine) LoadAndEvaluate(ctx context.Context, in *AcceptContext) (ru
 
 	// 逐条评估
 	for _, rule := range rules {
-		ruleCode := rule["rule_code"].(string)
-		ruleName := rule["rule_name"].(string)
-		ruleType := rule["rule_type"].(string)
-		scopeType := rule["scope_type"].(string)
-		configJSON := rule["config_json"].(string)
+		ruleCode, _ := rule["rule_code"].(string)
+		ruleName, _ := rule["rule_name"].(string)
+		ruleType, _ := rule["rule_type"].(string)
+		scopeType, _ := rule["scope_type"].(string)
+		configJSON, _ := rule["config_json"].(string)
+		if ruleCode == "" {
+			continue
+		}
 
 		var cfg ruleConfig
 		if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
@@ -176,7 +179,10 @@ func (e *RuleEngine) checkRequiredFiles(_ context.Context, in *AcceptContext, ru
 
 	var hits []RuleHit
 	for _, f := range cfg.RequiredFiles {
-		fullPath := filepath.Join(in.WorkDir, f)
+		fullPath := filepath.Clean(filepath.Join(in.WorkDir, f))
+		if !strings.HasPrefix(fullPath, filepath.Clean(in.WorkDir)+string(filepath.Separator)) && fullPath != filepath.Clean(in.WorkDir) {
+			continue
+		}
 		if _, statErr := os.Stat(fullPath); os.IsNotExist(statErr) {
 			hits = append(hits, RuleHit{
 				RuleCode:        ruleCode,

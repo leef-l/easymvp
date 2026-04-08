@@ -46,6 +46,11 @@ func (m *FeishuWSManager) StartWS(appID, appSecret, encryptKey string, onEvent f
 	m.cancel = cancel
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(ctx, "[FeishuWSManager] 长连接 panic: %v", r)
+			}
+		}()
 		client.Start(ctx)
 		g.Log().Info(ctx, "[FeishuWSManager] 长连接已退出")
 	}()

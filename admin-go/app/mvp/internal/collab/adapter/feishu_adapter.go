@@ -43,7 +43,10 @@ func (a *FeishuAdapter) SendTextMessage(ctx context.Context, openID string, text
 		return fmt.Errorf("获取飞书 token 失败: %w", err)
 	}
 
-	contentJSON, _ := json.Marshal(map[string]string{"text": text})
+	contentJSON, err2 := json.Marshal(map[string]string{"text": text})
+	if err2 != nil {
+		return fmt.Errorf("文本消息序列化失败: %w", err2)
+	}
 	body := g.Map{
 		"receive_id": openID,
 		"msg_type":   "text",
@@ -77,7 +80,10 @@ func (a *FeishuAdapter) SendCardMessage(ctx context.Context, openID string, card
 	}
 
 	cardJSON := a.buildMessageCard(card)
-	cardBytes, _ := json.Marshal(cardJSON)
+	cardBytes, err2 := json.Marshal(cardJSON)
+	if err2 != nil {
+		return fmt.Errorf("卡片消息序列化失败: %w", err2)
+	}
 
 	body := g.Map{
 		"receive_id": openID,

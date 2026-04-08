@@ -28,6 +28,11 @@ func NewCheckpointNotifier(adapter collab.MessageAdapter, bindingRepo *collabRep
 // OnCheckpointOpened 人工节点创建时推送审批卡片。
 func (n *CheckpointNotifier) OnCheckpointOpened(evt event.Event) {
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[CheckpointNotifier] OnCheckpointOpened panic: %v", r)
+			}
+		}()
 		ctx := context.Background()
 		if !n.adapter.IsEnabled(ctx) {
 			return
@@ -93,6 +98,11 @@ func (n *CheckpointNotifier) OnCheckpointOpened(evt event.Event) {
 // OnActionFailed 动作执行失败时推送告警。
 func (n *CheckpointNotifier) OnActionFailed(evt event.Event) {
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[CheckpointNotifier] OnActionFailed panic: %v", r)
+			}
+		}()
 		ctx := context.Background()
 		if !n.adapter.IsEnabled(ctx) {
 			return
@@ -118,6 +128,11 @@ func (n *CheckpointNotifier) OnActionFailed(evt event.Event) {
 // OnGateBlocked 闸门阻断时推送告警。
 func (n *CheckpointNotifier) OnGateBlocked(evt event.Event) {
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[CheckpointNotifier] OnGateBlocked panic: %v", r)
+			}
+		}()
 		ctx := context.Background()
 		if !n.adapter.IsEnabled(ctx) {
 			return

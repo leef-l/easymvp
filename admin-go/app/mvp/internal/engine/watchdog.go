@@ -129,10 +129,16 @@ func (w *Watchdog) checkRunningTasks(ctx context.Context) {
 		pid := task["project_id"].Int64()
 		projectIDs[pid] = true
 	}
-	for pid := range projectIDs {
-		project, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", pid).Fields("project_category").One()
-		if err == nil && !project.IsEmpty() {
-			projectCategories[pid] = project["project_category"].String()
+	if len(projectIDs) > 0 {
+		pidList := make([]int64, 0, len(projectIDs))
+		for pid := range projectIDs {
+			pidList = append(pidList, pid)
+		}
+		projects, pErr := g.DB().Model("mvp_project").Ctx(ctx).WhereIn("id", pidList).Fields("id, project_category").All()
+		if pErr == nil {
+			for _, p := range projects {
+				projectCategories[p["id"].Int64()] = p["project_category"].String()
+			}
 		}
 	}
 

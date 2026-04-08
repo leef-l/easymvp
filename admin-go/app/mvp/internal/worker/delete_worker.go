@@ -43,6 +43,11 @@ type deleteJob struct {
 func StartDeleteWorker(ctx context.Context) {
 	// 定期清理 sys_delete_queue 中 done/failed 的历史记录（保留7天）
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(ctx, "[DeleteWorker] 清理协程 panic: %v", r)
+			}
+		}()
 		ticker := time.NewTicker(24 * time.Hour)
 		defer ticker.Stop()
 		for {
@@ -66,6 +71,11 @@ func StartDeleteWorker(ctx context.Context) {
 
 	// 定期扫描软删除残留（兜底：手动删除/异常中断后未入队的记录）
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(ctx, "[DeleteWorker] 扫描残留协程 panic: %v", r)
+			}
+		}()
 		// 启动5分钟后开始第一次扫描，避免服务启动瞬间抢锁
 		time.Sleep(5 * time.Minute)
 		ticker := time.NewTicker(10 * time.Minute)
@@ -81,6 +91,11 @@ func StartDeleteWorker(ctx context.Context) {
 	}()
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(ctx, "[DeleteWorker] Redis 消费协程 panic: %v", r)
+			}
+		}()
 		// 等待 Redis 就绪（最多等 10 秒，每 2 秒重试一次）
 		var redis *gredis.Redis
 		for i := 0; i < 5; i++ {
@@ -199,6 +214,11 @@ func processJob(ctx context.Context, redis *gredis.Redis, job *deleteJob, rawPay
 	// 延迟重新入队（指数退避：count * 10s）
 	delay := time.Duration(count*10) * time.Second
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(ctx, "[DeleteWorker] 重试入队 panic: %v", r)
+			}
+		}()
 		time.Sleep(delay)
 		redis.LPush(ctx, redisQueueKey, rawPayload)
 		g.Log().Infof(ctx, "[DeleteWorker] 第%d次重试入队 entity=%s", count, job.Entity)
