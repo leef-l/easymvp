@@ -258,7 +258,11 @@ func (s *Service) runAuditorReview(ctx context.Context, stageRunID, workflowRunI
 		taskStatus = "failed"
 		errMsg = err.Error()
 	} else {
-		outputJSON, _ = json.Marshal(result)
+		var mErr error
+		outputJSON, mErr = json.Marshal(result)
+		if mErr != nil {
+			g.Log().Warningf(ctx, "[ReviewStage] auditor result 序列化失败: %v", mErr)
+		}
 		if !result.Approved {
 			// 审计员未通过，记录问题
 			if len(result.Issues) > 0 {
@@ -314,7 +318,11 @@ func (s *Service) runCoordinatorOptimize(ctx context.Context, stageRunID, workfl
 		errMsg = err.Error()
 		g.Log().Warningf(ctx, "[ReviewStage] 协调员优化失败: %v", err)
 	} else {
-		outputJSON, _ = json.Marshal(result)
+		var coErr error
+		outputJSON, coErr = json.Marshal(result)
+		if coErr != nil {
+			g.Log().Warningf(ctx, "[ReviewStage] coordinator result 序列化失败: %v", coErr)
+		}
 		// 应用优化到蓝图的 batch_no
 		engine.ApplyCoordinatorOptimizationsToBlueprints(ctx, planVersionID, blueprints, result)
 	}

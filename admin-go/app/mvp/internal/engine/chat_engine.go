@@ -252,10 +252,13 @@ func (e *ChatEngine) failMessage(ctx context.Context, replyID int64, errMsg stri
 	}
 
 	// 通知前端失败
-	errJSON, _ := json.Marshal(map[string]interface{}{
+	errJSON, mErr := json.Marshal(map[string]interface{}{
 		"error": errMsg,
 		"done":  true,
 	})
+	if mErr != nil {
+		errJSON = []byte(`{"error":"internal error","done":true}`)
+	}
 	e.hub.Publish(replyID, string(errJSON))
 	e.hub.Done(replyID)
 }

@@ -242,7 +242,10 @@ func (c *cWorkflow) SetBotMenu(ctx context.Context, req *v1.WorkflowSetBotMenuRe
 		_ = saveMvpConfig(ctx, "workflow.collab.feishu_bot_menu", "", "string", "collab", "飞书机器人自定义菜单 JSON")
 	} else {
 		items = req.MenuItems
-		menuJSON, _ := json.Marshal(items)
+		menuJSON, mErr := json.Marshal(items)
+		if mErr != nil {
+			menuJSON = []byte("[]")
+		}
 		_ = saveMvpConfig(ctx, "workflow.collab.feishu_bot_menu", string(menuJSON), "string", "collab", "飞书机器人自定义菜单 JSON")
 	}
 	_ = items

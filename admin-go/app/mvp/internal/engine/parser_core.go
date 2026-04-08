@@ -145,13 +145,15 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 			}
 			resourcesJSON := "[]"
 			if len(t.AffectedResources) > 0 {
-				b, _ := json.Marshal(t.AffectedResources)
-				resourcesJSON = string(b)
+				if b, mErr := json.Marshal(t.AffectedResources); mErr == nil {
+					resourcesJSON = string(b)
+				}
 			}
 			dependsJSON := "[]"
 			if len(t.DependsOn) > 0 {
-				b, _ := json.Marshal(t.DependsOn)
-				dependsJSON = string(b)
+				if b, mErr := json.Marshal(t.DependsOn); mErr == nil {
+					dependsJSON = string(b)
+				}
 			}
 			// 确定 task_kind：根据 roleType 判断
 			taskKind := consts.TaskKindImplement

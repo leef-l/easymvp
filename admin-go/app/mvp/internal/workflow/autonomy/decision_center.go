@@ -194,7 +194,10 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 	}
 
 	// 5. 写审计记录 (mvp_decision_action)
-	triggerJSON, _ := json.Marshal(req.TriggerContext)
+	triggerJSON, tjErr := json.Marshal(req.TriggerContext)
+	if tjErr != nil {
+		triggerJSON = []byte("{}")
+	}
 	// 闸门命中时把原动作写入 recommendation，gate ID 列表写入 matched_gate_ids
 	var recommendationJSON string
 	var matchedGateIDsJSON string
@@ -203,14 +206,20 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 			"original_action": originalActionType,
 			"blocked_by":      gateResult.BlockedGates,
 		}
-		recBytes, _ := json.Marshal(recMap)
+		recBytes, recMErr := json.Marshal(recMap)
+		if recMErr != nil {
+			recBytes = []byte("{}")
+		}
 		recommendationJSON = string(recBytes)
 
 		gateIDs := make([]int64, 0, len(gateResult.BlockedGates))
 		for _, bg := range gateResult.BlockedGates {
 			gateIDs = append(gateIDs, bg.GateID)
 		}
-		gateIDBytes, _ := json.Marshal(gateIDs)
+		gateIDBytes, gidErr := json.Marshal(gateIDs)
+		if gidErr != nil {
+			gateIDBytes = []byte("[]")
+		}
 		matchedGateIDsJSON = string(gateIDBytes)
 	}
 
@@ -257,7 +266,10 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 			recMap["confidence"] = plan.Meta.Confidence
 			recMap["blast_radius"] = plan.Meta.BlastRadius
 		}
-		recBytes, _ := json.Marshal(recMap)
+		recBytes, recMarshalErr := json.Marshal(recMap)
+		if recMarshalErr != nil {
+			recBytes = []byte("{}")
+		}
 		actionData["recommendation"] = string(recBytes)
 	}
 	if matchedGateIDsJSON != "" {
@@ -617,11 +629,14 @@ func (dc *DecisionCenter) handleAdmissionDenied(
 		Handled:       true,
 		DenyReason:    admission.DenyReason,
 	}
-	triggerJSON, _ := json.Marshal(g.Map{
+	triggerJSON, tErr := json.Marshal(g.Map{
 		"trigger_context": req.TriggerContext,
 		"admission":       admission,
 		"situation":       sit,
 	})
+	if tErr != nil {
+		triggerJSON = []byte("{}")
+	}
 	actionID, err := dc.actionRepo.Create(ctx, g.Map{
 		"workflow_run_id": req.WorkflowRunID,
 		"project_id":      req.ProjectID,

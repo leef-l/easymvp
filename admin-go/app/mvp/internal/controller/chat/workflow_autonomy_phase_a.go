@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/util/gconv"
@@ -31,7 +32,7 @@ func (c *cWorkflow) SaveObjective(ctx context.Context, req *v1.WorkflowSaveObjec
 	if err = checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
 	}
-	payload, _ := json.Marshal(g.Map{
+	payload, mErr := json.Marshal(g.Map{
 		"deliveryGoal":       req.DeliveryGoal,
 		"qualityFloor":       req.QualityFloor,
 		"tokenBudget":        req.TokenBudget,
@@ -46,6 +47,9 @@ func (c *cWorkflow) SaveObjective(ctx context.Context, req *v1.WorkflowSaveObjec
 		"autonomyLevel":      req.AutonomyLevel,
 		"maxSideEffectLevel": req.MaxSideEffectLevel,
 	})
+	if mErr != nil {
+		return nil, fmt.Errorf("序列化目标配置失败: %w", mErr)
+	}
 	_, err = g.DB().Model("mvp_project").Ctx(ctx).
 		Where("id", projectID).
 		WhereNull("deleted_at").

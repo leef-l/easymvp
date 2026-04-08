@@ -171,6 +171,9 @@ func (a *Actuator) summarizeSituation(sit *Situation) string {
 	if sit.Resource != nil {
 		m["tokensConsumed"] = sit.Resource.TokensConsumed
 	}
-	bytes, _ := json.Marshal(m)
+	bytes, err := json.Marshal(m)
+	if err != nil {
+		return "{}"
+	}
 	return string(bytes)
 }

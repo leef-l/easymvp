@@ -358,8 +358,9 @@ func (s *Scheduler) AutoDispatchFailureFix(ctx context.Context, projectID int64,
 		extra["description"] = patch.Description
 	}
 	if normalized, _ := normalizePatchResources(patch.AffectedResources); len(normalized) > 0 {
-		resourceJSON, _ := json.Marshal(normalized)
-		extra["affected_resources"] = string(resourceJSON)
+		if resourceJSON, mErr := json.Marshal(normalized); mErr == nil {
+			extra["affected_resources"] = string(resourceJSON)
+		}
 	}
 
 	if _, err = updateTaskStatus(ctx, implTaskID, "escalated", "pending", extra); err != nil {
@@ -384,7 +385,10 @@ func (s *Scheduler) AutoDispatchFailureFix(ctx context.Context, projectID int64,
 
 func normalizePatchResources(values []string) ([]string, []string) {
 	return parseResourcesDetail(func() string {
-		raw, _ := json.Marshal(values)
+		raw, err := json.Marshal(values)
+		if err != nil {
+			return "[]"
+		}
 		return string(raw)
 	}()).Resources, nil
 }

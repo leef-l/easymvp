@@ -45,7 +45,10 @@ func (e *RuleEngine) LoadAndEvaluate(ctx context.Context, in *AcceptContext) (ru
 	}
 
 	// 规则快照
-	snapshotBytes, _ := json.Marshal(rules)
+	snapshotBytes, snapErr := json.Marshal(rules)
+	if snapErr != nil {
+		snapshotBytes = []byte("[]")
+	}
 	rulesSnapshot = string(snapshotBytes)
 
 	if len(rules) == 0 {
