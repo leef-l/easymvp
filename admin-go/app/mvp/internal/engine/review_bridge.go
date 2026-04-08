@@ -23,9 +23,12 @@ func RunAuditorReviewForBlueprints(ctx context.Context, projectID int64, bluepri
 	}
 
 	// 获取项目信息，传给审计员做整体理解
-	project, _ := g.DB().Model("mvp_project").Ctx(ctx).
+	project, projErr := g.DB().Model("mvp_project").Ctx(ctx).
 		Fields("project_category, name, description").
 		Where("id", projectID).WhereNull("deleted_at").One()
+	if projErr != nil {
+		g.Log().Warningf(ctx, "[ReviewBridge] 查询项目失败: projectID=%d err=%v", projectID, projErr)
+	}
 	projectCategory := "软件开发"
 	projectName := ""
 	projectDesc := ""

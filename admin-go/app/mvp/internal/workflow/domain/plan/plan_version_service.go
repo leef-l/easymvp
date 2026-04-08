@@ -248,10 +248,13 @@ func (s *PlanVersionService) SubmitForReview(ctx context.Context, projectID int6
 	pvID := pv["id"].Int64()
 
 	// 2. 检查蓝图数
-	bpCount, _ := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
+	bpCount, bpCountErr := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
 		Where("plan_version_id", pvID).
 		WhereNull("deleted_at").
 		Count()
+	if bpCountErr != nil {
+		return fmt.Errorf("查询蓝图数失败: %w", bpCountErr)
+	}
 	if bpCount == 0 {
 		return fmt.Errorf("方案版本没有任务蓝图")
 	}
@@ -353,10 +356,13 @@ func (s *PlanVersionService) SubmitForReviewAsync(ctx context.Context, projectID
 	pvID := pv["id"].Int64()
 
 	// 2. 检查蓝图数
-	bpCount, _ := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
+	bpCount, bpCountErr := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
 		Where("plan_version_id", pvID).
 		WhereNull("deleted_at").
 		Count()
+	if bpCountErr != nil {
+		return fmt.Errorf("查询蓝图数失败: %w", bpCountErr)
+	}
 	if bpCount == 0 {
 		return fmt.Errorf("方案版本没有任务蓝图")
 	}

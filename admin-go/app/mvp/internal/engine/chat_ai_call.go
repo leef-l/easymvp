@@ -216,7 +216,10 @@ func (e *ChatEngine) tryParseArchitectTasks(conversationID int64, aiReply string
 	projectID := conv["project_id"].Int64()
 
 	// 判断引擎版本
-	ev, _ := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Value("engine_version")
+	ev, evErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Value("engine_version")
+	if evErr != nil {
+		g.Log().Warningf(ctx, "[ChatEngine] 查询 engine_version 失败: projectID=%d err=%v", projectID, evErr)
+	}
 	if ev.String() == "workflow_v2" {
 		e.tryParseArchitectBlueprints(ctx, projectID, conv["id"].Int64(), conversationID, aiReply)
 		return
@@ -252,8 +255,11 @@ func (e *ChatEngine) tryParseArchitectBlueprints(ctx context.Context, projectID,
 	}
 
 	// 获取项目分类
-	projectCategory, _ := g.DB().Model("mvp_project").Ctx(ctx).
+	projectCategory, pcErr := g.DB().Model("mvp_project").Ctx(ctx).
 		Where("id", projectID).Value("project_category")
+	if pcErr != nil {
+		g.Log().Warningf(ctx, "[ChatEngine] 查询项目分类失败: projectID=%d err=%v", projectID, pcErr)
+	}
 
 	tasks, err := GetParser().ExtractAndNormalize(ctx, aiReply, projectCategory.String())
 	if err != nil || len(tasks) == 0 {
@@ -261,12 +267,15 @@ func (e *ChatEngine) tryParseArchitectBlueprints(ctx context.Context, projectID,
 	}
 
 	// 查活跃的 workflow_run
-	wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+	wfRun, wfErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 		Where("project_id", projectID).
 		WhereIn("status", g.Slice{"pending", "running", "paused"}).
 		WhereNull("deleted_at").
 		OrderDesc("run_no").
 		One()
+	if wfErr != nil {
+		g.Log().Warningf(ctx, "[ChatEngine] 查询活跃 workflow_run 失败: projectID=%d err=%v", projectID, wfErr)
+	}
 	var wfRunID int64
 	if !wfRun.IsEmpty() {
 		wfRunID = wfRun["id"].Int64()

@@ -299,13 +299,17 @@ func (s *DomainTaskScheduler) getActiveBatch(ctx context.Context, workflowRunID 
 	batchNo := int(val)
 
 	// 检查该批次之前是否有未完成的任务（非 completed/skipped）
-	prevUnfinished, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+	prevUnfinished, puErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("workflow_run_id", workflowRunID).
 		Where("batch_no > 0").
 		Where("batch_no < ?", batchNo).
 		WhereNotIn("status", g.Slice{domainTask.StatusCompleted, "skipped"}).
 		WhereNull("deleted_at").
 		Count()
+	if puErr != nil {
+		g.Log().Warningf(ctx, "[DomainTaskScheduler] 查询前序未完成任务失败: wfRunID=%d err=%v", workflowRunID, puErr)
+		return 0
+	}
 	if prevUnfinished > 0 {
 		// 之前批次还有未完成的，不推进
 		prevBatch, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
@@ -344,11 +348,15 @@ func (s *DomainTaskScheduler) releaseTaskResources(taskID int64) {
 
 // checkAllDone 检查 workflow 的所有任务是否完成。
 func (s *DomainTaskScheduler) checkAllDone(ctx context.Context, workflowRunID int64) {
-	unfinished, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+	unfinished, ufErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("workflow_run_id", workflowRunID).
 		WhereNotIn("status", g.Slice{domainTask.StatusCompleted, "skipped", domainTask.StatusEscalated}).
 		WhereNull("deleted_at").
 		Count()
+	if ufErr != nil {
+		g.Log().Warningf(ctx, "[DomainTaskScheduler] checkAllDone 查询失败: wfRunID=%d err=%v", workflowRunID, ufErr)
+		return
+	}
 
 	if unfinished == 0 {
 		// Double-check：防止查询和回调之间有新任务插入或状态变更
@@ -403,11 +411,15 @@ func (s *DomainTaskScheduler) Wakeup(ctx context.Context, workflowRunID int64) {
 
 // HasUnfinished 检查是否还有未完成任务（供外部查询）。
 func (s *DomainTaskScheduler) HasUnfinished(ctx context.Context, workflowRunID int64) bool {
-	count, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+	count, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("workflow_run_id", workflowRunID).
 		WhereNotIn("status", g.Slice{domainTask.StatusCompleted, "skipped", domainTask.StatusEscalated}).
 		WhereNull("deleted_at").
 		Count()
+	if err != nil {
+		g.Log().Warningf(ctx, "[DomainTaskScheduler] HasUnfinished 查询失败: wfRunID=%d err=%v", workflowRunID, err)
+		return true // 查询失败保守返回 true
+	}
 	return count > 0
 }
 

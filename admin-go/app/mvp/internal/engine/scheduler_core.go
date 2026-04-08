@@ -155,12 +155,15 @@ func (s *Scheduler) PauseProject(projectID int64) {
 	}
 
 	// 3. 锁外查询该项目的 running 任务 ID
-	runningTasks, _ := g.DB().Model("mvp_task").
+	runningTasks, runErr := g.DB().Model("mvp_task").
 		Where("project_id", projectID).
 		Where("status", "running").
 		Where("deleted_at IS NULL").
 		Fields("id").
 		All()
+	if runErr != nil {
+		g.Log().Errorf(context.Background(), "[Scheduler] PauseProject 查询 running 任务失败: project=%d err=%v", projectID, runErr)
+	}
 
 	// 4. 持锁只清理内存中的 running 和 lockedRes
 	s.mu.Lock()
@@ -246,7 +249,10 @@ func (s *Scheduler) scheduleOnce(ctx context.Context, projectID int64) {
 
 	// --- 阶段 1.5：阶段锁 —— 按项目状态过滤允许执行的角色 ---
 	projectStatus := ""
-	proj, _ := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Fields("status").One()
+	proj, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Fields("status").One()
+	if projErr != nil {
+		g.Log().Warningf(ctx, "[Scheduler] 查询项目状态失败: project=%d err=%v", projectID, projErr)
+	}
 	if !proj.IsEmpty() {
 		projectStatus = proj["status"].String()
 	}

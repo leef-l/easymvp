@@ -24,9 +24,12 @@ func auditorReview(ctx context.Context, projectID int64, tasks gdb.Result) (*Aud
 	if err != nil {
 		return nil, fmt.Errorf("获取审计员模型失败: %w", err)
 	}
-	project, _ := g.DB().Model("mvp_project").Ctx(ctx).
+	project, projErr := g.DB().Model("mvp_project").Ctx(ctx).
 		Fields("project_category, name, description").
 		Where("id", projectID).WhereNull("deleted_at").One()
+	if projErr != nil {
+		g.Log().Warningf(ctx, "[AuditorReview] 查询项目失败: projectID=%d err=%v", projectID, projErr)
+	}
 	projectCategory := "软件开发"
 	projectName := ""
 	projectDesc := ""

@@ -598,8 +598,11 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 	}
 
 	// V2 主路径：先正则快速提取，失败则异步走 AI 二次提取
-	projectCategory, _ := g.DB().Model("mvp_project").Ctx(ctx).
+	projectCategory, catErr := g.DB().Model("mvp_project").Ctx(ctx).
 		Where("id", projectID).Value("project_category")
+	if catErr != nil {
+		g.Log().Warningf(ctx, "[ParseTasks] 查询项目分类失败: projectID=%d err=%v", projectID, catErr)
+	}
 
 	g.Log().Infof(ctx, "[ParseTasks] 开始提取: projectID=%d aiReplyLen=%d convID=%d lastMsgID=%d",
 		projectID, len([]rune(aiReply)), convID, lastMsgID)

@@ -188,7 +188,11 @@ func (n *CheckpointNotifier) sendToProjectOwner(ctx context.Context, createdBy i
 		if userID == 0 {
 			continue
 		}
-		binding, _ := n.bindingRepo.GetByUserID(ctx, userID, platform)
+		binding, bindErr := n.bindingRepo.GetByUserID(ctx, userID, platform)
+		if bindErr != nil {
+			g.Log().Warningf(ctx, "[CheckpointNotifier] 查询绑定失败: userID=%d err=%v", userID, bindErr)
+			continue
+		}
 		if binding != nil {
 			openID := fmt.Sprintf("%v", binding["platform_user_id"])
 			if openID != "" {
@@ -206,8 +210,12 @@ func (n *CheckpointNotifier) lookupProjectOwner(ctx context.Context, workflowRun
 		return 0
 	}
 	projectID := val.Int64()
-	createdBy, _ := g.DB().Model("mvp_project").Ctx(ctx).
+	createdBy, cbErr := g.DB().Model("mvp_project").Ctx(ctx).
 		Where("id", projectID).Value("created_by")
+	if cbErr != nil {
+		g.Log().Warningf(ctx, "[CheckpointNotifier] 查询 created_by 失败: projectID=%d err=%v", projectID, cbErr)
+		return 0
+	}
 	return createdBy.Int64()
 }
 
