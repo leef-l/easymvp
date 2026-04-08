@@ -64,7 +64,14 @@ func runPolling(ctx context.Context, bot *tgbotapi.BotAPI) error {
 			if !ok {
 				return fmt.Errorf("update channel 关闭")
 			}
-			go DispatchTelegramUpdate(ctx, bot, update)
+			go func(u tgbotapi.Update) {
+				defer func() {
+					if r := recover(); r != nil {
+						g.Log().Errorf(ctx, "[TGBot] DispatchTelegramUpdate panic: %v", r)
+					}
+				}()
+				DispatchTelegramUpdate(ctx, bot, u)
+			}(update)
 		}
 	}
 }

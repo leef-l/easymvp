@@ -107,7 +107,7 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 
 	// 保存指令消息
 	userMsgID := int64(snowflake.Generate())
-	g.DB().Model("mvp_message").Insert(g.Map{
+	if _, err := g.DB().Model("mvp_message").Insert(g.Map{
 		"id":              userMsgID,
 		"conversation_id": conversationID,
 		"role":            "user",
@@ -118,7 +118,9 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 		"dept_id":         0,
 		"created_at":      gtime.Now(),
 		"updated_at":      gtime.Now(),
-	})
+	}); err != nil {
+		g.Log().Warningf(ctx, "[Executor] 保存指令消息失败: task=%d err=%v", taskID, err)
+	}
 
 	// 5. 文件快照（执行前）：记录 affected_resources 的 mtime+size，用于检测假成功
 	beforeSnap := captureFileSnapshots(workDir, resources)
@@ -135,7 +137,7 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 	if result.Error != nil {
 		replyStatus = "failed"
 	}
-	g.DB().Model("mvp_message").Insert(g.Map{
+	if _, err := g.DB().Model("mvp_message").Insert(g.Map{
 		"id":              replyID,
 		"conversation_id": conversationID,
 		"role":            "assistant",
@@ -147,7 +149,9 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 		"dept_id":         0,
 		"created_at":      gtime.Now(),
 		"updated_at":      gtime.Now(),
-	})
+	}); err != nil {
+		g.Log().Warningf(ctx, "[Executor] 保存AI回复消息失败: task=%d err=%v", taskID, err)
+	}
 
 	// 8. 判断结果
 	if result.Error != nil {
@@ -181,7 +185,9 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 	}
 
 	// 11. 压缩上下文（同步执行，确保不丢失）
-	if err := GetCompressor().CompressTaskContext(context.Background(), projectID, taskID); err != nil {
+	compressCtx, compressCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer compressCancel()
+	if err := GetCompressor().CompressTaskContext(compressCtx, projectID, taskID); err != nil {
 		g.Log().Errorf(ctx, "[Executor] Aider任务压缩上下文失败（非致命）: task=%d, err=%v", taskID, err)
 	}
 

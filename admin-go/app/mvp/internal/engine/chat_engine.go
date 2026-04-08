@@ -236,12 +236,14 @@ func (e *ChatEngine) resolveModel(ctx context.Context, projectID int64, roleType
 func (e *ChatEngine) failMessage(ctx context.Context, replyID int64, errMsg string) {
 	g.Log().Errorf(ctx, "AI 调用失败 (messageID=%d): %s", replyID, errMsg)
 
-	g.DB().Model("mvp_message").Ctx(ctx).Where("id", replyID).Update(g.Map{
+	if _, err := g.DB().Model("mvp_message").Ctx(ctx).Where("id", replyID).Update(g.Map{
 		"message_type": mvpmodel.MessageTypePoison,
 		"status":       "failed",
 		"content":      "AI 调用失败: " + errMsg,
 		"updated_at":   gtime.Now(),
-	})
+	}); err != nil {
+		g.Log().Errorf(ctx, "[ChatEngine] 标记消息失败状态写入DB失败: msgID=%d err=%v", replyID, err)
+	}
 
 	// 通知前端失败
 	errJSON, _ := json.Marshal(map[string]interface{}{

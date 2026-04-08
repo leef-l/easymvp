@@ -164,6 +164,8 @@ func (e *Executor) createAuditTask(ctx context.Context, projectID int64, implTas
 	}); err != nil {
 		// 唯一索引冲突说明已被并发创建，清理多余的审计任务
 		g.Log().Warningf(ctx, "[Executor] 审计任务依赖已存在（并发重复），回滚: implTask=%d, err=%v", implTaskID, err)
-		g.DB().Ctx(ctx).Model("mvp_task").Where("id", auditTaskID).Delete()
+		if _, delErr := g.DB().Ctx(ctx).Model("mvp_task").Where("id", auditTaskID).Delete(); delErr != nil {
+			g.Log().Errorf(ctx, "[Executor] 回滚审计任务失败: auditTask=%d err=%v", auditTaskID, delErr)
+		}
 	}
 }

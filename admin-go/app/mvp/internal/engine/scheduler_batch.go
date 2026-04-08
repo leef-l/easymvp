@@ -154,7 +154,14 @@ func (s *Scheduler) OnTaskFailed(projectID int64, taskID int64, errMsg string) {
 func (s *Scheduler) OnTaskEscalated(projectID int64, taskID int64, message string) {
 	s.releaseTaskResources(taskID)
 	logTaskAction(taskID, "escalate_to_architect", "running", "escalated", message, "system")
-	go s.scheduleOnce(s.getProjectContext(projectID), projectID)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[Scheduler] scheduleOnce panic: project=%d err=%v", projectID, r)
+			}
+		}()
+		s.scheduleOnce(s.getProjectContext(projectID), projectID)
+	}()
 }
 
 // tryLockResources 尝试锁定资源，如果有冲突返回 false

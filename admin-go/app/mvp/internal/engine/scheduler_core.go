@@ -387,11 +387,13 @@ func (s *Scheduler) checkProjectDone(projectID int64) {
 	}
 
 	if count == 0 {
-		g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Update(g.Map{
+		if _, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Update(g.Map{
 			"status":          "completed",
 			"active_batch_no": 0,
 			"updated_at":      gtime.Now(),
-		})
+		}); err != nil {
+			g.Log().Errorf(ctx, "[Scheduler] 更新项目完成状态失败: project=%d err=%v", projectID, err)
+		}
 
 		// 飞书推送：项目完成通知
 		go func() {
@@ -431,7 +433,7 @@ func stageAllowedRoles(projectStatus string) g.Slice {
 
 // logTaskAction 记录任务日志
 func logTaskAction(taskID int64, action, fromStatus, toStatus, message, operator string) {
-	g.DB().Model("mvp_task_log").Insert(g.Map{
+	_, _ = g.DB().Model("mvp_task_log").Insert(g.Map{
 		"task_id":     taskID,
 		"action":      action,
 		"from_status": fromStatus,

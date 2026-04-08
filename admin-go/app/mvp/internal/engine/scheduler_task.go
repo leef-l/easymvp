@@ -33,7 +33,14 @@ func (s *Scheduler) RetryTask(projectID int64, taskID int64) error {
 
 	logTaskAction(taskID, "retry", currentStatus, "pending", "用户重新开始任务", "user")
 
-	go s.scheduleOnce(s.getProjectContext(projectID), projectID)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				g.Log().Errorf(context.Background(), "[Scheduler] scheduleOnce panic: project=%d err=%v", projectID, r)
+			}
+		}()
+		s.scheduleOnce(s.getProjectContext(projectID), projectID)
+	}()
 	return nil
 }
 
