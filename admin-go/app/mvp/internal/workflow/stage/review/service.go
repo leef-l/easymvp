@@ -369,9 +369,11 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 
 	if passed {
 		// 审核通过：更新 plan_version review_status
-		_, _ = g.DB().Model("mvp_plan_version").Ctx(ctx).
+		if _, pvErr := g.DB().Model("mvp_plan_version").Ctx(ctx).
 			Where("id", planVersionID).
-			Update(g.Map{"review_status": consts.PlanReviewStatusApproved, "approved_at": now, "updated_at": now})
+			Update(g.Map{"review_status": consts.PlanReviewStatusApproved, "approved_at": now, "updated_at": now}); pvErr != nil {
+			g.Log().Errorf(ctx, "[ReviewStage] 更新 plan_version 审核状态失败: pvID=%d err=%v", planVersionID, pvErr)
+		}
 
 		// 完成 review stage
 		if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
@@ -446,20 +448,24 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 		g.Log().Infof(ctx, "[ReviewStage] 审核通过 planVersionID=%d errors=%d warnings=%d", planVersionID, errorCount, warningCount)
 	} else {
 		// 审核不通过：回退 plan_version + blueprints + workflow + project
-		_, _ = g.DB().Model("mvp_plan_version").Ctx(ctx).
+		if _, pvErr := g.DB().Model("mvp_plan_version").Ctx(ctx).
 			Where("id", planVersionID).
 			Update(g.Map{
 				"status":        "draft",
 				"review_status": consts.PlanReviewStatusRejected,
 				"rejected_at":   now,
 				"updated_at":    now,
-			})
+			}); pvErr != nil {
+			g.Log().Errorf(ctx, "[ReviewStage] 驳回更新 plan_version 失败: pvID=%d err=%v", planVersionID, pvErr)
+		}
 
 		// 蓝图回退 confirmed → draft（让用户可以重新编辑）
-		_, _ = g.DB().Model("mvp_task_blueprint").Ctx(ctx).
+		if _, bpErr := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
 			Where("plan_version_id", planVersionID).
 			Where("blueprint_status", consts.BlueprintStatusConfirmed).
-			Update(g.Map{"blueprint_status": consts.BlueprintStatusDraft, "updated_at": now})
+			Update(g.Map{"blueprint_status": consts.BlueprintStatusDraft, "updated_at": now}); bpErr != nil {
+			g.Log().Errorf(ctx, "[ReviewStage] 蓝图回退失败: pvID=%d err=%v", planVersionID, bpErr)
+		}
 
 		// 标记 review stage 失败（仅标记 stage_run，不级联终止 workflow）
 		s.stageCompleter.FailStageOnly(ctx, stageRunID, summary)
@@ -476,17 +482,21 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 
 		// fallback：如果 designRollbackFn 失败或未注册，直接更新 workflow_run + project 状态
 		if !designRollbackOK {
-			_, _ = g.DB().Model("mvp_workflow_run").Ctx(ctx).
+			if _, wfErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 				Where("id", workflowRunID).
 				WhereIn("status", g.Slice{"reviewing", "failed"}).
 				Update(g.Map{
 					"status":        "designing",
 					"current_stage": "design",
 					"updated_at":    now,
-				})
-			_, _ = g.DB().Model("mvp_project").Ctx(ctx).
+				}); wfErr != nil {
+				g.Log().Errorf(ctx, "[ReviewStage] fallback 回退 workflow_run 失败: wfRun=%d err=%v", workflowRunID, wfErr)
+			}
+			if _, pErr := g.DB().Model("mvp_project").Ctx(ctx).
 				Where("id", projectID).
-				Update(g.Map{"status": "designing", "updated_at": now})
+				Update(g.Map{"status": "designing", "updated_at": now}); pErr != nil {
+				g.Log().Errorf(ctx, "[ReviewStage] fallback 回退 project 失败: project=%d err=%v", projectID, pErr)
+			}
 		}
 
 		// 通知架构师对话

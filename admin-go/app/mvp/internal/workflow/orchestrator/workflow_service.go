@@ -225,9 +225,11 @@ func (s *WorkflowService) Pause(ctx context.Context, workflowRunID int64, reason
 	// 同步 mvp_project.status
 	projectID := wfRun["project_id"].Int64()
 	if projectID > 0 {
-		_, _ = g.DB().Model("mvp_project").Ctx(ctx).
+		if _, syncErr := g.DB().Model("mvp_project").Ctx(ctx).
 			Where("id", projectID).
-			Update(g.Map{"status": consts.WorkflowRunStatusPaused, "pause_reason": reason, "updated_at": now})
+			Update(g.Map{"status": consts.WorkflowRunStatusPaused, "pause_reason": reason, "updated_at": now}); syncErr != nil {
+			g.Log().Errorf(ctx, "[WorkflowService] Pause 同步 project status 失败: projectID=%d err=%v", projectID, syncErr)
+		}
 	}
 
 	if s.publisher != nil {
@@ -282,9 +284,11 @@ func (s *WorkflowService) Resume(ctx context.Context, workflowRunID int64) error
 
 	// 同步 mvp_project.status
 	if projectID > 0 {
-		_, _ = g.DB().Model("mvp_project").Ctx(ctx).
+		if _, syncErr := g.DB().Model("mvp_project").Ctx(ctx).
 			Where("id", projectID).
-			Update(g.Map{"status": resumeStatus, "pause_reason": nil, "updated_at": now})
+			Update(g.Map{"status": resumeStatus, "pause_reason": nil, "updated_at": now}); syncErr != nil {
+			g.Log().Errorf(ctx, "[WorkflowService] Resume 同步 project status 失败: projectID=%d err=%v", projectID, syncErr)
+		}
 	}
 
 	// 恢复后重启调度器（execute/rework 阶段需要调度器推进任务）

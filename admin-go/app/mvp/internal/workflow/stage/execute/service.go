@@ -266,13 +266,15 @@ func (e *domainTaskExecutor) handleSuccess(ctx context.Context, taskID int64, re
 
 // handleFailure 任务失败。
 func (e *domainTaskExecutor) handleFailure(ctx context.Context, taskID int64, errMsg string) {
-	_, _ = g.DB().Model("mvp_domain_task").Ctx(ctx).
+	if _, upErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("id", taskID).Where("status", "running").
 		Update(g.Map{
 			"status":     "failed",
 			"result":     errMsg,
 			"updated_at": gtime.Now(),
-		})
+		}); upErr != nil {
+		g.Log().Errorf(ctx, "[domainTaskExecutor] handleFailure 更新状态失败: task=%d err=%v", taskID, upErr)
+	}
 	e.scheduler.OnTaskFailed(ctx, taskID, errMsg)
 }
 
