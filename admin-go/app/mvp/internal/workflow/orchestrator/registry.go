@@ -138,7 +138,7 @@ func Init() {
 		// 注册 accept → complete 回调（决策点 4: accept.passed）
 		acceptStageSvc.SetCompleteTrigger(func(ctx context.Context, workflowRunID int64) error {
 			if decisionCenter.IsEnabled(ctx) {
-				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id")
+				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id") //nolint: errcheck — best-effort for autonomy decision
 				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
 					WorkflowRunID: workflowRunID,
 					ProjectID:     projectID.Int64(),
@@ -208,7 +208,7 @@ func Init() {
 			if failedTaskID == 0 {
 				// 决策点 6: accept.manual_review
 				if decisionCenter.IsEnabled(ctx) {
-					projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id")
+					projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id") //nolint: errcheck — best-effort for autonomy decision
 					resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
 						WorkflowRunID: workflowRunID,
 						ProjectID:     projectID.Int64(),
@@ -227,7 +227,7 @@ func Init() {
 			}
 			// 决策��� 5: accept.failed
 			if decisionCenter.IsEnabled(ctx) {
-				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id")
+				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id") //nolint: errcheck — best-effort for autonomy decision
 				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
 					WorkflowRunID: workflowRunID,
 					ProjectID:     projectID.Int64(),
@@ -250,7 +250,7 @@ func Init() {
 			g.Log().Infof(ctx, "[Registry] rework 完成，恢复验收状态: workflowRunID=%d", workflowRunID)
 
 			if decisionCenter.IsEnabled(ctx) {
-				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id")
+				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id") //nolint: errcheck — best-effort for autonomy decision
 				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
 					WorkflowRunID: workflowRunID,
 					ProjectID:     projectID.Int64(),
@@ -306,13 +306,16 @@ func Init() {
 		domainWatchdog = watchdogV2.New()
 		domainWatchdog.SetScheduler(taskScheduler)
 		domainWatchdog.SetRetryFn(func(ctx context.Context, taskID int64) error {
-			wfRunID, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).Where("id", taskID).Value("workflow_run_id")
+			wfRunID, wfErr := g.DB().Model("mvp_domain_task").Ctx(ctx).Where("id", taskID).Value("workflow_run_id")
+			if wfErr != nil {
+				return fmt.Errorf("查询 domain_task workflow_run_id 失败: %w", wfErr)
+			}
 			if wfRunID.Int64() == 0 {
 				return nil
 			}
 			// 自治中台包裹
 			if decisionCenter.IsEnabled(ctx) {
-				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", wfRunID.Int64()).Value("project_id")
+				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", wfRunID.Int64()).Value("project_id") //nolint: errcheck — best-effort for autonomy
 				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
 					WorkflowRunID: wfRunID.Int64(),
 					ProjectID:     projectID.Int64(),
@@ -330,7 +333,7 @@ func Init() {
 		})
 		domainWatchdog.SetEscalateFn(func(ctx context.Context, workflowRunID, taskID int64) error {
 			if decisionCenter.IsEnabled(ctx) {
-				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id")
+				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id") //nolint: errcheck — best-effort for autonomy decision
 				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
 					WorkflowRunID: workflowRunID,
 					ProjectID:     projectID.Int64(),
@@ -350,7 +353,7 @@ func Init() {
 		domainWatchdog.SetCircuitBreaker(circuitBreaker)
 		domainWatchdog.SetPauseFn(func(ctx context.Context, workflowRunID int64, reason string) error {
 			if decisionCenter.IsEnabled(ctx) {
-				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id")
+				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id") //nolint: errcheck — best-effort for autonomy decision
 				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
 					WorkflowRunID: workflowRunID,
 					ProjectID:     projectID.Int64(),
@@ -379,11 +382,14 @@ func Init() {
 				}
 			}
 			// 降级到原逻辑
-			failedTasks, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+			failedTasks, ftErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
 				Where("workflow_run_id", workflowRunID).
 				WhereIn("status", g.Slice{"failed", "escalated"}).
 				WhereNull("deleted_at").
 				Fields("id, name, result, retry_count").All()
+			if ftErr != nil {
+				g.Log().Warningf(ctx, "[Registry] 查询失败任务列表失败: wfRunID=%d err=%v", workflowRunID, ftErr)
+			}
 			var failed []autonomy.FailedTaskInfo
 			for _, t := range failedTasks {
 				failed = append(failed, autonomy.FailedTaskInfo{

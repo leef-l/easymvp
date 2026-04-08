@@ -303,8 +303,11 @@ func (s *StageService) FailStage(ctx context.Context, stageRunID int64, reason s
 
 	// 同步 mvp_project.status
 	if updated {
-		projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		projectID, pidErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 			Where("id", wfRunID).Value("project_id")
+		if pidErr != nil {
+			g.Log().Warningf(ctx, "[StageService] FailStage 查询 project_id 失败: wfRun=%d err=%v", wfRunID, pidErr)
+		}
 		if projectID.Int64() > 0 {
 			if _, upErr := g.DB().Model("mvp_project").Ctx(ctx).
 				Where("id", projectID.Int64()).
@@ -436,12 +439,17 @@ func (s *StageService) completeWorkflow(ctx context.Context, workflowRunID int64
 	}
 
 	// 更新项目状态
-	projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+	projectID, pidErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 		Where("id", workflowRunID).Value("project_id")
+	if pidErr != nil {
+		g.Log().Warningf(ctx, "[StageService] completeWorkflow 查询 project_id 失败: wfRun=%d err=%v", workflowRunID, pidErr)
+	}
 	if projectID.Int64() > 0 {
-		_, _ = g.DB().Model("mvp_project").Ctx(ctx).
+		if _, upErr := g.DB().Model("mvp_project").Ctx(ctx).
 			Where("id", projectID.Int64()).
-			Update(g.Map{"status": "completed", "updated_at": now})
+			Update(g.Map{"status": "completed", "updated_at": now}); upErr != nil {
+			g.Log().Errorf(ctx, "[StageService] completeWorkflow 更新项目状态失败: projectID=%d err=%v", projectID.Int64(), upErr)
+		}
 	}
 
 	// 执行收尾逻辑：指标统计 + 总结生成

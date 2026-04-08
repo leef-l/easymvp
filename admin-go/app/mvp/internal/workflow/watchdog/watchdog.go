@@ -277,10 +277,13 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 	}
 	activeWfRuns := make(map[int64]bool)
 	if len(wfIDList) > 0 {
-		wfRecords, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		wfRecords, wfErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 			WhereIn("id", wfIDList).
 			WhereIn("status", []string{"executing", "reworking"}).
 			Fields("id").All()
+		if wfErr != nil {
+			g.Log().Warningf(ctx, "[WatchdogV2] 查询活跃 workflow_run 失败: err=%v", wfErr)
+		}
 		for _, r := range wfRecords {
 			activeWfRuns[r["id"].Int64()] = true
 		}
@@ -361,13 +364,17 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 		g.Log().Errorf(ctx, "[WatchdogV2] 任务 %d 重试超限，升级为 escalated", item.taskID)
 
 		now := gtime.Now()
-		result, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		result, upErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
 			Where("id", item.taskID).
 			Where("status", domainTask.StatusFailed).
 			Update(g.Map{
 				"status":     domainTask.StatusEscalated,
 				"updated_at": now,
 			})
+		if upErr != nil {
+			g.Log().Errorf(ctx, "[WatchdogV2] 升级任务状态失败: task=%d err=%v", item.taskID, upErr)
+			continue
+		}
 		rows, _ := result.RowsAffected()
 		if rows == 0 {
 			continue
@@ -402,8 +409,11 @@ func (w *DomainTaskWatchdog) checkCircuitBreaker(ctx context.Context, wfIDs map[
 	}
 	wfProjectMap := make(map[int64]int64)
 	if len(wfIDList) > 0 {
-		wfRecords, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		wfRecords, wfErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 			WhereIn("id", wfIDList).Fields("id, project_id").All()
+		if wfErr != nil {
+			g.Log().Warningf(ctx, "[WatchdogV2] 批量查询 wfRun→projectID 失败: err=%v", wfErr)
+		}
 		for _, r := range wfRecords {
 			wfProjectMap[r["id"].Int64()] = r["project_id"].Int64()
 		}
