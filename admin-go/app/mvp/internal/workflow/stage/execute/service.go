@@ -81,8 +81,11 @@ func (s *Service) InstantiateAndStart(ctx context.Context, stageRunID int64, pla
 		g.Log().Infof(ctx, "[ExecuteStage] 所有任务完成, workflowRunID=%d", wfRunID)
 
 		// 压缩上下文
-		projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		projectID, pidErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 			Where("id", wfRunID).Value("project_id")
+		if pidErr != nil {
+			g.Log().Warningf(ctx, "[ExecuteStage] 查询 project_id 失败: wfRunID=%d err=%v", wfRunID, pidErr)
+		}
 		if projectID.Int64() > 0 {
 			_ = engine.GetCompressor().CompressProjectContext(ctx, projectID.Int64())
 		}
@@ -143,8 +146,12 @@ func (e *domainTaskExecutor) ExecuteDomainTask(ctx context.Context, workflowRunI
 	}
 
 	// 查 project_id
-	projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+	projectID, pidErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 		Where("id", workflowRunID).Value("project_id")
+	if pidErr != nil {
+		e.handleFailure(ctx, taskID, fmt.Sprintf("查询 project_id 失败: %v", pidErr))
+		return
+	}
 
 	roleType := taskRecord["role_type"].String()
 	executionMode := taskRecord["execution_mode"].String()
@@ -167,7 +174,10 @@ func (e *domainTaskExecutor) ExecuteDomainTask(ctx context.Context, workflowRunI
 	// 如果执行器需要工作空间隔离，准备 worktree
 	var ws *workspace.TaskWorkspace
 	if exec.NeedsWorkspace() && e.wsMgr != nil {
-		project, _ := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID.Int64()).One()
+		project, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID.Int64()).One()
+		if projErr != nil {
+			g.Log().Warningf(ctx, "[domainTaskExecutor] 查询项目失败: projectID=%d err=%v", projectID.Int64(), projErr)
+		}
 		workDir := project["work_dir"].String()
 		ws, err = e.wsMgr.Prepare(ctx, workspace.PrepareRequest{
 			TaskID:        taskID,

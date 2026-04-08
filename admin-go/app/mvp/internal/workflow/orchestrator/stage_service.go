@@ -172,8 +172,11 @@ func (s *StageService) CompleteStage(ctx context.Context, stageRunID int64) erro
 	}
 
 	// 查 workflow_run_id 发事件
-	wfRunID, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).
+	wfRunID, wfErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
 		Where("id", stageRunID).Value("workflow_run_id")
+	if wfErr != nil {
+		g.Log().Warningf(ctx, "[StageService] 查询 workflow_run_id 失败: stageRunID=%d err=%v", stageRunID, wfErr)
+	}
 	if s.workflowSvc.publisher != nil && wfRunID.Int64() > 0 {
 		s.workflowSvc.publisher.Emit(ctx, event.Event{
 			WorkflowRunID: wfRunID.Int64(),
@@ -187,8 +190,11 @@ func (s *StageService) CompleteStage(ctx context.Context, stageRunID int64) erro
 
 	// 异步生成阶段报告
 	if s.onStageReport != nil && wfRunID.Int64() > 0 {
-		stageType, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).
+		stageType, stErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
 			Where("id", stageRunID).Value("stage_type")
+		if stErr != nil {
+			g.Log().Warningf(ctx, "[StageService] 查询 stage_type 失败: stageRunID=%d err=%v", stageRunID, stErr)
+		}
 		if st := stageType.String(); st != "" {
 			wfID := wfRunID.Int64()
 			go func() {

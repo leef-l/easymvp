@@ -333,10 +333,16 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 	}
 	workflowRunID := stageRun["workflow_run_id"].Int64()
 
-	errorCount, _ := g.DB().Model("mvp_review_issue").Ctx(ctx).
+	errorCount, ecErr := g.DB().Model("mvp_review_issue").Ctx(ctx).
 		Where("stage_run_id", stageRunID).Where("severity", "error").Where("status", "open").Count()
-	warningCount, _ := g.DB().Model("mvp_review_issue").Ctx(ctx).
+	if ecErr != nil {
+		g.Log().Warningf(ctx, "[ReviewService] 查询 error 数失败: stageRun=%d err=%v", stageRunID, ecErr)
+	}
+	warningCount, wcErr := g.DB().Model("mvp_review_issue").Ctx(ctx).
 		Where("stage_run_id", stageRunID).Where("severity", "warning").Where("status", "open").Count()
+	if wcErr != nil {
+		g.Log().Warningf(ctx, "[ReviewService] 查询 warning 数失败: stageRun=%d err=%v", stageRunID, wcErr)
+	}
 
 	outputPayload := g.Map{
 		"passed":       passed,
@@ -506,19 +512,25 @@ func (s *Service) SetExecuteTriggerFn(fn ExecuteTriggerFn) {
 // buildRejectNotification 构建审核驳回通知消息。
 func (s *Service) buildRejectNotification(ctx context.Context, stageRunID int64, summary string) string {
 	// 查所有 error 和 warning 级别的 issue
-	errors, _ := g.DB().Model("mvp_review_issue").Ctx(ctx).
+	errors, errQry := g.DB().Model("mvp_review_issue").Ctx(ctx).
 		Where("stage_run_id", stageRunID).
 		Where("severity", "error").
 		Where("status", "open").
 		OrderDesc("created_at").
 		All()
+	if errQry != nil {
+		g.Log().Warningf(ctx, "[ReviewService] 查询 error issues 失败: stageRun=%d err=%v", stageRunID, errQry)
+	}
 
-	warnings, _ := g.DB().Model("mvp_review_issue").Ctx(ctx).
+	warnings, warnQry := g.DB().Model("mvp_review_issue").Ctx(ctx).
 		Where("stage_run_id", stageRunID).
 		Where("severity", "warning").
 		Where("status", "open").
 		OrderDesc("created_at").
 		All()
+	if warnQry != nil {
+		g.Log().Warningf(ctx, "[ReviewService] 查询 warning issues 失败: stageRun=%d err=%v", stageRunID, warnQry)
+	}
 
 	msg := "## 方案审核未通过\n\n"
 	msg += "### 原因\n" + summary + "\n\n"

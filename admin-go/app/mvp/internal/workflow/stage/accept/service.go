@@ -112,11 +112,14 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 	}
 
 	// 2. 幂等检查：同一 stageRun 不重复创建 accept_run
-	existing, _ := g.DB().Model("mvp_accept_run").Ctx(ctx).
+	existing, exErr := g.DB().Model("mvp_accept_run").Ctx(ctx).
 		Where("stage_run_id", stageRunID).
 		WhereIn("status", g.Slice{"running"}).
 		WhereNull("deleted_at").
 		Count()
+	if exErr != nil {
+		return fmt.Errorf("检查运行中 accept_run 失败: %w", exErr)
+	}
 	if existing > 0 {
 		g.Log().Warningf(ctx, "[AcceptStage] stageRun=%d 已有运行中的 accept_run，跳过重复创建", stageRunID)
 		return nil
