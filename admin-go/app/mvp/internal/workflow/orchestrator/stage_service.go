@@ -120,12 +120,17 @@ func (s *StageService) StartStage(ctx context.Context, workflowRunID int64, stag
 
 		// 5. 同步 mvp_project.status（项目列表依赖此字段展示状态）
 		if targetWfStatus != "" {
-			projectID, _ := tx.Model("mvp_workflow_run").Ctx(ctx).
+			projectID, pidErr := tx.Model("mvp_workflow_run").Ctx(ctx).
 				Where("id", workflowRunID).Value("project_id")
+			if pidErr != nil {
+				g.Log().Warningf(ctx, "[StageService] 查询 project_id 失败: wfRunID=%d err=%v", workflowRunID, pidErr)
+			}
 			if projectID.Int64() > 0 {
-				_, _ = tx.Model("mvp_project").Ctx(ctx).
+				if _, syncErr := tx.Model("mvp_project").Ctx(ctx).
 					Where("id", projectID.Int64()).
-					Update(g.Map{"status": targetWfStatus, "updated_at": now})
+					Update(g.Map{"status": targetWfStatus, "updated_at": now}); syncErr != nil {
+					g.Log().Warningf(ctx, "[StageService] 同步 project status 失败: projectID=%d err=%v", projectID.Int64(), syncErr)
+				}
 			}
 		}
 

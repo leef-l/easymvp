@@ -200,17 +200,23 @@ func (e *Executor) executeChatMode(ctx context.Context, projectID int64, taskID 
 			activity.TouchConversationActivity(ctx, conversationID)
 			activity.TouchTaskActivity(ctx, taskID)
 
-			chunkJSON, _ := json.Marshal(map[string]interface{}{
+			chunkJSON, cErr := json.Marshal(map[string]interface{}{
 				"content": chunk.Content,
 				"index":   chunkIndex,
 			})
+			if cErr != nil {
+				chunkJSON = []byte(`{"content":"","index":0}`)
+			}
 			hub.Publish(replyID, string(chunkJSON))
 		}
 
 		if chunk.FinishReason != "" {
 			lastFinishReason = chunk.FinishReason
 			if chunk.Usage != nil {
-				usageJSON, _ := json.Marshal(chunk.Usage)
+				usageJSON, uErr := json.Marshal(chunk.Usage)
+				if uErr != nil {
+					usageJSON = []byte("{}")
+				}
 				if _, err := g.DB().Model("mvp_message").Ctx(ctx).Where("id", replyID).Update(g.Map{
 					"token_usage": string(usageJSON),
 				}); err != nil {

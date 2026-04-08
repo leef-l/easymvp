@@ -45,7 +45,10 @@ func doCoordinatorOptimize(ctx context.Context, modelInfo *ModelInfo, tasks gdb.
 			"role_type":          t["role_type"].String(),
 		})
 	}
-	summaryJSON, _ := json.MarshalIndent(taskSummaries, "", "  ")
+	summaryJSON, mErr := json.MarshalIndent(taskSummaries, "", "  ")
+	if mErr != nil {
+		return nil, fmt.Errorf("序列化任务清单失败: %w", mErr)
+	}
 
 	prompt := fmt.Sprintf(`请优化以下任务清单的调度计划。优化维度：
 1. 资源冲突精细检测（同批次任务不应修改相同文件）

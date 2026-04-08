@@ -266,9 +266,11 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 
 // failAcceptRun 标记 accept_run 为失败。
 func (s *Service) failAcceptRun(ctx context.Context, acceptRunID int64, reason string) {
-	_, _ = s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "running", "failed", g.Map{
+	if _, err := s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "running", "failed", g.Map{
 		"summary": reason,
-	})
+	}); err != nil {
+		g.Log().Errorf(ctx, "[AcceptStage] failAcceptRun 更新失败: acceptRunID=%d err=%v", acceptRunID, err)
+	}
 }
 
 // GetLatestIssues 获取最近一次验收的问题列表（供返工输入包使用）。
@@ -327,9 +329,11 @@ func (s *Service) ManualApprove(ctx context.Context, projectID int64, reason str
 		return fmt.Errorf("更新决策失败: %w", err)
 	}
 	if arStatus == "running" {
-		_, _ = s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "running", "completed", g.Map{
+		if _, upErr := s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "running", "completed", g.Map{
 			"finished_at": gtime.Now(),
-		})
+		}); upErr != nil {
+			g.Log().Errorf(ctx, "[AcceptStage] ManualApprove 更新 accept_run 失败: id=%d err=%v", acceptRunID, upErr)
+		}
 	}
 
 	g.Log().Infof(ctx, "[AcceptStage] 人工放行: acceptRunID=%d project=%d reason=%s", acceptRunID, projectID, reason)
@@ -383,9 +387,11 @@ func (s *Service) ManualRework(ctx context.Context, projectID int64, reason stri
 		return fmt.Errorf("更新决策失败: %w", err)
 	}
 	if arStatus == "running" {
-		_, _ = s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "running", "completed", g.Map{
+		if _, upErr := s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "running", "completed", g.Map{
 			"finished_at": gtime.Now(),
-		})
+		}); upErr != nil {
+			g.Log().Errorf(ctx, "[AcceptStage] ManualReject 更新 accept_run 失败: id=%d err=%v", acceptRunID, upErr)
+		}
 	}
 
 	g.Log().Infof(ctx, "[AcceptStage] 人工驳回并返工: acceptRunID=%d project=%d reason=%s", acceptRunID, projectID, reason)

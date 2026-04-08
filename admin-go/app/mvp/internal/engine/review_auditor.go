@@ -58,7 +58,10 @@ func doAuditorReview(ctx context.Context, modelInfo *ModelInfo, tasks gdb.Result
 			"depends_on":         t["depends_on"].String(),
 		})
 	}
-	summaryJSON, _ := json.MarshalIndent(taskSummaries, "", "  ")
+	summaryJSON, mErr := json.MarshalIndent(taskSummaries, "", "  ")
+	if mErr != nil {
+		return nil, fmt.Errorf("序列化任务清单失败: %w", mErr)
+	}
 
 	prompt := buildAuditorPrompt(projectCategory, projectName, projectDesc, len(tasks), string(summaryJSON))
 

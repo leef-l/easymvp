@@ -100,21 +100,27 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 		}
 		if len(oldTaskIDs) > 0 {
 			// 3b. 软删除任务日志
-			_, _ = tx.Model("mvp_task_log").
+			if _, logErr := tx.Model("mvp_task_log").
 				WhereIn("task_id", oldTaskIDs).
 				WhereNull("deleted_at").
 				Data(do.MvpTaskLog{
 					DeletedAt: gtime.Now(),
 					UpdatedAt: gtime.Now(),
 				}).
-				Update()
+				Update(); logErr != nil {
+				return fmt.Errorf("软删除任务日志失败: %w", logErr)
+			}
 			// 3c. 删除任务依赖关系
-			_, _ = tx.Model("mvp_task_dependency").
+			if _, depErr := tx.Model("mvp_task_dependency").
 				WhereIn("task_id", oldTaskIDs).
-				Delete()
-			_, _ = tx.Model("mvp_task_dependency").
+				Delete(); depErr != nil {
+				return fmt.Errorf("删除任务依赖失败: %w", depErr)
+			}
+			if _, depErr := tx.Model("mvp_task_dependency").
 				WhereIn("depends_on_id", oldTaskIDs).
-				Delete()
+				Delete(); depErr != nil {
+				return fmt.Errorf("删除依赖引用失败: %w", depErr)
+			}
 		}
 		// 3d. 软删除所有任务
 		_, txErr = tx.Model("mvp_task").
@@ -207,9 +213,11 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 			if !ok {
 				continue
 			}
-			_, _ = tx.Model("mvp_task").Where("id", taskID).Data(do.MvpTask{
+			if _, parentErr := tx.Model("mvp_task").Where("id", taskID).Data(do.MvpTask{
 				ParentId: parentID,
-			}).Update()
+			}).Update(); parentErr != nil {
+				return fmt.Errorf("更新任务 parent_id 失败: task=%d err=%w", taskID, parentErr)
+			}
 		}
 
 		// 6. 第三遍：建立依赖关系（mvp_task_dependency）

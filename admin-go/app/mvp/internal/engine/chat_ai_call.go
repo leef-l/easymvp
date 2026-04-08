@@ -81,10 +81,13 @@ func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *M
 			activity.TouchConversationActivity(ctx, conversationID)
 
 			// 推送到 SSE Hub
-			chunkJSON, _ := json.Marshal(map[string]interface{}{
+			chunkJSON, cErr := json.Marshal(map[string]interface{}{
 				"content": chunk.Content,
 				"index":   chunkIndex,
 			})
+			if cErr != nil {
+				chunkJSON = []byte(`{"content":"","index":0}`)
+			}
 			e.hub.Publish(replyID, string(chunkJSON))
 		}
 
@@ -93,7 +96,10 @@ func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *M
 			lastFinishReason = chunk.FinishReason
 			// 更新 token 用量
 			if chunk.Usage != nil {
-				usageJSON, _ := json.Marshal(chunk.Usage)
+				usageJSON, uErr := json.Marshal(chunk.Usage)
+				if uErr != nil {
+					usageJSON = []byte("{}")
+				}
 				if _, err := g.DB().Model("mvp_message").Ctx(ctx).Where("id", replyID).Update(g.Map{
 					"token_usage": string(usageJSON),
 				}); err != nil {
@@ -175,9 +181,12 @@ func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *M
 	}
 
 	// 6. 通知 SSE Hub 流式输出完成
-	doneJSON, _ := json.Marshal(map[string]interface{}{
+	doneJSON, dErr := json.Marshal(map[string]interface{}{
 		"done": true,
 	})
+	if dErr != nil {
+		doneJSON = []byte(`{"done":true}`)
+	}
 	e.hub.Publish(replyID, string(doneJSON))
 
 	// 7. 飞书主动推送：将 AI 回复发给对话绑定用户（异步，不阻塞）

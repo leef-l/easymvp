@@ -267,9 +267,9 @@ func (e *domainTaskExecutor) handleSuccess(ctx context.Context, taskID int64, re
 // handleFailure 任务失败。
 func (e *domainTaskExecutor) handleFailure(ctx context.Context, taskID int64, errMsg string) {
 	if _, upErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("id", taskID).Where("status", "running").
+		Where("id", taskID).Where("status", domainTask.StatusRunning).
 		Update(g.Map{
-			"status":     "failed",
+			"status":     domainTask.StatusFailed,
 			"result":     errMsg,
 			"updated_at": gtime.Now(),
 		}); upErr != nil {
