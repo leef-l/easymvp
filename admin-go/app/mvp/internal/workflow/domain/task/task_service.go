@@ -47,11 +47,17 @@ func (s *TaskService) InstantiateFromBlueprint(ctx context.Context, planVersionI
 	}
 
 	// 查项目 ID（从 workflow_run 获取）
-	projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+	projectID, pidErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 		Where("id", workflowRunID).Value("project_id")
+	if pidErr != nil {
+		return 0, fmt.Errorf("查询 workflow_run 的 project_id 失败: %w", pidErr)
+	}
 
 	// 查项目角色配置（获取 execution_mode 和 model_id），缺失的自动从默认预设补齐
-	roleConfigs, _ := repo.GetProjectRolesMap(ctx, projectID.Int64())
+	roleConfigs, rcErr := repo.GetProjectRolesMap(ctx, projectID.Int64())
+	if rcErr != nil {
+		g.Log().Warningf(ctx, "[TaskService] 查询项目角色配置失败: projectID=%d err=%v", projectID.Int64(), rcErr)
+	}
 
 	// 2. 获取项目归属字段（继承到领域任务）
 	scope := repo.GetProjectScopeByWorkflowRun(ctx, workflowRunID)

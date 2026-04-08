@@ -85,10 +85,16 @@ func (n *FeishuNotifier) NotifyProjectCompleted(ctx context.Context, projectID i
 	projectName := n.getProjectName(ctx, projectID)
 
 	// 统计任务数
-	total, _ := g.DB().Ctx(ctx).Model("mvp_task").
+	total, totalErr := g.DB().Ctx(ctx).Model("mvp_task").
 		Where("project_id", projectID).WhereNull("deleted_at").Count()
-	done, _ := g.DB().Ctx(ctx).Model("mvp_task").
+	if totalErr != nil {
+		g.Log().Warningf(ctx, "[FeishuNotifier] 查询任务总数失败: projectID=%d err=%v", projectID, totalErr)
+	}
+	done, doneErr := g.DB().Ctx(ctx).Model("mvp_task").
 		Where("project_id", projectID).Where("status", "completed").WhereNull("deleted_at").Count()
+	if doneErr != nil {
+		g.Log().Warningf(ctx, "[FeishuNotifier] 查询已完成任务数失败: projectID=%d err=%v", projectID, doneErr)
+	}
 
 	text := fmt.Sprintf(
 		"🎉 项目执行完成！\n───────────────\n📁 项目：%s\n✅ 完成任务：%d / %d\n\n可在 EasyMVP 管理端查看完整报告",
@@ -168,8 +174,11 @@ func (n *FeishuNotifier) getConversationOpenIDs(ctx context.Context, conversatio
 	userID := conv["created_by"].Int64()
 	if userID == 0 {
 		// 降级：用项目创建人
-		proj, _ := g.DB().Ctx(ctx).Model("mvp_project").
+		proj, projErr := g.DB().Ctx(ctx).Model("mvp_project").
 			Where("id", conv["project_id"].Int64()).Fields("created_by").One()
+		if projErr != nil {
+			g.Log().Warningf(ctx, "[FeishuNotifier] 查询项目创建人失败: err=%v", projErr)
+		}
 		if !proj.IsEmpty() {
 			userID = proj["created_by"].Int64()
 		}
@@ -214,8 +223,11 @@ func (n *FeishuNotifier) getUserOpenID(ctx context.Context, userID int64) string
 
 // getProjectName 获取项目名称。
 func (n *FeishuNotifier) getProjectName(ctx context.Context, projectID int64) string {
-	proj, _ := g.DB().Ctx(ctx).Model("mvp_project").
+	proj, projErr := g.DB().Ctx(ctx).Model("mvp_project").
 		Where("id", projectID).Fields("name").One()
+	if projErr != nil {
+		g.Log().Warningf(ctx, "[FeishuNotifier] 查询项目名称失败: projectID=%d err=%v", projectID, projErr)
+	}
 	if proj.IsEmpty() {
 		return fmt.Sprintf("项目%d", projectID)
 	}

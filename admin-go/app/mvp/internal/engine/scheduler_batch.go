@@ -132,7 +132,10 @@ func (s *Scheduler) OnTaskFailed(projectID int64, taskID int64, errMsg string) {
 			}
 		}()
 		ctx := s.getProjectContext(projectID)
-		task, _ := g.DB().Ctx(ctx).Model("mvp_task").Where("id", taskID).Fields("name").One()
+		task, tErr := g.DB().Ctx(ctx).Model("mvp_task").Where("id", taskID).Fields("name").One()
+		if tErr != nil {
+			g.Log().Warningf(ctx, "[Scheduler] 查询任务名称失败: taskID=%d err=%v", taskID, tErr)
+		}
 		taskName := ""
 		if !task.IsEmpty() {
 			taskName = task["name"].String()

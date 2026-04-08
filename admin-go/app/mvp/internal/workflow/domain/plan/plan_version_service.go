@@ -337,8 +337,11 @@ func (s *PlanVersionService) SubmitForReviewAsync(ctx context.Context, projectID
 	now := gtime.Now()
 
 	// 防重复提交：检查项目是否已在审核中
-	projectStatus, _ := g.DB().Model("mvp_project").Ctx(ctx).
+	projectStatus, psErr := g.DB().Model("mvp_project").Ctx(ctx).
 		Where("id", projectID).WhereNull("deleted_at").Value("status")
+	if psErr != nil {
+		return fmt.Errorf("查询项目状态失败: %w", psErr)
+	}
 	if projectStatus.String() == "reviewing" {
 		return fmt.Errorf("方案已在审核中，请勿重复提交")
 	}
@@ -494,10 +497,13 @@ func (s *PlanVersionService) Reject(ctx context.Context, planVersionID int64) er
 
 // GetBlueprintCount 获取版本下的蓝图数量。
 func (s *PlanVersionService) GetBlueprintCount(ctx context.Context, planVersionID int64) int {
-	count, _ := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
+	count, err := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
 		Where("plan_version_id", planVersionID).
 		WhereNull("deleted_at").
 		Count()
+	if err != nil {
+		g.Log().Warningf(ctx, "[PlanVersion] 查询蓝图数失败: pvID=%d err=%v", planVersionID, err)
+	}
 	return count
 }
 
