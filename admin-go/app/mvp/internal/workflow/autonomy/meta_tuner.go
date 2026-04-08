@@ -228,7 +228,7 @@ func (t *MetaTuner) ListPending(ctx context.Context, projectID int64) ([]TuneRec
 	if projectID > 0 {
 		m = m.Where("project_id", projectID)
 	}
-	records, err := m.Limit(50).All()
+	records, err := m.Fields("id, assessment_id, project_id, parameter, current_value, suggested_value, direction, reasoning, risk_level, status, confidence, auto_applicable").Limit(50).All()
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +250,7 @@ func (t *MetaTuner) ListAll(ctx context.Context, projectID int64, status string,
 	if status != "" {
 		m = m.Where("status", status)
 	}
-	records, err := m.All()
+	records, err := m.Fields("id, assessment_id, project_id, parameter, current_value, suggested_value, direction, reasoning, risk_level, status, confidence, auto_applicable").All()
 	if err != nil {
 		return nil, err
 	}

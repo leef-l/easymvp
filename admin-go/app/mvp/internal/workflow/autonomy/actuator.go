@@ -78,7 +78,7 @@ func (a *Actuator) EvaluateAfter(ctx context.Context, outcomeID int64, sitAfter 
 	}
 
 	// 读取执行前记录
-	record, err := g.DB().Model("mvp_action_outcome").Ctx(ctx).Where("id", outcomeID).One()
+	record, err := g.DB().Model("mvp_action_outcome").Ctx(ctx).Where("id", outcomeID).WhereNull("deleted_at").One()
 	if err != nil || record.IsEmpty() {
 		g.Log().Warningf(ctx, "[Actuator] EvaluateAfter 未找到记录: id=%d", outcomeID)
 		return

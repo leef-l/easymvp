@@ -171,6 +171,7 @@ func (s *DomainTaskScheduler) scheduleOnce(ctx context.Context, workflowRunID in
 
 	// 查候选任务
 	query := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		Fields("id, batch_no, sort, affected_resources, depends_on_task_ids, parent_task_id").
 		Where("workflow_run_id", workflowRunID).
 		Where("status", domainTask.StatusPending).
 		WhereNull("deleted_at")

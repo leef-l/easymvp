@@ -234,7 +234,7 @@ func createProjectRoleFromPreset(ctx context.Context, projectID int64, projectCt
 		return nil, err
 	}
 
-	return g.DB().Model("mvp_project_role").Ctx(ctx).Where("id", roleID).One()
+	return g.DB().Model("mvp_project_role").Ctx(ctx).Where("id", roleID).WhereNull("deleted_at").One()
 }
 
 func buildPresetRoleRecord(ctx context.Context, projectID int64, projectCtx *projectPresetContext, preset gdb.Record) gdb.Record {

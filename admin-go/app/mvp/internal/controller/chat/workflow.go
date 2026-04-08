@@ -1525,12 +1525,15 @@ func (c *cWorkflow) ReworkStatus(ctx context.Context, req *v1.WorkflowReworkStat
 
 	// 查当前 rework stage
 	var currentStage *v1.ReworkStageInfo
-	reworkStage, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).
+	reworkStage, rsErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
 		Where("workflow_run_id", wfRunID).
 		Where("stage_type", "rework").
 		WhereNull("deleted_at").
 		OrderDesc("stage_no").
 		One()
+	if rsErr != nil {
+		g.Log().Warningf(ctx, "[ReworkStatus] 查询 rework stage 失败: %v", rsErr)
+	}
 	if !reworkStage.IsEmpty() {
 		currentStage = &v1.ReworkStageInfo{
 			StageRunID: snowflake.JsonInt64(reworkStage["id"].Int64()),
@@ -1546,8 +1549,11 @@ func (c *cWorkflow) ReworkStatus(ctx context.Context, req *v1.WorkflowReworkStat
 		toTaskID := h["to_task_id"].Int64()
 
 		// 查失败任务名称和原因
-		failedTask, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
-			Where("id", fromTaskID).Fields("name, result").One()
+		failedTask, ftErr2 := g.DB().Model("mvp_domain_task").Ctx(ctx).
+			Where("id", fromTaskID).WhereNull("deleted_at").Fields("name, result").One()
+		if ftErr2 != nil {
+			g.Log().Warningf(ctx, "[ReworkStatus] 查询失败任务详情失败: taskID=%d err=%v", fromTaskID, ftErr2)
+		}
 		failedName := ""
 		failedReason := h["reason"].String()
 		if !failedTask.IsEmpty() {
@@ -1560,8 +1566,11 @@ func (c *cWorkflow) ReworkStatus(ctx context.Context, req *v1.WorkflowReworkStat
 		if toTaskID > 0 {
 			v := snowflake.JsonInt64(toTaskID)
 			analysisID = &v
-			analysisTask, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
-				Where("id", toTaskID).Fields("result").One()
+			analysisTask, atErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
+				Where("id", toTaskID).WhereNull("deleted_at").Fields("result").One()
+			if atErr != nil {
+				g.Log().Warningf(ctx, "[ReworkStatus] 查询分析任务结果失败: taskID=%d err=%v", toTaskID, atErr)
+			}
 			if !analysisTask.IsEmpty() {
 				analysisResult = analysisTask["result"].String()
 			}
@@ -1797,7 +1806,7 @@ func (c *cWorkflow) DomainTasks(ctx context.Context, req *v1.WorkflowDomainTasks
 		query = query.Where("batch_no", req.BatchNo)
 	}
 
-	tasks, err := query.OrderAsc("batch_no").OrderAsc("sort").All()
+	tasks, err := query.Fields("id, name, description, status, role_type, role_level, batch_no, sort, execution_mode, affected_resources, started_at, completed_at, error_message, result, retry_count").OrderAsc("batch_no").OrderAsc("sort").All()
 	if err != nil {
 		return nil, err
 	}
@@ -1835,8 +1844,11 @@ func (c *cWorkflow) ResourceLocks(ctx context.Context, req *v1.WorkflowResourceL
 		taskIDs = append(taskIDs, tid)
 	}
 	taskNames := make(map[int64]string)
-	tasks, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		WhereIn("id", taskIDs).Fields("id, name").All()
+	tasks, tErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		WhereIn("id", taskIDs).WhereNull("deleted_at").Fields("id, name").All()
+	if tErr != nil {
+		g.Log().Warningf(ctx, "[ResourceLocks] 查询任务名称失败: %v", tErr)
+	}
 	for _, t := range tasks {
 		taskNames[t["id"].Int64()] = t["name"].String()
 	}
@@ -2200,18 +2212,24 @@ func (c *cWorkflow) TriggerReplan(ctx context.Context, req *v1.WorkflowTriggerRe
 	}
 
 	// 前置检查：architect 角色的 AI 模型是否可用
-	projRole, _ := g.DB().Model("mvp_project_role").Ctx(ctx).
+	projRole, prErr := g.DB().Model("mvp_project_role").Ctx(ctx).
 		Where("project_id", projectID).
 		Where("role_type", "architect").
 		WhereNull("deleted_at").One()
+	if prErr != nil {
+		return nil, fmt.Errorf("查询架构师角色失败: %w", prErr)
+	}
 	if projRole.IsEmpty() || projRole["model_id"].Int64() == 0 {
 		return nil, fmt.Errorf("项目未配置架构师(architect)角色或模型，无法执行重规划。请先在项目角色中配置架构师。")
 	}
-	modelRow, _ := g.DB().Model("ai_model m").Ctx(ctx).
+	modelRow, mrErr := g.DB().Model("ai_model m").Ctx(ctx).
 		LeftJoin("ai_plan p", "p.id = m.plan_id").
 		Where("m.id", projRole["model_id"].Int64()).
 		Where("m.deleted_at IS NULL").
 		Fields("m.model_code, p.api_key").One()
+	if mrErr != nil {
+		return nil, fmt.Errorf("查询架构师模型失败: %w", mrErr)
+	}
 	if modelRow.IsEmpty() {
 		return nil, fmt.Errorf("架构师角色关联的 AI 模型(ID=%d)不存在或已删除", projRole["model_id"].Int64())
 	}
@@ -2223,11 +2241,14 @@ func (c *cWorkflow) TriggerReplan(ctx context.Context, req *v1.WorkflowTriggerRe
 	replanner := autonomy.NewReplanner(decisionRepo)
 
 	// 收集失败任务信息
-	failedTasks, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+	failedTasks, ftErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("workflow_run_id", wfRun["id"].Int64()).
 		WhereIn("status", g.Slice{"failed", "escalated"}).
 		WhereNull("deleted_at").
 		Fields("id, name, result, retry_count").All()
+	if ftErr != nil {
+		g.Log().Warningf(ctx, "[TriggerReplan] 查询失败任务列表失败: %v", ftErr)
+	}
 
 	var failed []autonomy.FailedTaskInfo
 	for _, t := range failedTasks {
@@ -2365,9 +2386,12 @@ func (c *cWorkflow) AutonomyMode(ctx context.Context, req *v1.WorkflowAutonomyMo
 // SetAutonomyMode 设置自治模式（写入 mvp_config）
 func (c *cWorkflow) SetAutonomyMode(ctx context.Context, req *v1.WorkflowSetAutonomyModeReq) (res *v1.WorkflowSetAutonomyModeRes, err error) {
 	// 检查是否已有记录
-	count, _ := g.DB().Ctx(ctx).Model("mvp_config").
+	count, cntErr := g.DB().Ctx(ctx).Model("mvp_config").
 		Where("config_key", "autonomy.mode").
 		WhereNull("deleted_at").Count()
+	if cntErr != nil {
+		return nil, fmt.Errorf("查询自治模式配置失败: %w", cntErr)
+	}
 	if count > 0 {
 		_, err = g.DB().Ctx(ctx).Model("mvp_config").
 			Where("config_key", "autonomy.mode").
