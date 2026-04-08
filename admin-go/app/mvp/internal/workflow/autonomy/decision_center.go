@@ -322,11 +322,13 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 			// Handled=false → 执行失败时调用方应降级到原逻辑
 		} else {
 			// 自动执行成功 → 写 auto_executed + final_action
-			_ = dc.actionRepo.UpdateStatus(ctx, actionID, consts.ActionStatusAutoExecuted, g.Map{
+			if upErr := dc.actionRepo.UpdateStatus(ctx, actionID, consts.ActionStatusAutoExecuted, g.Map{
 				"final_action": resp.ActionType,
 				"executed_at":  gtime.Now(),
 				"result":       "ok",
-			})
+			}); upErr != nil {
+				g.Log().Warningf(ctx, "[DecisionCenter] 更新 action 状态失败: actionID=%d err=%v", actionID, upErr)
+			}
 			dc.emitEvent(ctx, event.EventAutonomyActionExecuted, event.EntityDecisionAction,
 				req.WorkflowRunID, actionID, g.Map{"action_type": resp.ActionType})
 
@@ -341,7 +343,9 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 		// B/C 级：等待人工
 		resp.HumanRequired = true
 		resp.Handled = true // 创建人工节点 = 已接管
-		_ = dc.actionRepo.UpdateStatus(ctx, actionID, consts.ActionStatusWaitingHuman, nil)
+		if upErr := dc.actionRepo.UpdateStatus(ctx, actionID, consts.ActionStatusWaitingHuman, nil); upErr != nil {
+			g.Log().Warningf(ctx, "[DecisionCenter] 更新 action 为 waiting_human 失败: actionID=%d err=%v", actionID, upErr)
+		}
 
 		// 创建人工介入节点
 		checkpointType := consts.CheckpointApproval
@@ -408,20 +412,24 @@ func (dc *DecisionCenter) ApproveAction(ctx context.Context, actionID int64) err
 		return fmt.Errorf("决策状态不允许审批: %s", status)
 	}
 
-	_ = dc.actionRepo.UpdateStatus(ctx, actionID, consts.ActionStatusApproved, g.Map{
+	if upErr := dc.actionRepo.UpdateStatus(ctx, actionID, consts.ActionStatusApproved, g.Map{
 		"executed_at": gtime.Now(),
-	})
+	}); upErr != nil {
+		g.Log().Warningf(ctx, "[DecisionCenter] 审批更新 action 状态失败: actionID=%d err=%v", actionID, upErr)
+	}
 
 	// 更新人工节点
 	wfRunID := mapInt64(action, "workflow_run_id")
 	cp, _ := dc.checkpointRepo.GetByActionID(ctx, actionID)
 	if cp != nil {
 		cpID := mapInt64(cp, "id")
-		_ = dc.checkpointRepo.UpdateHandle(ctx, cpID, g.Map{
+		if upErr := dc.checkpointRepo.UpdateHandle(ctx, cpID, g.Map{
 			"status":        consts.CheckpointStatusHandled,
 			"handle_action": consts.HandleActionApprove,
 			"handled_at":    gtime.Now(),
-		})
+		}); upErr != nil {
+			g.Log().Warningf(ctx, "[DecisionCenter] 更新 checkpoint 状态失败: cpID=%d err=%v", cpID, upErr)
+		}
 		dc.emitEvent(ctx, event.EventAutonomyCheckpointHandled, event.EntityHumanCheckpoint,
 			wfRunID, cpID, g.Map{"action": consts.HandleActionApprove})
 	}
@@ -437,10 +445,12 @@ func (dc *DecisionCenter) ApproveAction(ctx context.Context, actionID int64) err
 	}
 
 	// 执行成功 → 保持 approved 状态不变，只写 final_action + result
-	_ = dc.actionRepo.UpdateStatus(ctx, actionID, consts.ActionStatusApproved, g.Map{
+	if upErr := dc.actionRepo.UpdateStatus(ctx, actionID, consts.ActionStatusApproved, g.Map{
 		"final_action": actionType,
 		"result":       "ok",
-	})
+	}); upErr != nil {
+		g.Log().Warningf(ctx, "[DecisionCenter] 审批后更新 action 失败: actionID=%d err=%v", actionID, upErr)
+	}
 
 	dc.emitEvent(ctx, event.EventAutonomyActionExecuted, event.EntityDecisionAction,
 		wfRunID, actionID, g.Map{"action_type": actionType})
@@ -474,20 +484,24 @@ func (dc *DecisionCenter) RejectAction(ctx context.Context, actionID int64, reas
 		return fmt.Errorf("决策状态不允许驳回: %s", status)
 	}
 
-	_ = dc.actionRepo.UpdateStatus(ctx, actionID, consts.ActionStatusRejected, g.Map{
+	if upErr := dc.actionRepo.UpdateStatus(ctx, actionID, consts.ActionStatusRejected, g.Map{
 		"result": reason,
-	})
+	}); upErr != nil {
+		g.Log().Warningf(ctx, "[DecisionCenter] 驳回更新 action 状态失败: actionID=%d err=%v", actionID, upErr)
+	}
 
 	wfRunID := mapInt64(action, "workflow_run_id")
 	cp, _ := dc.checkpointRepo.GetByActionID(ctx, actionID)
 	if cp != nil {
 		cpID := mapInt64(cp, "id")
-		_ = dc.checkpointRepo.UpdateHandle(ctx, cpID, g.Map{
+		if upErr := dc.checkpointRepo.UpdateHandle(ctx, cpID, g.Map{
 			"status":        consts.CheckpointStatusHandled,
 			"handle_action": consts.HandleActionReject,
 			"handle_reason":  reason,
 			"handled_at":    gtime.Now(),
-		})
+		}); upErr != nil {
+			g.Log().Warningf(ctx, "[DecisionCenter] 驳回更新 checkpoint 状态失败: cpID=%d err=%v", cpID, upErr)
+		}
 		dc.emitEvent(ctx, event.EventAutonomyCheckpointHandled, event.EntityHumanCheckpoint,
 			wfRunID, cpID, g.Map{"action": consts.HandleActionReject, "reason": reason})
 	}

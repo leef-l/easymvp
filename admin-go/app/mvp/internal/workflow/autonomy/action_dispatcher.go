@@ -39,9 +39,11 @@ func (d *ActionDispatcher) Execute(ctx context.Context, actionID int64, actionTy
 	if !ok {
 		errMsg := fmt.Sprintf("未注册动作回调: %s", actionType)
 		g.Log().Warningf(ctx, "[ActionDispatcher] %s actionID=%d", errMsg, actionID)
-		_ = d.actionRepo.UpdateStatus(ctx, actionID, consts.ActionStatusFailed, g.Map{
+		if upErr := d.actionRepo.UpdateStatus(ctx, actionID, consts.ActionStatusFailed, g.Map{
 			"result": errMsg,
-		})
+		}); upErr != nil {
+			g.Log().Warningf(ctx, "[ActionDispatcher] 更新失败状态也失败: actionID=%d err=%v", actionID, upErr)
+		}
 		return fmt.Errorf("%s", errMsg)
 	}
 
@@ -52,10 +54,12 @@ func (d *ActionDispatcher) Execute(ctx context.Context, actionID int64, actionTy
 	if err != nil {
 		g.Log().Warningf(ctx, "[ActionDispatcher] 动作执行失败: actionID=%d type=%s err=%v",
 			actionID, actionType, err)
-		_ = d.actionRepo.UpdateStatus(ctx, actionID, consts.ActionStatusFailed, g.Map{
+		if upErr := d.actionRepo.UpdateStatus(ctx, actionID, consts.ActionStatusFailed, g.Map{
 			"result":       err.Error(),
 			"final_action": actionType,
-		})
+		}); upErr != nil {
+			g.Log().Warningf(ctx, "[ActionDispatcher] 更新失败状态也失败: actionID=%d err=%v", actionID, upErr)
+		}
 		return err
 	}
 
