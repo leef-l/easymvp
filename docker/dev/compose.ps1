@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$ComposeArgs
 )
@@ -74,7 +74,7 @@ function Test-ProfileEnabled {
 
 function Write-StartupGuide {
     Write-Host 'Docker dev services started.' -ForegroundColor Green
-    Write-Host 'Default command starts all services: redis, mysql, system, ai, mvp, web.' -ForegroundColor Yellow
+    Write-Host 'Default command starts: mysql, system, ai, mvp, web.' -ForegroundColor Yellow
     Write-Host 'Start AI runtime too: .\docker\dev\compose.ps1 --profile ai-runtime up -d' -ForegroundColor Yellow
 }
 

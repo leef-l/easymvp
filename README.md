@@ -1,35 +1,40 @@
 # EasyMVP
 
-项目说明、架构设计、AI 引擎接入、使用文档和测试报告统一放在 `docs/` 目录。
+EasyMVP 当前由 `system`、`ai`、`mvp` 三个 Go 服务和 `vue-vben-admin` 前端组成。运行说明、使用文档和设计文档统一放在 `docs/` 目录。
 
-本地 Docker 开发入口放在 `docker/dev/`，中国网络环境建议直接运行：
+先看 [docs/README.md](docs/README.md)。该索引已经区分“当前有效文档”和“历史设计稿”。
+
+## 本地 Docker 开发
+
+Windows 推荐入口：
 
 ```powershell
 .\docker\dev\compose.ps1
 ```
 
-默认只启动核心服务：`mysql`、`system`、`ai`、`mvp`。
+默认会：
 
-如果要启动全部开发服务（包含 `web` 和 `openhands-runtime`），执行：
+- 同步 `docker/dev/.env` 到 `admin-go/.env`
+- 构建 `easymvp-admin-go-dev:latest` 和 `easymvp-web-dev:latest`
+- 启动 `mysql`、`system`、`ai`、`mvp`、`web`
+
+如果还需要 `OpenHands` runtime：
 
 ```powershell
-.\docker\dev\compose.ps1 --profile frontend --profile ai-runtime up -d
+.\docker\dev\compose.ps1 --profile ai-runtime up -d
 ```
 
-如需先预打包开发镜像，执行：
+如需单独预打包镜像：
 
 ```powershell
 .\docker\dev\build.ps1
 ```
 
-`compose.ps1` 会先用 `docker/dev/.env` 覆盖 `admin-go/.env`，默认执行：
+如需“Docker 基础设施 + 本地热重启”模式，可用：
 
 ```powershell
-docker build -f docker/build/Dockerfile.admin-go.dev admin-go -t easymvp-admin-go-dev:latest
-docker compose --project-name easymvp --env-file docker/dev/.env -f docker/dev/docker-compose.cn.yml up -d
+.\docker\dev\compose.ps1 --local
 ```
-
-因为 `web` 服务在 `frontend` profile 下、`openhands-runtime` 在 `ai-runtime` profile 下，所以默认命令不会启动它们。
 
 默认本地端口：
 
@@ -39,4 +44,4 @@ docker compose --project-name easymvp --env-file docker/dev/.env -f docker/dev/d
 - mvp: `41004`
 - web: `41005`
 
-更多说明见 `docs/README.md`。
+更多说明见 [docs/Docker开发环境说明.md](docs/Docker开发环境说明.md)。
