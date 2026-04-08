@@ -40,6 +40,7 @@ type AiderConfig struct {
 	SystemPrompt         string        // 系统提示词
 	WorkDir              string        // 工作目录（项目代码所在目录）
 	Files                []string      // 需要编辑的文件列表
+	AllowPaths           []string      // 允许创建/修改的路径（含目录）
 	ReadFiles            []string      // 只读参考文件
 	Message              string        // 任务指令
 	MaxTokens            int           // 最大输出 token
@@ -429,10 +430,11 @@ func (r *AiderRunner) BuildConfigFromModel(ctx context.Context, modelInfo *Model
 
 // RunTask 为 MVP 任务执行 Aider 代码编辑
 // 整合：解析角色模型 → 构建配置 → 调用 Aider → 返回结果
-func (r *AiderRunner) RunTask(ctx context.Context, projectID int64, taskID int64, modelInfo *ModelInfo, taskPrompt string, workDir string, files []string, readFiles []string) *AiderResult {
+func (r *AiderRunner) RunTask(ctx context.Context, projectID int64, taskID int64, modelInfo *ModelInfo, taskPrompt string, workDir string, files []string, allowPaths []string, readFiles []string) *AiderResult {
 	cfg := r.BuildConfigFromModel(ctx, modelInfo, workDir)
 	cfg.Message = taskPrompt
 	cfg.Files = files
+	cfg.AllowPaths = allowPaths
 	cfg.ReadFiles = readFiles
 	cfg.OnActivity = func() {
 		activity.TouchTaskActivity(context.Background(), taskID)
@@ -450,11 +452,14 @@ func (r *AiderRunner) RunTask(ctx context.Context, projectID int64, taskID int64
 	}
 
 	result := r.Run(ctx, cfg)
+	if cleanupErr := cleanupAiderArtifacts(workDir, cfg.AllowPaths); cleanupErr != nil {
+		g.Log().Warningf(ctx, "[AiderRunner] 清理 Aider 临时文件失败: %v", cleanupErr)
+	}
 	if result.Error != nil || snapshot == nil {
 		return result
 	}
 
-	validation, err := snapshot.Validate(ctx, workDir, cfg.Files)
+	validation, err := snapshot.Validate(ctx, workDir, cfg.AllowPaths)
 	if err != nil {
 		g.Log().Warningf(ctx, "[AiderRunner] 校验 git 变更失败: %v", err)
 		return result
@@ -469,6 +474,57 @@ func (r *AiderRunner) RunTask(ctx context.Context, projectID int64, taskID int64
 		result.Category = taskFailurePolicyGuard
 	}
 	return result
+}
+
+func cleanupAiderArtifacts(workDir string, allowPaths []string) error {
+	normalizedAllowPaths, _ := worktreeguard.NormalizeRelativePaths(allowPaths)
+	allowSet := make(map[string]struct{}, len(normalizedAllowPaths))
+	for _, allowPath := range normalizedAllowPaths {
+		allowSet[allowPath] = struct{}{}
+	}
+
+	matches, err := filepath.Glob(filepath.Join(workDir, ".aider*"))
+	if err != nil {
+		return err
+	}
+	for _, match := range matches {
+		if removeErr := os.RemoveAll(match); removeErr != nil && !os.IsNotExist(removeErr) {
+			return removeErr
+		}
+	}
+
+	if _, allowed := allowSet[".gitignore"]; allowed {
+		return nil
+	}
+
+	gitignorePath := filepath.Join(workDir, ".gitignore")
+	content, err := os.ReadFile(gitignorePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if !isAiderArtifactGitignore(string(content)) {
+		return nil
+	}
+	if err := os.Remove(gitignorePath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func isAiderArtifactGitignore(content string) bool {
+	content = strings.ReplaceAll(content, "\r", "")
+	var rules []string
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		rules = append(rules, line)
+	}
+	return len(rules) == 1 && rules[0] == ".aider*"
 }
 
 func (r *AiderRunner) buildCompactRetryConfig(cfg *AiderConfig) *AiderConfig {

@@ -108,6 +108,55 @@ func TestSyncWorktreeCommitFallsBackWhenMainHasUnrelatedDirtyChanges(t *testing.
 	}
 }
 
+func TestEnsureRepositoryBaselineCreatesInitialCommitForEmptyRepo(t *testing.T) {
+	mainDir := t.TempDir()
+	runGit(t, mainDir, "init")
+
+	if err := os.WriteFile(filepath.Join(mainDir, "README.md"), []byte("hello\n"), 0644); err != nil {
+		t.Fatalf("write initial file: %v", err)
+	}
+
+	headRef, err := ensureRepositoryBaseline(context.Background(), mainDir)
+	if err != nil {
+		t.Fatalf("ensureRepositoryBaseline() error = %v", err)
+	}
+	if strings.TrimSpace(headRef) == "" {
+		t.Fatalf("expected non-empty head ref")
+	}
+
+	if got := runGit(t, mainDir, "rev-list", "--count", "HEAD"); got != "1" {
+		t.Fatalf("unexpected commit count: %q", got)
+	}
+	if got := runGit(t, mainDir, "show", "HEAD:README.md"); got != "hello" {
+		t.Fatalf("unexpected committed README content: %q", got)
+	}
+}
+
+func TestEnsureRepositoryBaselineKeepsExistingHead(t *testing.T) {
+	mainDir := t.TempDir()
+	runGit(t, mainDir, "init")
+	runGit(t, mainDir, "config", "user.name", "Test User")
+	runGit(t, mainDir, "config", "user.email", "test@example.com")
+
+	if err := os.WriteFile(filepath.Join(mainDir, "README.md"), []byte("hello\n"), 0644); err != nil {
+		t.Fatalf("write initial file: %v", err)
+	}
+	runGit(t, mainDir, "add", "README.md")
+	runGit(t, mainDir, "commit", "-m", "init")
+
+	originalHead := runGit(t, mainDir, "rev-parse", "HEAD")
+	headRef, err := ensureRepositoryBaseline(context.Background(), mainDir)
+	if err != nil {
+		t.Fatalf("ensureRepositoryBaseline() error = %v", err)
+	}
+	if headRef != originalHead {
+		t.Fatalf("head changed unexpectedly: got %q want %q", headRef, originalHead)
+	}
+	if got := runGit(t, mainDir, "rev-list", "--count", "HEAD"); got != "1" {
+		t.Fatalf("unexpected commit count after baseline ensure: %q", got)
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)

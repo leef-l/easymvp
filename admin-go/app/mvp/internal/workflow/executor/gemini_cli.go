@@ -3,7 +3,6 @@ package executor
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -65,13 +64,27 @@ func (e *GeminiCLIExecutor) Execute(ctx context.Context, req *Request) *Result {
 		taskInstruction = strings.TrimSpace(req.ModelInfo.SystemPrompt) + "\n\n" + taskInstruction
 	}
 
-	// 解析 affected_resources
-	var files []string
-	resJSON := req.TaskRecord["affected_resources"].String()
-	if resJSON != "" && resJSON != "[]" && resJSON != "null" {
-		if err := json.Unmarshal([]byte(resJSON), &files); err != nil {
-			g.Log().Warningf(ctx, "[Executor] affected_resources JSON 解析失败: %v", err)
+	targets := parseResourceTargets(req.TaskRecord["affected_resources"].String())
+	if len(targets.Rejected) > 0 {
+		g.Log().Warningf(ctx, "[GeminiCLIExecutor] 丢弃可疑 affected_resources: task=%d rejected=%v", req.TaskID, targets.Rejected)
+	}
+	if len(targets.DirectoryPaths) > 0 {
+		if err := ensureDirectoryTargets(workDir, targets.DirectoryPaths); err != nil {
+			if req.Workspace != nil && e.wsMgr != nil {
+				_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: false, Error: err.Error()})
+			}
+			return &Result{Success: false, Error: err}
 		}
+	}
+	if len(targets.FilePaths) == 0 && len(targets.DirectoryPaths) > 0 {
+		output := fmt.Sprintf("已准备目录资源: %s", strings.Join(targets.DirectoryPaths, ", "))
+		if req.Workspace != nil && e.wsMgr != nil {
+			if err := finalizeWorkspaceSuccess(ctx, e.wsMgr, req.TaskID, "GeminiCLIExecutor"); err != nil {
+				_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: false, Error: err.Error(), Retain: true})
+				return &Result{Success: false, Error: err}
+			}
+		}
+		return &Result{Success: true, Output: output}
 	}
 
 	// 支持 command_template 或默认 gemini CLI
@@ -81,7 +94,7 @@ func (e *GeminiCLIExecutor) Execute(ctx context.Context, req *Request) *Result {
 		envVars := map[string]string{
 			"AI_TASK_WORKTREE_PATH": workDir,
 			"AI_TASK_INSTRUCTION":   strings.ReplaceAll(taskInstruction, "'", "'\\''"),
-			"AI_TASK_FILES":         strings.Join(files, ","),
+			"AI_TASK_FILES":         strings.Join(targets.FilePaths, ","),
 		}
 		if req.ModelInfo != nil {
 			envVars["AI_MODEL_API_KEY"] = req.ModelInfo.APIKey

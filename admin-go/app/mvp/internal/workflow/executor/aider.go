@@ -2,7 +2,6 @@ package executor
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -43,13 +42,27 @@ func (e *AiderExecutor) Execute(ctx context.Context, req *Request) *Result {
 		g.Log().Infof(ctx, "[AiderExecutor] 使用 worktree 隔离: task=%d path=%s", req.TaskID, workDir)
 	}
 
-	// 解析 affected_resources 作为文件列表
-	var files []string
-	resJSON := req.TaskRecord["affected_resources"].String()
-	if resJSON != "" && resJSON != "[]" && resJSON != "null" {
-		if umErr := json.Unmarshal([]byte(resJSON), &files); umErr != nil {
-			g.Log().Warningf(ctx, "[AiderExecutor] 解析 affected_resources 失败: task=%d err=%v", req.TaskID, umErr)
+	targets := parseResourceTargets(req.TaskRecord["affected_resources"].String())
+	if len(targets.Rejected) > 0 {
+		g.Log().Warningf(ctx, "[AiderExecutor] 丢弃可疑 affected_resources: task=%d rejected=%v", req.TaskID, targets.Rejected)
+	}
+	if len(targets.DirectoryPaths) > 0 {
+		if err := ensureDirectoryTargets(workDir, targets.DirectoryPaths); err != nil {
+			if req.Workspace != nil && e.wsMgr != nil {
+				_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: false, Error: err.Error()})
+			}
+			return &Result{Success: false, Error: err}
 		}
+	}
+	if len(targets.FilePaths) == 0 && len(targets.DirectoryPaths) > 0 {
+		output := fmt.Sprintf("已准备目录资源: %s", strings.Join(targets.DirectoryPaths, ", "))
+		if req.Workspace != nil && e.wsMgr != nil {
+			if err := finalizeWorkspaceSuccess(ctx, e.wsMgr, req.TaskID, "AiderExecutor"); err != nil {
+				_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: false, Error: err.Error(), Retain: true})
+				return &Result{Success: false, Error: err}
+			}
+		}
+		return &Result{Success: true, Output: output}
 	}
 
 	// 从引擎配置读取超时，与其他执行器保持一致
@@ -64,7 +77,7 @@ func (e *AiderExecutor) Execute(ctx context.Context, req *Request) *Result {
 
 	runner := engine.GetAiderRunner()
 	aiderResult := runner.RunTask(execCtx, req.ProjectID, req.TaskID, req.ModelInfo,
-		buildStrictAiderTaskPrompt(req.TaskRecord["description"].String(), files), workDir, files, nil)
+		buildStrictAiderTaskPrompt(req.TaskRecord["description"].String(), targets.AllowedPaths), workDir, targets.FilePaths, targets.AllowedPaths, nil)
 
 	if aiderResult.Error != nil {
 		// workspace finalize: 标记失败
@@ -90,19 +103,19 @@ func (e *AiderExecutor) Execute(ctx context.Context, req *Request) *Result {
 	return &Result{Success: true, Output: aiderResult.Output}
 }
 
-func buildStrictAiderTaskPrompt(description string, files []string) string {
+func buildStrictAiderTaskPrompt(description string, allowPaths []string) string {
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(description))
 	b.WriteString("\n\n执行约束：\n")
-	if len(files) > 0 {
+	if len(allowPaths) > 0 {
 		b.WriteString("- 只允许创建或修改以下路径：\n")
-		for _, file := range files {
-			file = strings.TrimSpace(file)
-			if file == "" {
+		for _, allowPath := range allowPaths {
+			allowPath = strings.TrimSpace(allowPath)
+			if allowPath == "" {
 				continue
 			}
 			b.WriteString("  - ")
-			b.WriteString(file)
+			b.WriteString(allowPath)
 			b.WriteString("\n")
 		}
 	} else {

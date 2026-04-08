@@ -132,7 +132,7 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 	TouchHeartbeat(ctx, taskID)
 	g.Log().Infof(ctx, "[Executor] 任务 %d 使用 Aider 执行: model=%s files=%v", taskID, modelInfo.ModelCode, resources)
 
-	result := GetAiderRunner().RunTask(ctx, projectID, taskID, modelInfo, taskPrompt, workDir, resources, nil)
+	result := GetAiderRunner().RunTask(ctx, projectID, taskID, modelInfo, taskPrompt, workDir, resources, resources, nil)
 
 	// 7. 保存 Aider 输出为 AI 回复消息
 	replyID := int64(snowflake.Generate())

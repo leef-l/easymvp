@@ -37,14 +37,6 @@ func (m *GitWorktreeManager) Prepare(ctx context.Context, req PrepareRequest) (*
 		if output, err := initCmd.CombinedOutput(); err != nil {
 			return nil, fmt.Errorf("git init 失败: %s: %s", workDir, string(output))
 		}
-		// 配置本地 git user（容器内可能没有全局配置）
-		_ = exec.Command("git", "-C", workDir, "config", "user.name", "EasyMVP").Run()
-		_ = exec.Command("git", "-C", workDir, "config", "user.email", "mvp@easymvp.local").Run()
-		// 创建初始提交（git worktree 要求至少有一个 commit）
-		addCmd := exec.Command("git", "-C", workDir, "commit", "--allow-empty", "-m", "init: project workspace")
-		if output, err := addCmd.CombinedOutput(); err != nil {
-			return nil, fmt.Errorf("初始提交失败: %s: %s", workDir, string(output))
-		}
 		g.Log().Infof(ctx, "[Workspace] 自动初始化 git 仓库: %s", workDir)
 	}
 	req.WorkDir = workDir
@@ -87,8 +79,8 @@ func (m *GitWorktreeManager) Prepare(ctx context.Context, req PrepareRequest) (*
 		}
 	}
 
-	// 3. 获取当前 HEAD 作为基线
-	baseRef, err := gitHeadRef(req.WorkDir)
+	// 3. 获取当前 HEAD 作为基线；空仓库会自动补初始提交
+	baseRef, err := ensureRepositoryBaseline(ctx, req.WorkDir)
 	if err != nil {
 		return nil, fmt.Errorf("获取 HEAD 引用失败: %w", err)
 	}
@@ -254,6 +246,48 @@ func gitHeadRef(dir string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil
+}
+
+func ensureRepositoryBaseline(ctx context.Context, dir string) (string, error) {
+	hasHead, err := gitHasHead(dir)
+	if err != nil {
+		return "", err
+	}
+	if hasHead {
+		return gitHeadRef(dir)
+	}
+
+	if err := ensureGitIdentity(dir); err != nil {
+		return "", err
+	}
+	if err := gitAddAll(dir); err != nil {
+		return "", fmt.Errorf("暂存初始仓库内容失败: %w", err)
+	}
+	if err := gitCommitAllowEmpty(dir, "init: project workspace"); err != nil {
+		return "", fmt.Errorf("创建初始提交失败: %w", err)
+	}
+
+	baseRef, err := gitHeadRef(dir)
+	if err != nil {
+		return "", fmt.Errorf("读取初始提交失败: %w", err)
+	}
+	g.Log().Infof(ctx, "[Workspace] 空仓库自动补初始提交: %s baseRef=%s", dir, baseRef)
+	return baseRef, nil
+}
+
+func gitHasHead(dir string) (bool, error) {
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "--verify", "HEAD")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 128 {
+			text := string(output)
+			if strings.Contains(text, "Needed a single revision") || strings.Contains(text, "unknown revision or path not in the working tree") {
+				return false, nil
+			}
+		}
+		return false, fmt.Errorf("%s: %s", err, string(output))
+	}
+	return true, nil
 }
 
 // gitWorktreeAdd 创建 worktree 并基于指定 commit 创建新分支。
@@ -441,6 +475,14 @@ func gitHasStagedChanges(dir string) (bool, error) {
 
 func gitCommit(dir, message string) error {
 	cmd := exec.Command("git", "-C", dir, "commit", "--no-verify", "-m", message)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: %s", err, string(output))
+	}
+	return nil
+}
+
+func gitCommitAllowEmpty(dir, message string) error {
+	cmd := exec.Command("git", "-C", dir, "commit", "--allow-empty", "--no-verify", "-m", message)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%s: %s", err, string(output))
 	}
