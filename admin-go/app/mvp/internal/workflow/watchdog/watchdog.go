@@ -420,7 +420,9 @@ func (w *DomainTaskWatchdog) checkCircuitBreaker(ctx context.Context, wfIDs map[
 		projectID := wfProjectMap[wfRunID]
 
 		// 记录熔断决策
-		_, _ = w.circuitBreaker.RecordBreak(ctx, wfRunID, projectID, result)
+		if _, cbErr := w.circuitBreaker.RecordBreak(ctx, wfRunID, projectID, result); cbErr != nil {
+			g.Log().Errorf(ctx, "[WatchdogV2] 记录熔断决策失败: workflowRun=%d err=%v", wfRunID, cbErr)
+		}
 
 		// 暂停项目
 		if w.pauseFn != nil {

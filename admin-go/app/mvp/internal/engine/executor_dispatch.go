@@ -156,7 +156,10 @@ func (e *Executor) executeChatMode(ctx context.Context, projectID int64, taskID 
 	}
 
 	// 加载对话历史
-	history, _ := e.loadConversationHistory(ctx, conversationID, replyID)
+	history, histErr := e.loadConversationHistory(ctx, conversationID, replyID)
+	if histErr != nil {
+		g.Log().Warningf(ctx, "[Executor] 加载对话历史失败: conv=%d err=%v", conversationID, histErr)
+	}
 
 	// 构建包含上下文摘要的 system prompt
 	enrichedPrompt := BuildTaskSystemPrompt(ctx, projectID, taskID, roleType, task["role_level"].String(), modelInfo.SystemPrompt)

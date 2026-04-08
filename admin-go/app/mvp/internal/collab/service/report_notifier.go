@@ -93,13 +93,21 @@ func (n *ReportNotifier) OnWorkflowCompleted(evt event.Event) {
 }
 
 func (n *ReportNotifier) lookupProjectOwner(ctx context.Context, workflowRunID int64) int64 {
-	val, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+	val, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 		Where("id", workflowRunID).Value("project_id")
+	if err != nil {
+		g.Log().Warningf(ctx, "[ReportNotifier] 查询 workflow_run 失败: id=%d err=%v", workflowRunID, err)
+		return 0
+	}
 	if val.Int64() == 0 {
 		return 0
 	}
-	createdBy, _ := g.DB().Model("mvp_project").Ctx(ctx).
+	createdBy, err := g.DB().Model("mvp_project").Ctx(ctx).
 		Where("id", val.Int64()).Value("created_by")
+	if err != nil {
+		g.Log().Warningf(ctx, "[ReportNotifier] 查询 project 失败: id=%d err=%v", val.Int64(), err)
+		return 0
+	}
 	return createdBy.Int64()
 }
 

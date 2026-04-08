@@ -37,11 +37,14 @@ func (s *Sensor) Perceive(ctx context.Context, workflowRunID int64) (*Situation,
 	}
 
 	projectID := wf["project_id"].Int64()
-	projectRow, _ := g.DB().Model("mvp_project").Ctx(ctx).
+	projectRow, projectErr := g.DB().Model("mvp_project").Ctx(ctx).
 		Fields("project_category, category_code").
 		Where("id", projectID).
 		WhereNull("deleted_at").
 		One()
+	if projectErr != nil {
+		g.Log().Warningf(ctx, "[Sensor] 查询项目分类失败: projectID=%d err=%v", projectID, projectErr)
+	}
 	categoryCode := projectRow["category_code"].String()
 	if categoryCode == "" {
 		categoryCode = projectRow["project_category"].String()

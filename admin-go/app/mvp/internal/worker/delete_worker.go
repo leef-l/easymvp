@@ -292,8 +292,12 @@ func scanSoftDeleted(ctx context.Context) {
 
 // saveFailedJob 将彻底失败的任务记录到数据库留存。
 func saveFailedJob(ctx context.Context, job *deleteJob, errMsg string) {
-	idsJSON, _ := json.Marshal(job.IDs)
-	_, _ = g.DB().Ctx(ctx).Model("sys_delete_queue").Insert(g.Map{
+	idsJSON, marshalErr := json.Marshal(job.IDs)
+	if marshalErr != nil {
+		g.Log().Errorf(ctx, "[DeleteWorker] saveFailedJob marshal IDs 失败: entity=%s err=%v", job.Entity, marshalErr)
+		idsJSON = []byte("[]")
+	}
+	if _, insertErr := g.DB().Ctx(ctx).Model("sys_delete_queue").Insert(g.Map{
 		"id":          int64(snowflake.Generate()),
 		"entity":      job.Entity,
 		"ids":         string(idsJSON),
@@ -302,7 +306,9 @@ func saveFailedJob(ctx context.Context, job *deleteJob, errMsg string) {
 		"error_msg":   errMsg,
 		"created_at":  gtime.Now(),
 		"updated_at":  gtime.Now(),
-	})
+	}); insertErr != nil {
+		g.Log().Errorf(ctx, "[DeleteWorker] saveFailedJob 写入失败队列失败: entity=%s err=%v", job.Entity, insertErr)
+	}
 }
 
 // safeGetRedis 安全获取 Redis 实例。

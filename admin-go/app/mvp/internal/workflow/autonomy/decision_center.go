@@ -647,7 +647,7 @@ func (dc *DecisionCenter) handleAdmissionDenied(
 		return resp
 	}
 	resp.ActionID = actionID
-	_, _ = dc.checkpointRepo.Create(ctx, g.Map{
+	if _, cpErr := dc.checkpointRepo.Create(ctx, g.Map{
 		"decision_action_id": actionID,
 		"project_id":         req.ProjectID,
 		"workflow_run_id":    req.WorkflowRunID,
@@ -659,7 +659,9 @@ func (dc *DecisionCenter) handleAdmissionDenied(
 		"dept_id":            deptID,
 		"created_at":         gtime.Now(),
 		"updated_at":         gtime.Now(),
-	})
+	}); cpErr != nil {
+		g.Log().Errorf(ctx, "[DecisionCenter] 创建检查点失败: err=%v", cpErr)
+	}
 	dc.emitEvent(ctx, event.EventAutonomyCheckpointOpened, event.EntityHumanCheckpoint,
 		req.WorkflowRunID, 0, g.Map{"action_id": actionID, "reason": admission.DenyReason})
 	return resp

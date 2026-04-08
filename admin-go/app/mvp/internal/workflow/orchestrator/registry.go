@@ -182,9 +182,11 @@ func Init() {
 			projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 				Where("id", workflowRunID).Value("project_id")
 			if projectID.Int64() > 0 {
-				_, _ = g.DB().Model("mvp_project").Ctx(ctx).
+				if _, syncErr := g.DB().Model("mvp_project").Ctx(ctx).
 					Where("id", projectID.Int64()).
-					Update(g.Map{"status": consts.WorkflowRunStatusExecuting, "updated_at": gtime.Now()})
+					Update(g.Map{"status": consts.WorkflowRunStatusExecuting, "updated_at": gtime.Now()}); syncErr != nil {
+					g.Log().Errorf(ctx, "[Registry] 同步 project status 失败: projectID=%d err=%v", projectID.Int64(), syncErr)
+				}
 			}
 
 			// 重启调度器拾取 pending 任务

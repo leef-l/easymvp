@@ -70,12 +70,24 @@ func (o *MetaObserver) Record(ctx context.Context, input *ObservationInput) {
 func (o *MetaObserver) doRecord(ctx context.Context, input *ObservationInput) {
 	id := int64(snowflake.Generate())
 
-	inputJSON, _ := json.Marshal(input.InputSnapshot)
-	outputJSON, _ := json.Marshal(input.OutputSnapshot)
+	inputJSON, err := json.Marshal(input.InputSnapshot)
+	if err != nil {
+		g.Log().Warningf(ctx, "[MetaObserver] inputSnapshot 序列化失败: %v", err)
+		inputJSON = []byte("{}")
+	}
+	outputJSON, err := json.Marshal(input.OutputSnapshot)
+	if err != nil {
+		g.Log().Warningf(ctx, "[MetaObserver] outputSnapshot 序列化失败: %v", err)
+		outputJSON = []byte("{}")
+	}
 
 	metaJSON := []byte("{}")
 	if input.Meta != nil {
-		metaJSON, _ = json.Marshal(input.Meta)
+		if mj, mErr := json.Marshal(input.Meta); mErr != nil {
+			g.Log().Warningf(ctx, "[MetaObserver] meta 序列化失败: %v", mErr)
+		} else {
+			metaJSON = mj
+		}
 	}
 
 	// 计算学习信号权重
@@ -91,7 +103,7 @@ func (o *MetaObserver) doRecord(ctx context.Context, input *ObservationInput) {
 		humanOverride = 1
 	}
 
-	_, err := g.DB().Model("mvp_observation_record").Ctx(ctx).Insert(g.Map{
+	_, err = g.DB().Model("mvp_observation_record").Ctx(ctx).Insert(g.Map{
 		"id":                  id,
 		"decision_action_id":  input.DecisionActionID,
 		"workflow_run_id":     input.WorkflowRunID,

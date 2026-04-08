@@ -57,8 +57,11 @@ func (n *CheckpointNotifier) OnCheckpointOpened(evt event.Event) {
 		}
 
 		projectID := action["project_id"].Int64()
-		project, _ := g.DB().Model("mvp_project").Ctx(ctx).
+		project, projErr := g.DB().Model("mvp_project").Ctx(ctx).
 			Where("id", projectID).Fields("name, created_by").One()
+		if projErr != nil {
+			g.Log().Warningf(ctx, "[CheckpointNotifier] 查询项目失败: projectID=%d err=%v", projectID, projErr)
+		}
 
 		projectName := "未知项目"
 		var createdBy int64
