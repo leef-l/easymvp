@@ -65,7 +65,7 @@ func (s *Scheduler) recoverResourceLocks() {
 	ctx := context.Background()
 	tasks, err := g.DB().Model("mvp_task").Ctx(ctx).
 		Where("status", "running").
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		Fields("id, locked_resources").
 		All()
 	if err != nil {
@@ -155,10 +155,10 @@ func (s *Scheduler) PauseProject(projectID int64) {
 	}
 
 	// 3. 锁外查询该项目的 running 任务 ID
-	runningTasks, runErr := g.DB().Model("mvp_task").
+	runningTasks, runErr := g.DB().Model("mvp_task").Ctx(context.Background()).
 		Where("project_id", projectID).
 		Where("status", "running").
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		Fields("id").
 		All()
 	if runErr != nil {
@@ -262,7 +262,7 @@ func (s *Scheduler) scheduleOnce(ctx context.Context, projectID int64) {
 	query := g.DB().Model("mvp_task").
 		Where("project_id", projectID).
 		Where("status", "pending").
-		Where("deleted_at IS NULL")
+		WhereNull("deleted_at")
 
 	// 阶段锁：只调度允许的角色
 	if len(allowedRoles) > 0 {
@@ -385,7 +385,7 @@ func (s *Scheduler) checkProjectDone(projectID int64) {
 	ctx := context.Background()
 	count, err := g.DB().Model("mvp_task").Ctx(ctx).
 		Where("project_id", projectID).
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		WhereNotIn("status", []string{"completed", "draft"}).
 		Count()
 	if err != nil {
@@ -439,7 +439,7 @@ func stageAllowedRoles(projectStatus string) g.Slice {
 
 // logTaskAction 记录任务日志
 func logTaskAction(taskID int64, action, fromStatus, toStatus, message, operator string) {
-	_, _ = g.DB().Model("mvp_task_log").Insert(g.Map{
+	if _, err := g.DB().Model("mvp_task_log").Ctx(context.Background()).Insert(g.Map{
 		"task_id":     taskID,
 		"action":      action,
 		"from_status": fromStatus,
@@ -447,7 +447,9 @@ func logTaskAction(taskID int64, action, fromStatus, toStatus, message, operator
 		"message":     message,
 		"operator":    operator,
 		"created_at":  gtime.Now(),
-	})
+	}); err != nil {
+		g.Log().Warningf(context.Background(), "[Scheduler] 记录任务日志失败: task=%d action=%s err=%v", taskID, action, err)
+	}
 }
 
 // feishuNotifyTaskFailed / feishuNotifyProjectCompleted

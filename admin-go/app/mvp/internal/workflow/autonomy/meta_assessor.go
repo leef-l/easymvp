@@ -325,7 +325,9 @@ func (a *MetaAssessor) GetLatest(ctx context.Context, projectID int64) (*Assessm
 
 	driftsStr := record["drifts"].String()
 	if driftsStr != "" && driftsStr != "null" {
-		_ = json.Unmarshal([]byte(driftsStr), &result.Drifts)
+		if unmErr := json.Unmarshal([]byte(driftsStr), &result.Drifts); unmErr != nil {
+			g.Log().Warningf(ctx, "[MetaAssessor] drifts JSON 解析失败: %v", unmErr)
+		}
 	}
 
 	return result, nil
@@ -364,7 +366,9 @@ func (a *MetaAssessor) ListAssessments(ctx context.Context, projectID int64, lim
 		}
 		driftsStr := r["drifts"].String()
 		if driftsStr != "" && driftsStr != "null" {
-			_ = json.Unmarshal([]byte(driftsStr), &ar.Drifts)
+			if unmErr := json.Unmarshal([]byte(driftsStr), &ar.Drifts); unmErr != nil {
+				g.Log().Warningf(ctx, "[MetaAssessor] drifts JSON 解析失败: %v", unmErr)
+			}
 		}
 		results = append(results, ar)
 	}

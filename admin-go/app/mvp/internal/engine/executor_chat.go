@@ -20,7 +20,7 @@ func (e *Executor) ensureConversation(ctx context.Context, projectID int64, task
 	conv, err := g.DB().Ctx(ctx).Model("mvp_conversation").
 		Where("project_id", projectID).
 		Where("task_id", taskID).
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		One()
 	if err != nil {
 		return 0, err
@@ -33,7 +33,7 @@ func (e *Executor) ensureConversation(ctx context.Context, projectID int64, task
 	project, err := g.DB().Ctx(ctx).Model("mvp_project").
 		Fields("created_by, dept_id").
 		Where("id", projectID).
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		One()
 	if err != nil {
 		return 0, err
@@ -65,7 +65,7 @@ func (e *Executor) ensureConversation(ctx context.Context, projectID int64, task
 func (e *Executor) loadConversationHistory(ctx context.Context, conversationID int64, excludeID int64) ([]provider.Message, error) {
 	records, err := g.DB().Ctx(ctx).Model("mvp_message").
 		Where("conversation_id", conversationID).
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		Where("status", "completed").
 		Where("(message_type IS NULL OR message_type <> ?)", mvpmodel.MessageTypePoison).
 		Where("id != ?", excludeID).

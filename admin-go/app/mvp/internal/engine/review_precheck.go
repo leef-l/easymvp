@@ -49,7 +49,7 @@ func RunReview(ctx context.Context, projectID int64) (*ReviewResult, error) {
 	tasks, err := g.DB().Ctx(ctx).Model("mvp_task").
 		Where("project_id", projectID).
 		Where("status", "draft").
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		Order("batch_no ASC, sort ASC").
 		All()
 	if err != nil {

@@ -111,7 +111,7 @@ func (w *Watchdog) checkRunningTasks(ctx context.Context) {
 	// 查询所有 running 状态的任务（锁外执行 DB 操作）
 	tasks, err := g.DB().Model("mvp_task").
 		Where("status", "running").
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		Fields("id, project_id, heartbeat_at, conversation_id").
 		All()
 	if err != nil {
@@ -309,7 +309,7 @@ func (w *Watchdog) checkFailedTasks(ctx context.Context) {
 	// 锁外执行所有 DB 查询
 	tasks, err := g.DB().Model("mvp_task").
 		Where("status", "failed").
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		All()
 	if err != nil {
 		return

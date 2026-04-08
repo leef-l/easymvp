@@ -23,7 +23,7 @@ import (
 //	reviewing → (审核不通过) → designing
 func (s *Scheduler) ConfirmPlan(ctx context.Context, projectID int64) error {
 	// 1. 检查项目状态
-	project, err := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).Where("deleted_at IS NULL").One()
+	project, err := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).WhereNull("deleted_at").One()
 	if err != nil || project.IsEmpty() {
 		return fmt.Errorf("项目不存在")
 	}
@@ -113,7 +113,7 @@ func (s *Scheduler) Pause(ctx context.Context, projectID int64, reason string) e
 // 如果已有 pending 任务，直接进入 running（跳过审核）
 // 如果只有 draft 任务，走审核流程
 func (s *Scheduler) Resume(ctx context.Context, projectID int64) error {
-	project, err := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).Where("deleted_at IS NULL").One()
+	project, err := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).WhereNull("deleted_at").One()
 	if err != nil || project.IsEmpty() {
 		return fmt.Errorf("项目不存在")
 	}
@@ -125,7 +125,7 @@ func (s *Scheduler) Resume(ctx context.Context, projectID int64) error {
 	pendingCount, pcErr := g.DB().Ctx(ctx).Model("mvp_task").
 		Where("project_id", projectID).
 		Where("status", "pending").
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		Count()
 	if pcErr != nil {
 		return fmt.Errorf("查询 pending 任务数失败: %w", pcErr)
@@ -241,7 +241,7 @@ func CreateProject(ctx context.Context, name, projectCategory, description, work
 		models, modErr := g.DB().Ctx(ctx).Model("ai_model").
 			Fields("id, role_prompt").
 			WhereIn("id", modelIDs).
-			Where("deleted_at IS NULL").
+			WhereNull("deleted_at").
 			All()
 		if modErr != nil {
 			g.Log().Warningf(ctx, "[CreateProject] 批量查询模型失败: err=%v", modErr)

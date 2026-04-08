@@ -16,7 +16,7 @@ func (e *ChatEngine) loadHistory(ctx context.Context, conversationID int64, excl
 	var records []gdb.Record
 	err := g.DB().Model("mvp_message").Ctx(ctx).
 		Where("conversation_id", conversationID).
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		Where("status", "completed").
 		Where("(message_type IS NULL OR message_type <> ?)", mvpmodel.MessageTypePoison).
 		Where("id != ?", excludeID).

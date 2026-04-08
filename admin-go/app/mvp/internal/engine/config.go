@@ -73,7 +73,7 @@ func GetConfigInt(ctx context.Context, key string, yamlPath string, defaultVal i
 	// 1. 数据库 mvp_config 表
 	row, err := g.DB().Model("mvp_config").Ctx(ctx).
 		Where("config_key", key).
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		Fields("config_value").
 		One()
 	if err == nil && !row.IsEmpty() {
@@ -208,7 +208,7 @@ func GetConfigString(ctx context.Context, key string, yamlPath string, defaultVa
 	// 1. 数据库
 	row, err := g.DB().Model("mvp_config").Ctx(ctx).
 		Where("config_key", key).
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		Fields("config_value").
 		One()
 	if err == nil && !row.IsEmpty() {

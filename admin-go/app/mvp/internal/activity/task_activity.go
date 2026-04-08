@@ -47,7 +47,7 @@ func TouchTaskActivity(ctx context.Context, taskID int64) {
 	}
 	_, _ = g.DB().Ctx(ctx).Model("mvp_task").
 		Where("id", taskID).
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		Data("updated_at", gtime.Now()).
 		Update()
 }
@@ -58,7 +58,7 @@ func TouchConversationActivity(ctx context.Context, conversationID int64) {
 	}
 	_, _ = g.DB().Ctx(ctx).Model("mvp_conversation").
 		Where("id", conversationID).
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		Data("updated_at", gtime.Now()).
 		Update()
 }
@@ -69,7 +69,7 @@ func TouchMessageActivity(ctx context.Context, messageID int64) {
 	}
 	_, _ = g.DB().Ctx(ctx).Model("mvp_message").
 		Where("id", messageID).
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		Data("updated_at", gtime.Now()).
 		Update()
 }
@@ -84,7 +84,7 @@ func LoadTaskSnapshots(ctx context.Context, taskIDs []int64) (map[int64]TaskSnap
 	err := g.DB().Ctx(ctx).Model("mvp_task").
 		Fields("id, status, conversation_id, started_at, updated_at").
 		WhereIn("id", taskIDs).
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		Scan(&tasks)
 	if err != nil {
 		return nil, err
@@ -136,7 +136,7 @@ func LoadProjectSummary(ctx context.Context, projectID int64) (*ProjectSummary, 
 		Fields("id").
 		Where("project_id", projectID).
 		Where("status", "running").
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		Scan(&rows); err != nil {
 		return nil, err
 	}
@@ -204,7 +204,7 @@ func loadConversationMessageTimes(ctx context.Context, conversationIDs []int64) 
 	err := g.DB().Ctx(ctx).Model("mvp_message").
 		Fields("conversation_id, MAX(updated_at) AS last_message_at").
 		WhereIn("conversation_id", conversationIDs).
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		Group("conversation_id").
 		Scan(&rows)
 	if err != nil {

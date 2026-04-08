@@ -555,7 +555,7 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 		Where("project_id", projectID).
 		Where("role_type", "architect").
 		Where("task_id IS NULL OR task_id = 0").
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		One()
 	if err != nil || conv.IsEmpty() {
 		return &v1.WorkflowParseTasksRes{HasTasks: false, TaskCount: 0}, nil
@@ -568,7 +568,7 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 		Where("conversation_id", convID).
 		Where("role", "assistant").
 		Where("status", "completed").
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		OrderAsc("created_at").
 		All()
 	if err != nil || len(allMsgs) == 0 {
@@ -733,7 +733,7 @@ func (c *cWorkflow) ProjectStatus(ctx context.Context, req *v1.WorkflowProjectSt
 		return nil, err
 	}
 
-	project, err := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).Where("deleted_at IS NULL").One()
+	project, err := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).WhereNull("deleted_at").One()
 	if err != nil {
 		return nil, err
 	}
@@ -859,7 +859,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 
 	// 1. AI 供应商
 	count, e := g.DB().Ctx(ctx).Model("ai_provider").
-		Where("status", 1).Where("base_url != ''").Where("deleted_at IS NULL").Count()
+		Where("status", 1).Where("base_url != ''").WhereNull("deleted_at").Count()
 	if e != nil {
 		addItem("ai_provider", "AI 供应商", "/ai/provider", "error", "查询失败: "+e.Error())
 	} else if count == 0 {
@@ -870,7 +870,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 
 	// 2. AI 套餐
 	count, e = g.DB().Ctx(ctx).Model("ai_plan").
-		Where("status", 1).Where("api_key != ''").Where("deleted_at IS NULL").Count()
+		Where("status", 1).Where("api_key != ''").WhereNull("deleted_at").Count()
 	if e != nil {
 		addItem("ai_plan", "AI 套餐", "/ai/plan", "error", "查询失败: "+e.Error())
 	} else if count == 0 {
@@ -881,7 +881,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 
 	// 3. 架构师模型
 	count, e = g.DB().Ctx(ctx).Model("ai_model").
-		Where("capability", "architect").Where("status", 1).Where("deleted_at IS NULL").Count()
+		Where("capability", "architect").Where("status", 1).WhereNull("deleted_at").Count()
 	if e != nil {
 		addItem("ai_model_architect", "AI 模型（架构师）", "/ai/model", "error", "查询失败: "+e.Error())
 	} else if count == 0 {
@@ -893,7 +893,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 	// 4. 实施员模型
 	count, e = g.DB().Ctx(ctx).Model("ai_model").
 		WhereIn("capability", g.Slice{"implementer", "coding", "chat"}).
-		Where("status", 1).Where("deleted_at IS NULL").Count()
+		Where("status", 1).WhereNull("deleted_at").Count()
 	if e != nil {
 		addItem("ai_model_implementer", "AI 模型（实施员）", "/ai/model", "error", "查询失败: "+e.Error())
 	} else if count == 0 {
@@ -915,7 +915,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 
 	// 6. AI 执行引擎
 	count, e = g.DB().Ctx(ctx).Model("ai_engine").
-		Where("status", 1).Where("deleted_at IS NULL").Count()
+		Where("status", 1).WhereNull("deleted_at").Count()
 	if e != nil {
 		addItem("ai_engine", "AI 执行引擎", "/ai/engine", "error", "查询失败: "+e.Error())
 	} else if count == 0 {
@@ -926,7 +926,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 
 	// 7. Aider 引擎配置
 	aiderCfg, e := g.DB().Ctx(ctx).Model("ai_engine_config").
-		Where("engine_code", "aider").Where("deleted_at IS NULL").One()
+		Where("engine_code", "aider").WhereNull("deleted_at").One()
 	if e != nil || aiderCfg.IsEmpty() {
 		addItem("ai_engine_config_aider", "Aider 引擎配置", "/ai/engine", "error", "未配置 Aider 引擎参数")
 	} else if aiderCfg["workspace_root"].String() == "" {
@@ -938,7 +938,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 
 	// 8. OpenHands 引擎配置
 	ohCfg, e := g.DB().Ctx(ctx).Model("ai_engine_config").
-		Where("engine_code", "openhands").Where("deleted_at IS NULL").One()
+		Where("engine_code", "openhands").WhereNull("deleted_at").One()
 	if e != nil || ohCfg.IsEmpty() {
 		addItem("ai_engine_config_openhands", "OpenHands 引擎配置", "/ai/engine", "warning", "未配置 OpenHands 引擎参数（非必须，仅使用 Aider 可忽略）")
 	} else if ohCfg["command_template"].String() == "" {
@@ -1007,7 +1007,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 		"scheduler.poll_interval",
 	}
 	count, e = g.DB().Ctx(ctx).Model("mvp_config").
-		WhereIn("config_key", requiredKeys).Where("deleted_at IS NULL").Count()
+		WhereIn("config_key", requiredKeys).WhereNull("deleted_at").Count()
 	if e != nil {
 		addItem("engine_config", "引擎核心配置", "/mvp/config", "error", "查询失败: "+e.Error())
 	} else if count < len(requiredKeys) {

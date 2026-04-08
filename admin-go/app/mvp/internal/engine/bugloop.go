@@ -263,7 +263,7 @@ func (s *Scheduler) AutoDispatchBugFix(ctx context.Context, projectID int64, ana
 			Where("parent_id", analysisTask["parent_id"].Int64()).
 			Where("role_type", "implementer").
 			Where("status", "bug_found").
-			Where("deleted_at IS NULL").
+			WhereNull("deleted_at").
 			One()
 		if err != nil || implTask.IsEmpty() {
 			return
@@ -437,7 +437,7 @@ func ensureProjectArchitectConversation(ctx context.Context, projectID int64) (i
 		Where("project_id", projectID).
 		Where("role_type", "architect").
 		Where("task_id IS NULL OR task_id = 0").
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		One()
 	if err != nil {
 		return 0, 0, 0, err
@@ -449,7 +449,7 @@ func ensureProjectArchitectConversation(ctx context.Context, projectID int64) (i
 	project, err := g.DB().Ctx(ctx).Model("mvp_project").
 		Fields("created_by, dept_id").
 		Where("id", projectID).
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		One()
 	if err != nil {
 		return 0, 0, 0, err

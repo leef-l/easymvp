@@ -146,7 +146,7 @@ func (c *ContextCompressor) CompressBatchContext(ctx context.Context, projectID 
 		Where("project_id", projectID).
 		Where("batch_no", batchNo).
 		Where("status", "completed").
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		Fields("name, role_type, role_level, context_summary").
 		Order("sort ASC").
 		All()

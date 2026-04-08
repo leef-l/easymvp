@@ -56,7 +56,7 @@ func (s *Scheduler) advanceBatchIfDone(projectID int64, taskID int64) {
 	count, err := g.DB().Model("mvp_task").
 		Where("project_id", projectID).
 		Where("batch_no", batchNo).
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		WhereNotIn("status", []string{"completed", "draft"}).
 		Count()
 	if err != nil || count > 0 {
@@ -89,7 +89,7 @@ func (s *Scheduler) calcActiveBatch(projectID int64) int {
 	result, err := g.DB().Model("mvp_task").
 		Where("project_id", projectID).
 		Where("batch_no > 0").
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		WhereNotIn("status", []string{"completed", "draft"}).
 		Fields("MIN(batch_no) as min_batch").
 		One()

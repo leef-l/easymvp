@@ -92,7 +92,7 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 		// 3a. 获取所有旧任务ID
 		oldTaskIDs, txErr := tx.Model("mvp_task").
 			Where("project_id", projectID).
-			Where("deleted_at IS NULL").
+			WhereNull("deleted_at").
 			Fields("id").
 			Array()
 		if txErr != nil {
@@ -102,7 +102,7 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 			// 3b. 软删除任务日志
 			_, _ = tx.Model("mvp_task_log").
 				WhereIn("task_id", oldTaskIDs).
-				Where("deleted_at IS NULL").
+				WhereNull("deleted_at").
 				Data(do.MvpTaskLog{
 					DeletedAt: gtime.Now(),
 					UpdatedAt: gtime.Now(),
@@ -119,7 +119,7 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 		// 3d. 软删除所有任务
 		_, txErr = tx.Model("mvp_task").
 			Where("project_id", projectID).
-			Where("deleted_at IS NULL").
+			WhereNull("deleted_at").
 			Data(do.MvpTask{
 				DeletedAt: gtime.Now(),
 				UpdatedAt: gtime.Now(),
@@ -333,7 +333,7 @@ func (p *TaskParser) ConfirmDraftTasks(ctx context.Context, projectID int64) (in
 	taskIDs, err := g.DB().Ctx(ctx).Model("mvp_task").
 		Where("project_id", projectID).
 		Where("status", "draft").
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		Fields("id").
 		Array()
 	if err != nil {
@@ -372,7 +372,7 @@ func (p *TaskParser) GetDraftCount(ctx context.Context, projectID int64) int {
 	count, err := g.DB().Ctx(ctx).Model("mvp_task").
 		Where("project_id", projectID).
 		Where("status", "draft").
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		Count()
 	if err != nil {
 		g.Log().Warningf(ctx, "[Parser] 查询 draft 任务数失败: projectID=%d err=%v", projectID, err)

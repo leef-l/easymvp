@@ -77,10 +77,13 @@ func resolveUserDataScope(ctx context.Context, userID int64) (int, []int64) {
 
 	var customDeptIDs []int64
 	if bestScope == DataScopeCustom && len(customRoleIDs) > 0 {
-		depts, _ := g.DB().Ctx(ctx).Model("system_role_dept").
+		depts, deptErr := g.DB().Ctx(ctx).Model("system_role_dept").
 			Fields("DISTINCT dept_id").
 			WhereIn("role_id", customRoleIDs).
 			All()
+		if deptErr != nil {
+			g.Log().Warningf(ctx, "[AI-Middleware] 查询自定义部门列表失败: err=%v", deptErr)
+		}
 		for _, d := range depts {
 			customDeptIDs = append(customDeptIDs, d["dept_id"].Int64())
 		}

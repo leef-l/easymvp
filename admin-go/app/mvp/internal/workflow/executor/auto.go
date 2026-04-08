@@ -39,7 +39,7 @@ func (e *AutoExecutor) Execute(ctx context.Context, req *Request) *Result {
 	rows, err := g.DB().Model("ai_engine_config").Ctx(ctx).
 		Fields("engine_code").
 		Where("status", 1).
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		All()
 	if err == nil {
 		for _, row := range rows {

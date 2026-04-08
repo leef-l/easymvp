@@ -134,7 +134,7 @@ func HandleReviewSuccess(ctx context.Context, projectID int64, result *ReviewRes
 				Where("project_id", projectID).
 				Where("name", taskName).
 				Where("status", "pending").
-				Where("deleted_at IS NULL").
+				WhereNull("deleted_at").
 				Fields("id,description").One()
 			if qErr != nil || task.IsEmpty() {
 				continue
@@ -205,7 +205,7 @@ func rollbackConfirmedTasks(ctx context.Context, projectID int64) {
 	taskIDs, err := g.DB().Ctx(ctx).Model("mvp_task").
 		Where("project_id", projectID).
 		Where("status", "pending").
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		Fields("id").
 		Array()
 	if err != nil {

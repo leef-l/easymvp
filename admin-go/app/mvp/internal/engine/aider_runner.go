@@ -317,10 +317,10 @@ func (r *AiderRunner) writeModelMetadata(cfg *AiderConfig) (string, error) {
 
 	// 从数据库查询模型的 context_window
 	contextWindow := 0
-	model, err := g.DB().Model("ai_model").
+	model, err := g.DB().Model("ai_model").Ctx(context.Background()).
 		Fields("context_window").
 		Where("model_code", cfg.ModelCode).
-		Where("deleted_at IS NULL").
+		WhereNull("deleted_at").
 		One()
 	if err == nil && !model.IsEmpty() {
 		contextWindow = model["context_window"].Int()
