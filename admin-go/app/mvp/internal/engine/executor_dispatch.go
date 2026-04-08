@@ -145,10 +145,11 @@ func (e *Executor) executeChatMode(ctx context.Context, projectID int64, taskID 
 
 	// 调用 AI
 	p, err := provider.GetProvider(provider.Config{
-		ProviderType: modelInfo.ProviderType,
-		BaseURL:      modelInfo.BaseURL,
-		APIKey:       modelInfo.APIKey,
-		APISecret:    modelInfo.APISecret,
+		ProviderType:       modelInfo.ProviderType,
+		SupportedProtocols: modelInfo.SupportedProtocols,
+		BaseURL:            modelInfo.BaseURL,
+		APIKey:             modelInfo.APIKey,
+		APISecret:          modelInfo.APISecret,
 	})
 	if err != nil {
 		e.handleTaskFailure(ctx, projectID, taskID, roleType, taskFailureExecution, err.Error())
@@ -385,7 +386,7 @@ func (e *Executor) getModelInfo(ctx context.Context, modelID int64, systemPrompt
 	model, err := g.DB().Model("ai_model m").
 		LeftJoin("ai_plan p", "p.id = m.plan_id").
 		LeftJoin("ai_provider pv", "pv.id = m.provider_id").
-		Fields("m.model_code, m.max_tokens, pv.provider_type, pv.base_url, p.api_key, p.api_secret, m.role_prompt").
+		Fields("m.model_code, m.max_tokens, pv.provider_type, pv.supported_protocols, pv.base_url, p.api_key, p.api_secret, m.role_prompt").
 		Where("m.id", modelID).
 		Where("m.deleted_at IS NULL").
 		One()
@@ -399,14 +400,15 @@ func (e *Executor) getModelInfo(ctx context.Context, modelID int64, systemPrompt
 	}
 
 	return &ModelInfo{
-		ModelID:      modelID,
-		ModelCode:    model["model_code"].String(),
-		ProviderType: model["provider_type"].String(),
-		BaseURL:      model["base_url"].String(),
-		APIKey:       model["api_key"].String(),
-		APISecret:    model["api_secret"].String(),
-		SystemPrompt: prompt,
-		MaxTokens:    model["max_tokens"].Int(),
+		ModelID:            modelID,
+		ModelCode:          model["model_code"].String(),
+		ProviderType:       model["provider_type"].String(),
+		SupportedProtocols: decodeProviderProtocols(model["supported_protocols"].String(), model["provider_type"].String()),
+		BaseURL:            model["base_url"].String(),
+		APIKey:             model["api_key"].String(),
+		APISecret:          model["api_secret"].String(),
+		SystemPrompt:       prompt,
+		MaxTokens:          model["max_tokens"].Int(),
 	}, nil
 }
 

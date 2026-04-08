@@ -50,9 +50,9 @@ type openaiResponse struct {
 }
 
 type openaiChoice struct {
-	Message      *openaiMessage     `json:"message,omitempty"`
-	Delta        *openaiMessage     `json:"delta,omitempty"`
-	FinishReason string             `json:"finish_reason,omitempty"`
+	Message      *openaiMessage `json:"message,omitempty"`
+	Delta        *openaiMessage `json:"delta,omitempty"`
+	FinishReason string         `json:"finish_reason,omitempty"`
 }
 
 type openaiUsage struct {
@@ -224,7 +224,7 @@ func (p *OpenAIProvider) buildRequest(req *ChatRequest, stream bool) ([]byte, er
 
 // newHTTPRequest 创建 HTTP 请求
 func (p *OpenAIProvider) newHTTPRequest(ctx context.Context, body []byte) (*http.Request, error) {
-	url := strings.TrimRight(p.config.BaseURL, "/") + "/chat/completions"
+	url := ResolveBaseURLForProtocol(p.config, TypeOpenAICompatible) + "/chat/completions"
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {

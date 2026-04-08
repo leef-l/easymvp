@@ -45,6 +45,17 @@ func NewService(ts *domainTask.TaskService, sched *scheduler.DomainTaskScheduler
 // SetAnalysisCompletedFn 注册 failure_analysis 完成后的回调。
 func (s *Service) SetAnalysisCompletedFn(fn AnalysisCompletedFn) { s.onAnalysisCompleted = fn }
 
+// BindExecutor 为已存在的 workflow 重新绑定执行器。
+func (s *Service) BindExecutor(workflowRunID int64) {
+	s.scheduler.SetExecutor(s.newDomainTaskExecutor(workflowRunID))
+}
+
+// BindExecuteStage 为 execute 阶段重新绑定执行器和完成回调。
+func (s *Service) BindExecuteStage(stageRunID, workflowRunID int64) {
+	s.BindExecutor(workflowRunID)
+	s.scheduler.SetCompletionCallback(s.newCompletionCallback(stageRunID))
+}
+
 // InstantiateAndStart 将审核通过的蓝图实例化为领域任务并启动调度。
 func (s *Service) InstantiateAndStart(ctx context.Context, stageRunID int64, planVersionID int64) error {
 	// 获取 workflow_run_id
@@ -65,19 +76,39 @@ func (s *Service) InstantiateAndStart(ctx context.Context, stageRunID int64, pla
 
 	g.Log().Infof(ctx, "[ExecuteStage] 实例化 %d 个领域任务, stageRunID=%d, planVersionID=%d", taskCount, stageRunID, planVersionID)
 
-	// 2. 注册执行器
-	s.scheduler.SetExecutor(&domainTaskExecutor{
+	// 2. 注册执行器和 execute 完成回调
+	s.BindExecuteStage(stageRunID, workflowRunID)
+
+	// 3. 启动调度
+	return s.scheduler.Start(context.Background(), workflowRunID)
+}
+
+// AnalysisCompletedFn 分析任务完成回调（路由到 rework service）。
+type AnalysisCompletedFn func(ctx context.Context, stageRunID, analysisTaskID int64) error
+
+// domainTaskExecutor 领域任务执行器，通过 executor.Registry 分发到具体执行器实现。
+type domainTaskExecutor struct {
+	workflowRunID       int64
+	scheduler           *scheduler.DomainTaskScheduler
+	wsMgr               workspace.Manager
+	registry            *executor.Registry
+	onAnalysisCompleted AnalysisCompletedFn
+}
+
+func (s *Service) newDomainTaskExecutor(workflowRunID int64) *domainTaskExecutor {
+	return &domainTaskExecutor{
 		workflowRunID:       workflowRunID,
 		scheduler:           s.scheduler,
 		wsMgr:               workspace.NewGitWorktreeManager(),
 		registry:            s.executorRegistry,
 		onAnalysisCompleted: s.onAnalysisCompleted,
-	})
+	}
+}
 
-	// 3. 注册完成回调
+func (s *Service) newCompletionCallback(stageRunID int64) scheduler.CompletionCallback {
 	finalStageRunID := stageRunID
 	cleanupMgr := workspace.NewGitWorktreeManager()
-	s.scheduler.SetCompletionCallback(func(ctx context.Context, wfRunID int64) {
+	return func(ctx context.Context, wfRunID int64) {
 		g.Log().Infof(ctx, "[ExecuteStage] 所有任务完成, workflowRunID=%d", wfRunID)
 
 		// 压缩上下文
@@ -111,22 +142,7 @@ func (s *Service) InstantiateAndStart(ctx context.Context, stageRunID int64, pla
 				g.Log().Errorf(ctx, "[ExecuteStage] TransitionNext 失败: workflowRunID=%d err=%v", wfRunID, err)
 			}
 		}
-	})
-
-	// 4. 启动调度
-	return s.scheduler.Start(context.Background(), workflowRunID)
-}
-
-// AnalysisCompletedFn 分析任务完成回调（路由到 rework service）。
-type AnalysisCompletedFn func(ctx context.Context, stageRunID, analysisTaskID int64) error
-
-// domainTaskExecutor 领域任务执行器，通过 executor.Registry 分发到具体执行器实现。
-type domainTaskExecutor struct {
-	workflowRunID       int64
-	scheduler           *scheduler.DomainTaskScheduler
-	wsMgr               workspace.Manager
-	registry            *executor.Registry
-	onAnalysisCompleted AnalysisCompletedFn
+	}
 }
 
 // ExecuteDomainTask 执行单个领域任务。

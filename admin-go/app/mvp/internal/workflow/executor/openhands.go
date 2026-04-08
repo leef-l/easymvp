@@ -83,7 +83,7 @@ func (e *OpenHandsExecutor) Execute(ctx context.Context, req *Request) *Result {
 	if req.ModelInfo != nil {
 		envVars["AI_MODEL_API_KEY"] = req.ModelInfo.APIKey
 		envVars["AI_MODEL_CODE"] = req.ModelInfo.ModelCode
-		envVars["AI_MODEL_BASE_URL"] = resolveModelBaseURL(req.ModelInfo, engineCfg["base_url"].String())
+		envVars["AI_MODEL_BASE_URL"] = resolveProtocolBaseURL(req.ModelInfo, engineCfg["base_url"].String(), "")
 	}
 
 	// 解析 affected_resources 附加到指令
@@ -120,7 +120,7 @@ func (e *OpenHandsExecutor) Execute(ctx context.Context, req *Request) *Result {
 		cmd.Env = append(cmd.Env,
 			"AI_MODEL_API_KEY="+req.ModelInfo.APIKey,
 			"AI_MODEL_CODE="+req.ModelInfo.ModelCode,
-			"AI_MODEL_BASE_URL="+resolveModelBaseURL(req.ModelInfo, engineCfg["base_url"].String()),
+			"AI_MODEL_BASE_URL="+resolveProtocolBaseURL(req.ModelInfo, engineCfg["base_url"].String(), ""),
 		)
 	}
 
@@ -156,19 +156,9 @@ func (e *OpenHandsExecutor) Execute(ctx context.Context, req *Request) *Result {
 
 	// workspace finalize: 标记成功
 	if req.Workspace != nil && e.wsMgr != nil {
-		if fErr := e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: true}); fErr != nil {
-			g.Log().Warningf(ctx, "[OpenHandsExecutor] workspace finalize 失败: task=%d err=%v", req.TaskID, fErr)
-		} else {
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						g.Log().Errorf(context.Background(), "[OpenHandsExecutor] workspace cleanup panic: task=%d err=%v", req.TaskID, r)
-					}
-				}()
-				if cleanErr := e.wsMgr.Cleanup(context.Background(), req.TaskID); cleanErr != nil {
-					g.Log().Warningf(context.Background(), "[OpenHandsExecutor] workspace cleanup 失败: task=%d err=%v", req.TaskID, cleanErr)
-				}
-			}()
+		if err := finalizeWorkspaceSuccess(ctx, e.wsMgr, req.TaskID, "OpenHandsExecutor"); err != nil {
+			_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: false, Error: err.Error(), Retain: true})
+			return &Result{Success: false, Error: err}
 		}
 	}
 

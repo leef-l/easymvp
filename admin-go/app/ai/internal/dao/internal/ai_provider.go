@@ -21,36 +21,38 @@ type AiProviderDao struct {
 
 // AiProviderColumns defines and stores column names for the table ai_provider.
 type AiProviderColumns struct {
-	Id           string // 雪花ID
-	Name         string // 供应商名称
-	Code         string // 供应商代码：openai/anthropic/deepseek/qwen/doubao/ernie/spark/glm/moonshot/yi/google/ollama
-	ProviderType string // Provider类型：openai_compatible/anthropic/baidu/xfyun/google
-	BaseUrl      string // API基础地址
-	Icon         string // 图标URL
-	Status       string // 状态:0=禁用,1=启用
-	Sort         string // 排序
-	CreatedBy    string // 创建人ID
-	DeptId       string // 所属部门ID
-	CreatedAt    string // 创建时间
-	UpdatedAt    string // 更新时间
-	DeletedAt    string // 软删除时间
+	Id                 string // 雪花ID
+	Name               string // 供应商名称
+	Code               string // 供应商代码：openai/anthropic/deepseek/qwen/doubao/ernie/spark/glm/moonshot/yi/google/ollama
+	ProviderType       string // 供应商主类型/默认路由类型
+	SupportedProtocols string // 支持的协议类型(JSON)：anthropic/openai_compatible/google 等
+	BaseUrl            string // API基础地址
+	Icon               string // 图标URL
+	Status             string // 状态:0=禁用,1=启用
+	Sort               string // 排序
+	CreatedBy          string // 创建人ID
+	DeptId             string // 所属部门ID
+	CreatedAt          string // 创建时间
+	UpdatedAt          string // 更新时间
+	DeletedAt          string // 软删除时间
 }
 
 // aiProviderColumns holds the columns for the table ai_provider.
 var aiProviderColumns = AiProviderColumns{
-	Id:           "id",
-	Name:         "name",
-	Code:         "code",
-	ProviderType: "provider_type",
-	BaseUrl:      "base_url",
-	Icon:         "icon",
-	Status:       "status",
-	Sort:         "sort",
-	CreatedBy:    "created_by",
-	DeptId:       "dept_id",
-	CreatedAt:    "created_at",
-	UpdatedAt:    "updated_at",
-	DeletedAt:    "deleted_at",
+	Id:                 "id",
+	Name:               "name",
+	Code:               "code",
+	ProviderType:       "provider_type",
+	SupportedProtocols: "supported_protocols",
+	BaseUrl:            "base_url",
+	Icon:               "icon",
+	Status:             "status",
+	Sort:               "sort",
+	CreatedBy:          "created_by",
+	DeptId:             "dept_id",
+	CreatedAt:          "created_at",
+	UpdatedAt:          "updated_at",
+	DeletedAt:          "deleted_at",
 }
 
 // NewAiProviderDao creates and returns a new DAO object for table data access.

@@ -266,7 +266,7 @@ func (p *AnthropicProvider) buildRequest(req *ChatRequest, stream bool) ([]byte,
 
 // newHTTPRequest 创建 HTTP 请求
 func (p *AnthropicProvider) newHTTPRequest(ctx context.Context, body []byte) (*http.Request, error) {
-	url := strings.TrimRight(p.config.BaseURL, "/") + "/messages"
+	url := ResolveBaseURLForProtocol(p.config, TypeAnthropic) + "/v1/messages"
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {

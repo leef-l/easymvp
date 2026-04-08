@@ -48,10 +48,11 @@ func (j *Judge) Evaluate(ctx context.Context, in *AcceptContext, evidence []Evid
 
 	// 2. 创建 Provider
 	p, err := provider.GetProvider(provider.Config{
-		ProviderType: modelInfo.ProviderType,
-		BaseURL:      modelInfo.BaseURL,
-		APIKey:       modelInfo.APIKey,
-		APISecret:    modelInfo.APISecret,
+		ProviderType:       modelInfo.ProviderType,
+		SupportedProtocols: modelInfo.SupportedProtocols,
+		BaseURL:            modelInfo.BaseURL,
+		APIKey:             modelInfo.APIKey,
+		APISecret:          modelInfo.APISecret,
 	})
 	if err != nil {
 		g.Log().Warningf(ctx, "[Judge] 创建 Provider 失败(降级): %v", err)
@@ -91,11 +92,12 @@ func (j *Judge) Evaluate(ctx context.Context, in *AcceptContext, evidence []Evid
 
 // judgeModelInfo 内部模型信息结构。
 type judgeModelInfo struct {
-	ModelCode    string
-	ProviderType string
-	BaseURL      string
-	APIKey       string
-	APISecret    string
+	ModelCode          string
+	ProviderType       string
+	SupportedProtocols []string
+	BaseURL            string
+	APIKey             string
+	APISecret          string
 }
 
 // resolveProjectModel 获取项目指定角色的模型配置，缺失时自动从默认预设创建。
@@ -109,7 +111,7 @@ func resolveProjectModel(ctx context.Context, projectID int64, roleType string) 
 	model, err := g.DB().Model("ai_model m").Ctx(ctx).
 		LeftJoin("ai_plan p", "p.id = m.plan_id").
 		LeftJoin("ai_provider pv", "pv.id = m.provider_id").
-		Fields("m.model_code, pv.provider_type, pv.base_url, p.api_key, p.api_secret").
+		Fields("m.model_code, pv.provider_type, pv.supported_protocols, pv.base_url, p.api_key, p.api_secret").
 		Where("m.id", modelID).
 		Where("m.deleted_at IS NULL").
 		One()
@@ -121,11 +123,12 @@ func resolveProjectModel(ctx context.Context, projectID int64, roleType string) 
 	}
 
 	return &judgeModelInfo{
-		ModelCode:    model["model_code"].String(),
-		ProviderType: model["provider_type"].String(),
-		BaseURL:      model["base_url"].String(),
-		APIKey:       model["api_key"].String(),
-		APISecret:    model["api_secret"].String(),
+		ModelCode:          model["model_code"].String(),
+		ProviderType:       model["provider_type"].String(),
+		SupportedProtocols: provider.DecodeSupportedProtocols(model["supported_protocols"].String(), model["provider_type"].String()),
+		BaseURL:            model["base_url"].String(),
+		APIKey:             model["api_key"].String(),
+		APISecret:          model["api_secret"].String(),
 	}, nil
 }
 

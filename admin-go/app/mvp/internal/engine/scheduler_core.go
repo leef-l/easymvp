@@ -32,11 +32,11 @@ type projectRuntime struct {
 //   - 任务完成/失败时清理 DB 和内存中的资源锁
 type Scheduler struct {
 	mu             sync.Mutex
-	running        map[int64]bool               // 正在执行的任务 ID（内存缓存，启动时从 DB 恢复）
-	lockedRes      map[string]int64             // 已锁定的资源 -> 占用任务 ID（内存缓存，与 DB 同步）
-	maxConcurrency int                          // 最大并发 goroutine 数
-	executor       *Executor                    // 任务执行器
-	projectCtx     map[int64]*projectRuntime    // 项目级运行句柄（ctx + cancel）
+	running        map[int64]bool            // 正在执行的任务 ID（内存缓存，启动时从 DB 恢复）
+	lockedRes      map[string]int64          // 已锁定的资源 -> 占用任务 ID（内存缓存，与 DB 同步）
+	maxConcurrency int                       // 最大并发 goroutine 数
+	executor       *Executor                 // 任务执行器
+	projectCtx     map[int64]*projectRuntime // 项目级运行句柄（ctx + cancel）
 }
 
 type resourceParseResult struct {
@@ -109,7 +109,7 @@ var (
 func GetScheduler() *Scheduler {
 	defaultSchedulerOnce.Do(func() {
 		ctx := context.Background()
-		maxConcurrent := GetConfigInt(ctx, "scheduler.max_concurrent", "engine.scheduler.maxConcurrent", 20)
+		maxConcurrent := GetSchedulerMaxConcurrency(ctx)
 		defaultScheduler = NewScheduler(maxConcurrent)
 		g.Log().Infof(ctx, "[Scheduler] 配置加载: maxConcurrent=%d", maxConcurrent)
 	})

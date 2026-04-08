@@ -19,22 +19,56 @@ var defaultRepo = &repo{}
 
 // create 插入工作空间记录。
 func (r *repo) create(ctx context.Context, ws *TaskWorkspace) error {
-	ws.ID = int64(snowflake.Generate())
 	now := gtime.Now()
-	_, err := g.DB().Model("mvp_task_workspace").Ctx(ctx).Data(g.Map{
-		"id":              ws.ID,
-		"task_id":         ws.TaskID,
-		"workflow_run_id": ws.WorkflowRunID,
-		"project_id":     ws.ProjectID,
-		"workspace_type":  ws.WorkspaceType,
-		"workspace_path":  ws.WorkspacePath,
-		"base_ref":        ws.BaseRef,
-		"status":          ws.Status,
-		"cleanup_status":  ws.CleanupStatus,
-		"created_at":      now,
-		"updated_at":      now,
-	}).Insert()
-	return err
+	ws.ID = int64(snowflake.Generate())
+
+	sql := `
+INSERT INTO mvp_task_workspace
+	(id, task_id, workflow_run_id, project_id, workspace_type, workspace_path, base_ref, status, cleanup_status, created_at, updated_at)
+VALUES
+	(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+	workflow_run_id = VALUES(workflow_run_id),
+	project_id = VALUES(project_id),
+	workspace_type = VALUES(workspace_type),
+	workspace_path = VALUES(workspace_path),
+	base_ref = VALUES(base_ref),
+	status = VALUES(status),
+	cleanup_status = VALUES(cleanup_status),
+	diff_summary = NULL,
+	error_message = NULL,
+	deleted_at = NULL,
+	created_at = VALUES(created_at),
+	updated_at = VALUES(updated_at)
+`
+	if _, err := g.DB().Exec(ctx, sql,
+		ws.ID,
+		ws.TaskID,
+		ws.WorkflowRunID,
+		ws.ProjectID,
+		ws.WorkspaceType,
+		ws.WorkspacePath,
+		ws.BaseRef,
+		ws.Status,
+		ws.CleanupStatus,
+		now,
+		now,
+	); err != nil {
+		return err
+	}
+
+	record, err := g.DB().Model("mvp_task_workspace").Ctx(ctx).
+		Where("task_id", ws.TaskID).
+		Fields("id").
+		One()
+	if err != nil {
+		return err
+	}
+	if record.IsEmpty() {
+		return fmt.Errorf("workspace upsert 后查询 task_id=%d 失败", ws.TaskID)
+	}
+	ws.ID = record["id"].Int64()
+	return nil
 }
 
 // getByTaskID 按任务 ID 查询工作空间。

@@ -15,11 +15,11 @@ import (
 )
 
 var (
-	tasksRe          = regexp.MustCompile(`(?s)\{\s*"tasks"\s*:\s*\[.*?\]\s*\}`)
-	tasksGreedyRe    = regexp.MustCompile(`(?s)\{\s*"tasks"\s*:\s*\[[\s\S]*\]\s*\}`)
-	arrayRe          = regexp.MustCompile(`(?s)\[\s*\{[\s\S]*\}\s*\]`)
-	multiCommentRe   = regexp.MustCompile(`(?s)/\*.*?\*/`)
-	trailingCommaRe  = regexp.MustCompile(`,\s*([\]\}])`)
+	tasksRe              = regexp.MustCompile(`(?s)\{\s*"tasks"\s*:\s*\[.*?\]\s*\}`)
+	tasksGreedyRe        = regexp.MustCompile(`(?s)\{\s*"tasks"\s*:\s*\[[\s\S]*\]\s*\}`)
+	arrayRe              = regexp.MustCompile(`(?s)\[\s*\{[\s\S]*\}\s*\]`)
+	multiCommentRe       = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	trailingCommaRe      = regexp.MustCompile(`,\s*([\]\}])`)
 	codeBlockReParserExt = regexp.MustCompile("(?s)```(?:json)?\\s*\\n?([\\{\\[][\\s\\S]*?[\\}\\]])\\s*```")
 )
 
@@ -230,7 +230,7 @@ func (p *TaskParser) aiExtractTasks(ctx context.Context, aiReply, projectCategor
 		}
 	}
 
-	prompt := fmt.Sprintf(`你是一个任务提取助手。请从以下内容中提取所有任务/章节/模块，转换为标准 JSON 任务列表。
+	prompt := fmt.Sprintf(`你是一个任务提取助手。请基于“项目目标 / 最近用户要求 / 架构师回复”三个上下文，提取能够直接交付目标的最终任务，并转换为标准 JSON 任务列表。
 
 项目分类：%s
 
@@ -238,8 +238,11 @@ func (p *TaskParser) aiExtractTasks(ctx context.Context, aiReply, projectCategor
 1. 每个任务必须有 name 和 description
 2. 有批次/阶段信息映射到 batch_no（从1开始）
 3. 小说/创意类项目：每个"卷"或"阶段"作为一个任务，章节范围和概要放在 description 中
-4. 任务数量控制在 5-30 个，太细的合并
-5. 只输出 JSON，不要其他内容
+4. 任务数量控制在 2-30 个，太细的合并
+5. 忽略 tool_call / invoke / cli-mcp-server_run_command / XML 标签 / 命令探测痕迹，这些不是任务
+6. 不要保留“查看目录 / 读取文件 / 环境分析”这类无交付占位任务，除非它本身就是明确交付物
+7. 如果架构师回复只包含勘察动作，也要回到项目目标和最近用户要求，推导出最小可交付任务清单
+8. 只输出 JSON，不要其他内容
 
 输出格式：
 {"tasks": [{"name": "任务名", "description": "描述", "batch_no": 1, "affected_resources": [], "depends_on": []}]}
@@ -338,7 +341,7 @@ func getDefaultReviewModel(ctx context.Context) *ModelInfo {
 	model, err := g.DB().Model("ai_model m").Ctx(ctx).
 		LeftJoin("ai_plan p", "p.id = m.plan_id").
 		LeftJoin("ai_provider pv", "pv.id = m.provider_id").
-		Fields("m.model_code, m.max_tokens, pv.provider_type, pv.base_url, p.api_key, p.api_secret, m.role_prompt").
+		Fields("m.model_code, m.max_tokens, pv.provider_type, pv.supported_protocols, pv.base_url, p.api_key, p.api_secret, m.role_prompt").
 		Where("m.deleted_at IS NULL").
 		Where("m.id", preset["model_id"].Int64()).
 		One()
@@ -352,23 +355,25 @@ func getDefaultReviewModel(ctx context.Context) *ModelInfo {
 	}
 
 	return &ModelInfo{
-		ModelCode:    model["model_code"].String(),
-		ProviderType: model["provider_type"].String(),
-		BaseURL:      model["base_url"].String(),
-		APIKey:       model["api_key"].String(),
-		APISecret:    model["api_secret"].String(),
-		SystemPrompt: sp,
-		MaxTokens:    model["max_tokens"].Int(),
+		ModelCode:          model["model_code"].String(),
+		ProviderType:       model["provider_type"].String(),
+		SupportedProtocols: decodeProviderProtocols(model["supported_protocols"].String(), model["provider_type"].String()),
+		BaseURL:            model["base_url"].String(),
+		APIKey:             model["api_key"].String(),
+		APISecret:          model["api_secret"].String(),
+		SystemPrompt:       sp,
+		MaxTokens:          model["max_tokens"].Int(),
 	}
 }
 
 // callAIForJSON 调用 AI 获取 JSON 结果（非流式）。
 func callAIForJSON(ctx context.Context, modelInfo *ModelInfo, prompt string) (string, error) {
 	p, err := provider.GetProvider(provider.Config{
-		ProviderType: modelInfo.ProviderType,
-		BaseURL:      modelInfo.BaseURL,
-		APIKey:       modelInfo.APIKey,
-		APISecret:    modelInfo.APISecret,
+		ProviderType:       modelInfo.ProviderType,
+		SupportedProtocols: modelInfo.SupportedProtocols,
+		BaseURL:            modelInfo.BaseURL,
+		APIKey:             modelInfo.APIKey,
+		APISecret:          modelInfo.APISecret,
 	})
 	if err != nil {
 		return "", err

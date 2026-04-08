@@ -10,49 +10,49 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
-	"easymvp/app/mvp/internal/consts"
-	"easymvp/app/mvp/internal/engine"
-	"easymvp/app/mvp/internal/workflow/acceptance"
 	"easymvp/app/mvp/internal/collab/adapter"
 	collabRepo "easymvp/app/mvp/internal/collab/repo"
 	collabService "easymvp/app/mvp/internal/collab/service"
-	executorPkg "easymvp/app/mvp/internal/workflow/executor"
-	"easymvp/app/mvp/internal/workspace"
+	"easymvp/app/mvp/internal/consts"
+	"easymvp/app/mvp/internal/engine"
+	"easymvp/app/mvp/internal/workflow/acceptance"
+	"easymvp/app/mvp/internal/workflow/autonomy"
 	"easymvp/app/mvp/internal/workflow/domain/plan"
 	domainTask "easymvp/app/mvp/internal/workflow/domain/task"
-	"easymvp/app/mvp/internal/workflow/autonomy"
 	"easymvp/app/mvp/internal/workflow/event"
+	executorPkg "easymvp/app/mvp/internal/workflow/executor"
 	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/app/mvp/internal/workflow/runtime"
 	"easymvp/app/mvp/internal/workflow/scheduler"
 	acceptStage "easymvp/app/mvp/internal/workflow/stage/accept"
 	completeStage "easymvp/app/mvp/internal/workflow/stage/complete"
 	executeStage "easymvp/app/mvp/internal/workflow/stage/execute"
-	reworkStage "easymvp/app/mvp/internal/workflow/stage/rework"
 	reviewStage "easymvp/app/mvp/internal/workflow/stage/review"
+	reworkStage "easymvp/app/mvp/internal/workflow/stage/rework"
 	watchdogV2 "easymvp/app/mvp/internal/workflow/watchdog"
+	"easymvp/app/mvp/internal/workspace"
 )
 
 var (
-	once            sync.Once
-	workflowSvc     *WorkflowService
-	stageSvc        *StageService
-	planVersionSvc  *plan.PlanVersionService
-	reviewStageSvc  *reviewStage.Service
-	executeStageSvc *executeStage.Service
-	taskScheduler   *scheduler.DomainTaskScheduler
+	once              sync.Once
+	workflowSvc       *WorkflowService
+	stageSvc          *StageService
+	planVersionSvc    *plan.PlanVersionService
+	reviewStageSvc    *reviewStage.Service
+	executeStageSvc   *executeStage.Service
+	taskScheduler     *scheduler.DomainTaskScheduler
 	acceptStageSvc    *acceptStage.Service
 	reworkStageSvc    *reworkStage.Service
 	completeStageSvc  *completeStage.Service
 	domainWatchdog    *watchdogV2.DomainTaskWatchdog
-	runtimeMgr      *runtime.Manager
-	eventBus        *event.Bus
-	eventPublisher  *event.Publisher
-	execRegistry    *executorPkg.Registry
-	decisionCenter     *autonomy.DecisionCenter
-	collabBindingRepo  *collabRepo.BindingRepo
-	metaAssessor       *autonomy.MetaAssessor
-	metaTuner          *autonomy.MetaTuner
+	runtimeMgr        *runtime.Manager
+	eventBus          *event.Bus
+	eventPublisher    *event.Publisher
+	execRegistry      *executorPkg.Registry
+	decisionCenter    *autonomy.DecisionCenter
+	collabBindingRepo *collabRepo.BindingRepo
+	metaAssessor      *autonomy.MetaAssessor
+	metaTuner         *autonomy.MetaTuner
 )
 
 // Init 初始化所有工作流服务单例。在应用启动时调用一次。
@@ -137,6 +137,9 @@ func Init() {
 
 		// 注册 accept → complete 回调（决策点 4: accept.passed）
 		acceptStageSvc.SetCompleteTrigger(func(ctx context.Context, workflowRunID int64) error {
+			if acceptStage.HasManualCompleteBypass(ctx) {
+				return stageSvc.completeWorkflow(ctx, workflowRunID)
+			}
 			if decisionCenter.IsEnabled(ctx) {
 				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id") //nolint: errcheck — best-effort for autonomy decision
 				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
@@ -162,31 +165,30 @@ func Init() {
 
 		// 注册 rework 完成后推回 execute 的回调
 		reworkStageSvc.SetExecuteTrigger(func(ctx context.Context, workflowRunID, planVersionID int64) error {
-			g.Log().Infof(ctx, "[Registry] rework 完成，恢复执行状态: workflowRunID=%d", workflowRunID)
-
-			// CAS: reworking → executing（CompleteStage(rework) 不改 workflow_run 状态，需显式恢复）
-			rows, err := workflowSvc.wfRepo.UpdateStatus(ctx, workflowRunID,
-				consts.WorkflowRunStatusReworking, consts.WorkflowRunStatusExecuting, g.Map{
-					"current_stage": "execute",
-					"updated_at":    gtime.Now(),
-				})
+			wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+				Where("id", workflowRunID).
+				WhereNull("deleted_at").
+				Fields("status").
+				One()
 			if err != nil {
-				return fmt.Errorf("rework→executing 状态恢复失败: %w", err)
+				return fmt.Errorf("查询 workflow_run 失败: %w", err)
 			}
-			if rows == 0 {
-				g.Log().Warningf(ctx, "[Registry] rework→executing CAS 失败，workflow_run(%d) 可能已被取消/暂停", workflowRunID)
+			if wfRun.IsEmpty() {
+				return fmt.Errorf("workflow_run(%d) 不存在", workflowRunID)
+			}
+			if wfRun["status"].String() != consts.WorkflowRunStatusReworking {
+				g.Log().Warningf(ctx, "[Registry] rework 完成时 workflow_run(%d) 已不在 reworking 状态，跳过回流 execute", workflowRunID)
 				return nil
 			}
 
-			// 同步 project.status
-			projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-				Where("id", workflowRunID).Value("project_id")
-			if projectID.Int64() > 0 {
-				if _, syncErr := g.DB().Model("mvp_project").Ctx(ctx).
-					Where("id", projectID.Int64()).
-					Update(g.Map{"status": consts.WorkflowRunStatusExecuting, "updated_at": gtime.Now()}); syncErr != nil {
-					g.Log().Errorf(ctx, "[Registry] 同步 project status 失败: projectID=%d err=%v", projectID.Int64(), syncErr)
-				}
+			stageRunID, err := stageSvc.StartStage(ctx, workflowRunID, consts.StageTypeExecute)
+			if err != nil {
+				return fmt.Errorf("rework 完成后创建 execute stage 失败: %w", err)
+			}
+			g.Log().Infof(ctx, "[Registry] rework 完成，已重新进入 execute: workflowRunID=%d stageRunID=%d", workflowRunID, stageRunID)
+
+			if err := PrepareTaskSchedulerForStage(ctx, workflowRunID, consts.StageTypeExecute, stageRunID); err != nil {
+				return fmt.Errorf("rework 完成后绑定 execute 调度器失败: %w", err)
 			}
 
 			// 重启调度器拾取 pending 任务
@@ -210,9 +212,9 @@ func Init() {
 				if decisionCenter.IsEnabled(ctx) {
 					projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id") //nolint: errcheck — best-effort for autonomy decision
 					resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
-						WorkflowRunID: workflowRunID,
-						ProjectID:     projectID.Int64(),
-						TriggerSource: consts.TriggerAcceptManualReview,
+						WorkflowRunID:  workflowRunID,
+						ProjectID:      projectID.Int64(),
+						TriggerSource:  consts.TriggerAcceptManualReview,
 						TriggerContext: map[string]interface{}{"accept_run_id": acceptRunID},
 					})
 					if resp.Handled {
@@ -296,10 +298,24 @@ func Init() {
 		workflowSvc.SetWorkflowResumedCallback(func(ctx context.Context, workflowRunID int64, resumeStatus string) {
 			if resumeStatus == consts.WorkflowRunStatusExecuting || resumeStatus == consts.WorkflowRunStatusReworking {
 				g.Log().Infof(ctx, "[Registry] 工作流恢复，重启调度器: workflowRunID=%d status=%s", workflowRunID, resumeStatus)
+				stageType := consts.StageTypeExecute
+				if resumeStatus == consts.WorkflowRunStatusReworking {
+					stageType = consts.StageTypeRework
+				}
+				if err := PrepareTaskSchedulerForStage(ctx, workflowRunID, stageType, 0); err != nil {
+					g.Log().Errorf(ctx, "[Registry] 工作流恢复后绑定调度器失败: workflowRunID=%d err=%v", workflowRunID, err)
+					return
+				}
 				if err := taskScheduler.Start(ctx, workflowRunID); err != nil {
 					g.Log().Errorf(ctx, "[Registry] 工作流恢复后调度器启动失败: workflowRunID=%d err=%v", workflowRunID, err)
 				}
 			}
+		})
+
+		// 注册工作流取消后的回调（停止调度器并释放运行中任务）。
+		workflowSvc.SetWorkflowCanceledCallback(func(ctx context.Context, workflowRunID int64) {
+			g.Log().Infof(ctx, "[Registry] 工作流取消，停止调度器: workflowRunID=%d", workflowRunID)
+			taskScheduler.Pause(ctx, workflowRunID)
 		})
 
 		// Watchdog V2: 监控 domain_task 心跳
@@ -317,10 +333,10 @@ func Init() {
 			if decisionCenter.IsEnabled(ctx) {
 				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", wfRunID.Int64()).Value("project_id") //nolint: errcheck — best-effort for autonomy
 				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
-					WorkflowRunID: wfRunID.Int64(),
-					ProjectID:     projectID.Int64(),
-					DomainTaskID:  taskID,
-					TriggerSource: consts.TriggerTaskFailed,
+					WorkflowRunID:  wfRunID.Int64(),
+					ProjectID:      projectID.Int64(),
+					DomainTaskID:   taskID,
+					TriggerSource:  consts.TriggerTaskFailed,
 					TriggerContext: map[string]interface{}{"task_id": taskID},
 				})
 				if resp.Handled {
@@ -335,10 +351,10 @@ func Init() {
 			if decisionCenter.IsEnabled(ctx) {
 				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id") //nolint: errcheck — best-effort for autonomy decision
 				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
-					WorkflowRunID: workflowRunID,
-					ProjectID:     projectID.Int64(),
-					DomainTaskID:  taskID,
-					TriggerSource: consts.TriggerTaskRetryExhausted,
+					WorkflowRunID:  workflowRunID,
+					ProjectID:      projectID.Int64(),
+					DomainTaskID:   taskID,
+					TriggerSource:  consts.TriggerTaskRetryExhausted,
 					TriggerContext: map[string]interface{}{"task_id": taskID},
 				})
 				if resp.Handled {
@@ -355,9 +371,9 @@ func Init() {
 			if decisionCenter.IsEnabled(ctx) {
 				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id") //nolint: errcheck — best-effort for autonomy decision
 				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
-					WorkflowRunID: workflowRunID,
-					ProjectID:     projectID.Int64(),
-					TriggerSource: consts.TriggerCircuitBreak,
+					WorkflowRunID:  workflowRunID,
+					ProjectID:      projectID.Int64(),
+					TriggerSource:  consts.TriggerCircuitBreak,
 					TriggerContext: map[string]interface{}{"reason": reason},
 				})
 				if resp.Handled {
@@ -372,9 +388,9 @@ func Init() {
 			// 决策点 8: replan.suggested — 自治中台包裹
 			if decisionCenter.IsEnabled(ctx) {
 				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
-					WorkflowRunID: workflowRunID,
-					ProjectID:     projectID,
-					TriggerSource: consts.TriggerReplanSuggested,
+					WorkflowRunID:  workflowRunID,
+					ProjectID:      projectID,
+					TriggerSource:  consts.TriggerReplanSuggested,
 					TriggerContext: map[string]interface{}{"break_reason": breakReason},
 				})
 				if resp.Handled {
@@ -443,12 +459,12 @@ func Init() {
 
 		// ==================== Phase B: 策略函数 + Planner + Actuator ====================
 		planner := autonomy.NewPlanner()
-		planner.Register(autonomy.NewCostGuardStrategy())           // 优先级 100：成本最优先
-		planner.Register(autonomy.NewAdaptiveRetryStrategy())       // 优先级 90：失败处理
-		planner.Register(autonomy.NewProactiveReplanStrategy())     // 优先级 70：主动重规划
-		planner.Register(autonomy.NewEngineSelectionStrategy())     // 优先级 70：执行器选择
-		planner.Register(autonomy.NewBatchAdjustStrategy())         // 优先级 60：批次调整
-		planner.Register(autonomy.NewQualityGateStrategy())         // 优先级 50：质量门
+		planner.Register(autonomy.NewCostGuardStrategy())       // 优先级 100：成本最优先
+		planner.Register(autonomy.NewAdaptiveRetryStrategy())   // 优先级 90：失败处理
+		planner.Register(autonomy.NewProactiveReplanStrategy()) // 优先级 70：主动重规划
+		planner.Register(autonomy.NewEngineSelectionStrategy()) // 优先级 70：执行器选择
+		planner.Register(autonomy.NewBatchAdjustStrategy())     // 优先级 60：批次调整
+		planner.Register(autonomy.NewQualityGateStrategy())     // 优先级 50：质量门
 		actuator := autonomy.NewActuator()
 		decisionCenter.SetPhaseBDeps(planner, actuator)
 
@@ -708,10 +724,33 @@ func triggerReviewStage(ctx context.Context, projectID, planVersionID int64) err
 	workflowRunID := wfRun["id"].Int64()
 	currentStageRunID := wfRun["current_stage_run_id"].Int64()
 
-	// 完成 design stage（必须成功，否则阻止进入 review）
+	// 完成 design stage。若当前 design stage 已被人工清理或重建，允许跳过旧实例，避免审核链路被陈旧 stage_run 卡死。
 	if currentStageRunID > 0 {
-		if err := stageSvc.CompleteStage(ctx, currentStageRunID); err != nil {
-			return fmt.Errorf("完成 design stage 失败，无法进入审核: %w", err)
+		stageRun, stageErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
+			Where("id", currentStageRunID).
+			Fields("stage_type, status, deleted_at").
+			One()
+		if stageErr != nil {
+			return fmt.Errorf("查询 design stage 失败，无法进入审核: %w", stageErr)
+		}
+
+		switch {
+		case stageRun.IsEmpty():
+			g.Log().Warningf(ctx, "[triggerReviewStage] design stage_run(%d) 不存在，继续进入 review", currentStageRunID)
+		case stageRun["stage_type"].String() != consts.StageTypeDesign:
+			g.Log().Warningf(ctx, "[triggerReviewStage] 当前 stage_run(%d) 不是 design，而是 %s，继续进入 review",
+				currentStageRunID, stageRun["stage_type"].String())
+		case !stageRun["deleted_at"].IsEmpty():
+			g.Log().Warningf(ctx, "[triggerReviewStage] design stage_run(%d) 已被软删除，继续进入 review", currentStageRunID)
+		case stageRun["status"].String() == consts.StageStatusCompleted:
+			// 已完成则直接进入审核
+		case stageRun["status"].String() == consts.StageStatusRunning:
+			if err := stageSvc.CompleteStage(ctx, currentStageRunID); err != nil {
+				return fmt.Errorf("完成 design stage 失败，无法进入审核: %w", err)
+			}
+		default:
+			return fmt.Errorf("design stage_run(%d) 状态异常(%s)，无法进入审核",
+				currentStageRunID, stageRun["status"].String())
 		}
 	}
 
@@ -764,6 +803,33 @@ func triggerExecuteStage(ctx context.Context, workflowRunID, planVersionID int64
 	}
 
 	g.Log().Infof(ctx, "[triggerExecuteStage] 执行阶段已启动 workflowRunID=%d stageRunID=%d planVersionID=%d", workflowRunID, stageRunID, planVersionID)
+	return nil
+}
+
+// PrepareTaskSchedulerForStage 在恢复/人工接管场景下，为既有任务重新绑定执行器后再启动调度器。
+func PrepareTaskSchedulerForStage(ctx context.Context, workflowRunID int64, stageType string, stageRunID int64) error {
+	Init()
+
+	switch stageType {
+	case consts.StageTypeExecute:
+		if stageRunID == 0 {
+			val, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+				Where("id", workflowRunID).
+				WhereNull("deleted_at").
+				Value("current_stage_run_id")
+			if err != nil {
+				return fmt.Errorf("查询 execute stage_run 失败: %w", err)
+			}
+			stageRunID = val.Int64()
+		}
+		if stageRunID == 0 {
+			return fmt.Errorf("workflow_run(%d) 当前 execute stage_run 为空", workflowRunID)
+		}
+		executeStageSvc.BindExecuteStage(stageRunID, workflowRunID)
+	case consts.StageTypeRework:
+		executeStageSvc.BindExecutor(workflowRunID)
+	}
+
 	return nil
 }
 

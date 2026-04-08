@@ -19,6 +19,7 @@ import (
 	"easymvp/app/mvp/internal/workflow/autonomy"
 	"easymvp/app/mvp/internal/workflow/orchestrator"
 	"easymvp/app/mvp/internal/workflow/repo"
+	"easymvp/app/mvp/internal/workspace"
 	"easymvp/utility/snowflake"
 )
 
@@ -27,6 +28,7 @@ var Workflow = cWorkflow{}
 type cWorkflow struct{}
 
 const projectRuntimeSnapshotFreshWindow = 2 * time.Minute
+const projectRuntimeTaskActiveWindow = 3 * time.Minute
 
 type projectRuntimeTaskStat struct {
 	WorkflowRunID  int64 `orm:"workflow_run_id"`
@@ -34,6 +36,23 @@ type projectRuntimeTaskStat struct {
 	CompletedTasks int   `orm:"completed_tasks"`
 	FailedTasks    int   `orm:"failed_tasks"`
 	RunningTasks   int   `orm:"running_tasks"`
+}
+
+type projectRuntimeTaskActivityRow struct {
+	WorkflowRunID int64       `orm:"workflow_run_id"`
+	Status        string      `orm:"status"`
+	BatchNo       int         `orm:"batch_no"`
+	HeartbeatAt   *gtime.Time `orm:"heartbeat_at"`
+	StartedAt     *gtime.Time `orm:"started_at"`
+	CompletedAt   *gtime.Time `orm:"completed_at"`
+	UpdatedAt     *gtime.Time `orm:"updated_at"`
+}
+
+type projectRuntimeTaskActivityStat struct {
+	LastActiveAt       *gtime.Time
+	ActiveBatch        int
+	ActiveRunningTasks int
+	StalledTaskCount   int
 }
 
 type projectRuntimeSnapshot struct {
@@ -51,10 +70,609 @@ type workflowRuntimeSnapshotLatestID struct {
 	ID            int64 `orm:"id"`
 }
 
+type workflowArtifactResetOptions struct {
+	PauseScheduler          bool
+	CancelRuntime           bool
+	DeleteDomainTasks       bool
+	DeleteStageTasks        bool
+	DeleteStageRuns         bool
+	DeleteReviewIssues      bool
+	DeleteAcceptRuns        bool
+	DeleteTaskWorkspaces    bool
+	CleanupPhysicalWorktree bool
+	SupersedePlanVersions   bool
+}
+
+type domainTaskUpdateOptions struct {
+	TaskID                   int64
+	Name                     string
+	Description              string
+	RoleType                 string
+	RoleLevel                string
+	ExecutionMode            string
+	BatchNo                  *int
+	Sort                     *int
+	AffectedResources        []string
+	ReplaceAffectedResources bool
+	RestartAfterUpdate       bool
+	Reason                   string
+}
+
 // checkProjectOwnership 校验项目访问权限（支持 owner/同部门/超管三级）。
 // 兼容别名：旧调用不需要改名。
 func checkProjectOwnership(ctx context.Context, projectID int64) error {
 	return middleware.CheckProjectAccess(ctx, projectID)
+}
+
+func latestWorkflowRunForProject(ctx context.Context, projectID int64) (gdb.Record, error) {
+	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at").
+		OrderDesc("run_no").
+		OrderDesc("created_at").
+		One()
+	if err != nil {
+		return nil, fmt.Errorf("查询工作流运行失败: %w", err)
+	}
+	if wfRun.IsEmpty() {
+		return nil, fmt.Errorf("项目 %d 没有工作流运行记录", projectID)
+	}
+	return wfRun, nil
+}
+
+func resolvePlanVersionForForceStage(ctx context.Context, projectID, workflowRunID, requestedPlanVersionID int64) (int64, error) {
+	if requestedPlanVersionID > 0 {
+		record, err := g.DB().Model("mvp_plan_version").Ctx(ctx).
+			Where("id", requestedPlanVersionID).
+			Where("project_id", projectID).
+			WhereIn("status", g.Slice{"draft", "active"}).
+			WhereNull("deleted_at").
+			One()
+		if err != nil {
+			return 0, fmt.Errorf("查询方案版本失败: %w", err)
+		}
+		if record.IsEmpty() {
+			return 0, fmt.Errorf("方案版本 %d 不存在或不可用于重启阶段", requestedPlanVersionID)
+		}
+		return requestedPlanVersionID, nil
+	}
+
+	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("id", workflowRunID).
+		WhereNull("deleted_at").
+		Fields("active_plan_version_id").
+		One()
+	if err == nil && !wfRun.IsEmpty() && wfRun["active_plan_version_id"].Int64() > 0 {
+		return wfRun["active_plan_version_id"].Int64(), nil
+	}
+
+	record, err := g.DB().Model("mvp_plan_version").Ctx(ctx).
+		Where("project_id", projectID).
+		WhereIn("status", g.Slice{"active", "draft"}).
+		WhereNull("deleted_at").
+		OrderDesc("version_no").
+		One()
+	if err != nil {
+		return 0, fmt.Errorf("查询最新方案版本失败: %w", err)
+	}
+	if record.IsEmpty() {
+		return 0, fmt.Errorf("项目 %d 没有可用于重启的方案版本", projectID)
+	}
+	return record["id"].Int64(), nil
+}
+
+func resetWorkflowArtifacts(ctx context.Context, projectID, workflowRunID int64, opts workflowArtifactResetOptions) error {
+	if workflowRunID == 0 {
+		return fmt.Errorf("workflowRunID 不能为空")
+	}
+
+	if opts.PauseScheduler {
+		if scheduler := orchestrator.GetTaskScheduler(); scheduler != nil {
+			scheduler.Pause(ctx, workflowRunID)
+		}
+	}
+
+	if opts.CancelRuntime {
+		orchestrator.GetRuntimeManager().Cancel(workflowRunID)
+	}
+
+	now := gtime.Now()
+
+	if opts.DeleteTaskWorkspaces {
+		workspaces, err := g.DB().Model("mvp_task_workspace").Ctx(ctx).
+			Where("workflow_run_id", workflowRunID).
+			WhereNull("deleted_at").
+			Fields("task_id").
+			All()
+		if err != nil {
+			return fmt.Errorf("查询工作空间记录失败: %w", err)
+		}
+
+		if opts.CleanupPhysicalWorktree {
+			wsMgr := workspace.NewGitWorktreeManager()
+			for _, ws := range workspaces {
+				taskID := ws["task_id"].Int64()
+				if taskID == 0 {
+					continue
+				}
+				if cleanErr := wsMgr.Cleanup(context.Background(), taskID); cleanErr != nil {
+					g.Log().Warningf(ctx, "[WorkflowReset] 清理任务工作空间失败: task=%d err=%v", taskID, cleanErr)
+				}
+			}
+		}
+
+		if _, err := g.DB().Model("mvp_task_workspace").Ctx(ctx).
+			Where("workflow_run_id", workflowRunID).
+			WhereNull("deleted_at").
+			Update(g.Map{"deleted_at": now, "updated_at": now}); err != nil {
+			return fmt.Errorf("归档旧工作空间失败: %w", err)
+		}
+	}
+
+	if opts.DeleteStageTasks {
+		stageRunIDs, err := g.DB().Model("mvp_stage_run").Ctx(ctx).
+			Where("workflow_run_id", workflowRunID).
+			WhereNull("deleted_at").
+			Fields("id").
+			Array()
+		if err != nil {
+			return fmt.Errorf("查询阶段实例失败: %w", err)
+		}
+		if len(stageRunIDs) > 0 {
+			idList := make([]int64, 0, len(stageRunIDs))
+			for _, v := range stageRunIDs {
+				idList = append(idList, v.Int64())
+			}
+			if _, err := g.DB().Model("mvp_stage_task").Ctx(ctx).
+				WhereIn("stage_run_id", idList).
+				WhereNull("deleted_at").
+				Update(g.Map{"deleted_at": now, "updated_at": now}); err != nil {
+				return fmt.Errorf("归档旧阶段任务失败: %w", err)
+			}
+		}
+	}
+
+	resetTables := []struct {
+		enabled bool
+		table   string
+		label   string
+	}{
+		{enabled: opts.DeleteDomainTasks, table: "mvp_domain_task", label: "领域任务"},
+		{enabled: opts.DeleteReviewIssues, table: "mvp_review_issue", label: "审核问题"},
+		{enabled: opts.DeleteAcceptRuns, table: "mvp_accept_run", label: "验收记录"},
+		{enabled: opts.DeleteStageRuns, table: "mvp_stage_run", label: "阶段实例"},
+	}
+	for _, item := range resetTables {
+		if !item.enabled {
+			continue
+		}
+		if _, err := g.DB().Model(item.table).Ctx(ctx).
+			Where("workflow_run_id", workflowRunID).
+			WhereNull("deleted_at").
+			Update(g.Map{"deleted_at": now, "updated_at": now}); err != nil {
+			return fmt.Errorf("归档旧%s失败: %w", item.label, err)
+		}
+	}
+
+	if opts.SupersedePlanVersions {
+		planVersionIDs, err := g.DB().Model("mvp_plan_version").Ctx(ctx).
+			Where("project_id", projectID).
+			WhereIn("status", g.Slice{"draft", "active"}).
+			WhereNull("deleted_at").
+			Fields("id").
+			Array()
+		if err != nil {
+			return fmt.Errorf("查询方案版本失败: %w", err)
+		}
+		if len(planVersionIDs) > 0 {
+			idList := make([]int64, 0, len(planVersionIDs))
+			for _, v := range planVersionIDs {
+				idList = append(idList, v.Int64())
+			}
+			if _, err := g.DB().Model("mvp_plan_version").Ctx(ctx).
+				WhereIn("id", idList).
+				Update(g.Map{"status": "superseded", "updated_at": now}); err != nil {
+				return fmt.Errorf("废弃方案版本失败: %w", err)
+			}
+			if _, err := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
+				WhereIn("plan_version_id", idList).
+				WhereNull("deleted_at").
+				Update(g.Map{"blueprint_status": "superseded", "updated_at": now}); err != nil {
+				return fmt.Errorf("废弃任务蓝图失败: %w", err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func resetWorkflowExecutionArtifacts(ctx context.Context, projectID, workflowRunID int64) error {
+	return resetWorkflowArtifacts(ctx, projectID, workflowRunID, workflowArtifactResetOptions{
+		PauseScheduler:          true,
+		CancelRuntime:           true,
+		DeleteDomainTasks:       true,
+		DeleteStageTasks:        true,
+		DeleteReviewIssues:      true,
+		DeleteAcceptRuns:        true,
+		DeleteTaskWorkspaces:    true,
+		CleanupPhysicalWorktree: true,
+	})
+}
+
+func ensureFreshDesignStageRun(ctx context.Context, workflowRunID int64) (int64, error) {
+	existing, err := g.DB().Model("mvp_stage_run").Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		Where("stage_type", orchestrator.StageDesign).
+		WhereIn("status", g.Slice{"pending", "running"}).
+		WhereNull("deleted_at").
+		OrderDesc("stage_no").
+		Fields("id").
+		One()
+	if err != nil {
+		return 0, fmt.Errorf("查询设计阶段失败: %w", err)
+	}
+	if !existing.IsEmpty() {
+		return existing["id"].Int64(), nil
+	}
+
+	maxNo, err := g.DB().Model("mvp_stage_run").Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at").
+		Max("stage_no")
+	if err != nil {
+		return 0, fmt.Errorf("查询 stage_no 失败: %w", err)
+	}
+
+	stageRunID := int64(snowflake.Generate())
+	scope := repo.GetProjectScopeByWorkflowRun(ctx, workflowRunID)
+	now := gtime.Now()
+	if _, err := g.DB().Model("mvp_stage_run").Ctx(ctx).Insert(g.Map{
+		"id":              stageRunID,
+		"workflow_run_id": workflowRunID,
+		"stage_type":      orchestrator.StageDesign,
+		"stage_no":        int(maxNo) + 1,
+		"status":          "running",
+		"created_by":      scope.CreatedBy,
+		"dept_id":         scope.DeptID,
+		"started_at":      now,
+		"created_at":      now,
+		"updated_at":      now,
+	}); err != nil {
+		return 0, fmt.Errorf("创建设计阶段失败: %w", err)
+	}
+
+	return stageRunID, nil
+}
+
+func preparePlanVersionForForceStage(ctx context.Context, projectID, workflowRunID, requestedPlanVersionID int64, targetStage string) (int64, error) {
+	planVersionID, err := resolvePlanVersionForForceStage(ctx, projectID, workflowRunID, requestedPlanVersionID)
+	if err != nil {
+		return 0, err
+	}
+	if err := activatePlanVersionForForceStage(ctx, projectID, workflowRunID, planVersionID, targetStage); err != nil {
+		return 0, err
+	}
+	return planVersionID, nil
+}
+
+func activatePlanVersionForForceStage(ctx context.Context, projectID, workflowRunID, planVersionID int64, targetStage string) error {
+	now := gtime.Now()
+
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		otherPlanVersions, err := tx.Model("mvp_plan_version").Ctx(ctx).
+			Where("project_id", projectID).
+			WhereIn("status", g.Slice{"draft", "active"}).
+			Where("id <>", planVersionID).
+			WhereNull("deleted_at").
+			Fields("id").
+			Array()
+		if err != nil {
+			return fmt.Errorf("查询其他方案版本失败: %w", err)
+		}
+
+		record, err := tx.Model("mvp_plan_version").Ctx(ctx).
+			Where("id", planVersionID).
+			Where("project_id", projectID).
+			WhereIn("status", g.Slice{"draft", "active"}).
+			WhereNull("deleted_at").
+			Fields("id, status").
+			One()
+		if err != nil {
+			return fmt.Errorf("查询方案版本失败: %w", err)
+		}
+		if record.IsEmpty() {
+			return fmt.Errorf("方案版本 %d 不存在或不可用于强制切换", planVersionID)
+		}
+
+		if len(otherPlanVersions) > 0 {
+			otherIDs := make([]int64, 0, len(otherPlanVersions))
+			for _, item := range otherPlanVersions {
+				otherIDs = append(otherIDs, item.Int64())
+			}
+			if _, err := tx.Model("mvp_plan_version").Ctx(ctx).
+				WhereIn("id", otherIDs).
+				Update(g.Map{"status": "superseded", "updated_at": now}); err != nil {
+				return fmt.Errorf("废弃其他方案版本失败: %w", err)
+			}
+			if _, err := tx.Model("mvp_task_blueprint").Ctx(ctx).
+				WhereIn("plan_version_id", otherIDs).
+				WhereNull("deleted_at").
+				Update(g.Map{"blueprint_status": "superseded", "updated_at": now}); err != nil {
+				return fmt.Errorf("废弃其他版本蓝图失败: %w", err)
+			}
+		}
+
+		if _, err := tx.Model("mvp_task_blueprint").Ctx(ctx).
+			Where("plan_version_id", planVersionID).
+			Where("blueprint_status", "draft").
+			Update(g.Map{"blueprint_status": "confirmed", "updated_at": now}); err != nil {
+			return fmt.Errorf("确认任务蓝图失败: %w", err)
+		}
+
+		planUpdate := g.Map{
+			"status":     "active",
+			"updated_at": now,
+		}
+		switch targetStage {
+		case "review":
+			planUpdate["review_status"] = "pending"
+			planUpdate["approved_at"] = nil
+			planUpdate["rejected_at"] = nil
+		case "execute":
+			planUpdate["review_status"] = "approved"
+			planUpdate["approved_at"] = now
+			planUpdate["rejected_at"] = nil
+		}
+
+		if _, err := tx.Model("mvp_plan_version").Ctx(ctx).
+			Where("id", planVersionID).
+			Update(planUpdate); err != nil {
+			return fmt.Errorf("更新方案版本状态失败: %w", err)
+		}
+
+		confirmedCount, err := tx.Model("mvp_task_blueprint").Ctx(ctx).
+			Where("plan_version_id", planVersionID).
+			Where("blueprint_status", "confirmed").
+			WhereNull("deleted_at").
+			Count()
+		if err != nil {
+			return fmt.Errorf("查询确认蓝图失败: %w", err)
+		}
+		if confirmedCount == 0 {
+			return fmt.Errorf("方案版本 %d 没有可执行的确认蓝图", planVersionID)
+		}
+
+		if _, err := tx.Model("mvp_workflow_run").Ctx(ctx).
+			Where("id", workflowRunID).
+			Update(g.Map{"active_plan_version_id": planVersionID, "updated_at": now}); err != nil {
+			return fmt.Errorf("回写 active_plan_version_id 失败: %w", err)
+		}
+		return nil
+	})
+}
+
+func reopenWorkflowForTaskRestart(ctx context.Context, workflowRunID, taskID int64) error {
+	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("id", workflowRunID).
+		WhereNull("deleted_at").
+		Fields("status, current_stage, current_stage_run_id").
+		One()
+	if err != nil {
+		return fmt.Errorf("查询工作流状态失败: %w", err)
+	}
+	if wfRun.IsEmpty() {
+		return fmt.Errorf("workflow_run(%d) 不存在", workflowRunID)
+	}
+
+	status := wfRun["status"].String()
+	currentStage := wfRun["current_stage"].String()
+	if status == orchestrator.WorkflowExecuting && currentStage == orchestrator.StageExecute {
+		if err := orchestrator.PrepareTaskSchedulerForStage(ctx, workflowRunID, orchestrator.StageExecute, wfRun["current_stage_run_id"].Int64()); err != nil {
+			return fmt.Errorf("恢复 execute 调度器失败: %w", err)
+		}
+		if scheduler := orchestrator.GetTaskScheduler(); scheduler != nil {
+			return scheduler.Start(context.Background(), workflowRunID)
+		}
+		return nil
+	}
+
+	reason := fmt.Sprintf("manual restart task %d", taskID)
+	stageRunID, err := orchestrator.GetStageService().ForceStartStage(ctx, workflowRunID, orchestrator.StageExecute, reason)
+	if err != nil {
+		return fmt.Errorf("重开执行阶段失败: %w", err)
+	}
+	if err := orchestrator.PrepareTaskSchedulerForStage(ctx, workflowRunID, orchestrator.StageExecute, stageRunID); err != nil {
+		return fmt.Errorf("绑定重启后的 execute 调度器失败: %w", err)
+	}
+	if scheduler := orchestrator.GetTaskScheduler(); scheduler != nil {
+		return scheduler.Start(context.Background(), workflowRunID)
+	}
+	return nil
+}
+
+func resetDomainTaskExecutionArtifacts(ctx context.Context, taskID int64) error {
+	now := gtime.Now()
+	wsMgr := workspace.NewGitWorktreeManager()
+	if cleanErr := wsMgr.Cleanup(context.Background(), taskID); cleanErr != nil {
+		g.Log().Warningf(ctx, "[TaskReset] 清理旧工作空间失败: task=%d err=%v", taskID, cleanErr)
+	}
+	if _, err := g.DB().Model("mvp_task_workspace").Ctx(ctx).
+		Where("task_id", taskID).
+		WhereNull("deleted_at").
+		Update(g.Map{"deleted_at": now, "updated_at": now}); err != nil {
+		return fmt.Errorf("归档旧工作空间失败: %w", err)
+	}
+	if _, err := g.DB().Model("mvp_task_resource_lock").Ctx(ctx).
+		Where("task_id", taskID).
+		Where("lock_status", "held").
+		Data(g.Map{
+			"lock_status": "released",
+			"released_at": now,
+		}).
+		Update(); err != nil {
+		return fmt.Errorf("释放旧资源锁失败: %w", err)
+	}
+	return nil
+}
+
+func updateDomainTaskInternal(ctx context.Context, projectID int64, opts domainTaskUpdateOptions) (res *v1.WorkflowUpdateDomainTaskRes, err error) {
+	taskID := opts.TaskID
+	task, err := g.DB().Model("mvp_domain_task t").Ctx(ctx).
+		InnerJoin("mvp_workflow_run wf", "wf.id = t.workflow_run_id").
+		Where("t.id", taskID).
+		Where("wf.project_id", projectID).
+		WhereNull("t.deleted_at").
+		Fields("t.id, t.workflow_run_id, t.status").
+		One()
+	if err != nil {
+		return nil, fmt.Errorf("查询任务失败: %w", err)
+	}
+	if task.IsEmpty() {
+		return nil, fmt.Errorf("任务不存在")
+	}
+
+	workflowRunID := task["workflow_run_id"].Int64()
+	currentStatus := task["status"].String()
+	pausedForRestart := false
+	defer func() {
+		if err != nil && pausedForRestart {
+			if scheduler := orchestrator.GetTaskScheduler(); scheduler != nil {
+				_ = scheduler.Start(context.Background(), workflowRunID)
+			}
+		}
+	}()
+	if currentStatus == "running" && !opts.RestartAfterUpdate {
+		return nil, fmt.Errorf("运行中的任务必须配合 restartAfterUpdate=true 一起修改")
+	}
+	if currentStatus == "running" {
+		if scheduler := orchestrator.GetTaskScheduler(); scheduler != nil {
+			scheduler.Pause(ctx, workflowRunID)
+			pausedForRestart = true
+		}
+		currentStatus = "pending"
+	}
+
+	updateData := g.Map{
+		"updated_at": gtime.Now(),
+	}
+	changed := false
+
+	if name := strings.TrimSpace(opts.Name); name != "" {
+		updateData["name"] = name
+		changed = true
+	}
+	if desc := strings.TrimSpace(opts.Description); desc != "" {
+		updateData["description"] = desc
+		changed = true
+	}
+	if roleType := strings.TrimSpace(opts.RoleType); roleType != "" {
+		updateData["role_type"] = roleType
+		changed = true
+	}
+	if roleLevel := strings.TrimSpace(opts.RoleLevel); roleLevel != "" {
+		updateData["role_level"] = roleLevel
+		changed = true
+	}
+	if executionMode := strings.TrimSpace(opts.ExecutionMode); executionMode != "" {
+		updateData["execution_mode"] = executionMode
+		changed = true
+	}
+	if opts.BatchNo != nil {
+		updateData["batch_no"] = *opts.BatchNo
+		changed = true
+	}
+	if opts.Sort != nil {
+		updateData["sort"] = *opts.Sort
+		changed = true
+	}
+	if opts.ReplaceAffectedResources {
+		resJSON, jsonErr := json.Marshal(opts.AffectedResources)
+		if jsonErr != nil {
+			return nil, fmt.Errorf("序列化 affectedResources 失败: %w", jsonErr)
+		}
+		updateData["affected_resources"] = string(resJSON)
+		changed = true
+	}
+
+	message := "任务已更新"
+	if opts.RestartAfterUpdate {
+		if err := resetDomainTaskExecutionArtifacts(ctx, taskID); err != nil {
+			return nil, err
+		}
+		now := gtime.Now()
+		updateData["status"] = "pending"
+		updateData["result"] = nil
+		updateData["error_message"] = nil
+		updateData["started_at"] = nil
+		updateData["completed_at"] = nil
+		updateData["heartbeat_at"] = nil
+		updateData["locked_resources"] = nil
+		updateData["updated_at"] = now
+		changed = true
+		currentStatus = "pending"
+		message = "任务已更新并重置为 pending"
+	}
+
+	if !changed {
+		return nil, fmt.Errorf("没有可更新的字段")
+	}
+
+	if _, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		Where("id", taskID).
+		WhereNull("deleted_at").
+		Update(updateData); err != nil {
+		return nil, fmt.Errorf("更新任务失败: %w", err)
+	}
+
+	recordWorkflowEvent(ctx, workflowRunID, "task", "task.manual_updated", &taskID, nil, map[string]interface{}{
+		"project_id":           projectID,
+		"task_id":              taskID,
+		"restart_after_update": opts.RestartAfterUpdate,
+		"replace_resources":    opts.ReplaceAffectedResources,
+		"reason":               opts.Reason,
+	})
+
+	if opts.RestartAfterUpdate {
+		if err := reopenWorkflowForTaskRestart(ctx, workflowRunID, taskID); err != nil {
+			return nil, err
+		}
+	}
+
+	res = &v1.WorkflowUpdateDomainTaskRes{
+		TaskID:  snowflake.JsonInt64(taskID),
+		Status:  currentStatus,
+		Message: message,
+	}
+	return res, nil
+}
+
+func recordWorkflowEvent(ctx context.Context, workflowRunID int64, entityType, eventType string, entityID, stageRunID *int64, payload map[string]interface{}) {
+	var payloadJSON string
+	if len(payload) > 0 {
+		if data, err := json.Marshal(payload); err == nil {
+			payloadJSON = string(data)
+		} else {
+			g.Log().Warningf(ctx, "[WorkflowEvent] payload 序列化失败: event=%s err=%v", eventType, err)
+		}
+	}
+
+	data := g.Map{
+		"id":              int64(snowflake.Generate()),
+		"workflow_run_id": workflowRunID,
+		"entity_type":     entityType,
+		"event_type":      eventType,
+		"payload":         payloadJSON,
+		"created_at":      gtime.Now(),
+	}
+	if entityID != nil {
+		data["entity_id"] = *entityID
+	}
+	if stageRunID != nil {
+		data["stage_run_id"] = *stageRunID
+	}
+	if _, err := g.DB().Model("mvp_workflow_event").Ctx(ctx).Insert(data); err != nil {
+		g.Log().Warningf(ctx, "[WorkflowEvent] 写入失败: event=%s workflowRunID=%d err=%v", eventType, workflowRunID, err)
+	}
 }
 
 func loadLatestWorkflowRuns(ctx context.Context, projectIDs []int64) (map[int64]gdb.Record, error) {
@@ -179,6 +797,49 @@ func loadTaskStats(ctx context.Context, workflowRunIDs []int64) (map[int64]proje
 	return result, nil
 }
 
+func loadTaskActivityStats(ctx context.Context, workflowRunIDs []int64) (map[int64]projectRuntimeTaskActivityStat, error) {
+	result := make(map[int64]projectRuntimeTaskActivityStat, len(workflowRunIDs))
+	if len(workflowRunIDs) == 0 {
+		return result, nil
+	}
+
+	var rows []projectRuntimeTaskActivityRow
+	if err := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		WhereIn("workflow_run_id", workflowRunIDs).
+		WhereNull("deleted_at").
+		Fields("workflow_run_id, status, batch_no, heartbeat_at, started_at, completed_at, updated_at").
+		Scan(&rows); err != nil {
+		return nil, err
+	}
+
+	for _, row := range rows {
+		stat := result[row.WorkflowRunID]
+		heartbeatAt := normalizeDBUTCGTime(row.HeartbeatAt)
+		completedAt := normalizeDBUTCGTime(row.CompletedAt)
+		startedAt := normalizeDBUTCGTime(row.StartedAt)
+		updatedAt := normalizeDBUTCGTime(row.UpdatedAt)
+
+		stat.LastActiveAt = latestNonNilTime(stat.LastActiveAt, heartbeatAt, completedAt, startedAt, updatedAt)
+		if row.Status != "running" {
+			result[row.WorkflowRunID] = stat
+			continue
+		}
+
+		lastRunningAt := latestNonNilTime(heartbeatAt, startedAt, updatedAt)
+		if isRecentGTime(lastRunningAt, projectRuntimeTaskActiveWindow) {
+			stat.ActiveRunningTasks++
+			if stat.ActiveBatch == 0 || (row.BatchNo > 0 && row.BatchNo < stat.ActiveBatch) {
+				stat.ActiveBatch = row.BatchNo
+			}
+		} else {
+			stat.StalledTaskCount++
+		}
+		result[row.WorkflowRunID] = stat
+	}
+
+	return result, nil
+}
+
 func shouldUseRuntimeSnapshot(snapshot *projectRuntimeSnapshot, workflowStatus string) bool {
 	if snapshot == nil || snapshot.Situation.Progress == nil {
 		return false
@@ -209,6 +870,56 @@ func taskStatFromProgress(progress *autonomy.ProgressMetrics) projectRuntimeTask
 		FailedTasks:    progress.FailedTasks,
 		RunningTasks:   progress.RunningTasks,
 	}
+}
+
+func latestNonNilTime(items ...*gtime.Time) *gtime.Time {
+	var latest *gtime.Time
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if latest == nil || item.TimestampMilli() > latest.TimestampMilli() {
+			latest = item
+		}
+	}
+	return latest
+}
+
+func normalizeDBUTCGTime(value *gtime.Time) *gtime.Time {
+	if value == nil || value.IsZero() {
+		return nil
+	}
+
+	raw := strings.TrimSpace(value.String())
+	switch raw {
+	case "", "0000-00-00 00:00:00":
+		return nil
+	}
+
+	for _, layout := range []string{
+		"2006-01-02 15:04:05.999999",
+		"2006-01-02 15:04:05.999",
+		time.DateTime,
+		time.RFC3339Nano,
+		time.RFC3339,
+	} {
+		if parsed, err := time.ParseInLocation(layout, raw, time.UTC); err == nil {
+			return gtime.NewFromTime(parsed.In(time.Local))
+		}
+	}
+
+	return value
+}
+
+func isRecentGTime(value *gtime.Time, window time.Duration) bool {
+	if value == nil {
+		return false
+	}
+	delta := gtime.Now().TimestampMilli() - value.TimestampMilli()
+	if delta < 0 {
+		delta = 0
+	}
+	return time.Duration(delta)*time.Millisecond <= window
 }
 
 // CreateProject 创建项目
@@ -280,26 +991,36 @@ func (c *cWorkflow) ConfirmPlan(ctx context.Context, req *v1.WorkflowConfirmPlan
 	}
 	if !wfRun.IsEmpty() {
 		wfRunID := wfRun["id"].Int64()
-		// 软删除旧的领域任务、阶段任务、阶段实例、审核问题、验收记录
-		for _, table := range []string{"mvp_domain_task", "mvp_stage_task", "mvp_stage_run", "mvp_review_issue", "mvp_accept_run"} {
-			if _, delErr := g.DB().Model(table).Ctx(ctx).
-				Where("workflow_run_id", wfRunID).WhereNull("deleted_at").
-				Update(g.Map{"deleted_at": now, "updated_at": now}); delErr != nil {
-				g.Log().Errorf(ctx, "[ConfirmPlan] 清理 %s 失败: wfRun=%d err=%v", table, wfRunID, delErr)
-			}
+		if resetErr := resetWorkflowArtifacts(ctx, projectID, wfRunID, workflowArtifactResetOptions{
+			PauseScheduler:          true,
+			CancelRuntime:           true,
+			DeleteDomainTasks:       true,
+			DeleteStageTasks:        true,
+			DeleteStageRuns:         true,
+			DeleteReviewIssues:      true,
+			DeleteAcceptRuns:        true,
+			DeleteTaskWorkspaces:    true,
+			CleanupPhysicalWorktree: true,
+		}); resetErr != nil {
+			g.Log().Errorf(ctx, "[ConfirmPlan] 清理工作流执行数据失败: projectID=%d wfRunID=%d err=%v", projectID, wfRunID, resetErr)
 		}
-		// 清理 worktree 记录
-		if _, wsErr := g.DB().Model("mvp_task_workspace").Ctx(ctx).
-			Where("project_id", projectID).WhereNull("deleted_at").
-			Update(g.Map{"deleted_at": now, "updated_at": now}); wsErr != nil {
-			g.Log().Errorf(ctx, "[ConfirmPlan] 清理 workspace 失败: project=%d err=%v", projectID, wsErr)
+
+		stageRunID, stageErr := ensureFreshDesignStageRun(ctx, wfRunID)
+		if stageErr != nil {
+			return nil, stageErr
 		}
+
 		// workflow_run 回到 designing（SubmitForReviewAsync 会再改成 reviewing）
 		if _, wfErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 			Where("id", wfRunID).
 			Update(g.Map{
-				"status": "designing", "current_stage": "design",
-				"pause_reason": nil, "status_before_pause": nil, "updated_at": now,
+				"status":               "designing",
+				"current_stage":        "design",
+				"current_stage_run_id": stageRunID,
+				"pause_reason":         nil,
+				"status_before_pause":  nil,
+				"finished_at":          nil,
+				"updated_at":           now,
 			}); wfErr != nil {
 			g.Log().Errorf(ctx, "[ConfirmPlan] 回退 workflow_run 状态失败: wfRun=%d err=%v", wfRunID, wfErr)
 		}
@@ -309,6 +1030,8 @@ func (c *cWorkflow) ConfirmPlan(ctx context.Context, req *v1.WorkflowConfirmPlan
 			Update(g.Map{"status": "designing", "pause_reason": nil, "updated_at": now}); pErr != nil {
 			g.Log().Errorf(ctx, "[ConfirmPlan] 回退 project 状态失败: project=%d err=%v", projectID, pErr)
 		}
+
+		orchestrator.GetRuntimeManager().Create(wfRunID, projectID)
 
 		g.Log().Infof(ctx, "[ConfirmPlan] 已清理旧执行数据: projectID=%d wfRunID=%d", projectID, wfRunID)
 	}
@@ -383,90 +1106,66 @@ func (c *cWorkflow) ResetToDesign(ctx context.Context, req *v1.WorkflowResetToDe
 		return nil, fmt.Errorf("查询活跃 workflow_run 失败: %w", wfErr)
 	}
 
+	if wfRun.IsEmpty() {
+		wfSvc := orchestrator.GetWorkflowService()
+		newWorkflowRunID, createErr := wfSvc.CreateRun(ctx, projectID)
+		if createErr != nil {
+			return nil, fmt.Errorf("创建新的设计工作流失败: %w", createErr)
+		}
+		if startErr := wfSvc.StartDesign(ctx, newWorkflowRunID); startErr != nil {
+			return nil, fmt.Errorf("启动新的设计阶段失败: %w", startErr)
+		}
+		if _, pErr := g.DB().Model("mvp_project").Ctx(ctx).
+			Where("id", projectID).
+			Update(g.Map{"status": "designing", "pause_reason": nil, "updated_at": now}); pErr != nil {
+			g.Log().Errorf(ctx, "[ResetToDesign] project 重置失败: projectID=%d err=%v", projectID, pErr)
+		}
+		g.Log().Infof(ctx, "[ResetToDesign] 项目已回到设计阶段并创建新 workflow_run: projectID=%d wfRunID=%d", projectID, newWorkflowRunID)
+		return &v1.WorkflowResetToDesignRes{Message: "已回到设计阶段，可重新拆分方案"}, nil
+	}
+
 	if !wfRun.IsEmpty() {
 		wfRunID := wfRun["id"].Int64()
-
-		// 1. 软删除 domain_task
-		if _, dtErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
-			Where("workflow_run_id", wfRunID).WhereNull("deleted_at").
-			Update(g.Map{"deleted_at": now, "updated_at": now}); dtErr != nil {
-			g.Log().Errorf(ctx, "[ResetToDesign] 软删除 domain_task 失败: wfRunID=%d err=%v", wfRunID, dtErr)
+		if resetErr := resetWorkflowArtifacts(ctx, projectID, wfRunID, workflowArtifactResetOptions{
+			PauseScheduler:          true,
+			CancelRuntime:           true,
+			DeleteDomainTasks:       true,
+			DeleteStageTasks:        true,
+			DeleteStageRuns:         true,
+			DeleteReviewIssues:      true,
+			DeleteAcceptRuns:        true,
+			DeleteTaskWorkspaces:    true,
+			CleanupPhysicalWorktree: true,
+			SupersedePlanVersions:   true,
+		}); resetErr != nil {
+			g.Log().Errorf(ctx, "[ResetToDesign] 重置工作流执行数据失败: projectID=%d wfRunID=%d err=%v", projectID, wfRunID, resetErr)
 		}
 
-		// 2. 软删除 stage_task
-		if _, stErr := g.DB().Model("mvp_stage_task").Ctx(ctx).
-			Where("workflow_run_id", wfRunID).WhereNull("deleted_at").
-			Update(g.Map{"deleted_at": now, "updated_at": now}); stErr != nil {
-			g.Log().Errorf(ctx, "[ResetToDesign] 软删除 stage_task 失败: wfRunID=%d err=%v", wfRunID, stErr)
+		// 7. 重建 design stage_run，确保回到 designing 后链路仍可继续运行
+		newStageRunID, stageErr := ensureFreshDesignStageRun(ctx, wfRunID)
+		if stageErr != nil {
+			return nil, stageErr
 		}
 
-		// 3. 软删除 stage_run
-		if _, srErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
-			Where("workflow_run_id", wfRunID).WhereNull("deleted_at").
-			Update(g.Map{"deleted_at": now, "updated_at": now}); srErr != nil {
-			g.Log().Errorf(ctx, "[ResetToDesign] 软删除 stage_run 失败: wfRunID=%d err=%v", wfRunID, srErr)
-		}
-
-		// 4. supersede 所有 plan_version 及蓝图
-		pvIDs, pvErr := g.DB().Model("mvp_plan_version").Ctx(ctx).
-			Where("project_id", projectID).
-			WhereIn("status", g.Slice{"draft", "active"}).
-			WhereNull("deleted_at").Fields("id").Array()
-		if pvErr != nil {
-			g.Log().Errorf(ctx, "[ResetToDesign] 查询 plan_version 失败: projectID=%d err=%v", projectID, pvErr)
-		}
-		if len(pvIDs) > 0 {
-			idList := make([]int64, 0, len(pvIDs))
-			for _, v := range pvIDs {
-				idList = append(idList, v.Int64())
-			}
-			if _, upErr := g.DB().Model("mvp_plan_version").Ctx(ctx).
-				WhereIn("id", idList).
-				Update(g.Map{"status": "superseded", "updated_at": now}); upErr != nil {
-				g.Log().Errorf(ctx, "[ResetToDesign] supersede plan_version 失败: err=%v", upErr)
-			}
-			if _, bpErr := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
-				WhereIn("plan_version_id", idList).WhereNull("deleted_at").
-				Update(g.Map{"blueprint_status": "superseded", "updated_at": now}); bpErr != nil {
-				g.Log().Errorf(ctx, "[ResetToDesign] supersede blueprint 失败: err=%v", bpErr)
-			}
-		}
-
-		// 5. 清理 worktree（软删除 workspace 记录）
-		if _, wsErr := g.DB().Model("mvp_task_workspace").Ctx(ctx).
-			Where("project_id", projectID).WhereNull("deleted_at").
-			Update(g.Map{"deleted_at": now, "updated_at": now}); wsErr != nil {
-			g.Log().Errorf(ctx, "[ResetToDesign] 软删除 workspace 失败: projectID=%d err=%v", projectID, wsErr)
-		}
-
-		// 6. 清理审核/验收相关记录
-		if _, riErr := g.DB().Model("mvp_review_issue").Ctx(ctx).
-			Where("workflow_run_id", wfRunID).WhereNull("deleted_at").
-			Update(g.Map{"deleted_at": now, "updated_at": now}); riErr != nil {
-			g.Log().Errorf(ctx, "[ResetToDesign] 软删除 review_issue 失败: wfRunID=%d err=%v", wfRunID, riErr)
-		}
-		if _, arErr := g.DB().Model("mvp_accept_run").Ctx(ctx).
-			Where("workflow_run_id", wfRunID).WhereNull("deleted_at").
-			Update(g.Map{"deleted_at": now, "updated_at": now}); arErr != nil {
-			g.Log().Errorf(ctx, "[ResetToDesign] 软删除 accept_run 失败: wfRunID=%d err=%v", wfRunID, arErr)
-		}
-
-		// 7. workflow_run 回到 designing
+		// 8. workflow_run 回到 designing
 		if _, wfUpErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 			Where("id", wfRunID).
 			Update(g.Map{
-				"status":                  "designing",
-				"current_stage":           "design",
-				"active_plan_version_id":  nil,
-				"pause_reason":            nil,
-				"status_before_pause":     nil,
+				"status":                 "designing",
+				"current_stage":          "design",
+				"current_stage_run_id":   newStageRunID,
+				"active_plan_version_id": nil,
+				"pause_reason":           nil,
+				"status_before_pause":    nil,
+				"finished_at":            nil,
 				"updated_at":             now,
 			}); wfUpErr != nil {
 			g.Log().Errorf(ctx, "[ResetToDesign] workflow_run 重置失败: wfRunID=%d err=%v", wfRunID, wfUpErr)
 		}
+		orchestrator.GetRuntimeManager().Create(wfRunID, projectID)
 	}
 
-	// 8. project 回到 designing
+	// 9. project 回到 designing
 	if _, pErr := g.DB().Model("mvp_project").Ctx(ctx).
 		Where("id", projectID).
 		Update(g.Map{"status": "designing", "pause_reason": nil, "updated_at": now}); pErr != nil {
@@ -515,15 +1214,35 @@ func (c *cWorkflow) RetryTask(ctx context.Context, req *v1.WorkflowRetryTaskReq)
 	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
 	}
+	task, err := g.DB().Model("mvp_domain_task t").Ctx(ctx).
+		InnerJoin("mvp_workflow_run wf", "wf.id = t.workflow_run_id").
+		Where("t.id", taskID).
+		Where("wf.project_id", projectID).
+		WhereNull("t.deleted_at").
+		Fields("t.workflow_run_id").
+		One()
+	if err != nil {
+		return nil, fmt.Errorf("查询任务失败: %w", err)
+	}
+	if task.IsEmpty() {
+		return nil, fmt.Errorf("任务不存在")
+	}
+	if err := resetDomainTaskExecutionArtifacts(ctx, taskID); err != nil {
+		return nil, err
+	}
 
 	result, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("id", taskID).WhereIn("status", g.Slice{"failed", "escalated"}).
 		Update(g.Map{
-			"status":        "pending",
-			"retry_count":   gdb.Raw("retry_count + 1"),
-			"result":        nil,
-			"error_message": nil,
-			"updated_at":    gdb.Raw("NOW()"),
+			"status":           "pending",
+			"retry_count":      gdb.Raw("retry_count + 1"),
+			"result":           nil,
+			"error_message":    nil,
+			"started_at":       nil,
+			"completed_at":     nil,
+			"heartbeat_at":     nil,
+			"locked_resources": nil,
+			"updated_at":       gdb.Raw("NOW()"),
 		})
 	if err != nil {
 		return nil, err
@@ -532,7 +1251,169 @@ func (c *cWorkflow) RetryTask(ctx context.Context, req *v1.WorkflowRetryTaskReq)
 	if rows == 0 {
 		return nil, fmt.Errorf("任务(%d)不在 failed/escalated 状态，无法重试", taskID)
 	}
+	if err := reopenWorkflowForTaskRestart(ctx, task["workflow_run_id"].Int64(), taskID); err != nil {
+		return nil, err
+	}
 	return &v1.WorkflowRetryTaskRes{}, nil
+}
+
+// ForceStage 强制跳转/重启到指定阶段。
+func (c *cWorkflow) ForceStage(ctx context.Context, req *v1.WorkflowForceStageReq) (res *v1.WorkflowForceStageRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	wfRun, err := latestWorkflowRunForProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	workflowRunID := wfRun["id"].Int64()
+	targetStage := strings.TrimSpace(req.TargetStage)
+	if targetStage == "rework" && int64(req.FailedTaskID) == 0 {
+		return nil, fmt.Errorf("rework 阶段必须提供 failedTaskID")
+	}
+
+	switch targetStage {
+	case "design":
+		if err := resetWorkflowArtifacts(ctx, projectID, workflowRunID, workflowArtifactResetOptions{
+			PauseScheduler:          true,
+			CancelRuntime:           true,
+			DeleteDomainTasks:       true,
+			DeleteStageTasks:        true,
+			DeleteStageRuns:         true,
+			DeleteReviewIssues:      true,
+			DeleteAcceptRuns:        true,
+			DeleteTaskWorkspaces:    true,
+			CleanupPhysicalWorktree: true,
+			SupersedePlanVersions:   true,
+		}); err != nil {
+			return nil, err
+		}
+	case "review", "execute":
+		if err := resetWorkflowExecutionArtifacts(ctx, projectID, workflowRunID); err != nil {
+			return nil, err
+		}
+	case "accept", "rework":
+		if scheduler := orchestrator.GetTaskScheduler(); scheduler != nil {
+			scheduler.Pause(ctx, workflowRunID)
+		}
+		orchestrator.GetRuntimeManager().Cancel(workflowRunID)
+	}
+
+	stageSvc := orchestrator.GetStageService()
+	stageRunID, err := stageSvc.ForceStartStage(ctx, workflowRunID, targetStage, strings.TrimSpace(req.Reason))
+	if err != nil {
+		return nil, err
+	}
+
+	switch targetStage {
+	case "review":
+		planVersionID, err := preparePlanVersionForForceStage(ctx, projectID, workflowRunID, int64(req.PlanVersionID), targetStage)
+		if err != nil {
+			_ = stageSvc.FailStage(context.Background(), stageRunID, err.Error())
+			return nil, err
+		}
+		go func() {
+			bgCtx := context.Background()
+			if runErr := orchestrator.GetReviewStageService().RunReview(bgCtx, stageRunID, planVersionID); runErr != nil {
+				g.Log().Errorf(bgCtx, "[ForceStage] review 重启失败: workflowRunID=%d stageRunID=%d err=%v", workflowRunID, stageRunID, runErr)
+				_ = stageSvc.FailStage(bgCtx, stageRunID, runErr.Error())
+			}
+		}()
+	case "execute":
+		planVersionID, err := preparePlanVersionForForceStage(ctx, projectID, workflowRunID, int64(req.PlanVersionID), targetStage)
+		if err != nil {
+			_ = stageSvc.FailStage(context.Background(), stageRunID, err.Error())
+			return nil, err
+		}
+		if err := orchestrator.GetExecuteStageService().InstantiateAndStart(ctx, stageRunID, planVersionID); err != nil {
+			_ = stageSvc.FailStage(context.Background(), stageRunID, err.Error())
+			return nil, fmt.Errorf("重启执行阶段失败: %w", err)
+		}
+	case "design":
+		if _, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+			Where("id", workflowRunID).
+			Update(g.Map{"active_plan_version_id": nil, "updated_at": gtime.Now()}); err != nil {
+			g.Log().Warningf(ctx, "[ForceStage] 清空 active_plan_version_id 失败: workflowRunID=%d err=%v", workflowRunID, err)
+		}
+	case "accept":
+		go func() {
+			bgCtx := context.Background()
+			if runErr := orchestrator.GetAcceptStageService().Run(bgCtx, workflowRunID, stageRunID); runErr != nil {
+				g.Log().Errorf(bgCtx, "[ForceStage] accept 重启失败: workflowRunID=%d stageRunID=%d err=%v", workflowRunID, stageRunID, runErr)
+				_ = stageSvc.FailStage(bgCtx, stageRunID, runErr.Error())
+			}
+		}()
+	case "rework":
+		failedTaskID := int64(req.FailedTaskID)
+		if failedTaskID > 0 {
+			sourceStage := strings.TrimSpace(req.SourceStage)
+			if sourceStage == "" {
+				sourceStage = "execute"
+			}
+			if err := orchestrator.GetReworkStageService().HandleReworkWithSource(ctx, stageRunID, failedTaskID, sourceStage); err != nil {
+				_ = stageSvc.FailStage(context.Background(), stageRunID, err.Error())
+				return nil, fmt.Errorf("重启返工阶段失败: %w", err)
+			}
+		}
+	}
+
+	recordWorkflowEvent(ctx, workflowRunID, "workflow", "workflow.force_stage", &workflowRunID, &stageRunID, map[string]interface{}{
+		"project_id":      projectID,
+		"target_stage":    targetStage,
+		"plan_version_id": int64(req.PlanVersionID),
+		"failed_task_id":  int64(req.FailedTaskID),
+		"reason":          req.Reason,
+	})
+
+	return &v1.WorkflowForceStageRes{
+		WorkflowRunID: snowflake.JsonInt64(workflowRunID),
+		StageRunID:    snowflake.JsonInt64(stageRunID),
+		CurrentStage:  targetStage,
+	}, nil
+}
+
+// Cancel 人工取消工作流。
+func (c *cWorkflow) Cancel(ctx context.Context, req *v1.WorkflowCancelReq) (res *v1.WorkflowCancelRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNotIn("status", g.Slice{"completed", "canceled"}).
+		WhereNull("deleted_at").
+		OrderDesc("run_no").
+		OrderDesc("created_at").
+		One()
+	if err != nil {
+		return nil, fmt.Errorf("查询可取消的工作流失败: %w", err)
+	}
+	if wfRun.IsEmpty() {
+		return nil, fmt.Errorf("项目 %d 没有可取消的工作流", projectID)
+	}
+
+	workflowRunID := wfRun["id"].Int64()
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		reason = "manual cancel"
+	}
+
+	if err := orchestrator.GetWorkflowService().Cancel(ctx, workflowRunID, reason); err != nil {
+		return nil, err
+	}
+
+	recordWorkflowEvent(ctx, workflowRunID, "workflow", "workflow.canceled", &workflowRunID, nil, map[string]interface{}{
+		"project_id": projectID,
+		"reason":     reason,
+	})
+
+	return &v1.WorkflowCancelRes{
+		WorkflowRunID: snowflake.JsonInt64(workflowRunID),
+		Message:       "工作流已取消",
+	}, nil
 }
 
 // SkipTask 跳过失败任务（防止批次永久阻塞）
@@ -563,6 +1444,28 @@ func (c *cWorkflow) SkipTask(ctx context.Context, req *v1.WorkflowSkipTaskReq) (
 		g.Log().Warningf(ctx, "[SkipTask] 通知调度器任务完成失败: task=%d err=%v", taskID, completeErr)
 	}
 	return &v1.WorkflowSkipTaskRes{}, nil
+}
+
+// UpdateDomainTask 人工修改领域任务，必要时可直接重置为 pending 并重新调度。
+func (c *cWorkflow) UpdateDomainTask(ctx context.Context, req *v1.WorkflowUpdateDomainTaskReq) (res *v1.WorkflowUpdateDomainTaskRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+	return updateDomainTaskInternal(ctx, projectID, domainTaskUpdateOptions{
+		TaskID:                   int64(req.TaskID),
+		Name:                     req.Name,
+		Description:              req.Description,
+		RoleType:                 req.RoleType,
+		RoleLevel:                req.RoleLevel,
+		ExecutionMode:            req.ExecutionMode,
+		BatchNo:                  req.BatchNo,
+		Sort:                     req.Sort,
+		AffectedResources:        req.AffectedResources,
+		ReplaceAffectedResources: req.ReplaceAffectedResources,
+		RestartAfterUpdate:       req.RestartAfterUpdate,
+		Reason:                   req.Reason,
+	})
 }
 
 // ParseTasks 手动解析架构师回复中的任务清单（托底机制）
@@ -632,6 +1535,29 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 	if catErr != nil {
 		g.Log().Warningf(ctx, "[ParseTasks] 查询项目分类失败: projectID=%d err=%v", projectID, catErr)
 	}
+	projectRecord, projErr := g.DB().Model("mvp_project").Ctx(ctx).
+		Where("id", projectID).
+		Fields("name, description").
+		One()
+	if projErr != nil {
+		g.Log().Warningf(ctx, "[ParseTasks] 查询项目信息失败: projectID=%d err=%v", projectID, projErr)
+	}
+	latestUserMsg, userMsgErr := g.DB().Ctx(ctx).Model("mvp_message").
+		Where("conversation_id", convID).
+		Where("role", "user").
+		Where("status", "completed").
+		WhereNull("deleted_at").
+		OrderDesc("created_at").
+		One()
+	if userMsgErr != nil {
+		g.Log().Warningf(ctx, "[ParseTasks] 查询最近用户消息失败: convID=%d err=%v", convID, userMsgErr)
+	}
+	extractionInput := buildTaskExtractionInput(
+		projectRecord["name"].String(),
+		projectRecord["description"].String(),
+		latestUserMsg["content"].String(),
+		aiReply,
+	)
 
 	g.Log().Infof(ctx, "[ParseTasks] 开始提取: projectID=%d aiReplyLen=%d convID=%d lastMsgID=%d",
 		projectID, len([]rune(aiReply)), convID, lastMsgID)
@@ -670,7 +1596,7 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 			}
 		}()
 
-		tasks, err := engine.GetParser().AIExtractTasks(bgCtx, aiReply, projectCategory.String())
+		tasks, err := engine.GetParser().AIExtractTasks(bgCtx, extractionInput, projectCategory.String())
 		if err != nil || len(tasks) == 0 {
 			g.Log().Warningf(bgCtx, "[ParseTasks] AI 异步提取失败或无结果: projectID=%d err=%v", projectID, err)
 			engine.NotifyProjectArchitectConversation(bgCtx, projectID,
@@ -694,6 +1620,20 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 		TaskCount: 0,
 		Message:   "正在通过 AI 提取任务，请稍候刷新查看",
 	}, nil
+}
+
+func buildTaskExtractionInput(projectName, projectDesc, latestUserPrompt, aiReply string) string {
+	parts := make([]string, 0, 4)
+	if strings.TrimSpace(projectName) != "" || strings.TrimSpace(projectDesc) != "" {
+		parts = append(parts, fmt.Sprintf("=== 项目目标 ===\n项目名称：%s\n项目简介：%s", strings.TrimSpace(projectName), strings.TrimSpace(projectDesc)))
+	}
+	if strings.TrimSpace(latestUserPrompt) != "" {
+		parts = append(parts, "=== 最近用户要求 ===\n"+strings.TrimSpace(latestUserPrompt))
+	}
+	if strings.TrimSpace(aiReply) != "" {
+		parts = append(parts, "=== 架构师回复 ===\n"+strings.TrimSpace(aiReply))
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // RolePresets 获取角色预设列表（前端创建项目时读取默认模型）
@@ -774,6 +1714,7 @@ func projectStatusV2(ctx context.Context, project gdb.Record) (*v1.WorkflowProje
 	var wfStatus, currentStage string
 	var progressPercent int
 	var totalTasks, completedTasks, failedTasks, runningTasks int
+	var activity projectRuntimeTaskActivityStat
 
 	wfRuns, err := loadLatestWorkflowRuns(ctx, []int64{projectID})
 	if err != nil {
@@ -802,6 +1743,11 @@ func projectStatusV2(ctx context.Context, project gdb.Record) (*v1.WorkflowProje
 			}
 			stats = taskStats[wfRunID]
 		}
+		activityStats, activityErr := loadTaskActivityStats(ctx, []int64{wfRunID})
+		if activityErr != nil {
+			return nil, activityErr
+		}
+		activity = activityStats[wfRunID]
 
 		totalTasks = stats.TotalTasks
 		completedTasks = stats.CompletedTasks
@@ -849,14 +1795,19 @@ func projectStatusV2(ctx context.Context, project gdb.Record) (*v1.WorkflowProje
 	}
 
 	res := &v1.WorkflowProjectStatusRes{
-		Status:          project["status"].String(),
-		PauseReason:     project["pause_reason"].String(),
-		TotalTasks:      displayTotal,
-		StatusCounts:    statusCounts,
-		EngineVersion:   "workflow_v2",
-		WorkflowStatus:  wfStatus,
-		CurrentStage:    currentStage,
-		ProgressPercent: progressPercent,
+		Status:             project["status"].String(),
+		PauseReason:        project["pause_reason"].String(),
+		ActiveBatch:        activity.ActiveBatch,
+		TotalTasks:         displayTotal,
+		StatusCounts:       statusCounts,
+		LastActiveAt:       activity.LastActiveAt,
+		IsActuallyWorking:  activity.ActiveRunningTasks > 0,
+		ActiveRunningTasks: activity.ActiveRunningTasks,
+		StalledTaskCount:   activity.StalledTaskCount,
+		EngineVersion:      "workflow_v2",
+		WorkflowStatus:     wfStatus,
+		CurrentStage:       currentStage,
+		ProgressPercent:    progressPercent,
 	}
 
 	if wfStatus != "" {
@@ -1026,19 +1977,25 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 		"watchdog.check_interval",
 		"watchdog.max_stale_count",
 		"watchdog.max_retries",
-		"scheduler.max_concurrent",
 		"scheduler.poll_interval",
 	}
 	count, e = g.DB().Ctx(ctx).Model("mvp_config").
 		WhereIn("config_key", requiredKeys).WhereNull("deleted_at").Count()
 	if e != nil {
 		addItem("engine_config", "引擎核心配置", "/mvp/config", "error", "查询失败: "+e.Error())
-	} else if count < len(requiredKeys) {
-		addItem("engine_config", "引擎核心配置", "/mvp/config", "warning",
-			fmt.Sprintf("核心配置仅有 %d/%d 项，缺少的将使用默认值", count, len(requiredKeys)))
 	} else {
-		addItem("engine_config", "引擎核心配置", "/mvp/config", "ok",
-			fmt.Sprintf("全部 %d 项核心配置已就绪", len(requiredKeys)))
+		schedulerCount, schedulerErr := g.DB().Ctx(ctx).Model("mvp_config").
+			WhereIn("config_key", []string{"scheduler.max_concurrent", "workflow.scheduler.max_concurrency"}).
+			WhereNull("deleted_at").Count()
+		if schedulerErr != nil {
+			addItem("engine_config", "引擎核心配置", "/mvp/config", "error", "查询调度并发配置失败: "+schedulerErr.Error())
+		} else if count < len(requiredKeys) || schedulerCount == 0 {
+			addItem("engine_config", "引擎核心配置", "/mvp/config", "warning",
+				fmt.Sprintf("核心配置仅有 %d/%d 项，且调度并发键需要至少配置 1 个，缺少项将使用默认值", count, len(requiredKeys)))
+		} else {
+			addItem("engine_config", "引擎核心配置", "/mvp/config", "ok",
+				fmt.Sprintf("全部 %d 项核心配置已就绪，调度并发兼容键已配置", len(requiredKeys)+1))
+		}
 	}
 
 	// 13. 飞书协作配置
@@ -1399,9 +2356,11 @@ var eventLabelMap = map[string]string{
 	"task.failed":            "任务失败",
 	"task.escalated":         "任务已升级",
 	"task.retried":           "任务已重试",
+	"task.manual_updated":    "任务已人工修改",
 	"replan.completed":       "重规划完成",
 	"replan.failed":          "重规划失败",
 	"replan.aborted":         "重规划中止",
+	"workflow.force_stage":   "工作流已人工切换阶段",
 }
 
 // Timeline 工作流事件时间线
@@ -1806,7 +2765,7 @@ func (c *cWorkflow) DomainTasks(ctx context.Context, req *v1.WorkflowDomainTasks
 		query = query.Where("batch_no", req.BatchNo)
 	}
 
-	tasks, err := query.Fields("id, name, description, status, role_type, role_level, batch_no, sort, execution_mode, affected_resources, started_at, completed_at, error_message, result, retry_count").OrderAsc("batch_no").OrderAsc("sort").All()
+	tasks, err := query.Fields("id, name, description, status, role_type, role_level, batch_no, sort, execution_mode, affected_resources, started_at, completed_at, result, retry_count").OrderAsc("batch_no").OrderAsc("sort").All()
 	if err != nil {
 		return nil, err
 	}
@@ -1873,6 +2832,8 @@ func buildDomainTaskItem(t gdb.Record) v1.DomainTaskItem {
 			g.Log().Warningf(context.Background(), "[buildDomainTaskItem] 解析 affected_resources 失败: task=%d err=%v", t["id"].Int64(), umErr)
 		}
 	}
+	startedAt := normalizeDBUTCGTime(t["started_at"].GTime())
+	completedAt := normalizeDBUTCGTime(t["completed_at"].GTime())
 	return v1.DomainTaskItem{
 		ID:                snowflake.JsonInt64(t["id"].Int64()),
 		Name:              t["name"].String(),
@@ -1884,12 +2845,23 @@ func buildDomainTaskItem(t gdb.Record) v1.DomainTaskItem {
 		Sort:              t["sort"].Int(),
 		ExecutionMode:     t["execution_mode"].String(),
 		AffectedResources: resources,
-		StartedAt:         t["started_at"].GTime(),
-		CompletedAt:       t["completed_at"].GTime(),
-		ErrorMessage:      t["error_message"].String(),
+		StartedAt:         startedAt,
+		CompletedAt:       completedAt,
+		ErrorMessage:      domainTaskErrorMessage(t),
 		Result:            t["result"].String(),
 		RetryCount:        t["retry_count"].Int(),
 	}
+}
+
+func domainTaskErrorMessage(t gdb.Record) string {
+	if msg := t["error_message"].String(); msg != "" {
+		return msg
+	}
+	status := t["status"].String()
+	if status == "failed" || status == "escalated" {
+		return t["result"].String()
+	}
+	return ""
 }
 
 // ==================== 验收控制台 Controller ====================
@@ -1952,8 +2924,8 @@ func (c *cWorkflow) AcceptStatus(ctx context.Context, req *v1.WorkflowAcceptStat
 		Score:         g.NewVar(acceptRun["score"]).Float64(),
 		Summary:       g.NewVar(acceptRun["summary"]).String(),
 		RulesSnapshot: g.NewVar(acceptRun["rules_snapshot_ref"]).String(),
-		StartedAt:     g.NewVar(acceptRun["started_at"]).GTime(),
-		FinishedAt:    g.NewVar(acceptRun["finished_at"]).GTime(),
+		StartedAt:     normalizeDBUTCGTime(g.NewVar(acceptRun["started_at"]).GTime()),
+		FinishedAt:    normalizeDBUTCGTime(g.NewVar(acceptRun["finished_at"]).GTime()),
 		BlockerCount:  blockers,
 		ErrorCount:    errors,
 		WarnCount:     warns,
@@ -2011,7 +2983,7 @@ func (c *cWorkflow) AcceptIssues(ctx context.Context, req *v1.WorkflowAcceptIssu
 			DomainTaskID:    snowflake.JsonInt64(g.NewVar(issue["domain_task_id"]).Int64()),
 			ResourceRef:     g.NewVar(issue["resource_ref"]).String(),
 			Status:          g.NewVar(issue["status"]).String(),
-			CreatedAt:       g.NewVar(issue["created_at"]).GTime(),
+			CreatedAt:       normalizeDBUTCGTime(g.NewVar(issue["created_at"]).GTime()),
 		})
 	}
 	if items == nil {
@@ -2057,7 +3029,7 @@ func (c *cWorkflow) AcceptEvidence(ctx context.Context, req *v1.WorkflowAcceptEv
 			SourceID:     snowflake.JsonInt64(g.NewVar(e["source_id"]).Int64()),
 			ContentRef:   g.NewVar(e["content_ref"]).String(),
 			Summary:      g.NewVar(e["summary"]).String(),
-			CreatedAt:    g.NewVar(e["created_at"]).GTime(),
+			CreatedAt:    normalizeDBUTCGTime(g.NewVar(e["created_at"]).GTime()),
 		})
 	}
 	if items == nil {

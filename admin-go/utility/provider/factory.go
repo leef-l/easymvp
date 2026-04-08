@@ -79,15 +79,36 @@ func (f *Factory) ClearCache() {
 //   - 其他一律 → OpenAI 兼容协议
 func detectProtocol(cfg Config) string {
 	url := strings.ToLower(strings.TrimSpace(cfg.BaseURL))
-	if strings.Contains(url, "api.anthropic.com") || strings.Contains(url, "/anthropic/") {
+	if strings.Contains(url, "api.anthropic.com") || strings.Contains(url, "/anthropic/") || strings.HasSuffix(url, "/anthropic") {
 		return TypeAnthropic
 	}
-	// provider_type 明确指定 anthropic 系时也走 Anthropic 协议
+	if strings.Contains(url, "generativelanguage.googleapis.com") {
+		return TypeGoogle
+	}
+
 	pt := strings.ToLower(cfg.ProviderType)
-	if pt == TypeAnthropic || pt == "tencent_coding" || pt == "baidu_coding" {
+	if pt == TypeAnthropic {
 		return TypeAnthropic
+	}
+	if pt == TypeOpenAICompatible {
+		return TypeOpenAICompatible
+	}
+	if pt == TypeGoogle {
+		return TypeGoogle
+	}
+	if SupportsProtocol(cfg.ProviderType, cfg.SupportedProtocols, TypeAnthropic) &&
+		!SupportsProtocol(cfg.ProviderType, cfg.SupportedProtocols, TypeOpenAICompatible) {
+		return TypeAnthropic
+	}
+	if SupportsProtocol(cfg.ProviderType, cfg.SupportedProtocols, TypeOpenAICompatible) {
+		return TypeOpenAICompatible
 	}
 	return TypeOpenAICompatible
+}
+
+// ResolveProtocol 对外暴露统一的协议解析逻辑，供运行时和执行器复用。
+func ResolveProtocol(cfg Config) string {
+	return detectProtocol(cfg)
 }
 
 // create 根据 base_url + provider_type 共同判断协议，创建 Provider
@@ -104,5 +125,5 @@ func (f *Factory) create(cfg Config) (Provider, error) {
 func cacheKey(cfg Config) string {
 	h := sha256.Sum256([]byte(cfg.APIKey))
 	keyHash := hex.EncodeToString(h[:8]) // 前 8 字节足够区分
-	return cfg.ProviderType + ":" + cfg.BaseURL + ":" + keyHash
+	return cfg.ProviderType + ":" + strings.Join(NormalizeProtocols(cfg.ProviderType, cfg.SupportedProtocols), ",") + ":" + cfg.BaseURL + ":" + keyHash
 }

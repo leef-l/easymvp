@@ -35,10 +35,11 @@ func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *M
 
 	// 2. 创建 Provider
 	p, err := provider.GetProvider(provider.Config{
-		ProviderType: modelInfo.ProviderType,
-		BaseURL:      modelInfo.BaseURL,
-		APIKey:       modelInfo.APIKey,
-		APISecret:    modelInfo.APISecret,
+		ProviderType:       modelInfo.ProviderType,
+		SupportedProtocols: modelInfo.SupportedProtocols,
+		BaseURL:            modelInfo.BaseURL,
+		APIKey:             modelInfo.APIKey,
+		APISecret:          modelInfo.APISecret,
 	})
 	if err != nil {
 		e.failMessage(ctx, replyID, err.Error())

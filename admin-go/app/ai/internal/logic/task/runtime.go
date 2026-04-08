@@ -20,6 +20,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	providerutil "easymvp/utility/provider"
 	"easymvp/utility/snowflake"
 	"easymvp/utility/worktreeguard"
 )
@@ -58,14 +59,15 @@ type runtimeEngineConfig struct {
 }
 
 type runtimeModelInfo struct {
-	ModelID       int64
-	ModelCode     string
-	ProviderType  string
-	BaseURL       string
-	APIKey        string
-	APISecret     string
-	MaxTokens     int
-	ContextWindow int
+	ModelID            int64
+	ModelCode          string
+	ProviderType       string
+	SupportedProtocols []string
+	BaseURL            string
+	APIKey             string
+	APISecret          string
+	MaxTokens          int
+	ContextWindow      int
 }
 
 type taskExecutionResult struct {
@@ -277,7 +279,7 @@ func (s *sTask) loadModelRuntimeInfo(ctx context.Context, modelID int64) (*runti
 	record, err := g.DB().Ctx(ctx).Model("ai_model m").
 		LeftJoin("ai_plan p", "p.id = m.plan_id").
 		LeftJoin("ai_provider pv", "pv.id = m.provider_id").
-		Fields("m.id, m.model_code, COALESCE(m.max_tokens, 4096) AS max_tokens, COALESCE(m.context_window, 128000) AS context_window, pv.provider_type, pv.base_url, p.api_key, p.api_secret").
+		Fields("m.id, m.model_code, COALESCE(m.max_tokens, 4096) AS max_tokens, COALESCE(m.context_window, 128000) AS context_window, pv.provider_type, pv.supported_protocols, pv.base_url, p.api_key, p.api_secret").
 		Where("m.id", modelID).
 		Where("m.deleted_at IS NULL").
 		One()
@@ -288,14 +290,15 @@ func (s *sTask) loadModelRuntimeInfo(ctx context.Context, modelID int64) (*runti
 		return nil, fmt.Errorf("默认模型不存在")
 	}
 	return &runtimeModelInfo{
-		ModelID:       record["id"].Int64(),
-		ModelCode:     record["model_code"].String(),
-		ProviderType:  record["provider_type"].String(),
-		BaseURL:       record["base_url"].String(),
-		APIKey:        record["api_key"].String(),
-		APISecret:     record["api_secret"].String(),
-		MaxTokens:     record["max_tokens"].Int(),
-		ContextWindow: record["context_window"].Int(),
+		ModelID:            record["id"].Int64(),
+		ModelCode:          record["model_code"].String(),
+		ProviderType:       record["provider_type"].String(),
+		SupportedProtocols: providerutil.DecodeSupportedProtocols(record["supported_protocols"].String(), record["provider_type"].String()),
+		BaseURL:            record["base_url"].String(),
+		APIKey:             record["api_key"].String(),
+		APISecret:          record["api_secret"].String(),
+		MaxTokens:          record["max_tokens"].Int(),
+		ContextWindow:      record["context_window"].Int(),
 	}, nil
 }
 
@@ -884,20 +887,41 @@ func buildAiderEnv(model *runtimeModelInfo) []string {
 		"PYTHONLEGACYWINDOWSSTDIO=0",
 		"UV_LOCK_TIMEOUT=600",
 	}
-	switch model.ProviderType {
-	case "openai_compatible":
+	switch resolveRuntimeProtocol(model) {
+	case providerutil.TypeOpenAICompatible:
 		env = append(env,
 			"OPENAI_API_KEY="+model.APIKey,
-			"OPENAI_API_BASE="+strings.TrimRight(model.BaseURL, "/"),
+			"OPENAI_API_BASE="+normalizeRuntimeBaseURL(model),
 		)
 	default:
-		baseURL := strings.TrimRight(strings.TrimSuffix(model.BaseURL, "/v1"), "/")
 		env = append(env,
 			"ANTHROPIC_API_KEY="+model.APIKey,
-			"ANTHROPIC_BASE_URL="+baseURL,
+			"ANTHROPIC_BASE_URL="+normalizeRuntimeBaseURL(model),
 		)
 	}
 	return env
+}
+
+func resolveRuntimeProtocol(model *runtimeModelInfo) string {
+	if model == nil {
+		return providerutil.TypeAnthropic
+	}
+	return providerutil.ResolveProtocol(providerutil.Config{
+		ProviderType:       model.ProviderType,
+		SupportedProtocols: model.SupportedProtocols,
+		BaseURL:            model.BaseURL,
+	})
+}
+
+func normalizeRuntimeBaseURL(model *runtimeModelInfo) string {
+	if model == nil {
+		return ""
+	}
+	return providerutil.ResolveBaseURLForProtocol(providerutil.Config{
+		ProviderType:       model.ProviderType,
+		SupportedProtocols: model.SupportedProtocols,
+		BaseURL:            model.BaseURL,
+	}, resolveRuntimeProtocol(model))
 }
 
 func writeAiderMetadata(model *runtimeModelInfo) (string, error) {
@@ -940,8 +964,8 @@ func formatAiderModel(model *runtimeModelInfo) string {
 	if model == nil {
 		return ""
 	}
-	switch model.ProviderType {
-	case "openai_compatible":
+	switch resolveRuntimeProtocol(model) {
+	case providerutil.TypeOpenAICompatible:
 		if strings.HasPrefix(model.ModelCode, "openai/") {
 			return model.ModelCode
 		}
@@ -1010,6 +1034,7 @@ func buildCommandTemplateEnv(taskInfo *runtimeTask, engineCfg *runtimeEngineConf
 			"AI_MODEL_ID="+strconv.FormatInt(modelInfo.ModelID, 10),
 			"AI_MODEL_CODE="+modelInfo.ModelCode,
 			"AI_MODEL_PROVIDER_TYPE="+modelInfo.ProviderType,
+			"AI_MODEL_SUPPORTED_PROTOCOLS="+strings.Join(modelInfo.SupportedProtocols, ","),
 			"AI_MODEL_BASE_URL="+modelInfo.BaseURL,
 			"AI_MODEL_API_KEY="+modelInfo.APIKey,
 		)
@@ -1047,7 +1072,7 @@ func buildOpenHandsCLIEnv(taskInfo *runtimeTask, modelInfo *runtimeModelInfo) []
 	var env = []string{
 		"LLM_API_KEY=" + modelInfo.APIKey,
 		"LLM_MODEL=" + formatOpenHandsModel(modelInfo),
-		"LLM_BASE_URL=" + strings.TrimRight(modelInfo.BaseURL, "/"),
+		"LLM_BASE_URL=" + normalizeRuntimeBaseURL(modelInfo),
 		"SANDBOX_VOLUMES=" + taskInfo.WorktreePath + ":/workspace:rw",
 		"PYTHONIOENCODING=utf-8",
 		"UV_LOCK_TIMEOUT=600",
@@ -1059,8 +1084,8 @@ func formatOpenHandsModel(model *runtimeModelInfo) string {
 	if model == nil {
 		return ""
 	}
-	switch model.ProviderType {
-	case "openai_compatible":
+	switch resolveRuntimeProtocol(model) {
+	case providerutil.TypeOpenAICompatible:
 		return model.ModelCode
 	default:
 		if strings.HasPrefix(model.ModelCode, "anthropic/") {

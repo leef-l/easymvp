@@ -1,263 +1,178 @@
 # EasyMVP 架构设计文档
 
-> 版本：v2.1 | 更新日期：2026-04-04
+> 更新日期：2026-04-08
 
----
+本文描述当前仓库里的真实实现，而不是早期蓝图。当前主线以 `Workflow V2` 为准；API 中仍保留少量 `legacy` / `engineVersion` 兼容字段，但文档和前端主流程都以 V2 为基线。
 
-## 1. 系统概述
+## 1. 系统组成
 
-EasyMVP 是一个 **AI 协作开发平台**，核心理念是让多个 AI 角色协同完成软件项目的全流程开发。
+EasyMVP 当前由四个主要部分组成：
 
-用户只需描述需求，系统自动完成：**需求分析 → 方案设计 → 任务拆分 → 代码编写 → 代码审计 → Bug 修复**。
+| 组成 | 目录 | 职责 |
+|------|------|------|
+| `system` | `admin-go/app/system` | 用户、角色、菜单、部门、鉴权、RBAC |
+| `ai` | `admin-go/app/ai` | AI 供应商、套餐、模型、执行引擎、手工任务 |
+| `mvp` | `admin-go/app/mvp` | 项目、对话、Workflow V2、执行器、协作、自治 |
+| `web` | `vue-vben-admin` | 管理端前端、工作流仪表盘、配置和协作页面 |
 
-### 核心架构
+## 2. 仓库结构
 
-```
-用户 ──→ 架构师 AI（需求分析/方案设计/任务拆分）
-              │
-              ▼
-         任务调度器（依赖检查 + 资源冲突检测 + 并发控制）
-              │
-     ┌────────┼────────────┐
-     ▼        ▼            ▼
- 实施员 AI  实施员 AI   实施员 AI   ← 通过 Aider 真实编辑代码
-     │        │            │
-     ▼        ▼            ▼
- 审计员 AI  审计员 AI   审计员 AI   ← 代码审查，发现 Bug 回报
-     │
-     └──→ Bug 闭环（架构师分析 → 实施员修复 → 审计员复查）
-```
-
----
-
-## 2. 技术栈
-
-| 层级 | 技术选型 |
-|------|---------|
-| **后端框架** | Go 1.25 + GoFrame v2.10（MonoRepo 多应用架构） |
-| **前端框架** | Vue 3 + Vben Admin v5.7 + Ant Design Vue + VxeTable |
-| **数据库** | MySQL 8.0 |
-| **ID 策略** | Snowflake 雪花 ID（`snowflake.JsonInt64`） |
-| **认证** | JWT（自定义实现） |
-| **AI 调用** | 统一 Provider 接口（支持 Anthropic / OpenAI 兼容协议） |
-| **代码编辑** | Aider CLI（AI 代码编辑工具） |
-| **实时推送** | Server-Sent Events (SSE) |
-| **代码生成** | 自研 Codegen（Go text/template） |
-
----
-
-## 3. 项目目录结构
-
-```
+```text
 easymvp/
-├── admin-go/                              # 后端（Go MonoRepo）
+├── admin-go/
 │   ├── app/
-│   │   ├── mvp/                           # MVP 核心模块
-│   │   │   ├── api/mvp/v1/               # API 定义层
-│   │   │   │   ├── chat.go               # 对话 API（手写）
-│   │   │   │   ├── workflow.go           # 工作流 API（手写）
-│   │   │   │   ├── project.go            # 项目 CRUD（codegen）
-│   │   │   │   ├── task.go               # 任务 CRUD（codegen）
-│   │   │   │   ├── conversation.go       # 对话 CRUD（codegen）
-│   │   │   │   ├── message.go            # 消息 CRUD（codegen）
-│   │   │   │   ├── project_role.go       # 项目角色 CRUD（codegen）
-│   │   │   │   └── role_preset.go        # 角色预设 CRUD（codegen）
-│   │   │   └── internal/
-│   │   │       ├── engine/                # 核心执行引擎（全部手写）
-│   │   │       │   ├── chat_engine.go     # 对话引擎（SSE 流式推送）
-│   │   │       │   ├── scheduler.go       # 任务调度器（依赖+资源冲突）
-│   │   │       │   ├── executor.go        # 任务执行器（ChatStream/Aider）
-│   │   │       │   ├── aider_runner.go    # Aider CLI 封装
-│   │   │       │   ├── task_parser.go     # 任务解析器（JSON 提取）
-│   │   │       │   ├── context_compressor.go  # 上下文压缩器（三层策略）
-│   │   │       │   ├── sse_hub.go         # SSE 推送中心
-│   │   │       │   ├── watchdog.go        # 任务看门狗（心跳+自动重启）
-│   │   │       │   ├── bugloop.go         # Bug 闭环处理
-│   │   │       │   └── workflow.go        # 项目流程编排
-│   │   │       ├── controller/            # HTTP 控制器
-│   │   │       ├── logic/                 # 业务逻辑（codegen 生成）
-│   │   │       ├── service/               # 服务接口
-│   │   │       ├── model/                 # DTO 模型
-│   │   │       ├── dao/                   # 数据访问层
-│   │   │       └── middleware/            # 中间件
-│   │   ├── ai/                            # AI 配置管理
-│   │   │   └── (供应商/套餐/模型 CRUD)
-│   │   └── system/                        # 系统管理
-│   │       └── (用户/角色/部门/菜单 RBAC)
-│   ├── utility/
-│   │   ├── provider/                      # AI Provider 统一接口
-│   │   │   ├── provider.go               # 接口定义
-│   │   │   ├── factory.go                # 工厂模式（缓存实例）
-│   │   │   ├── anthropic.go              # Anthropic 协议实现
-│   │   │   └── openai.go                 # OpenAI 兼容协议实现
-│   │   ├── snowflake/                     # 雪花 ID 生成器
-│   │   ├── jwt/                           # JWT 令牌
-│   │   └── response/                      # 统一响应格式
-│   ├── codegen/                           # 代码生成器
-│   └── deploy/                            # 部署配置
-│
-└── vue-vben-admin/                        # 管理端前端
-    └── apps/web-antd/src/
-        ├── views/mvp/                     # MVP 页面
-        │   ├── chat/                      # 对话界面
-        │   │   ├── index.vue              # 主页面（SSE 实时对话）
-        │   │   └── components/            # ChatInput / ChatMessage
-        │   ├── project/                   # 项目管理
-        │   │   ├── index.vue              # 列表页（状态/进度/操作）
-        │   │   └── modules/               # form / pause-modal / status-panel
-        │   ├── task/                       # 任务列表
-        │   ├── conversation/              # 对话历史
-        │   ├── message/                   # 消息管理
-        │   ├── role_preset/               # 角色预设模板
-        │   └── project_role/              # 项目角色配置
-        └── api/mvp/                       # API 调用层
-            ├── project/                   # 项目 API
-            ├── workflow/                  # 工作流 API
-            └── ...
+│   │   ├── system/
+│   │   ├── ai/
+│   │   └── mvp/
+│   ├── utility/               # provider/jwt/response/snowflake 等公共能力
+│   └── manifest/sql/          # 基线 schema 与增量迁移
+├── vue-vben-admin/            # 前端
+├── docker/                    # dev/prod compose 与 Dockerfile
+└── docs/                      # 当前文档
 ```
 
----
+`mvp` 服务内部又分成三层：
 
-## 4. 核心模块设计
+- `api` / `controller` / `logic`：HTTP 接口、CRUD 和页面数据接口
+- `internal/workflow`：Workflow V2 的运行实体、阶段服务、调度器、执行器、验收、自治
+- `internal/collab` / `internal/workspace` / `internal/engine`：协作接入、工作区隔离、对话与模型解析等支撑能力
 
-### 4.1 四大 AI 角色
+## 3. MVP 核心数据模型
 
-| 角色 | 职责 | 执行方式 | 等级 |
-|------|------|---------|------|
-| **Architect（架构师）** | 需求分析、方案设计、任务拆分、Bug 分析 | ChatStream 对话 | max |
-| **Implementer（实施员）** | 代码编写、文件修改、配置环境 | **Aider 代码编辑** | lite/pro/max |
-| **Auditor（审计员）** | 代码审查、质量检测、Bug 发现 | ChatStream 对话 | lite/pro/max |
-| **Coordinator（协调员）** | 进度协调、冲突解决、总结报告 | ChatStream 对话 | lite |
+当前 Workflow V2 的核心表已经落在基线 schema 中：
 
-### 4.2 角色等级（Role Level）
+| 实体 | 作用 |
+|------|------|
+| `mvp_project` | 项目业务容器、工作目录、分类、展示状态 |
+| `mvp_workflow_run` | 一次正式工作流运行的权威状态 |
+| `mvp_stage_run` | 设计/审核/执行/验收/返工/完成等阶段实例 |
+| `mvp_plan_version` | 架构师输出的一版计划 |
+| `mvp_task_blueprint` | 审核前的任务蓝图 |
+| `mvp_domain_task` | 审核通过后实例化的执行期任务 |
+| `mvp_review_issue` | 审核阶段问题 |
+| `mvp_accept_run` / `mvp_accept_issue` / `mvp_accept_evidence` | 验收轮次、问题、证据 |
+| `mvp_task_workspace` | 写仓任务的隔离工作区 |
+| `mvp_workflow_event` | 工作流事件流与时间线数据 |
+| `mvp_decision_action` / `mvp_human_checkpoint` | 自治决策与人工检查点 |
+| `mvp_user_collab_binding` | 飞书 / Telegram 用户绑定 |
 
-| 等级 | 模型定位 | 上下文访问 | 适用场景 |
-|------|---------|-----------|---------|
-| **max** | 最强模型 | 全局摘要（~3000字） | 核心模块、复杂逻辑 |
-| **pro** | 中等模型 | 依赖任务摘要 | 常规功能开发 |
-| **lite** | 轻量模型 | 依赖任务摘要 | 简单任务、配置修改 |
+这套模型对应的基线 SQL 在：
 
-### 4.3 项目分类与角色预设
+- `admin-go/manifest/sql/mysql/000001_baseline_schema.up.sql`
+- `admin-go/docker/mysql/init.sql`
 
-**核心机制**：每个项目有 `project_category`（如"软件开发"、"数据分析"），决定该项目使用哪套 AI 角色配置。
+## 4. 后端核心模块
 
-```
-mvp_role_preset（按分类存储角色模板）
-  │
-  │ 创建项目时，按 project_category 过滤
-  ▼
-mvp_project_role（项目实际使用的角色配置）
-  │
-  │ 任务执行时，按 role_type + role_level 查找
-  ▼
-ai_model（获取具体的 AI 模型、API Key、系统提示词）
-```
+### 4.1 工作流编排
 
-**创建项目流程**：
-1. 用户选择 `projectCategory`（如"软件开发"）和架构师模型
-2. 后端从 `mvp_role_preset` 查找该分类下的所有角色预设
-3. 为每个预设创建 `mvp_project_role` 记录（绑定到当前项目）
-4. 系统提示词优先级：模型 `role_prompt` > 预设 `system_prompt`
-5. 架构师角色特殊处理：动态拼接项目名称和描述
+`admin-go/app/mvp/internal/workflow/orchestrator/registry.go` 是当前工作流装配中心，负责：
 
-**前端联动**：
-- 项目创建表单中，切换 `projectCategory` 下拉框会触发 `getRolePresets(category)` 重新加载
-- 架构师模型下拉框自动更新为该分类预设中的架构师模型
+- 初始化 `WorkflowService`、`StageService`
+- 初始化执行器注册表
+- 注册审核、执行、验收、返工、完成阶段之间的回调
+- 初始化自治决策中台、事件总线、协作通知器
 
-**预设分类**（可扩展）：软件开发、数据分析、产品设计、内容创作、其他
+### 4.2 阶段服务
 
-### 4.4 项目状态机
+当前阶段服务分别位于：
 
-```
-                    用户创建项目
-                         │
-                         ▼
-                    ┌──────────┐
-                    │ designing │ ← 与架构师对话，拆分任务
-                    └────┬─────┘
-                         │ 用户确认方案
-                         ▼
-                    ┌──────────┐
-              ┌────▶│ running  │ ← 任务并发执行中
-              │     └────┬─────┘
-              │          │
-              │     ┌────┴────┐
-              │     │         │
-              │     ▼         ▼
-              │ ┌────────┐ ┌───────────┐
-              │ │ paused │ │ completed │
-              │ └────┬───┘ └───────────┘
-              │      │
-              └──────┘ 用户恢复
-```
+- `stage/review`
+- `stage/execute`
+- `stage/accept`
+- `stage/rework`
+- `stage/complete`
 
-### 4.5 任务状态机
+职责分工：
 
-```
-draft ──→ pending ──→ running ──→ completed
-                        │              │
-                        │         (审计发现bug)
-                        │              │
-                        ▼              ▼
-                      failed      bug_found
-                        │              │
-                   (自动重试)    (架构师分析)
-                        │              │
-                        ▼              ▼
-                     pending       pending (追加修复指令)
-```
+- `review`：预检、审计员审核、协调员优化、问题落库
+- `execute`：将蓝图实例化为 `domain_task` 并启动调度
+- `accept`：证据收集、规则评估、裁决归并、推进完成或返工
+- `rework`：围绕失败任务补建分析/修复链路
+- `complete`：工作流闭环、汇总和最终完成态
 
----
+### 4.3 执行器与工作区
 
-## 5. 引擎模块详细设计
+执行器抽象在 `internal/workflow/executor`：
 
-### 5.1 ChatEngine（对话引擎）
+- `Registry`：按 `execution_mode` 注册和分发执行器
+- 已注册模式：`aider`、`chat`、`openhands`、`claude_code`、`codex_cli`、`gemini_cli`、`auto`
+- `Request` / `Result`：统一执行输入输出
 
-**文件：** `engine/chat_engine.go`
+写仓执行器与 `internal/workspace` 配合，为任务准备 `git worktree` 隔离目录。
 
-**职责：** 管理用户与 AI 的实时对话，支持 SSE 流式推送。
+### 4.4 对话与模型解析
 
-**核心流程：**
+`internal/engine` 仍承担当前主线里的几项基础职责：
 
-```
-SendMessage(conversationID, content, userID)
-  │
-  ├─ 1. 查询对话 → 获取 projectID、roleType
-  ├─ 2. resolveModel() → 三表联查获取模型配置
-  │     mvp_project_role → ai_model → ai_plan + ai_provider
-  │     返回: ModelInfo{ModelCode, ProviderType, BaseURL, APIKey, SystemPrompt}
-  ├─ 3. 保存用户消息 (status=completed)
-  ├─ 4. 创建 AI 回复消息 (status=streaming)
-  └─ 5. goroutine → runAICall()
-         ├─ 加载对话历史 (completed 消息，排除当前 streaming)
-         ├─ provider.ChatStream() 流式调用
-         ├─ 逐个 chunk:
-         │   ├─ 写入 mvp_message_chunk (chunk_index, content)
-         │   └─ SSEHub.Publish(replyID, chunkJSON)
-         ├─ 更新消息 status=completed, content=fullContent
-         ├─ SSEHub.Done(replyID)
-         └─ tryParseArchitectTasks() → 异步解析任务清单
-```
+- 架构师对话与 SSE 流输出
+- 模型解析 `ResolveProjectModelInfo`
+- 架构师任务拆解回写
+- 上下文压缩和部分运行时辅助能力
 
-**ModelInfo 结构：**
-```go
-type ModelInfo struct {
-    ModelID      int64
-    ModelCode    string   // 如 "tc-code-latest", "glm-5"
-    ProviderType string   // "anthropic" / "openai_compatible"
-    BaseURL      string   // "https://api.lkeap.cloud.tencent.com/coding/anthropic/v1"
-    APIKey       string
-    APISecret    string
-    SystemPrompt string   // 角色提示词
-    MaxTokens    int
-}
-```
+也就是说，Workflow V2 已经把正式运行实体迁到 `internal/workflow`，但模型解析、对话流和部分兼容逻辑仍留在 `internal/engine`。
 
-### 5.2 TaskParser（任务解析器）
+### 4.5 自治与协作
 
-**文件：** `engine/task_parser.go`
+当前已落地的外围能力包括：
 
-**职责：** 从架构师 AI 回复中提取 JSON 任务清单，创建 draft 任务。
+- `internal/workflow/autonomy`：决策中台、策略、风险闸门、目标层、态势感知、元认知
+- `internal/collab`：飞书/Telegram 适配器、通知服务、长连接和回调处理
+- `internal/worker`：异步后台任务
+
+## 5. 前端结构
+
+前端位于 `vue-vben-admin/apps/web-antd/src/views/mvp`，当前主要页面包括：
+
+- `dashboard/`：MVP 系统概览与系统检查
+- `project/`：项目管理
+- `chat/`：与架构师对话
+- `workflow/`：仪表盘、审核、执行、验收、返工、时间线、自治、飞书、Telegram
+- `config/`：MVP 全局配置
+- `project_category/`、`role_preset/`、`project_role/`：分类与角色配置
+- `task/`、`task_log/`、`conversation/`、`message/`：任务与消息明细
+
+当前工作流页不是单页 demo，而是已拆成多个独立面板：
+
+- `dashboard.vue`
+- `review.vue`
+- `execution.vue`
+- `accept.vue`
+- `rework.vue`
+- `autonomy.vue`
+- `objective.vue`
+- `situation.vue`
+- `meta-cognition.vue`
+- `timeline.vue`
+- `feishu.vue`
+- `telegram.vue`
+
+## 6. 运行基础设施
+
+### 6.1 数据与缓存
+
+- 数据库：MySQL 8.0
+- Redis：生产 compose 默认启用；开发环境分精简版和全量版两套 compose
+
+### 6.2 AI 协议
+
+AI 供应商通过 `admin-go/utility/provider` 统一抽象，当前覆盖：
+
+- Anthropic 风格协议
+- OpenAI 兼容协议
+
+### 6.3 开发与部署
+
+- `docker/dev/docker-compose.cn.yml`：默认开发入口
+- `docker/dev/docker-compose.yml`：带 Redis 的全量开发 compose
+- `docker/prod/docker-compose.yml`：当前生产 compose
+
+## 7. 当前文档边界
+
+2026-04-08 起，仓库文档只保留与当前代码仍对应的内容：
+
+- 不再在主文档里保留迁移计划、Phase 路线图和旧链说明
+- 已删除的历史设计稿如需查看，请从 `git` 历史追溯
+- 对尚未落地的能力，文档会明确写成“当前边界”，不再写成“建议新增”
 
 **架构师输出格式：**
 ```json

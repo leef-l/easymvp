@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	_ "github.com/gogf/gf/contrib/nosql/redis/v2" // 注册 gredis 驱动
@@ -26,7 +27,7 @@ import (
 )
 
 const (
-	redisQueueKey   = "easymvp:delete:queue"   // Redis List key
+	redisQueueKey   = "easymvp:delete:queue"    // Redis List key
 	redisRetryKey   = "easymvp:delete:retry:%d" // 单条重试计数 key（ttl 1h）
 	deleteMaxRetry  = 5
 	deleteBatchSize = 100 // 单步最多处理的 ID 数
@@ -323,7 +324,16 @@ func safeGetRedis(ctx context.Context) (r *gredis.Redis) {
 	}()
 	r = g.Redis()
 	if r != nil {
-		return r
+		if _, err := r.Do(ctx, "PING"); err == nil {
+			return r
+		} else {
+			g.Log().Warningf(ctx, "[DeleteWorker] 默认 Redis 客户端不可用，回退直连: %v", err)
+			// GoFrame 配置缺少密码时会稳定 NOAUTH，这里回退到带密码的直连客户端。
+			if !strings.Contains(strings.ToLower(err.Error()), "noauth") &&
+				!strings.Contains(strings.ToLower(err.Error()), "authentication") {
+				return r
+			}
+		}
 	}
 	// 配置文件没有，尝试环境变量
 	addr := os.Getenv("REDIS_ADDR")
@@ -338,6 +348,10 @@ func safeGetRedis(ctx context.Context) (r *gredis.Redis) {
 	})
 	if err != nil {
 		g.Log().Warningf(ctx, "[DeleteWorker] Redis 直连失败 addr=%s: %v", addr, err)
+		return nil
+	}
+	if _, err := client.Do(ctx, "PING"); err != nil {
+		g.Log().Warningf(ctx, "[DeleteWorker] Redis 直连鉴权失败 addr=%s: %v", addr, err)
 		return nil
 	}
 	return client

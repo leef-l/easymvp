@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -22,8 +23,8 @@ func NewAiderExecutor(wsMgr workspace.Manager) *AiderExecutor {
 	return &AiderExecutor{wsMgr: wsMgr}
 }
 
-func (e *AiderExecutor) Name() string          { return "aider" }
-func (e *AiderExecutor) NeedsWorkspace() bool   { return true }
+func (e *AiderExecutor) Name() string         { return "aider" }
+func (e *AiderExecutor) NeedsWorkspace() bool { return true }
 
 // Execute 执行 Aider 任务。
 func (e *AiderExecutor) Execute(ctx context.Context, req *Request) *Result {
@@ -63,7 +64,7 @@ func (e *AiderExecutor) Execute(ctx context.Context, req *Request) *Result {
 
 	runner := engine.GetAiderRunner()
 	aiderResult := runner.RunTask(execCtx, req.ProjectID, req.TaskID, req.ModelInfo,
-		req.TaskRecord["description"].String(), workDir, files, nil)
+		buildStrictAiderTaskPrompt(req.TaskRecord["description"].String(), files), workDir, files, nil)
 
 	if aiderResult.Error != nil {
 		// workspace finalize: 标记失败
@@ -80,23 +81,39 @@ func (e *AiderExecutor) Execute(ctx context.Context, req *Request) *Result {
 
 	// workspace finalize: 标记成功
 	if req.Workspace != nil && e.wsMgr != nil {
-		if err := e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: true}); err != nil {
-			g.Log().Warningf(ctx, "[AiderExecutor] workspace finalize 失败: task=%d err=%v", req.TaskID, err)
-		} else {
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						g.Log().Errorf(context.Background(), "[AiderExecutor] workspace cleanup panic: task=%d err=%v", req.TaskID, r)
-					}
-				}()
-				if cleanErr := e.wsMgr.Cleanup(context.Background(), req.TaskID); cleanErr != nil {
-					g.Log().Warningf(context.Background(), "[AiderExecutor] workspace cleanup 失败: task=%d err=%v", req.TaskID, cleanErr)
-				}
-			}()
+		if err := finalizeWorkspaceSuccess(ctx, e.wsMgr, req.TaskID, "AiderExecutor"); err != nil {
+			_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: false, Error: err.Error(), Retain: true})
+			return &Result{Success: false, Error: err}
 		}
 	}
 
 	return &Result{Success: true, Output: aiderResult.Output}
+}
+
+func buildStrictAiderTaskPrompt(description string, files []string) string {
+	var b strings.Builder
+	b.WriteString(strings.TrimSpace(description))
+	b.WriteString("\n\n执行约束：\n")
+	if len(files) > 0 {
+		b.WriteString("- 只允许创建或修改以下路径：\n")
+		for _, file := range files {
+			file = strings.TrimSpace(file)
+			if file == "" {
+				continue
+			}
+			b.WriteString("  - ")
+			b.WriteString(file)
+			b.WriteString("\n")
+		}
+	} else {
+		b.WriteString("- 当前任务未声明允许写入的文件路径；若无法在现有文件内完成，请直接失败，不要自行扩展范围。\n")
+	}
+	b.WriteString("- 严禁创建任何未在允许列表中的文件、目录、临时文件、总结文件或说明文件。\n")
+	b.WriteString("- 严禁把回答中的标题、项目符号、代码块说明、'运行方式：'、'验证：'、'说明：' 等自然语言文本当成文件名。\n")
+	b.WriteString("- 直接编辑目标文件，不要额外生成 Markdown 报告、操作说明、验证清单或同义标题文件。\n")
+	b.WriteString("- 如果需要说明如何运行或验证，只能写入已允许的目标文件内容，或在标准输出中说明，不要新增文件。\n")
+	b.WriteString("- 如果发现任务描述与允许路径冲突，优先遵守允许路径并直接失败，不要越界修改。\n")
+	return b.String()
 }
 
 // ChatExecutor ChatStream 执行器。
@@ -105,8 +122,8 @@ type ChatExecutor struct{}
 // NewChatExecutor 创建 Chat 执行器。
 func NewChatExecutor() *ChatExecutor { return &ChatExecutor{} }
 
-func (e *ChatExecutor) Name() string          { return "chat" }
-func (e *ChatExecutor) NeedsWorkspace() bool   { return false }
+func (e *ChatExecutor) Name() string         { return "chat" }
+func (e *ChatExecutor) NeedsWorkspace() bool { return false }
 
 // Execute 执行 Chat 任务。
 func (e *ChatExecutor) Execute(ctx context.Context, req *Request) *Result {

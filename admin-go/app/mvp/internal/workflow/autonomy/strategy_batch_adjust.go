@@ -50,7 +50,7 @@ func (s *BatchAdjustStrategy) Evaluate(ctx context.Context, sit *Situation, req 
 	currentMax := r.MaxConcurrency
 	if currentMax <= 0 {
 		// 读取引擎配置默认值
-		currentMax = engine.GetConfigInt(ctx, "scheduler.max_concurrent", "scheduler.maxConcurrent", 20)
+		currentMax = engine.GetSchedulerMaxConcurrency(ctx)
 	}
 
 	direction, newMax, reason, confidence := s.calcAdjustment(sit, h, r, currentMax)
@@ -75,7 +75,7 @@ func (s *BatchAdjustStrategy) Evaluate(ctx context.Context, sit *Situation, req 
 		RollbackAction:  consts.ActionTypePauseWorkflow,
 		ExpectedOutcome: fmt.Sprintf("并发度%s至 %d，提升系统稳定性", directionLabel(direction), newMax),
 		Parameters: map[string]interface{}{
-			"adjust_direction": direction,        // "increase" / "decrease"
+			"adjust_direction":   direction, // "increase" / "decrease"
 			"new_max_concurrent": newMax,
 			"old_max_concurrent": currentMax,
 		},

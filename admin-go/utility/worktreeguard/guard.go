@@ -72,7 +72,7 @@ func (s *Snapshot) Validate(ctx context.Context, workDir string, allowPaths []st
 			result.Suspicious = append(result.Suspicious, currentPath)
 			continue
 		}
-		if len(allowList) > 0 && !isAllowedPath(currentPath, allowList) {
+		if len(allowList) == 0 || !isAllowedPath(currentPath, allowList) {
 			result.Invalid = append(result.Invalid, currentPath)
 		}
 	}
@@ -162,7 +162,7 @@ func IsSuspiciousPath(value string) bool {
 	if value == "" {
 		return false
 	}
-	if strings.ContainsAny(value, "（）`") {
+	if strings.ContainsAny(value, "（）`:：") {
 		return true
 	}
 
@@ -190,7 +190,7 @@ func isAllowedPath(value string, allowPaths []string) bool {
 }
 
 func readGitStatus(ctx context.Context, workDir string) (map[string]string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", workDir, "status", "--porcelain=v1", "--untracked-files=all")
+	cmd := exec.CommandContext(ctx, "git", "-c", "core.quotepath=false", "-C", workDir, "status", "--porcelain=v1", "--untracked-files=all")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("读取 git 变更失败: %w", err)
@@ -210,6 +210,7 @@ func readGitStatus(ctx context.Context, workDir string) (map[string]string, erro
 			parts := strings.Split(filePath, " -> ")
 			filePath = strings.TrimSpace(parts[len(parts)-1])
 		}
+		filePath = strings.Trim(filePath, "\"")
 		filePath = strings.ReplaceAll(filePath, "\\", "/")
 		filePath = path.Clean(filePath)
 		if filePath == "." || filePath == "" {

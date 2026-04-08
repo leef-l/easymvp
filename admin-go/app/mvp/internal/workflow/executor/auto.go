@@ -57,6 +57,10 @@ func (e *AutoExecutor) Execute(ctx context.Context, req *Request) *Result {
 			}
 			continue
 		}
+		if mode == "claude_code" && shouldAvoidClaudeCodeInCurrentEnv() {
+			g.Log().Warningf(ctx, "[AutoExecutor] 跳过执行器: %s（root 环境下 Claude Code 无法无交互授权写入）", mode)
+			continue
+		}
 		if !enabledEngines[mode] {
 			continue
 		}

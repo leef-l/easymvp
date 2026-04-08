@@ -22,7 +22,7 @@ func RecoverActiveWorkflows(ctx context.Context) error {
 			consts.WorkflowRunStatusReworking,
 		}).
 		WhereNull("deleted_at").
-		Fields("id, project_id, status, current_stage").
+		Fields("id, project_id, status, current_stage, current_stage_run_id").
 		OrderAsc("created_at").
 		All()
 	if err != nil {
@@ -56,6 +56,12 @@ func RecoverActiveWorkflows(ctx context.Context) error {
 
 		switch stage {
 		case consts.StageTypeExecute, consts.StageTypeRework:
+			if err := PrepareTaskSchedulerForStage(ctx, workflowRunID, stage, run["current_stage_run_id"].Int64()); err != nil {
+				g.Log().Errorf(ctx, "[WorkflowRecovery] 绑定调度器执行器失败: workflowRunID=%d stage=%s err=%v",
+					workflowRunID, stage, err)
+				failedWorkflows = append(failedWorkflows, workflowRunID)
+				continue
+			}
 			// 调度器用独立 ctx，生命周期不跟随启动流程
 			if err := taskScheduler.Start(context.Background(), workflowRunID); err != nil {
 				g.Log().Errorf(ctx, "[WorkflowRecovery] 重启调度失败: workflowRunID=%d stage=%s status=%s err=%v",

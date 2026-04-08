@@ -110,6 +110,10 @@ func dispatchIntent(
 		handleBotPauseProject(ctx, intent.ProjectName, systemUserID, reply)
 	case "resume_project":
 		handleBotResumeProject(ctx, intent.ProjectName, systemUserID, reply)
+	case "cancel_project":
+		handleBotCancelProject(ctx, intent.ProjectName, systemUserID, reply)
+	case "force_stage":
+		handleBotForceStage(ctx, intent.ProjectName, intent.TargetStage, intent.TaskID, systemUserID, reply)
 	case "confirm_plan":
 		handleBotConfirmPlan(ctx, openID, platformName, systemUserID, reply)
 
@@ -120,6 +124,8 @@ func dispatchIntent(
 		handleBotRetryTask(ctx, intent.ProjectName, intent.TaskID, systemUserID, reply)
 	case "skip_task":
 		handleBotSkipTask(ctx, intent.ProjectName, intent.TaskID, systemUserID, reply)
+	case "update_task":
+		handleBotUpdateTask(ctx, intent, systemUserID, reply)
 
 	// ── 审核管理 ──
 	case "review_status":
@@ -182,10 +188,11 @@ func dispatchIntent(
 // 不含关键词的闲聊/问候直接走 fallback，避免不必要的 AI 调用。
 func looksLikeCommand(lower string) bool {
 	keywords := []string{
-		"项目", "任务", "创建", "新建", "暂停", "恢复", "继续", "重试", "跳过",
+		"项目", "任务", "创建", "新建", "暂停", "恢复", "继续", "取消", "终止", "重试", "跳过", "修改", "调整", "更新",
+		"强制", "回到设计", "重开审核", "重开执行", "验收", "返工",
 		"状态", "进度", "完成", "失败", "审核", "验收", "通过", "驳回", "拒绝",
 		"批准", "确认", "方案", "自治", "检查点",
-		"create", "project", "task", "pause", "resume", "retry", "skip",
+		"create", "project", "task", "pause", "resume", "cancel", "retry", "skip", "force", "reset",
 		"status", "review", "accept", "approve", "reject", "confirm",
 	}
 	for _, kw := range keywords {
@@ -203,8 +210,9 @@ func botHelpText() string {
 直接用自然语言和我说就行，不需要记命令。
 
 我能帮你做：
-📁 创建项目 / 查看进度 / 暂停继续
-📋 查看任务 / 重试失败 / 跳过阻塞
+📁 创建项目 / 查看进度 / 暂停继续 / 直接取消
+🧭 强制回设计 / 强制重审 / 强制重跑执行
+📋 查看任务 / 重试失败 / 跳过阻塞 / 直接改任务
 🔍 查看审核结果 / 人工审核通过或驳回
 🎯 查看验收状态 / 验收通过或打回
 🤖 查看自治检查点 / 批准或拒绝
@@ -212,6 +220,9 @@ func botHelpText() string {
 示例：
   "帮我建个电商后台项目"
   "电商后台跑到哪里了"
+  "把电商后台回到设计阶段"
+  "强制把电商后台重开到执行阶段"
+  "把电商后台的任务123改成 codex_cli 并重新开始"
   "有失败任务帮我重试一下"
   "审核通过了吗，没问题就批了"
   "自治那边有啥需要我确认的吗"

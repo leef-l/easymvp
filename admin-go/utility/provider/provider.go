@@ -21,19 +21,19 @@ type Message struct {
 
 // ChatRequest AI 对话请求
 type ChatRequest struct {
-	Model       string    `json:"model"`        // 模型代码
-	Messages    []Message `json:"messages"`      // 对话历史
-	MaxTokens   int       `json:"max_tokens"`    // 最大输出 token
-	Temperature float64   `json:"temperature"`   // 温度（0-2）
-	TopP        float64   `json:"top_p"`         // Top-P 采样
-	Stream      bool      `json:"stream"`        // 是否流式
-	SystemPrompt string   `json:"system_prompt"` // 系统提示词（部分 API 单独传递）
+	Model        string    `json:"model"`         // 模型代码
+	Messages     []Message `json:"messages"`      // 对话历史
+	MaxTokens    int       `json:"max_tokens"`    // 最大输出 token
+	Temperature  float64   `json:"temperature"`   // 温度（0-2）
+	TopP         float64   `json:"top_p"`         // Top-P 采样
+	Stream       bool      `json:"stream"`        // 是否流式
+	SystemPrompt string    `json:"system_prompt"` // 系统提示词（部分 API 单独传递）
 }
 
 // ChatResponse AI 对话响应
 type ChatResponse struct {
-	Content      string     `json:"content"`       // 回复内容
-	FinishReason string     `json:"finish_reason"` // 结束原因：stop/length/error
+	Content      string      `json:"content"`       // 回复内容
+	FinishReason string      `json:"finish_reason"` // 结束原因：stop/length/error
 	Usage        *TokenUsage `json:"usage"`         // token 用量
 }
 
@@ -46,8 +46,8 @@ type TokenUsage struct {
 
 // StreamChunk 流式输出的单个分片
 type StreamChunk struct {
-	Content      string     `json:"content"`                // 增量内容
-	FinishReason string     `json:"finish_reason,omitempty"` // 结束原因（最后一个 chunk 才有）
+	Content      string      `json:"content"`                 // 增量内容
+	FinishReason string      `json:"finish_reason,omitempty"` // 结束原因（最后一个 chunk 才有）
 	Usage        *TokenUsage `json:"usage,omitempty"`         // token 用量（最后一个 chunk 才有）
 }
 
@@ -66,8 +66,9 @@ type Provider interface {
 
 // Config Provider 配置
 type Config struct {
-	ProviderType string // 类型：openai_compatible/anthropic/google
-	BaseURL      string // API 基础地址
-	APIKey       string // API Key
-	APISecret    string // API Secret（部分供应商需要）
+	ProviderType       string   // 类型：openai_compatible/anthropic/google
+	SupportedProtocols []string // 供应商支持的协议类型列表
+	BaseURL            string   // API 基础地址
+	APIKey             string   // API Key
+	APISecret          string   // API Secret（部分供应商需要）
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	"easymvp/app/mvp/internal/collab/adapter"
 	collabRepo "easymvp/app/mvp/internal/collab/repo"
@@ -19,12 +20,20 @@ import (
 
 // botIntent AI 解析出的用户意图。
 type botIntent struct {
-	Action      string `json:"action"`       // 意图动作，见下方 intentSystemPrompt
-	ProjectName string `json:"project_name"` // 项目名称（多数操作需要）
-	Category    string `json:"category"`     // 项目分类（create 时有值）
-	TaskID      string `json:"task_id"`      // 任务ID（retry_task/skip_task）
-	IssueID     string `json:"issue_id"`     // 审核/验收问题ID
-	Reply       string `json:"reply"`        // chat 时 AI 的直接回复文本
+	Action             string `json:"action"`               // 意图动作，见下方 intentSystemPrompt
+	ProjectName        string `json:"project_name"`         // 项目名称（多数操作需要）
+	Category           string `json:"category"`             // 项目分类（create 时有值）
+	TaskID             string `json:"task_id"`              // 任务ID（retry_task/skip_task/update_task）
+	IssueID            string `json:"issue_id"`             // 审核/验收问题ID
+	TargetStage        string `json:"target_stage"`         // 强制切换目标阶段
+	TaskName           string `json:"task_name"`            // 更新后的任务名
+	TaskDescription    string `json:"task_description"`     // 更新后的任务描述
+	RoleType           string `json:"role_type"`            // 更新后的角色类型
+	RoleLevel          string `json:"role_level"`           // 更新后的角色等级
+	ExecutionMode      string `json:"execution_mode"`       // 更新后的执行方式
+	RestartAfterUpdate bool   `json:"restart_after_update"` // 修改后是否重置为 pending
+	Reason             string `json:"reason"`               // 人工接管原因
+	Reply              string `json:"reply"`                // chat 时 AI 的直接回复文本
 }
 
 // intentSystemPrompt AI 意图解析系统提示词。
@@ -38,12 +47,15 @@ const intentSystemPrompt = `你是 EasyMVP 的飞书机器人助手。EasyMVP �
 - project_status：查询项目状态和进度（project_name必填）
 - pause_project：暂停项目执行（project_name必填）
 - resume_project：继续/恢复项目（project_name必填）
+- cancel_project：取消当前工作流（project_name必填）
+- force_stage：强制切换到指定阶段（project_name必填，target_stage必填，可选值：design/review/execute/accept/rework；rework 时 task_id 建议填写失败任务ID）
 - confirm_plan：确认当前对话中的方案并启动自动执行
 
 ### 任务管理
 - list_tasks：查看项目任务列表（project_name必填）
 - retry_task：重试失败任务（project_name必填，task_id可选，不填则重试所有失败任务）
 - skip_task：跳过阻塞任务（project_name必填，task_id必填）
+- update_task：人工修改任务（project_name必填，task_id必填；可选 task_name/task_description/role_type/role_level/execution_mode/restart_after_update）
 
 ### 审核管理
 - review_status：查看项目当前审核状态和问题（project_name必填）
@@ -70,10 +82,13 @@ const intentSystemPrompt = `你是 EasyMVP 的飞书机器人助手。EasyMVP �
 - "XXX进度/状态/怎么样了" → project_status
 - "暂停/停止XXX" → pause_project
 - "继续/恢复/重启XXX" → resume_project
+- "取消/终止XXX项目" → cancel_project
+- "回到设计/重开审核/重跑执行/强制验收/进入返工" → force_stage，并填写 target_stage
 - "确认方案/开始执行/启动" → confirm_plan
 - "任务列表/查看任务/XXX的任务" → list_tasks
 - "重试/重新执行XXX失败任务" → retry_task
 - "跳过任务/跳过阻塞" → skip_task
+- "修改任务/调整任务/重置任务" → update_task
 - "审核状态/审核结果/审核通过了吗" → review_status
 - "通过审核/审核通过" → approve_review
 - "驳回审核/审核不通过" → reject_review
@@ -86,8 +101,10 @@ const intentSystemPrompt = `你是 EasyMVP 的飞书机器人助手。EasyMVP �
 - 其他：chat（reply填写友好回复）
 
 category 常见值：软件开发、游戏开发、数据分析、内容创作、运营策划。未指定默认"软件开发"。
+reason 可选，用户提到“因为.../原因是...”时尽量提取。
+update_task 时，若用户提到“重跑/重置后重做/重新开始”，将 restart_after_update 设为 true。
 
-只返回 JSON，格式：{"action":"...","project_name":"...","category":"...","task_id":"...","issue_id":"...","reply":"..."}`
+只返回 JSON，格式：{"action":"...","project_name":"...","category":"...","task_id":"...","issue_id":"...","target_stage":"...","task_name":"...","task_description":"...","role_type":"...","role_level":"...","execution_mode":"...","restart_after_update":false,"reason":"...","reply":"..."}`
 
 // feishuBotPlatform 实现 BotPlatform 接口，封装飞书消息回复。
 type feishuBotPlatform struct {
@@ -161,10 +178,11 @@ func parseIntentWithAI(ctx context.Context, userText string, systemUserID int64)
 	}
 
 	p, err := provider.GetProvider(provider.Config{
-		ProviderType: modelInfo.ProviderType,
-		BaseURL:      modelInfo.BaseURL,
-		APIKey:       modelInfo.APIKey,
-		APISecret:    modelInfo.APISecret,
+		ProviderType:       modelInfo.ProviderType,
+		SupportedProtocols: modelInfo.SupportedProtocols,
+		BaseURL:            modelInfo.BaseURL,
+		APIKey:             modelInfo.APIKey,
+		APISecret:          modelInfo.APISecret,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("初始化 provider 失败: %w", err)
@@ -296,19 +314,35 @@ func handleBotListProjects(ctx context.Context, systemUserID int64, reply func(s
 		return
 	}
 
+	scope, err := resolveBotProjectScope(ctx, systemUserID)
+	if err != nil {
+		reply(fmt.Sprintf("❌ 查询权限范围失败：%v", err))
+		return
+	}
+
 	type projectRow struct {
 		ID     int64  `json:"id"`
 		Name   string `json:"name"`
 		Status string `json:"status"`
 	}
 	var rows []projectRow
-	if err := g.DB().Ctx(ctx).Model("mvp_project").
-		Where("created_by", systemUserID).
+	query := g.DB().Ctx(ctx).Model("mvp_project").
 		WhereNull("deleted_at").
 		Fields("id, name, status").
 		OrderDesc("created_at").
-		Limit(8).
-		Scan(&rows); err != nil {
+		Limit(8)
+	switch {
+	case scope.All:
+	case len(scope.DeptIDs) == 0 && scope.IncludeSelf:
+		query = query.Where("created_by", systemUserID)
+	case len(scope.DeptIDs) == 0:
+		query = query.Where("id", -1)
+	case scope.IncludeSelf:
+		query = query.Where("(created_by = ? OR dept_id IN (?))", systemUserID, scope.DeptIDs)
+	default:
+		query = query.WhereIn("dept_id", scope.DeptIDs)
+	}
+	if err := query.Scan(&rows); err != nil {
 		reply(fmt.Sprintf("❌ 查询失败：%v", err))
 		return
 	}
@@ -320,9 +354,14 @@ func handleBotListProjects(ctx context.Context, systemUserID int64, reply func(s
 
 	statusLabel := map[string]string{
 		"designing": "⚙️ 设计中",
+		"reviewing": "🔍 审核中",
+		"executing": "🚀 执行中",
+		"accepting": "🎯 验收中",
+		"reworking": "🔁 返工中",
 		"running":   "🚀 执行中",
 		"paused":    "⏸️ 已暂停",
 		"completed": "✅ 已完成",
+		"canceled":  "🛑 已取消",
 	}
 	lines := []string{"📋 您的项目（最近8个）", "───────────────"}
 	for i, row := range rows {
@@ -355,36 +394,69 @@ func handleBotProjectStatus(ctx context.Context, projectName string, systemUserI
 	name := project["name"].String()
 	status := project["status"].String()
 
-	type sc struct {
-		Status string
-		Count  int
-	}
-	var counts []sc
-	_ = g.DB().Ctx(ctx).Model("mvp_task").
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		Fields("status, COUNT(*) as count").
-		Group("status").
-		Scan(&counts)
-
 	total, done, running, failed := 0, 0, 0, 0
-	for _, c := range counts {
-		total += c.Count
-		switch c.Status {
-		case "completed":
-			done += c.Count
-		case "running":
-			running += c.Count
-		case "failed":
-			failed += c.Count
+	if isWorkflowV2Project(project) {
+		wfRun, wfErr := latestWorkflowRunForProject(ctx, projectID)
+		if wfErr == nil && !wfRun.IsEmpty() {
+			status = wfRun["status"].String()
+			type sc struct {
+				Status string
+				Count  int
+			}
+			var counts []sc
+			_ = g.DB().Ctx(ctx).Model("mvp_domain_task").
+				Where("workflow_run_id", wfRun["id"].Int64()).
+				WhereNull("deleted_at").
+				Fields("status, COUNT(*) as count").
+				Group("status").
+				Scan(&counts)
+			for _, c := range counts {
+				total += c.Count
+				switch c.Status {
+				case "completed":
+					done += c.Count
+				case "running":
+					running += c.Count
+				case "failed", "escalated":
+					failed += c.Count
+				}
+			}
+		}
+	} else {
+		type sc struct {
+			Status string
+			Count  int
+		}
+		var counts []sc
+		_ = g.DB().Ctx(ctx).Model("mvp_task").
+			Where("project_id", projectID).
+			WhereNull("deleted_at").
+			Fields("status, COUNT(*) as count").
+			Group("status").
+			Scan(&counts)
+		for _, c := range counts {
+			total += c.Count
+			switch c.Status {
+			case "completed":
+				done += c.Count
+			case "running":
+				running += c.Count
+			case "failed":
+				failed += c.Count
+			}
 		}
 	}
 
 	statusLabel := map[string]string{
 		"designing": "⚙️ 设计中",
+		"reviewing": "🔍 审核中",
+		"executing": "🚀 执行中",
+		"accepting": "🎯 验收中",
+		"reworking": "🔁 返工中",
 		"running":   "🚀 执行中",
 		"paused":    "⏸️ 已暂停",
 		"completed": "✅ 已完成",
+		"canceled":  "🛑 已取消",
 	}
 	label := statusLabel[status]
 	if label == "" {
@@ -422,9 +494,31 @@ func handleBotPauseProject(ctx context.Context, projectName string, systemUserID
 		reply(fmt.Sprintf("❌ 未找到项目「%s」", projectName))
 		return
 	}
-	if err := engine.GetScheduler().Pause(ctx, project["id"].Int64(), "飞书机器人指令暂停"); err != nil {
-		reply(fmt.Sprintf("❌ 暂停失败：%v", err))
-		return
+	if isWorkflowV2Project(project) {
+		wfRun, qErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+			Where("project_id", project["id"].Int64()).
+			WhereNotIn("status", g.Slice{"completed", "canceled", "paused"}).
+			WhereNull("deleted_at").
+			OrderDesc("run_no").
+			OrderDesc("created_at").
+			One()
+		if qErr != nil {
+			reply(fmt.Sprintf("❌ 查询工作流失败：%v", qErr))
+			return
+		}
+		if wfRun.IsEmpty() {
+			reply(fmt.Sprintf("❌ 项目「%s」当前没有可暂停的工作流", project["name"].String()))
+			return
+		}
+		if err := orchestrator.GetWorkflowService().Pause(ctx, wfRun["id"].Int64(), "飞书机器人指令暂停"); err != nil {
+			reply(fmt.Sprintf("❌ 暂停失败：%v", err))
+			return
+		}
+	} else {
+		if err := engine.GetScheduler().Pause(ctx, project["id"].Int64(), "飞书机器人指令暂停"); err != nil {
+			reply(fmt.Sprintf("❌ 暂停失败：%v", err))
+			return
+		}
 	}
 	reply(fmt.Sprintf("⏸️ 项目「%s」已暂停", project["name"].String()))
 }
@@ -443,11 +537,287 @@ func handleBotResumeProject(ctx context.Context, projectName string, systemUserI
 		reply(fmt.Sprintf("❌ 未找到项目「%s」", projectName))
 		return
 	}
-	if err := engine.GetScheduler().Resume(ctx, project["id"].Int64()); err != nil {
-		reply(fmt.Sprintf("❌ 恢复失败：%v", err))
-		return
+	if isWorkflowV2Project(project) {
+		wfRun, qErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+			Where("project_id", project["id"].Int64()).
+			Where("status", "paused").
+			WhereNull("deleted_at").
+			OrderDesc("run_no").
+			OrderDesc("created_at").
+			One()
+		if qErr != nil {
+			reply(fmt.Sprintf("❌ 查询暂停工作流失败：%v", qErr))
+			return
+		}
+		if wfRun.IsEmpty() {
+			reply(fmt.Sprintf("❌ 项目「%s」当前没有暂停的工作流", project["name"].String()))
+			return
+		}
+		if err := orchestrator.GetWorkflowService().Resume(ctx, wfRun["id"].Int64()); err != nil {
+			reply(fmt.Sprintf("❌ 恢复失败：%v", err))
+			return
+		}
+	} else {
+		if err := engine.GetScheduler().Resume(ctx, project["id"].Int64()); err != nil {
+			reply(fmt.Sprintf("❌ 恢复失败：%v", err))
+			return
+		}
 	}
 	reply(fmt.Sprintf("▶️ 项目「%s」已继续执行", project["name"].String()))
+}
+
+func handleBotCancelProject(ctx context.Context, projectName string, systemUserID int64, reply func(string)) {
+	if systemUserID == 0 {
+		reply("❌ 您尚未绑定飞书账号，请先在 EasyMVP 管理端完成飞书绑定。")
+		return
+	}
+	if projectName == "" {
+		reply("❌ 请告诉我要取消哪个项目")
+		return
+	}
+	project, err := findProjectByKeyword(ctx, projectName, systemUserID)
+	if err != nil || project == nil {
+		reply(fmt.Sprintf("❌ 未找到项目「%s」", projectName))
+		return
+	}
+
+	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("project_id", project["id"].Int64()).
+		WhereNotIn("status", g.Slice{"completed", "canceled"}).
+		WhereNull("deleted_at").
+		OrderDesc("run_no").
+		OrderDesc("created_at").
+		One()
+	if err != nil {
+		reply(fmt.Sprintf("❌ 查询工作流失败：%v", err))
+		return
+	}
+	if wfRun.IsEmpty() {
+		reply(fmt.Sprintf("❌ 项目「%s」当前没有可取消的工作流", project["name"].String()))
+		return
+	}
+
+	reason := "机器人人工取消"
+	if err := orchestrator.GetWorkflowService().Cancel(ctx, wfRun["id"].Int64(), reason); err != nil {
+		reply(fmt.Sprintf("❌ 取消工作流失败：%v", err))
+		return
+	}
+
+	workflowRunID := wfRun["id"].Int64()
+	recordWorkflowEvent(ctx, workflowRunID, "workflow", "workflow.canceled", &workflowRunID, nil, map[string]interface{}{
+		"project_id": project["id"].Int64(),
+		"reason":     reason,
+		"source":     "bot",
+	})
+	reply(fmt.Sprintf("🛑 项目「%s」当前工作流已取消", project["name"].String()))
+}
+
+func handleBotForceStage(ctx context.Context, projectName, targetStage, taskIDStr string, systemUserID int64, reply func(string)) {
+	if systemUserID == 0 {
+		reply("❌ 您尚未绑定飞书账号，请先在 EasyMVP 管理端完成飞书绑定。")
+		return
+	}
+	if projectName == "" {
+		reply("❌ 请告诉我要操作哪个项目")
+		return
+	}
+	project, err := findProjectByKeyword(ctx, projectName, systemUserID)
+	if err != nil || project == nil {
+		reply(fmt.Sprintf("❌ 未找到项目「%s」", projectName))
+		return
+	}
+
+	projectID := project["id"].Int64()
+	wfRun, err := latestWorkflowRunForProject(ctx, projectID)
+	if err != nil {
+		reply(fmt.Sprintf("❌ 查询工作流失败：%v", err))
+		return
+	}
+	workflowRunID := wfRun["id"].Int64()
+	reason := "机器人人工切换阶段"
+
+	switch targetStage {
+	case "design":
+		if err := resetWorkflowArtifacts(ctx, projectID, workflowRunID, workflowArtifactResetOptions{
+			PauseScheduler:          true,
+			CancelRuntime:           true,
+			DeleteDomainTasks:       true,
+			DeleteStageTasks:        true,
+			DeleteStageRuns:         true,
+			DeleteReviewIssues:      true,
+			DeleteAcceptRuns:        true,
+			DeleteTaskWorkspaces:    true,
+			CleanupPhysicalWorktree: true,
+			SupersedePlanVersions:   true,
+		}); err != nil {
+			reply(fmt.Sprintf("❌ 回到设计阶段失败：%v", err))
+			return
+		}
+	case "review", "execute":
+		if err := resetWorkflowExecutionArtifacts(ctx, projectID, workflowRunID); err != nil {
+			reply(fmt.Sprintf("❌ 清理旧执行数据失败：%v", err))
+			return
+		}
+	case "accept", "rework":
+		if scheduler := orchestrator.GetTaskScheduler(); scheduler != nil {
+			scheduler.Pause(ctx, workflowRunID)
+		}
+		orchestrator.GetRuntimeManager().Cancel(workflowRunID)
+	default:
+		reply("❌ 不支持的目标阶段")
+		return
+	}
+
+	stageSvc := orchestrator.GetStageService()
+	stageRunID, err := stageSvc.ForceStartStage(ctx, workflowRunID, targetStage, reason)
+	if err != nil {
+		reply(fmt.Sprintf("❌ 强制切换阶段失败：%v", err))
+		return
+	}
+
+	switch targetStage {
+	case "review":
+		planVersionID, err := preparePlanVersionForForceStage(ctx, projectID, workflowRunID, 0, targetStage)
+		if err != nil {
+			_ = stageSvc.FailStage(context.Background(), stageRunID, err.Error())
+			reply(fmt.Sprintf("❌ 准备审核阶段失败：%v", err))
+			return
+		}
+		go func() {
+			bgCtx := context.Background()
+			if runErr := orchestrator.GetReviewStageService().RunReview(bgCtx, stageRunID, planVersionID); runErr != nil {
+				g.Log().Errorf(bgCtx, "[BotForceStage] review 重启失败: workflowRunID=%d stageRunID=%d err=%v", workflowRunID, stageRunID, runErr)
+				_ = stageSvc.FailStage(bgCtx, stageRunID, runErr.Error())
+			}
+		}()
+	case "execute":
+		planVersionID, err := preparePlanVersionForForceStage(ctx, projectID, workflowRunID, 0, targetStage)
+		if err != nil {
+			_ = stageSvc.FailStage(context.Background(), stageRunID, err.Error())
+			reply(fmt.Sprintf("❌ 准备执行阶段失败：%v", err))
+			return
+		}
+		if err := orchestrator.GetExecuteStageService().InstantiateAndStart(ctx, stageRunID, planVersionID); err != nil {
+			_ = stageSvc.FailStage(context.Background(), stageRunID, err.Error())
+			reply(fmt.Sprintf("❌ 启动执行阶段失败：%v", err))
+			return
+		}
+	case "design":
+		if _, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+			Where("id", workflowRunID).
+			Update(g.Map{"active_plan_version_id": nil, "updated_at": gtime.Now()}); err != nil {
+			g.Log().Warningf(ctx, "[BotForceStage] 清空 active_plan_version_id 失败: workflowRunID=%d err=%v", workflowRunID, err)
+		}
+	case "accept":
+		go func() {
+			bgCtx := context.Background()
+			if runErr := orchestrator.GetAcceptStageService().Run(bgCtx, workflowRunID, stageRunID); runErr != nil {
+				g.Log().Errorf(bgCtx, "[BotForceStage] accept 重启失败: workflowRunID=%d stageRunID=%d err=%v", workflowRunID, stageRunID, runErr)
+				_ = stageSvc.FailStage(bgCtx, stageRunID, runErr.Error())
+			}
+		}()
+	case "rework":
+		var failedTaskID int64
+		if taskIDStr != "" {
+			fmt.Sscanf(taskIDStr, "%d", &failedTaskID)
+		}
+		if failedTaskID == 0 {
+			_ = stageSvc.FailStage(context.Background(), stageRunID, "机器人返工未提供失败任务ID")
+			reply("❌ 强制返工需要提供失败任务ID，例如：让项目X进入返工，任务123")
+			return
+		}
+		if err := orchestrator.GetReworkStageService().HandleReworkWithSource(ctx, stageRunID, failedTaskID, "execute"); err != nil {
+			_ = stageSvc.FailStage(context.Background(), stageRunID, err.Error())
+			reply(fmt.Sprintf("❌ 启动返工阶段失败：%v", err))
+			return
+		}
+	}
+
+	recordWorkflowEvent(ctx, workflowRunID, "workflow", "workflow.force_stage", &workflowRunID, &stageRunID, map[string]interface{}{
+		"project_id":     projectID,
+		"target_stage":   targetStage,
+		"failed_task_id": taskIDStr,
+		"reason":         reason,
+		"source":         "bot",
+	})
+	reply(fmt.Sprintf("🧭 项目「%s」已强制切换到%s阶段", project["name"].String(), botStageLabel(targetStage)))
+}
+
+func handleBotUpdateTask(ctx context.Context, intent *botIntent, systemUserID int64, reply func(string)) {
+	if systemUserID == 0 {
+		reply("❌ 您尚未绑定飞书账号，请先在 EasyMVP 管理端完成飞书绑定。")
+		return
+	}
+	if intent == nil {
+		reply("❌ 指令解析失败")
+		return
+	}
+	if strings.TrimSpace(intent.ProjectName) == "" {
+		reply("❌ 请告诉我要操作哪个项目")
+		return
+	}
+	if strings.TrimSpace(intent.TaskID) == "" {
+		reply("❌ 修改任务必须提供任务ID")
+		return
+	}
+
+	project, err := findProjectByKeyword(ctx, intent.ProjectName, systemUserID)
+	if err != nil || project == nil {
+		reply(fmt.Sprintf("❌ 未找到项目「%s」", intent.ProjectName))
+		return
+	}
+
+	var taskID int64
+	if _, scanErr := fmt.Sscanf(strings.TrimSpace(intent.TaskID), "%d", &taskID); scanErr != nil || taskID == 0 {
+		reply("❌ 任务ID格式不正确")
+		return
+	}
+
+	res, err := updateDomainTaskInternal(ctx, project["id"].Int64(), domainTaskUpdateOptions{
+		TaskID:             taskID,
+		Name:               intent.TaskName,
+		Description:        intent.TaskDescription,
+		RoleType:           intent.RoleType,
+		RoleLevel:          intent.RoleLevel,
+		ExecutionMode:      intent.ExecutionMode,
+		RestartAfterUpdate: intent.RestartAfterUpdate,
+		Reason:             intent.Reason,
+	})
+	if err != nil {
+		reply(fmt.Sprintf("❌ 修改任务失败：%v", err))
+		return
+	}
+
+	reply(fmt.Sprintf("✏️ 项目「%s」任务 %d 已更新，当前状态：%s。%s",
+		project["name"].String(),
+		taskID,
+		res.Status,
+		res.Message,
+	))
+}
+
+func botStageLabel(stage string) string {
+	switch stage {
+	case "design":
+		return "设计"
+	case "review":
+		return "审核"
+	case "execute":
+		return "执行"
+	case "accept":
+		return "验收"
+	case "rework":
+		return "返工"
+	default:
+		return stage
+	}
+}
+
+func isWorkflowV2Project(project gdb.Record) bool {
+	if project == nil || project.IsEmpty() {
+		return false
+	}
+	return project["engine_version"].String() != "legacy"
 }
 
 // ─── 工具函数 ────────────────────────────────────────────────────────────────
@@ -468,6 +838,20 @@ func fallbackParseIntent(text string) *botIntent {
 		return &botIntent{Action: "pause_project", ProjectName: extractKeyword(text, "暂停", "pause")}
 	case strings.Contains(lower, "继续") || strings.Contains(lower, "恢复") || strings.Contains(lower, "resume"):
 		return &botIntent{Action: "resume_project", ProjectName: extractKeyword(text, "继续", "恢复", "resume")}
+	case strings.Contains(lower, "取消") || strings.Contains(lower, "终止") || strings.Contains(lower, "cancel"):
+		return &botIntent{Action: "cancel_project", ProjectName: extractKeyword(text, "取消", "终止", "cancel")}
+	case strings.Contains(lower, "回到设计") || strings.Contains(lower, "重新设计"):
+		return &botIntent{Action: "force_stage", ProjectName: text, TargetStage: "design"}
+	case strings.Contains(lower, "重开审核") || strings.Contains(lower, "重新审核") || strings.Contains(lower, "强制审核"):
+		return &botIntent{Action: "force_stage", ProjectName: text, TargetStage: "review"}
+	case strings.Contains(lower, "重开执行") || strings.Contains(lower, "重新执行阶段") || strings.Contains(lower, "强制执行"):
+		return &botIntent{Action: "force_stage", ProjectName: text, TargetStage: "execute"}
+	case strings.Contains(lower, "强制验收") || strings.Contains(lower, "重开验收"):
+		return &botIntent{Action: "force_stage", ProjectName: text, TargetStage: "accept"}
+	case strings.Contains(lower, "强制返工") || strings.Contains(lower, "进入返工"):
+		return &botIntent{Action: "force_stage", ProjectName: text, TargetStage: "rework", TaskID: extractTaskID(text)}
+	case strings.Contains(lower, "修改任务") || strings.Contains(lower, "调整任务") || strings.Contains(lower, "更新任务"):
+		return &botIntent{Action: "update_task", ProjectName: text, TaskID: extractTaskID(text)}
 	case strings.Contains(lower, "帮助") || lower == "help" || lower == "?":
 		return &botIntent{Action: "help"}
 	default:
@@ -505,6 +889,20 @@ func extractKeyword(text string, prefixes ...string) string {
 		}
 	}
 	return text
+}
+
+func extractTaskID(text string) string {
+	var taskID int64
+	if _, err := fmt.Sscanf(text, "%d", &taskID); err == nil && taskID > 0 {
+		return fmt.Sprintf("%d", taskID)
+	}
+	parts := strings.FieldsFunc(text, func(r rune) bool { return r < '0' || r > '9' })
+	for _, part := range parts {
+		if part != "" {
+			return part
+		}
+	}
+	return ""
 }
 
 // lookupSystemUser 根据飞书 openID 查找绑定的系统用户 ID 和部门 ID。
@@ -569,12 +967,130 @@ func clearBotSession(platform, openID string) {
 	}
 }
 
+type botProjectScope struct {
+	All         bool
+	IncludeSelf bool
+	DeptIDs     []int64
+}
+
+func resolveBotProjectScope(ctx context.Context, userID int64) (*botProjectScope, error) {
+	scope := &botProjectScope{DeptIDs: make([]int64, 0)}
+	if userID == 0 {
+		return scope, nil
+	}
+
+	user, err := g.DB().Ctx(ctx).Model("system_users").
+		Fields("dept_id").
+		Where("id", userID).
+		WhereNull("deleted_at").
+		One()
+	if err != nil {
+		return nil, err
+	}
+	currentDeptID := user["dept_id"].Int64()
+
+	roles, err := g.DB().Ctx(ctx).Model("system_user_role AS ur").
+		LeftJoin("system_role AS r", "r.id = ur.role_id").
+		Fields("r.id, r.is_admin, r.data_scope").
+		Where("ur.user_id", userID).
+		Where("r.status", 1).
+		Where("r.deleted_at IS NULL").
+		All()
+	if err != nil {
+		return nil, err
+	}
+	if len(roles) == 0 {
+		scope.IncludeSelf = true
+		return scope, nil
+	}
+
+	deptSet := make(map[int64]struct{})
+	customRoleIDs := make([]int64, 0)
+	for _, role := range roles {
+		if role["is_admin"].Int() == 1 || role["data_scope"].Int() == 1 {
+			scope.All = true
+			return scope, nil
+		}
+		switch role["data_scope"].Int() {
+		case 2:
+			for _, deptID := range loadBotDeptSubtreeIDs(ctx, currentDeptID) {
+				deptSet[deptID] = struct{}{}
+			}
+		case 3:
+			if currentDeptID > 0 {
+				deptSet[currentDeptID] = struct{}{}
+			}
+		case 4:
+			scope.IncludeSelf = true
+		case 5:
+			customRoleIDs = append(customRoleIDs, role["id"].Int64())
+		}
+	}
+
+	if len(customRoleIDs) > 0 {
+		customDepts, deptErr := g.DB().Ctx(ctx).Model("system_role_dept").
+			Fields("DISTINCT dept_id").
+			WhereIn("role_id", customRoleIDs).
+			All()
+		if deptErr != nil {
+			return nil, deptErr
+		}
+		for _, dept := range customDepts {
+			deptID := dept["dept_id"].Int64()
+			if deptID > 0 {
+				deptSet[deptID] = struct{}{}
+			}
+		}
+	}
+
+	for deptID := range deptSet {
+		scope.DeptIDs = append(scope.DeptIDs, deptID)
+	}
+	return scope, nil
+}
+
+func loadBotDeptSubtreeIDs(ctx context.Context, rootDeptID int64) []int64 {
+	if rootDeptID == 0 {
+		return nil
+	}
+	result := []int64{rootDeptID}
+	children, err := g.DB().Ctx(ctx).Model("system_dept").
+		Fields("id").
+		Where("parent_id", rootDeptID).
+		Where("status", 1).
+		WhereNull("deleted_at").
+		All()
+	if err != nil || len(children) == 0 {
+		return result
+	}
+	for _, child := range children {
+		result = append(result, loadBotDeptSubtreeIDs(ctx, child["id"].Int64())...)
+	}
+	return result
+}
+
 // findProjectByKeyword 按项目名或 ID 查找项目（限当前用户）。
 func findProjectByKeyword(ctx context.Context, keyword string, userID int64) (gdb.Record, error) {
+	scope, err := resolveBotProjectScope(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
 	m := g.DB().Ctx(ctx).Model("mvp_project").
 		WhereNull("deleted_at").
-		Where("created_by", userID).
-		Fields("id, name, status, pause_reason")
+		Fields("id, name, status, pause_reason, engine_version")
+
+	switch {
+	case scope.All:
+	case len(scope.DeptIDs) == 0 && scope.IncludeSelf:
+		m = m.Where("created_by", userID)
+	case len(scope.DeptIDs) == 0:
+		m = m.Where("id", -1)
+	case scope.IncludeSelf:
+		m = m.Where("(created_by = ? OR dept_id IN (?))", userID, scope.DeptIDs)
+	default:
+		m = m.WhereIn("dept_id", scope.DeptIDs)
+	}
 
 	var numID int64
 	if _, err := fmt.Sscanf(keyword, "%d", &numID); err == nil && numID > 0 {
@@ -693,20 +1209,35 @@ func handleBotListTasks(ctx context.Context, projectName string, systemUserID in
 		return
 	}
 	projectID := project["id"].Int64()
-
 	type taskRow struct {
 		ID     int64  `json:"id"`
 		Name   string `json:"name"`
 		Status string `json:"status"`
 	}
 	var tasks []taskRow
-	_ = g.DB().Ctx(ctx).Model("mvp_task").
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		Fields("id, name, status").
-		OrderAsc("batch_no").
-		Limit(20).
-		Scan(&tasks)
+	if isWorkflowV2Project(project) {
+		wfRun, wfErr := latestWorkflowRunForProject(ctx, projectID)
+		if wfErr != nil {
+			reply(fmt.Sprintf("❌ 查询工作流失败：%v", wfErr))
+			return
+		}
+		_ = g.DB().Ctx(ctx).Model("mvp_domain_task").
+			Where("workflow_run_id", wfRun["id"].Int64()).
+			WhereNull("deleted_at").
+			Fields("id, name, status").
+			OrderAsc("batch_no").
+			OrderAsc("sort").
+			Limit(20).
+			Scan(&tasks)
+	} else {
+		_ = g.DB().Ctx(ctx).Model("mvp_task").
+			Where("project_id", projectID).
+			WhereNull("deleted_at").
+			Fields("id, name, status").
+			OrderAsc("batch_no").
+			Limit(20).
+			Scan(&tasks)
+	}
 
 	if len(tasks) == 0 {
 		reply(fmt.Sprintf("📭 项目「%s」暂无任务", project["name"].String()))
@@ -718,6 +1249,7 @@ func handleBotListTasks(ctx context.Context, projectName string, systemUserID in
 		"running":   "🔄",
 		"completed": "✅",
 		"failed":    "❌",
+		"escalated": "🧠",
 		"skipped":   "⏭️",
 		"draft":     "📝",
 	}
@@ -744,7 +1276,79 @@ func handleBotRetryTask(ctx context.Context, projectName, taskIDStr string, syst
 	}
 	projectID := project["id"].Int64()
 
-	// 如果指定了 task_id，重试单个
+	if isWorkflowV2Project(project) {
+		wfRun, wfErr := latestWorkflowRunForProject(ctx, projectID)
+		if wfErr != nil {
+			reply(fmt.Sprintf("❌ 查询工作流失败：%v", wfErr))
+			return
+		}
+
+		if taskIDStr != "" {
+			var taskID int64
+			fmt.Sscanf(taskIDStr, "%d", &taskID)
+			if taskID > 0 {
+				result, err := g.DB().Ctx(ctx).Model("mvp_domain_task").
+					Where("id", taskID).
+					Where("workflow_run_id", wfRun["id"].Int64()).
+					WhereIn("status", g.Slice{"failed", "escalated"}).
+					Update(g.Map{
+						"status":        "pending",
+						"retry_count":   gdb.Raw("retry_count + 1"),
+						"result":        nil,
+						"error_message": nil,
+						"updated_at":    gdb.Raw("NOW()"),
+					})
+				if err != nil {
+					reply(fmt.Sprintf("❌ 重试任务 %d 失败：%v", taskID, err))
+					return
+				}
+				rows, _ := result.RowsAffected()
+				if rows == 0 {
+					reply(fmt.Sprintf("❌ 任务 %d 当前不在 failed/escalated 状态", taskID))
+					return
+				}
+				reply(fmt.Sprintf("🔄 任务 %d 已重新加入 V2 队列", taskID))
+				return
+			}
+		}
+
+		type taskIDRow struct{ ID int64 }
+		var rows []taskIDRow
+		_ = g.DB().Ctx(ctx).Model("mvp_domain_task").
+			Where("workflow_run_id", wfRun["id"].Int64()).
+			WhereIn("status", g.Slice{"failed", "escalated"}).
+			WhereNull("deleted_at").
+			Fields("id").
+			Scan(&rows)
+		if len(rows) == 0 {
+			reply(fmt.Sprintf("✅ 项目「%s」没有失败的 V2 任务", project["name"].String()))
+			return
+		}
+		errCount := 0
+		for _, r := range rows {
+			result, err := g.DB().Ctx(ctx).Model("mvp_domain_task").
+				Where("id", r.ID).
+				WhereIn("status", g.Slice{"failed", "escalated"}).
+				Update(g.Map{
+					"status":        "pending",
+					"retry_count":   gdb.Raw("retry_count + 1"),
+					"result":        nil,
+					"error_message": nil,
+					"updated_at":    gdb.Raw("NOW()"),
+				})
+			if err != nil {
+				errCount++
+				continue
+			}
+			if affected, _ := result.RowsAffected(); affected == 0 {
+				errCount++
+			}
+		}
+		reply(fmt.Sprintf("🔄 已重试 %d 个 V2 失败任务（失败 %d 个）", len(rows)-errCount, errCount))
+		return
+	}
+
+	// Legacy: 如果指定了 task_id，重试单个
 	if taskIDStr != "" {
 		var taskID int64
 		fmt.Sscanf(taskIDStr, "%d", &taskID)
@@ -758,7 +1362,6 @@ func handleBotRetryTask(ctx context.Context, projectName, taskIDStr string, syst
 		}
 	}
 
-	// 重试所有失败任务
 	type taskIDRow struct{ ID int64 }
 	var rows []taskIDRow
 	_ = g.DB().Ctx(ctx).Model("mvp_task").
@@ -767,7 +1370,6 @@ func handleBotRetryTask(ctx context.Context, projectName, taskIDStr string, syst
 		WhereNull("deleted_at").
 		Fields("id").
 		Scan(&rows)
-
 	if len(rows) == 0 {
 		reply(fmt.Sprintf("✅ 项目「%s」没有失败的任务", project["name"].String()))
 		return
@@ -796,7 +1398,43 @@ func handleBotSkipTask(ctx context.Context, projectName, taskIDStr string, syste
 		reply("❌ 任务ID格式不正确")
 		return
 	}
-	// 需要 projectID，先查任务所属项目
+	project, err := findProjectByKeyword(ctx, projectName, systemUserID)
+	if err != nil || project == nil {
+		reply(fmt.Sprintf("❌ 未找到项目「%s」", projectName))
+		return
+	}
+	if isWorkflowV2Project(project) {
+		wfRun, wfErr := latestWorkflowRunForProject(ctx, project["id"].Int64())
+		if wfErr != nil {
+			reply(fmt.Sprintf("❌ 查询工作流失败：%v", wfErr))
+			return
+		}
+		result, err := g.DB().Ctx(ctx).Model("mvp_domain_task").
+			Where("id", taskID).
+			Where("workflow_run_id", wfRun["id"].Int64()).
+			WhereIn("status", g.Slice{"pending", "failed", "escalated"}).
+			Update(g.Map{
+				"status":       "completed",
+				"result":       "skipped",
+				"completed_at": gdb.Raw("NOW()"),
+				"updated_at":   gdb.Raw("NOW()"),
+			})
+		if err != nil {
+			reply(fmt.Sprintf("❌ 跳过任务失败：%v", err))
+			return
+		}
+		rows, _ := result.RowsAffected()
+		if rows == 0 {
+			reply("❌ 任务当前不在可跳过状态")
+			return
+		}
+		if completeErr := orchestrator.GetTaskScheduler().OnTaskCompleted(ctx, taskID); completeErr != nil {
+			g.Log().Warningf(ctx, "[BotSkipTask] 通知调度器任务完成失败: task=%d err=%v", taskID, completeErr)
+		}
+		reply(fmt.Sprintf("⏭️ V2 任务 %d 已跳过", taskID))
+		return
+	}
+
 	taskRecord, _ := g.DB().Ctx(ctx).Model("mvp_task").Where("id", taskID).WhereNull("deleted_at").Fields("project_id").One()
 	var skipProjectID int64
 	if !taskRecord.IsEmpty() {

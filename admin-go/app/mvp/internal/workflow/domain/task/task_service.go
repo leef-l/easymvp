@@ -78,7 +78,9 @@ func (s *TaskService) InstantiateFromBlueprint(ctx context.Context, planVersionI
 		// 从角色配置获取 execution_mode 和 model_id
 		executionMode := "chat"
 		var modelID int64
+		resolvedExactRole := false
 		if rc, ok := roleConfigs[roleKey]; ok {
+			resolvedExactRole = true
 			if em, ok := rc["execution_mode"].(string); ok && em != "" {
 				executionMode = em
 			}
@@ -86,28 +88,44 @@ func (s *TaskService) InstantiateFromBlueprint(ctx context.Context, planVersionI
 				modelID = mid
 			}
 		}
+		if !resolvedExactRole || modelID == 0 {
+			roleRecord, roleErr := repo.GetProjectRoleByLevel(ctx, projectID.Int64(), roleType, roleLevel)
+			if roleErr != nil {
+				g.Log().Warningf(ctx, "[TaskService] 解析角色回退配置失败: projectID=%d role=%s/%s err=%v",
+					projectID.Int64(), roleType, roleLevel, roleErr)
+			} else if roleRecord != nil {
+				if !resolvedExactRole {
+					if em := roleRecord["execution_mode"].String(); em != "" {
+						executionMode = em
+					}
+				}
+				if modelID == 0 {
+					modelID = roleRecord["model_id"].Int64()
+				}
+			}
+		}
 
 		taskInserts = append(taskInserts, g.Map{
-			"id":                taskID,
-			"workflow_run_id":   workflowRunID,
-			"stage_run_id":      stageRunID,
-			"plan_version_id":   planVersionID,
-			"blueprint_id":      bpID,
-			"task_kind":         "implement",
-			"name":              bp["name"].String(),
-			"description":       bp["description"].String(),
-			"role_type":         roleType,
-			"role_level":        roleLevel,
-			"execution_mode":    executionMode,
-			"status":            StatusPending,
-			"model_id":          modelID,
-			"batch_no":          bp["batch_no"].Int(),
-			"sort":              bp["sort"].Int(),
+			"id":                 taskID,
+			"workflow_run_id":    workflowRunID,
+			"stage_run_id":       stageRunID,
+			"plan_version_id":    planVersionID,
+			"blueprint_id":       bpID,
+			"task_kind":          "implement",
+			"name":               bp["name"].String(),
+			"description":        bp["description"].String(),
+			"role_type":          roleType,
+			"role_level":         roleLevel,
+			"execution_mode":     executionMode,
+			"status":             StatusPending,
+			"model_id":           modelID,
+			"batch_no":           bp["batch_no"].Int(),
+			"sort":               bp["sort"].Int(),
 			"affected_resources": bp["affected_resources"].String(),
-			"created_by":        scope.CreatedBy,
-			"dept_id":           scope.DeptID,
-			"created_at":        now,
-			"updated_at":        now,
+			"created_by":         scope.CreatedBy,
+			"dept_id":            scope.DeptID,
+			"created_at":         now,
+			"updated_at":         now,
 		})
 	}
 
@@ -193,9 +211,9 @@ func (s *TaskService) Skip(ctx context.Context, taskID int64) error {
 
 	// 尝试从 pending 跳过
 	rows, err := s.taskRepo.UpdateStatus(ctx, taskID, StatusPending, StatusCompleted, g.Map{
-		"result":      "skipped",
+		"result":       "skipped",
 		"completed_at": now,
-		"updated_at":  now,
+		"updated_at":   now,
 	})
 	if err != nil {
 		return err
@@ -206,9 +224,9 @@ func (s *TaskService) Skip(ctx context.Context, taskID int64) error {
 
 	// 尝试从 failed 跳过
 	rows, err = s.taskRepo.UpdateStatus(ctx, taskID, StatusFailed, StatusCompleted, g.Map{
-		"result":      "skipped",
+		"result":       "skipped",
 		"completed_at": now,
-		"updated_at":  now,
+		"updated_at":   now,
 	})
 	if err != nil {
 		return err

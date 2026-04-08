@@ -1,215 +1,108 @@
 # GitWorktree任务级环境隔离设计文档
 
-## 一、文档目标
+> 更新日期：2026-04-08
 
-本文档定义 EasyMVP 在当前 WorkflowRun 与多执行器架构下，基于 `git worktree` 的任务级环境隔离方案。
+本文只描述当前 `internal/workspace` 包已经实现的内容，不再保留“建议新增”的隔离方案。
 
-目标：
+## 1. 当前实现概览
 
-1. 降低任务执行对主工作区的污染风险。
-2. 支持 Aider、OpenHands、Claude Code、Codex CLI、Gemini CLI 等写仓执行器的安全运行。
-3. 在不引入过重容器复杂度的前提下，尽快为任务执行提供隔离能力。
+EasyMVP 现在已经把写仓执行器接到 `git worktree` 隔离目录中。核心入口在：
 
----
+- `admin-go/app/mvp/internal/workspace/manager.go`
+- `admin-go/app/mvp/internal/workspace/git_worktree.go`
+- `admin-go/app/mvp/internal/workspace/cleanup.go`
+- `admin-go/app/mvp/internal/workspace/workspace_repo.go`
 
-## 二、为什么现在需要隔离
-
-当前系统的写仓任务主要直接在项目 `work_dir` 上执行。
-
-现有保护手段包括：
-
-1. 批次门控
-2. 依赖检查
-3. `affected_resources` 资源锁
-
-这些能力可以减少并发文件冲突，但不能解决以下问题：
-
-1. 任务误改未声明文件
-2. 临时文件残留污染主工作区
-3. 依赖安装、副作用命令污染环境
-4. 失败任务留下半成品状态
-5. 多执行器混跑时互相影响
-
-因此，需要为“写仓任务”引入任务级隔离。
-
----
-
-## 三、为什么选择 Git Worktree
-
-相较于“直接主工作区运行”和“每任务容器沙箱”，`git worktree` 更适合当前阶段。
-
-### 3.1 相较直接主工作区执行
-
-优点：
-
-1. 每个任务有独立目录
-2. 主工作区不会被直接污染
-3. 任务失败后可以直接清理工作树
-
-### 3.2 相较容器隔离
-
-优点：
-
-1. 实施成本更低
-2. 不需要先解决镜像、挂载、容器编排问题
-3. 更容易接入现有 Aider/CLI 执行器
-4. 调试成本低
-
-### 3.3 适用范围
-
-适合：
-
-1. Git 仓库类项目
-2. 文件编辑型任务
-3. 本地命令行执行器
-
-不适合：
-
-1. 非 Git 工作目录
-2. 强依赖系统级副作用的任务
-3. 必须完全隔离进程/网络/依赖的重型 Agent
-
----
-
-## 四、目标架构
-
-### 4.1 核心思想
-
-主工作区只作为“源仓库入口”，任务不直接在主工作区执行。
-
-每个写仓任务执行前：
-
-1. 为任务分配独立 `worktree`
-2. 执行器在该 `worktree` 中运行
-3. 任务结束后提取结果
-4. 根据策略决定：
-   - 回写主工作区
-   - 保留隔离目录用于排查
-   - 或直接清理
-
-### 4.2 结构示意
+隔离目录规则：
 
 ```text
-project work_dir (主工作区)
-└── .git
-
-task worktrees
-└── .mvp-worktrees/
-    ├── task-315xxxx001/
-    ├── task-315xxxx002/
-    └── task-315xxxx003/
+{work_dir}/.mvp-worktrees/task-{task_id}
 ```
 
----
-
-## 五、隔离范围
-
-### 5.1 必须启用 worktree 的任务
-
-1. `aider`
-2. `openhands`
-3. `claude_code`
-4. `codex_cli`
-5. `gemini_cli`
-
-这些执行器都属于“写仓任务执行器”。
-
-### 5.2 可先不启用的任务
-
-1. `chat`
-2. 纯审核任务
-3. 纯分析任务
-4. 不落地文件的对话型任务
-
-### 5.3 后续可配置化
-
-建议支持：
-
-- 项目级配置
-- 执行器级默认配置
-- 任务级强制开关
-
----
-
-## 六、目录规划
-
-建议在项目根目录下维护专用工作树目录：
+分支命名规则：
 
 ```text
-{work_dir}/.mvp-worktrees/
+mvp-task-{task_id}
 ```
 
-每个任务目录命名建议：
+## 2. 哪些执行器会使用 worktree
 
-```text
-task-{task_id}
-```
+当前需要隔离工作区的执行模式：
 
-示例：
+- `aider`
+- `openhands`
+- `claude_code`
+- `codex_cli`
+- `gemini_cli`
+- `auto`
 
-```text
-/workspace/my-project/.mvp-worktrees/task-315667201073876992
-```
+当前不需要隔离工作区的模式：
 
-这样便于：
+- `chat`
 
-1. 排查任务问题
-2. 清理孤儿工作树
-3. 与任务 ID 直接映射
+执行器是否使用隔离，不再靠文档约定，而是由 `Executor.NeedsWorkspace()` 在运行时决定。
 
----
+## 3. 创建流程
 
-## 七、生命周期设计
+当前 `Prepare` 的真实流程如下：
 
-### 7.1 创建阶段
+1. 校验 `workDir`
+2. 如果目录不是 Git 仓库，则自动：
+   - 创建目录
+   - `git init`
+   - 写入本地 `user.name` / `user.email`
+   - 创建空提交，满足 `git worktree` 的基线要求
+3. 读取主工作区 `HEAD`
+4. 在 `mvp_task_workspace` 写入一条 `creating` 记录
+5. 创建 `.mvp-worktrees/task-{taskID}`
+6. 通过 `git worktree add -b mvp-task-{taskID}` 建立隔离目录
+7. 更新状态为 `ready`
 
-任务调度进入执行前：
+这意味着编码类项目即使用户给的是空目录，也能被系统自动补成最小可运行的 Git 工作区。
 
-1. 校验主工作区是否是合法 Git 仓库
-2. 选择隔离基线分支/提交
-3. 创建 worktree
-4. 记录 worktree 元数据
-5. 将执行器工作目录切换到 worktree
+## 4. 运行与收尾
 
-### 7.2 执行阶段
+### 4.1 运行阶段
 
-执行器只在 worktree 内运行：
+当执行器真正开始执行时，会：
 
-1. 读取文件
-2. 修改文件
-3. 生成中间产物
-4. 产生日志
+- 把工作目录切到 `WorkspacePath`
+- 将工作空间状态从 `ready` 标成 `running`
 
-不得直接回到主工作区执行。
+### 4.2 成功阶段
 
-### 7.3 结束阶段
+当前成功收尾会做两件事：
 
-任务结束后：
+1. 调用 `Finalize`
+2. 采集 `git diff --stat` 结果写入 `diff_summary`
 
-1. 收集变更文件
-2. 生成 diff / 结果摘要
-3. 根据策略回写主工作区或保留 worktree
-4. 标记 worktree 状态
+随后，大多数写仓执行器会直接触发 `Cleanup`，把 worktree 和临时分支删除。
 
-### 7.4 清理阶段
+### 4.3 失败阶段
 
-默认策略建议：
+失败路径会：
 
-1. 成功任务：回写后清理
-2. 失败任务：保留一段时间
-3. 超时/取消任务：保留待诊断
+- 将工作空间标记为 `failed`
+- 记录 `error_message`
+- 不立即清理，留给后台保留期策略处理
 
----
+### 4.4 定时清理
 
-## 八、数据模型建议
+`RunCleanup` 当前默认保留期：
 
-建议新增表：
+- 成功：24 小时
+- 失败：72 小时
+- 取消：24 小时
 
-### 8.1 `mvp_task_workspace`
+但要注意：
 
-字段建议：
+- 成功任务通常会被执行器立即清理
+- 这个保留策略主要影响失败、取消或显式保留的工作空间
 
-- `id`
+## 5. 数据模型
+
+`mvp_task_workspace` 当前已经落库，关键字段包括：
+
 - `task_id`
 - `workflow_run_id`
 - `project_id`
@@ -218,45 +111,33 @@ task-{task_id}
 - `base_ref`
 - `status`
 - `cleanup_status`
-- `created_at`
-- `updated_at`
-- `deleted_at`
+- `diff_summary`
+- `error_message`
 
-### 8.2 字段含义
+当前状态值：
 
-- `workspace_type`
-  - `git_worktree`
-- `status`
-  - `creating`
-  - `ready`
-  - `running`
-  - `completed`
-  - `failed`
-  - `canceled`
-- `cleanup_status`
-  - `pending`
-  - `done`
-  - `retained`
-  - `failed`
+- `creating`
+- `ready`
+- `running`
+- `completed`
+- `failed`
+- `canceled`
 
----
+当前清理状态值：
 
-## 九、核心组件设计
+- `pending`
+- `done`
+- `retained`
+- `failed`
 
-### 9.1 `TaskWorkspaceManager`
+## 6. 当前边界
 
-建议新增：
+更新本文档时，和旧版本相比有一个必须明确写出来的边界：
 
-```text
-admin-go/app/mvp/internal/workspace/
-```
+- 当前 `workspace` 包负责的是“准备隔离目录、记录 diff、清理目录”
+- 当前 `workspace` 包本身没有实现“把 worktree 变更自动 merge / cherry-pick 回主工作区”
 
-建议核心组件：
-
-1. `manager.go`
-2. `git_worktree.go`
-3. `cleanup.go`
-4. `workspace_repo.go`
+因此，本文档不再写“系统已经自动回写主工作区”。如果后续要把 worktree 变更正式沉淀回项目主目录，需要在工作流主链里单独补齐合入策略。
 
 ### 9.2 核心接口
 
@@ -527,4 +408,3 @@ worktree 隔离不是安全沙箱，它只解决：
 
 1. 现在先上 `git worktree`
 2. OpenHands 后续再升级到更重的 sandbox/container
-

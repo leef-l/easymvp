@@ -66,6 +66,8 @@ func architectJSONFormatSuffix(projectCategory string) string {
 %s
 - 每个 JSON 块必须是完整的 {"tasks": [...]} 格式
 - 任务名称全局唯一，跨模块依赖用完整任务名引用
+- 禁止输出 <minimax:tool_call>、<invoke>、函数调用、命令执行、XML/HTML 标签或“我先查看目录”这类过程描述
+- 不要把“查看环境 / 读取目录 / 确认文件结构”当成独立任务；如果目录为空，直接按从零创建拆分可交付任务
 - 如果输出被截断，系统会自动请求继续`, newProjectNote)
 }
 func buildCodingArchitectPrompt(projectName, projectDesc string) string {

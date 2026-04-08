@@ -1,331 +1,129 @@
 # EasyMVP 对接 OpenHands 与 Aider 引擎设计实现文档
 
-## 1. 背景
+> 更新日期：2026-04-08
 
-当前 EasyMVP 需要支持在系统内执行“写代码、改文件、执行命令”等 AI Agent 能力，并允许后台灵活切换使用 `Aider` 或 `OpenHands`。为了兼顾权限、安全、可扩展性与审计能力，采用“角色授权 + 引擎配置中心 + 统一任务执行”的设计。
+本文只覆盖当前代码里已经落地的 `Aider` / `OpenHands` 配置与运行路径，以及它们和 MVP 工作流的关系。
 
-## 2. 目标
+## 1. 定位
 
-- 同时接入 `Aider` 与 `OpenHands`
-- 后台可配置引擎连接参数、启停状态、默认模型
-- 角色可配置可用引擎与默认引擎
-- 所有执行动作统一走任务中心，保留日志和审计信息
-- 为后续扩展第三种引擎保留统一抽象
+`Aider` 与 `OpenHands` 现在有两条使用方式：
 
-## 3. 总体设计
+### 1.1 AI 模块手工任务
 
-### 3.1 分层原则
+适合做：
 
-- `system` 模块负责角色层控制
-  - 角色可用引擎
-  - 角色默认引擎
-- `ai` 模块负责引擎层与执行层
-  - 引擎定义
-  - 引擎连接配置
-  - 执行任务
-  - 执行日志
+- 引擎连通性验证
+- 仓库路径与命令模板验证
+- 一次性手工任务执行
 
-### 3.2 设计结论
+### 1.2 MVP 工作流执行器
 
-角色里只放“权限和默认值”，不放连接地址、密钥、命令模板等细节配置。连接信息统一放在 AI 配置中心。
+适合做：
 
-## 4. 数据库设计
+- `mvp_domain_task` 的正式执行
+- 审核通过后的项目任务调度
+- 工作流里的写仓任务落地
 
-### 4.1 `system_role` 增加默认引擎字段
+这两条链路共享引擎配置和模型数据，但不是同一段运行时代码。
 
-```sql
-ALTER TABLE `system_role`
-ADD COLUMN `default_ai_engine` varchar(32) DEFAULT NULL COMMENT '默认AI执行引擎: aider/openhands' AFTER `is_admin`;
-```
+## 2. 当前数据模型
 
-### 4.2 `ai_engine`
+AI 模块里与执行引擎相关的核心表包括：
 
-```sql
-CREATE TABLE `ai_engine` (
-  `id` bigint NOT NULL COMMENT '主键ID',
-  `code` varchar(32) NOT NULL COMMENT '引擎编码: aider/openhands',
-  `name` varchar(64) NOT NULL COMMENT '引擎名称',
-  `description` varchar(255) DEFAULT NULL COMMENT '说明',
-  `status` tinyint NOT NULL DEFAULT 1 COMMENT '状态: 1启用 0禁用',
-  `sort` int NOT NULL DEFAULT 0 COMMENT '排序',
-  `dept_id` bigint NOT NULL DEFAULT 0 COMMENT '部门ID',
-  `created_by` bigint NOT NULL DEFAULT 0 COMMENT '创建人',
-  `updated_by` bigint NOT NULL DEFAULT 0 COMMENT '更新人',
-  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_ai_engine_code` (`code`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI执行引擎定义表';
-```
+- `ai_engine`
+- `ai_engine_config`
+- `ai_task`
+- `ai_task_log`
 
-初始化数据：
+其中：
 
-```sql
-INSERT INTO `ai_engine` (`id`, `code`, `name`, `description`, `status`, `sort`, `dept_id`, `created_by`)
-VALUES
-(100001, 'aider', 'Aider', '本地命令行代码执行引擎', 1, 10, 0, 1),
-(100002, 'openhands', 'OpenHands', '远程Agent执行引擎', 1, 20, 0, 1);
-```
+- `ai_engine` 保存引擎定义
+- `ai_engine_config` 保存命令模板、超时、默认模型、工作区等
+- `ai_task` 保存手工执行任务
+- `ai_task_log` 保存运行日志
 
-### 4.3 `ai_engine_config`
+MVP 工作流侧还会额外使用：
 
-```sql
-CREATE TABLE `ai_engine_config` (
-  `id` bigint NOT NULL COMMENT '主键ID',
-  `engine_code` varchar(32) NOT NULL COMMENT '引擎编码',
-  `base_url` varchar(255) DEFAULT NULL COMMENT '服务地址',
-  `api_key` text COMMENT 'API Key(建议加密存储)',
-  `default_model_id` bigint DEFAULT NULL COMMENT '默认模型ID, 关联ai_model.id',
-  `timeout_seconds` int NOT NULL DEFAULT 600 COMMENT '超时时间(秒)',
-  `max_steps` int NOT NULL DEFAULT 20 COMMENT '最大执行步数',
-  `workspace_root` varchar(500) DEFAULT NULL COMMENT '工作区根目录',
-  `command_template` varchar(1000) DEFAULT NULL COMMENT '命令模板, 主要用于aider',
-  `callback_url` varchar(255) DEFAULT NULL COMMENT '回调地址',
-  `callback_secret` varchar(255) DEFAULT NULL COMMENT '回调密钥',
-  `extra_config` json DEFAULT NULL COMMENT '额外配置JSON',
-  `status` tinyint NOT NULL DEFAULT 1 COMMENT '状态: 1启用 0禁用',
-  `dept_id` bigint NOT NULL DEFAULT 0 COMMENT '部门ID',
-  `created_by` bigint NOT NULL DEFAULT 0 COMMENT '创建人',
-  `updated_by` bigint NOT NULL DEFAULT 0 COMMENT '更新人',
-  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_ai_engine_config_engine_code` (`engine_code`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI执行引擎配置表';
-```
+- `mvp_domain_task`
+- `mvp_task_workspace`
 
-### 4.4 `system_role_ai_engine`
+## 3. Aider 当前运行路径
 
-```sql
-CREATE TABLE `system_role_ai_engine` (
-  `role_id` bigint NOT NULL COMMENT '角色ID',
-  `engine_code` varchar(32) NOT NULL COMMENT '引擎编码',
-  PRIMARY KEY (`role_id`, `engine_code`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='角色可用AI执行引擎';
-```
+AI 模块中的 `Aider` 运行链路位于 `admin-go/app/ai/internal/logic/task/runtime.go`，当前行为是：
 
-### 4.5 `ai_task`
+1. 读取 `ai_engine_config(engine_code=aider)`
+2. 解析默认模型与供应商密钥
+3. 优先尝试本机 `aider`
+4. 缺失时尝试 `uv`
+5. 仍不可用时回退 Docker 方式
 
-```sql
-CREATE TABLE `ai_task` (
-  `id` bigint NOT NULL COMMENT '主键ID',
-  `title` varchar(255) NOT NULL COMMENT '任务标题',
-  `engine_code` varchar(32) NOT NULL COMMENT '执行引擎',
-  `role_id` bigint DEFAULT NULL COMMENT '发起时角色ID',
-  `user_id` bigint NOT NULL COMMENT '发起用户ID',
-  `project_id` bigint DEFAULT NULL COMMENT '项目ID, 可空',
-  `repo_path` varchar(500) NOT NULL COMMENT '仓库路径',
-  `worktree_path` varchar(500) DEFAULT NULL COMMENT '执行工作目录',
-  `branch_name` varchar(255) DEFAULT NULL COMMENT '分支名称',
-  `instruction` longtext NOT NULL COMMENT '用户指令',
-  `engine_config_snapshot` json DEFAULT NULL COMMENT '执行时配置快照',
-  `request_payload` json DEFAULT NULL COMMENT '发送给引擎的请求体',
-  `response_summary` longtext COMMENT '执行结果摘要',
-  `error_message` longtext COMMENT '错误信息',
-  `status` varchar(32) NOT NULL DEFAULT 'pending' COMMENT 'pending/running/success/failed/cancelled',
-  `started_at` datetime DEFAULT NULL COMMENT '开始时间',
-  `finished_at` datetime DEFAULT NULL COMMENT '结束时间',
-  `dept_id` bigint NOT NULL DEFAULT 0 COMMENT '部门ID',
-  `created_by` bigint NOT NULL DEFAULT 0 COMMENT '创建人',
-  `updated_by` bigint NOT NULL DEFAULT 0 COMMENT '更新人',
-  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
-  PRIMARY KEY (`id`),
-  KEY `idx_ai_task_user_id` (`user_id`),
-  KEY `idx_ai_task_engine_code` (`engine_code`),
-  KEY `idx_ai_task_status` (`status`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI执行任务表';
-```
+当前还有两个实现细节值得记录：
 
-### 4.6 `ai_task_log`
+- 超时时间来自 `timeout_seconds`
+- 命中 token limit 时会做一次精简上下文重试
 
-```sql
-CREATE TABLE `ai_task_log` (
-  `id` bigint NOT NULL COMMENT '主键ID',
-  `task_id` bigint NOT NULL COMMENT '任务ID',
-  `seq` int NOT NULL DEFAULT 0 COMMENT '日志序号',
-  `log_type` varchar(32) NOT NULL DEFAULT 'stdout' COMMENT 'stdout/stderr/system/event',
-  `content` longtext NOT NULL COMMENT '日志内容',
-  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  PRIMARY KEY (`id`),
-  KEY `idx_ai_task_log_task_id` (`task_id`),
-  KEY `idx_ai_task_log_task_seq` (`task_id`, `seq`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI任务执行日志';
-```
+## 4. OpenHands 当前运行路径
 
-## 5. 后端设计
+`OpenHands` 现在同时支持两类执行方式：
 
-### 5.1 system 模块
+### 4.1 CLI / uv
 
-职责：
+优先走本机 `openhands` 或 `uv` 路径，适合已有本地运行环境的场景。
 
-- 角色默认引擎字段管理
-- 角色引擎授权
+### 4.2 HTTP
 
-建议扩展：
+如果 CLI 路径不可用，则会退回到 `base_url` 驱动的 HTTP 请求模式。
 
-- `admin-go\app\system\api\system\v1\role.go`
-- `admin-go\app\system\internal\controller\role\role.go`
-- `admin-go\app\system\internal\service\role.go`
-- `admin-go\app\system\internal\logic\role\role.go`
-- `admin-go\app\system\internal\model\role.go`
-- 新增 `role_ai_engine` 对应 dao/do/entity
+当前文档更新时确认到的实现特点：
 
-新增接口：
+- CLI 与 HTTP 共用 `ai_engine_config`
+- 运行前会采集仓库基线信息
+- 日志与结果会回写到 `ai_task` / `ai_task_log`
 
-- `POST /api/system/role/grant-ai-engine`
-- `GET /api/system/role/ai-engine-codes`
+## 5. 与 MVP 工作流的关系
 
-### 5.2 ai 模块
+### 5.1 配置共享
 
-职责：
+MVP 工作流会复用：
 
-- 管理执行引擎配置
-- 接收执行任务
-- 路由到对应执行器
-- 写入任务日志和状态
+- AI 模型
+- 供应商配置
+- `ai_engine_config`
 
-建议新增模块：
+因此系统概览页会直接检查：
 
-- `engine`
-- `task`
-- `executor`
+- Aider 引擎配置
+- OpenHands 引擎配置
+- Aider 可执行环境
+- OpenHands 可执行环境
 
-新增接口：
+### 5.2 运行入口不同
 
-- `GET /api/ai/engine/list`
-- `GET /api/ai/engine/detail`
-- `POST /api/ai/engine/update`
-- `POST /api/ai/engine/test-connection`
+AI 模块手工任务通过：
+
 - `POST /api/ai/task/execute`
-- `GET /api/ai/task/list`
-- `GET /api/ai/task/detail`
-- `GET /api/ai/task/logs`
-- `POST /api/ai/task/cancel`
 
-### 5.3 执行器抽象
+MVP 工作流则通过：
 
-```go
-type IExecutor interface {
-    Code() string
-    TestConnection(ctx context.Context, cfg *entity.AiEngineConfig) error
-    Execute(ctx context.Context, task *entity.AiTask, cfg *entity.AiEngineConfig) error
-    Cancel(ctx context.Context, task *entity.AiTask, cfg *entity.AiEngineConfig) error
-}
-```
+- `mvp_domain_task.execution_mode`
+- `executor.Registry`
 
-建议实现：
+来决定是否落到 `AiderExecutor` 或 `OpenHandsExecutor`。
 
-- `AiderExecutor`
-- `OpenHandsExecutor`
-- `Factory`
+## 6. 推荐配置顺序
 
-### 5.4 安全要求
+当前实际可行的配置顺序是：
 
-- 执行仓库路径必须在白名单根目录内
-- 密钥建议加密存储
-- 日志输出要脱敏
-- 任务必须保留完整审计
+1. 配置 AI 供应商
+2. 配置套餐 / 模型
+3. 配置 `Aider` / `OpenHands` 引擎
+4. 在 `AI 管理 -> 任务` 做一次手工冒烟验证
+5. 再进入 `MVP -> 角色预设` 和项目工作流
 
-## 6. 前端设计
+## 7. 当前边界
 
-### 6.1 角色管理页增强
+更新本文档时确认到的边界如下：
 
-在 `系统管理 / 角色管理` 中增加：
-
-- `默认引擎` 字段
-- `AI引擎权限` 按钮
-
-建议新增文件：
-
-- `vue-vben-admin\apps\web-antd\src\views\system\role\modules\grant-ai-engine.vue`
-
-### 6.2 AI 管理页新增执行引擎配置
-
-建议新增：
-
-- `vue-vben-admin\apps\web-antd\src\views\ai\engine\index.vue`
-- `vue-vben-admin\apps\web-antd\src\api\ai\engine\index.ts`
-- `vue-vben-admin\apps\web-antd\src\api\ai\engine\types.ts`
-
-字段建议：
-
-- 引擎名称
-- 引擎编码
-- 启用状态
-- 默认模型
-- 超时时间
-- 最大步数
-- 工作区根目录
-- Base URL
-- API Key
-- 命令模板
-- 额外配置 JSON
-
-### 6.3 AI 任务页
-
-建议新增：
-
-- `vue-vben-admin\apps\web-antd\src\views\ai\task\index.vue`
-- `vue-vben-admin\apps\web-antd\src\views\ai\task\modules\execute-form.vue`
-- `vue-vben-admin\apps\web-antd\src\views\ai\task\modules\log-drawer.vue`
-- `vue-vben-admin\apps\web-antd\src\api\ai\task\index.ts`
-- `vue-vben-admin\apps\web-antd\src\api\ai\task\types.ts`
-
-## 7. 权限与菜单
-
-建议新增权限：
-
-```text
-ai:engine:list
-ai:engine:detail
-ai:engine:update
-ai:engine:test
-ai:task:execute
-ai:task:list
-ai:task:detail
-ai:task:log
-ai:task:cancel
-system:role:grant-ai-engine
-system:role:view-ai-engine
-```
-
-建议新增菜单：
-
-- `AI管理 / 执行引擎配置`
-- `AI管理 / 执行任务`
-
-## 8. 推荐实施顺序
-
-1. 完成数据库结构与 DAO 生成
-2. 完成后端 role + engine + task API
-3. 完成执行器骨架与任务流转
-4. 完成前端角色授权、引擎配置、任务页面
-5. 补菜单、权限、构建验证
-
-## 9. V1 范围
-
-V1 必做：
-
-- 角色默认引擎
-- 角色引擎授权
-- 引擎配置管理
-- 统一任务执行入口
-- Aider/OpenHands 执行器骨架
-- 任务日志与状态页
-
-V1 暂不做：
-
-- 角色级模型权限
-- 项目级引擎策略
-- 多租户隔离
-- 审批流
-
-## 10. 开发注意事项
-
-- 该需求涉及后端、前端、菜单、权限、数据库多处联动，开始开发前必须先阅读本文档
-- 角色中只放“权限和默认值”，连接配置统一在 AI 配置中心
-- 所有执行任务必须记录配置快照，保证历史审计可追溯
+- AI 模块里的手工任务运行时，当前一等支持的仍然是 `Aider` / `OpenHands`
+- `Claude Code` / `Codex CLI` / `Gemini CLI` 已进入 MVP 执行器注册表，但还不是 AI 模块手工任务页里的同级主入口
+- 文档不再写“建议新增”或“未来再做”的引擎方案，未落地能力不在此文档中保留

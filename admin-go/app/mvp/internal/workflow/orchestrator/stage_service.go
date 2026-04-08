@@ -249,8 +249,8 @@ func (s *StageService) FailStage(ctx context.Context, stageRunID int64, reason s
 		Data(g.Map{
 			"status":        consts.StageStatusFailed,
 			"error_message": reason,
-			"finished_at":  now,
-			"updated_at":   now,
+			"finished_at":   now,
+			"updated_at":    now,
 		}).Update()
 	if err != nil {
 		return fmt.Errorf("标记 stage_run 失败: %w", err)
@@ -405,6 +405,133 @@ func isAcceptEnabled(ctx context.Context) bool {
 // TransitionTo 强制跳转到指定阶段（用于审核驳回回退 design 等场景）。
 func (s *StageService) TransitionTo(ctx context.Context, workflowRunID int64, targetStage string) (int64, error) {
 	return s.StartStage(ctx, workflowRunID, targetStage)
+}
+
+// ForceStartStage 强制启动指定阶段。
+// 用于人工接管场景：绕过常规迁移约束，终止当前活跃阶段并创建新的 running stage_run。
+func (s *StageService) ForceStartStage(ctx context.Context, workflowRunID int64, stageType, reason string) (int64, error) {
+	now := time.Now()
+	stageRunID := int64(snowflake.Generate())
+	targetWfStatus := StageTypeToWorkflowStatus(stageType)
+	if targetWfStatus == "" {
+		return 0, fmt.Errorf("未知阶段类型: %s", stageType)
+	}
+
+	var projectID int64
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		wfRun, err := tx.Model("mvp_workflow_run").Ctx(ctx).
+			Where("id", workflowRunID).
+			WhereNull("deleted_at").
+			Fields("id, project_id, status, current_stage_run_id").
+			One()
+		if err != nil {
+			return fmt.Errorf("查询 workflow_run 失败: %w", err)
+		}
+		if wfRun.IsEmpty() {
+			return fmt.Errorf("workflow_run(%d) 不存在", workflowRunID)
+		}
+		projectID = wfRun["project_id"].Int64()
+
+		// 终止当前 workflow 下所有 pending/running 的阶段实例，避免出现多个活跃阶段并存。
+		if _, err := tx.Model("mvp_stage_run").Ctx(ctx).
+			Where("workflow_run_id", workflowRunID).
+			WhereIn("status", g.Slice{consts.StageStatusPending, consts.StageStatusRunning}).
+			WhereNull("deleted_at").
+			Data(g.Map{
+				"status":        consts.StageStatusFailed,
+				"error_message": buildForceStageReason(stageType, reason),
+				"finished_at":   now,
+				"updated_at":    now,
+			}).
+			Update(); err != nil {
+			return fmt.Errorf("终止当前活跃阶段失败: %w", err)
+		}
+
+		maxNo, err := tx.Model("mvp_stage_run").Ctx(ctx).
+			Where("workflow_run_id", workflowRunID).
+			WhereNull("deleted_at").
+			Max("stage_no")
+		if err != nil {
+			return fmt.Errorf("查询 stage_no 失败: %w", err)
+		}
+		stageNo := int(maxNo) + 1
+		scope := repo.GetProjectScopeByWorkflowRun(ctx, workflowRunID)
+
+		if _, err := tx.Model("mvp_stage_run").Ctx(ctx).Insert(g.Map{
+			"id":              stageRunID,
+			"workflow_run_id": workflowRunID,
+			"stage_type":      stageType,
+			"stage_no":        stageNo,
+			"status":          consts.StageStatusRunning,
+			"created_by":      scope.CreatedBy,
+			"dept_id":         scope.DeptID,
+			"started_at":      now,
+			"created_at":      now,
+			"updated_at":      now,
+		}); err != nil {
+			return fmt.Errorf("创建 stage_run 失败: %w", err)
+		}
+
+		if _, err := tx.Model("mvp_workflow_run").Ctx(ctx).
+			Where("id", workflowRunID).
+			Update(g.Map{
+				"status":               targetWfStatus,
+				"current_stage":        stageType,
+				"current_stage_run_id": stageRunID,
+				"pause_reason":         nil,
+				"status_before_pause":  nil,
+				"finished_at":          nil,
+				"updated_at":           now,
+			}); err != nil {
+			return fmt.Errorf("更新 workflow_run 失败: %w", err)
+		}
+
+		if projectID > 0 {
+			if _, err := tx.Model("mvp_project").Ctx(ctx).
+				Where("id", projectID).
+				Update(g.Map{
+					"status":       targetWfStatus,
+					"pause_reason": nil,
+					"updated_at":   now,
+				}); err != nil {
+				return fmt.Errorf("更新项目状态失败: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	if projectID > 0 {
+		s.workflowSvc.runtimeMgr.Create(workflowRunID, projectID)
+	}
+
+	if s.workflowSvc.publisher != nil {
+		s.workflowSvc.publisher.Emit(ctx, event.Event{
+			WorkflowRunID: workflowRunID,
+			StageRunID:    &stageRunID,
+			EntityType:    event.EntityStageRun,
+			EntityID:      &stageRunID,
+			EventType:     event.EventStageStarted,
+			Payload: map[string]string{
+				"stage_type": stageType,
+				"forced":     "true",
+				"reason":     reason,
+			},
+		})
+	}
+
+	g.Log().Infof(ctx, "[StageService] ForceStartStage workflowRunID=%d stageType=%s stageRunID=%d", workflowRunID, stageType, stageRunID)
+	return stageRunID, nil
+}
+
+func buildForceStageReason(stageType, reason string) string {
+	message := "force restarted to " + stageType
+	if reason == "" {
+		return message
+	}
+	return message + ": " + reason
 }
 
 // completeWorkflow 完成整个工作流。

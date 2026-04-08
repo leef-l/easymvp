@@ -63,34 +63,48 @@ func (c *configCache) set(key, value string) {
 
 // GetConfigInt 读取整型配置，三级 fallback：缓存 → 数据库 mvp_config → config.yaml → 硬编码默认值
 func GetConfigInt(ctx context.Context, key string, yamlPath string, defaultVal int) int {
-	// 0. 缓存
-	if cached, ok := cfgCache.get(key); ok {
-		if v, e := strconv.Atoi(cached); e == nil {
-			return v
+	return GetConfigIntAny(ctx, []string{key}, []string{yamlPath}, defaultVal)
+}
+
+// GetConfigIntAny 按顺序尝试多个 DB key / YAML path，常用于新旧配置键并存的兼容读取。
+func GetConfigIntAny(ctx context.Context, keys []string, yamlPaths []string, defaultVal int) int {
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+
+		if cached, ok := cfgCache.get(key); ok {
+			if v, e := strconv.Atoi(cached); e == nil {
+				return v
+			}
+		}
+
+		row, err := g.DB().Model("mvp_config").Ctx(ctx).
+			Where("config_key", key).
+			WhereNull("deleted_at").
+			Fields("config_value").
+			One()
+		if err == nil && !row.IsEmpty() {
+			val := row["config_value"].String()
+			cfgCache.set(key, val)
+			if v, e := strconv.Atoi(val); e == nil {
+				return v
+			}
 		}
 	}
 
-	// 1. 数据库 mvp_config 表
-	row, err := g.DB().Model("mvp_config").Ctx(ctx).
-		Where("config_key", key).
-		WhereNull("deleted_at").
-		Fields("config_value").
-		One()
-	if err == nil && !row.IsEmpty() {
-		val := row["config_value"].String()
-		cfgCache.set(key, val) // 写缓存
-		if v, e := strconv.Atoi(val); e == nil {
-			return v
+	for _, yamlPath := range yamlPaths {
+		yamlPath = strings.TrimSpace(yamlPath)
+		if yamlPath == "" {
+			continue
+		}
+		cfgVal := g.Cfg().MustGet(ctx, yamlPath)
+		if cfgVal != nil && !cfgVal.IsEmpty() {
+			return cfgVal.Int()
 		}
 	}
 
-	// 2. config.yaml
-	cfgVal := g.Cfg().MustGet(ctx, yamlPath)
-	if cfgVal != nil && !cfgVal.IsEmpty() {
-		return cfgVal.Int()
-	}
-
-	// 3. 硬编码默认值
 	return defaultVal
 }
 
@@ -110,7 +124,7 @@ var categoryFamilyFallback = map[string]CategoryFamily{
 	"novel_writing": CategoryFamilyCreative, "animation_writing": CategoryFamilyCreative,
 	"comic_drama_writing": CategoryFamilyCreative, "movie_writing": CategoryFamilyCreative,
 	"animation_project": CategoryFamilyCreative,
-	"data_analysis": CategoryFamilyAnalysis, "product_design": CategoryFamilyAnalysis,
+	"data_analysis":     CategoryFamilyAnalysis, "product_design": CategoryFamilyAnalysis,
 	// display_name（兼容旧调用）
 	"软件开发": CategoryFamilyCoding, "游戏开发": CategoryFamilyCoding,
 	"小说创作": CategoryFamilyCreative, "动漫创作": CategoryFamilyCreative,
@@ -170,6 +184,20 @@ func GetReviewTimeout(ctx context.Context) int {
 // GetReviewAutoFixBatch 审核预检时是否自动修正 batch_no 不合理的问题
 func GetReviewAutoFixBatch(ctx context.Context) bool {
 	return GetConfigInt(ctx, "review.auto_fix_batch", "engine.review.autoFixBatch", 1) == 1
+}
+
+// GetSchedulerMaxConcurrency 读取调度最大并发，兼容新旧配置键。
+// 默认值固定为 1，优先保证低配服务器可安全落地。
+func GetSchedulerMaxConcurrency(ctx context.Context) int {
+	maxConcurrency := GetConfigIntAny(ctx,
+		[]string{"workflow.scheduler.max_concurrency", "scheduler.max_concurrent"},
+		[]string{"workflow.scheduler.maxConcurrency", "engine.scheduler.maxConcurrent"},
+		1,
+	)
+	if maxConcurrency < 1 {
+		return 1
+	}
+	return maxConcurrency
 }
 
 // IsFeatureEnabledForProjectType 判断某功能是否对指定项目类型启用。

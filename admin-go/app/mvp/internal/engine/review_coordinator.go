@@ -63,10 +63,11 @@ func doCoordinatorOptimize(ctx context.Context, modelInfo *ModelInfo, tasks gdb.
 {"optimized_batches": {"任务名": {"batch_no": 1, "reason": "调整原因"}}, "parallelism_score": 0.8, "estimated_duration": "约2小时", "warnings": []}`, len(tasks), string(summaryJSON))
 
 	p, err := provider.GetProvider(provider.Config{
-		ProviderType: modelInfo.ProviderType,
-		BaseURL:      modelInfo.BaseURL,
-		APIKey:       modelInfo.APIKey,
-		APISecret:    modelInfo.APISecret,
+		ProviderType:       modelInfo.ProviderType,
+		SupportedProtocols: modelInfo.SupportedProtocols,
+		BaseURL:            modelInfo.BaseURL,
+		APIKey:             modelInfo.APIKey,
+		APISecret:          modelInfo.APISecret,
 	})
 	if err != nil {
 		return nil, err

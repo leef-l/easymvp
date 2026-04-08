@@ -353,9 +353,10 @@ func ruleCompress(content string) string {
 
 func (c *ContextCompressor) aiCompressTask(ctx context.Context, modelInfo *ModelInfo, taskName string, content string, systemPrompt string) (string, error) {
 	p, err := provider.GetProvider(provider.Config{
-		ProviderType: modelInfo.ProviderType,
-		BaseURL:      modelInfo.BaseURL,
-		APIKey:       modelInfo.APIKey,
+		ProviderType:       modelInfo.ProviderType,
+		SupportedProtocols: modelInfo.SupportedProtocols,
+		BaseURL:            modelInfo.BaseURL,
+		APIKey:             modelInfo.APIKey,
 	})
 	if err != nil {
 		return "", err
@@ -377,9 +378,10 @@ func (c *ContextCompressor) aiCompressTask(ctx context.Context, modelInfo *Model
 
 func (c *ContextCompressor) aiCompressProject(ctx context.Context, modelInfo *ModelInfo, projectName string, dialog string, systemPrompt string) (string, error) {
 	p, err := provider.GetProvider(provider.Config{
-		ProviderType: modelInfo.ProviderType,
-		BaseURL:      modelInfo.BaseURL,
-		APIKey:       modelInfo.APIKey,
+		ProviderType:       modelInfo.ProviderType,
+		SupportedProtocols: modelInfo.SupportedProtocols,
+		BaseURL:            modelInfo.BaseURL,
+		APIKey:             modelInfo.APIKey,
 	})
 	if err != nil {
 		return "", err
@@ -401,9 +403,10 @@ func (c *ContextCompressor) aiCompressProject(ctx context.Context, modelInfo *Mo
 
 func (c *ContextCompressor) aiMergeGlobal(ctx context.Context, modelInfo *ModelInfo, projectName string, merged string, globalLimit int) (string, error) {
 	p, err := provider.GetProvider(provider.Config{
-		ProviderType: modelInfo.ProviderType,
-		BaseURL:      modelInfo.BaseURL,
-		APIKey:       modelInfo.APIKey,
+		ProviderType:       modelInfo.ProviderType,
+		SupportedProtocols: modelInfo.SupportedProtocols,
+		BaseURL:            modelInfo.BaseURL,
+		APIKey:             modelInfo.APIKey,
 	})
 	if err != nil {
 		return "", err
@@ -456,7 +459,7 @@ func (c *ContextCompressor) getCompressModel(ctx context.Context, projectID int6
 	model, err := g.DB().Ctx(ctx).Model("ai_model m").
 		LeftJoin("ai_plan p", "p.id = m.plan_id").
 		LeftJoin("ai_provider pv", "pv.id = m.provider_id").
-		Fields("m.model_code, m.max_tokens, pv.provider_type, pv.base_url, p.api_key, p.api_secret").
+		Fields("m.model_code, m.max_tokens, pv.provider_type, pv.supported_protocols, pv.base_url, p.api_key, p.api_secret").
 		Where("m.id", role["model_id"].Int64()).
 		One()
 	if err != nil || model.IsEmpty() {
@@ -464,13 +467,14 @@ func (c *ContextCompressor) getCompressModel(ctx context.Context, projectID int6
 	}
 
 	return &ModelInfo{
-		ModelID:      role["model_id"].Int64(),
-		ModelCode:    model["model_code"].String(),
-		ProviderType: model["provider_type"].String(),
-		BaseURL:      model["base_url"].String(),
-		APIKey:       model["api_key"].String(),
-		APISecret:    model["api_secret"].String(),
-		MaxTokens:    2000,
+		ModelID:            role["model_id"].Int64(),
+		ModelCode:          model["model_code"].String(),
+		ProviderType:       model["provider_type"].String(),
+		SupportedProtocols: decodeProviderProtocols(model["supported_protocols"].String(), model["provider_type"].String()),
+		BaseURL:            model["base_url"].String(),
+		APIKey:             model["api_key"].String(),
+		APISecret:          model["api_secret"].String(),
+		MaxTokens:          2000,
 	}, nil
 }
 

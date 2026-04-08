@@ -61,10 +61,92 @@ func (p *TaskParser) normalizeTasks(ctx context.Context, tasks []ArchitectTask, 
 		if !validLevels[task.RoleLevel] {
 			task.RoleLevel = "pro" // 默认 pro
 		}
+		if isExplorationPlaceholderTask(task) {
+			g.Log().Warningf(ctx, "[TaskParser] 跳过无交付占位任务: %s", task.Name)
+			continue
+		}
 
 		seenNames[task.Name] = struct{}{}
 		normalized = append(normalized, task)
 	}
 
 	return normalized
+}
+
+func isExplorationPlaceholderTask(task ArchitectTask) bool {
+	combined := strings.ToLower(strings.TrimSpace(task.Name + "\n" + task.Description))
+	if combined == "" {
+		return false
+	}
+
+	toolMarkers := []string{
+		"<minimax:tool_call>",
+		"<invoke",
+		"cli-mcp-server_run_command",
+		"ls -la",
+		"pwd",
+		"find ",
+		"grep ",
+		"rg ",
+		"cat ",
+	}
+	if containsAny(combined, toolMarkers) {
+		return true
+	}
+
+	if len(task.AffectedResources) > 0 || len(task.DependsOn) > 0 {
+		return false
+	}
+
+	explorationKeywords := []string{
+		"查看项目目录",
+		"查看目录",
+		"目录结构",
+		"读取文件",
+		"了解现有代码",
+		"了解代码结构",
+		"熟悉代码",
+		"环境分析",
+		"项目勘察",
+		"查看仓库",
+		"检查目录",
+		"scan the repo",
+		"inspect the repo",
+		"repo structure",
+		"list files",
+	}
+	if !containsAny(combined, explorationKeywords) {
+		return false
+	}
+
+	deliverableKeywords := []string{
+		"方案",
+		"计划",
+		"文档",
+		"清单",
+		"报告",
+		"设计",
+		"修复",
+		"实现",
+		"接口",
+		"测试",
+		"验收",
+		"脚本",
+		"迁移",
+		"优化",
+		"deliverable",
+		"plan",
+		"spec",
+		"report",
+	}
+	return !containsAny(combined, deliverableKeywords)
+}
+
+func containsAny(text string, keywords []string) bool {
+	for _, keyword := range keywords {
+		if keyword != "" && strings.Contains(text, strings.ToLower(keyword)) {
+			return true
+		}
+	}
+	return false
 }

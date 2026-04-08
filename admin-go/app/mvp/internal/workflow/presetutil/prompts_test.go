@@ -46,4 +46,7 @@ func TestBuildArchitectSystemPromptAppendsProjectContextAndFormat(t *testing.T) 
 	if !strings.Contains(prompt, "输出格式要求") {
 		t.Fatalf("missing json suffix: %s", prompt)
 	}
+	if !strings.Contains(prompt, "禁止输出 <minimax:tool_call>") {
+		t.Fatalf("missing tool-call guard: %s", prompt)
+	}
 }

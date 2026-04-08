@@ -4,6 +4,7 @@ package watchdog
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +42,7 @@ type DomainTaskWatchdog struct {
 	mu         sync.Mutex
 	staleCount map[int64]int // taskID → 连续无心跳次数
 	retryCount map[int64]int // taskID → 已重试次数
+	lastRef    map[int64]string
 	cancel     context.CancelFunc
 
 	scheduler      SchedulerCallback
@@ -64,6 +66,7 @@ func New() *DomainTaskWatchdog {
 		maxRetries:    maxRetries,
 		staleCount:    make(map[int64]int),
 		retryCount:    make(map[int64]int),
+		lastRef:       make(map[int64]string),
 	}
 }
 
@@ -120,6 +123,8 @@ func (w *DomainTaskWatchdog) ResetRetryCount(taskID int64) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	delete(w.retryCount, taskID)
+	delete(w.staleCount, taskID)
+	delete(w.lastRef, taskID)
 }
 
 // heartbeatLoop 心跳检测循环。
@@ -160,32 +165,28 @@ func (w *DomainTaskWatchdog) checkRunningTasks(ctx context.Context) {
 	w.mu.Lock()
 	for _, task := range tasks {
 		taskID := task["id"].Int64()
-		hb := task["heartbeat_at"].GTime()
-		startedAt := task["started_at"].GTime()
-
-		// 确定检测基准时间
-		var refTime *gtime.Time
-		if hb != nil && !hb.IsZero() {
-			refTime = hb
-		} else if startedAt != nil && !startedAt.IsZero() {
-			refTime = startedAt
-		}
-
-		if refTime == nil {
+		refRaw, refTime, ok := resolveRefTime(task["heartbeat_at"].String(), task["started_at"].String())
+		if !ok {
 			// 无参考时间，跳过本轮
 			continue
 		}
 
-		elapsed := time.Since(refTime.Time)
+		if w.lastRef[taskID] != refRaw {
+			w.lastRef[taskID] = refRaw
+			w.staleCount[taskID] = 0
+		}
+
+		elapsed := time.Since(refTime)
 		if elapsed > heartbeatTimeout {
 			w.staleCount[taskID]++
 			if w.staleCount[taskID] >= w.maxStaleCount {
 				// 连续无心跳次数达到阈值
 				staleTasks = append(staleTasks, staleTask{
 					taskID: taskID,
-					reason: fmt.Sprintf("心跳超时：最后活跃 %s, 连续无心跳 %d 次", refTime.String(), w.staleCount[taskID]),
+					reason: fmt.Sprintf("心跳超时：最后活跃 %s, 连续无心跳 %d 次", refRaw, w.staleCount[taskID]),
 				})
 				delete(w.staleCount, taskID)
+				delete(w.lastRef, taskID)
 			}
 		} else {
 			w.staleCount[taskID] = 0
@@ -200,6 +201,12 @@ func (w *DomainTaskWatchdog) checkRunningTasks(ctx context.Context) {
 	for id := range w.staleCount {
 		if !activeIDs[id] {
 			delete(w.staleCount, id)
+			delete(w.lastRef, id)
+		}
+	}
+	for id := range w.lastRef {
+		if !activeIDs[id] {
+			delete(w.lastRef, id)
 		}
 	}
 	w.mu.Unlock()
@@ -335,10 +342,15 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 			Where("id", item.taskID).
 			Where("status", domainTask.StatusFailed).
 			Update(g.Map{
-				"status":      domainTask.StatusPending,
-				"retry_count": item.retryNo,
-				"result":      nil,
-				"updated_at":  now,
+				"status":           domainTask.StatusPending,
+				"retry_count":      item.retryNo,
+				"result":           nil,
+				"error_message":    nil,
+				"started_at":       nil,
+				"completed_at":     nil,
+				"heartbeat_at":     nil,
+				"locked_resources": nil,
+				"updated_at":       now,
 			})
 		if dbErr != nil {
 			g.Log().Errorf(ctx, "[WatchdogV2] 重试任务 %d DB 更新失败: %v", item.taskID, dbErr)
@@ -396,6 +408,45 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 		}
 		w.checkCircuitBreaker(ctx, wfIDs)
 	}
+}
+
+func resolveRefTime(heartbeatRaw, startedAtRaw string) (string, time.Time, bool) {
+	for _, raw := range []string{heartbeatRaw, startedAtRaw} {
+		refRaw := normalizeDBTime(raw)
+		if refRaw == "" {
+			continue
+		}
+		if refTime, ok := parseUTCRefTime(refRaw); ok {
+			return refRaw, refTime, true
+		}
+	}
+	return "", time.Time{}, false
+}
+
+func normalizeDBTime(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	switch trimmed {
+	case "", "null", "NULL", "0000-00-00 00:00:00":
+		return ""
+	default:
+		return trimmed
+	}
+}
+
+func parseUTCRefTime(raw string) (time.Time, bool) {
+	layouts := []string{
+		"2006-01-02 15:04:05.999999",
+		"2006-01-02 15:04:05.999",
+		time.DateTime,
+		time.RFC3339Nano,
+		time.RFC3339,
+	}
+	for _, layout := range layouts {
+		if parsed, err := time.ParseInLocation(layout, raw, time.UTC); err == nil {
+			return parsed.UTC(), true
+		}
+	}
+	return time.Time{}, false
 }
 
 // checkCircuitBreaker 对活跃 workflow 执行熔断检查。

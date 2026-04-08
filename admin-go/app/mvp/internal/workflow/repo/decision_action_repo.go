@@ -2,6 +2,8 @@ package repo
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -19,6 +21,7 @@ func (r *DecisionActionRepo) table() string { return "mvp_decision_action" }
 
 // Create 创建决策动作记录。
 func (r *DecisionActionRepo) Create(ctx context.Context, data g.Map) (int64, error) {
+	normalizeDecisionActionJSONFields(data)
 	id := snowflake.Generate()
 	data["id"] = id
 	_, err := g.DB().Model(r.table()).Ctx(ctx).Insert(data)
@@ -41,8 +44,48 @@ func (r *DecisionActionRepo) UpdateStatus(ctx context.Context, id int64, status 
 	for k, v := range extra {
 		data[k] = v
 	}
+	normalizeDecisionActionJSONFields(data)
 	_, err := g.DB().Model(r.table()).Ctx(ctx).Where("id", id).Update(data)
 	return err
+}
+
+func normalizeDecisionActionJSONFields(data g.Map) {
+	for _, key := range []string{"trigger_context", "matched_gate_ids", "recommendation", "result"} {
+		value, ok := data[key]
+		if !ok {
+			continue
+		}
+		if value == nil {
+			continue
+		}
+		switch v := value.(type) {
+		case string:
+			trimmed := strings.TrimSpace(v)
+			if trimmed == "" {
+				data[key] = nil
+				continue
+			}
+			if json.Valid([]byte(trimmed)) {
+				data[key] = trimmed
+				continue
+			}
+			if encoded, err := json.Marshal(v); err == nil {
+				data[key] = string(encoded)
+			}
+		case []byte:
+			if json.Valid(v) {
+				data[key] = string(v)
+				continue
+			}
+			if encoded, err := json.Marshal(string(v)); err == nil {
+				data[key] = string(encoded)
+			}
+		default:
+			if encoded, err := json.Marshal(v); err == nil {
+				data[key] = string(encoded)
+			}
+		}
+	}
 }
 
 // ListByWorkflow 按工作流查询决策记录。

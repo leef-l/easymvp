@@ -179,7 +179,8 @@ CREATE TABLE `ai_provider` (
   `id` bigint unsigned NOT NULL COMMENT '雪花ID',
   `name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '供应商名称',
   `code` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '供应商代码：openai/anthropic/deepseek/qwen/doubao/ernie/spark/glm/moonshot/yi/google/ollama',
-  `provider_type` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Provider类型：openai_compatible/anthropic/baidu/xfyun/google',
+  `provider_type` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '供应商主类型/默认路由类型',
+  `supported_protocols` json DEFAULT NULL COMMENT '支持的协议类型(JSON)：anthropic/openai_compatible/google 等',
   `base_url` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'API基础地址',
   `icon` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '图标URL',
   `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态:0=禁用,1=启用',
@@ -200,7 +201,7 @@ CREATE TABLE `ai_provider` (
 
 LOCK TABLES `ai_provider` WRITE;
 /*!40000 ALTER TABLE `ai_provider` DISABLE KEYS */;
-INSERT INTO `ai_provider` VALUES (315056637784100864,'腾讯云coding plan','tencent_coding','tencent_coding','https://api.lkeap.cloud.tencent.com/coding/anthropic/v1','ant-design:wechat-filled',1,0,1000000000000000003,1000000000000000001,'2026-04-02 07:35:56','2026-04-02 15:41:36',NULL);
+INSERT INTO `ai_provider` VALUES (315056637784100864,'腾讯云coding plan','tencent_coding','tencent_coding',JSON_ARRAY('anthropic','openai_compatible'),'https://api.lkeap.cloud.tencent.com/coding/anthropic/v1','ant-design:wechat-filled',1,0,1000000000000000003,1000000000000000001,'2026-04-02 07:35:56','2026-04-02 15:41:36',NULL);
 /*!40000 ALTER TABLE `ai_provider` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -2099,4 +2100,3 @@ UNLOCK TABLES;
 /*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
-

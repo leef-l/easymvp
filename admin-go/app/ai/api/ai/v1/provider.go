@@ -15,14 +15,15 @@ var _ = gtime.New
 
 // ProviderCreateReq 创建AI供应商表请求
 type ProviderCreateReq struct {
-	g.Meta `path:"/provider/create" method:"post" tags:"AI供应商表" summary:"创建AI供应商表"`
-	Name string `json:"name" v:"required|max-length:100" dc:"供应商名称"`
-	Code string `json:"code" v:"required|max-length:50" dc:"供应商代码"`
-	ProviderType string `json:"providerType" v:"required|max-length:20" dc:"Provider类型"`
-	BaseURL string `json:"baseURL" v:"required|url|max-length:500" dc:"API基础地址"`
-	Icon string `json:"icon" v:"max-length:500" dc:"图标URL"`
-	Status int `json:"status"  dc:"状态"`
-	Sort int `json:"sort"  dc:"排序"`
+	g.Meta             `path:"/provider/create" method:"post" tags:"AI供应商表" summary:"创建AI供应商表"`
+	Name               string   `json:"name" v:"required|max-length:100" dc:"供应商名称"`
+	Code               string   `json:"code" v:"required|max-length:50" dc:"供应商代码"`
+	ProviderType       string   `json:"providerType" v:"required|max-length:20" dc:"供应商主类型/默认路由类型"`
+	SupportedProtocols []string `json:"supportedProtocols" dc:"支持的协议类型列表，如 anthropic/openai_compatible"`
+	BaseURL            string   `json:"baseURL" v:"required|url|max-length:500" dc:"API基础地址"`
+	Icon               string   `json:"icon" v:"max-length:500" dc:"图标URL"`
+	Status             int      `json:"status"  dc:"状态"`
+	Sort               int      `json:"sort"  dc:"排序"`
 }
 
 // ProviderCreateRes 创建AI供应商表响应
@@ -32,15 +33,16 @@ type ProviderCreateRes struct {
 
 // ProviderUpdateReq 更新AI供应商表请求
 type ProviderUpdateReq struct {
-	g.Meta `path:"/provider/update" method:"put" tags:"AI供应商表" summary:"更新AI供应商表"`
-	ID     snowflake.JsonInt64 `json:"id" v:"required#ID不能为空" dc:"AI供应商表ID"`
-	Name string `json:"name" dc:"供应商名称"`
-	Code string `json:"code" dc:"供应商代码"`
-	ProviderType string `json:"providerType" dc:"Provider类型"`
-	BaseURL string `json:"baseURL" dc:"API基础地址"`
-	Icon string `json:"icon" dc:"图标URL"`
-	Status int `json:"status" dc:"状态"`
-	Sort int `json:"sort" dc:"排序"`
+	g.Meta             `path:"/provider/update" method:"put" tags:"AI供应商表" summary:"更新AI供应商表"`
+	ID                 snowflake.JsonInt64 `json:"id" v:"required#ID不能为空" dc:"AI供应商表ID"`
+	Name               string              `json:"name" dc:"供应商名称"`
+	Code               string              `json:"code" dc:"供应商代码"`
+	ProviderType       string              `json:"providerType" dc:"供应商主类型/默认路由类型"`
+	SupportedProtocols []string            `json:"supportedProtocols" dc:"支持的协议类型列表，如 anthropic/openai_compatible"`
+	BaseURL            string              `json:"baseURL" dc:"API基础地址"`
+	Icon               string              `json:"icon" dc:"图标URL"`
+	Status             int                 `json:"status" dc:"状态"`
+	Sort               int                 `json:"sort" dc:"排序"`
 }
 
 // ProviderUpdateRes 更新AI供应商表响应
@@ -103,31 +105,30 @@ type ProviderListReq struct {
 	OrderDir  string `json:"orderDir" d:"asc" dc:"排序方向:asc/desc"`
 	StartTime string `json:"startTime" dc:"开始时间"`
 	EndTime   string `json:"endTime" dc:"结束时间"`
-	Status *int `json:"status" dc:"状态"`
-	Name string `json:"name" dc:"供应商名称"`
+	Status    *int   `json:"status" dc:"状态"`
+	Name      string `json:"name" dc:"供应商名称"`
 }
 
 // ProviderListRes 获取AI供应商表列表响应
 type ProviderListRes struct {
 	g.Meta `mime:"application/json"`
 	List   []*model.ProviderListOutput `json:"list" dc:"列表数据"`
-	Total  int                               `json:"total" dc:"总数"`
+	Total  int                         `json:"total" dc:"总数"`
 }
+
 // ProviderExportReq 导出AI供应商表请求
 type ProviderExportReq struct {
 	g.Meta    `path:"/provider/export" method:"get" tags:"AI供应商表" summary:"导出AI供应商表"`
 	StartTime string `json:"startTime" dc:"开始时间"`
 	EndTime   string `json:"endTime" dc:"结束时间"`
-	Status *int `json:"status" dc:"状态"`
-	Name string `json:"name" dc:"供应商名称"`
+	Status    *int   `json:"status" dc:"状态"`
+	Name      string `json:"name" dc:"供应商名称"`
 }
 
 // ProviderExportRes 导出AI供应商表响应
 type ProviderExportRes struct {
 	g.Meta `mime:"text/csv"`
 }
-
-
 
 // ProviderImportReq 导入AI供应商表请求
 type ProviderImportReq struct {
@@ -150,4 +151,3 @@ type ProviderImportTemplateReq struct {
 type ProviderImportTemplateRes struct {
 	g.Meta `mime:"text/csv"`
 }
-

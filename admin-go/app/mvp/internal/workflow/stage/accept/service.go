@@ -21,6 +21,23 @@ import (
 // 通知 accept service 保持 accept stage running 等待人工介入。
 var ErrManualReviewRequired = errors.New("manual review required: no task to rework")
 
+type manualCompleteContextKey struct{}
+
+// WithManualCompleteBypass 标记当前 complete 流程已获得人工明确放行，
+// 后续不应再被 accept.passed 的自治人工节点二次拦截。
+func WithManualCompleteBypass(ctx context.Context) context.Context {
+	return context.WithValue(ctx, manualCompleteContextKey{}, true)
+}
+
+// HasManualCompleteBypass 判断当前 complete 流程是否由人工放行触发。
+func HasManualCompleteBypass(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	flag, _ := ctx.Value(manualCompleteContextKey{}).(bool)
+	return flag
+}
+
 // StageCompleter 阶段操作回调（避免循环依赖）。
 type StageCompleter interface {
 	CompleteStage(ctx context.Context, stageRunID int64) error
@@ -35,12 +52,12 @@ type CompleteTriggerFn func(ctx context.Context, workflowRunID int64) error
 
 // Service 验收阶段服务。
 type Service struct {
-	acceptRunRepo *repo.AcceptRunRepo
-	collector     *acceptance.EvidenceCollector
-	ruleEngine    *acceptance.RuleEngine
-	reducer       *acceptance.DecisionReducer
-	stageCompleter StageCompleter
-	reworkTrigger  ReworkTriggerFn
+	acceptRunRepo   *repo.AcceptRunRepo
+	collector       *acceptance.EvidenceCollector
+	ruleEngine      *acceptance.RuleEngine
+	reducer         *acceptance.DecisionReducer
+	stageCompleter  StageCompleter
+	reworkTrigger   ReworkTriggerFn
 	completeTrigger CompleteTriggerFn
 }
 
@@ -340,12 +357,26 @@ func (s *Service) ManualApprove(ctx context.Context, projectID int64, reason str
 
 	// 完成 accept stage → 推进到 complete
 	if s.stageCompleter != nil {
-		if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
-			return fmt.Errorf("CompleteStage 失败: %w", err)
+		stageStatus, statusErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
+			Where("id", stageRunID).
+			WhereNull("deleted_at").
+			Value("status")
+		if statusErr != nil {
+			return fmt.Errorf("查询 accept stage 状态失败: %w", statusErr)
+		}
+		switch stageStatus.String() {
+		case "running":
+			if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
+				return fmt.Errorf("CompleteStage 失败: %w", err)
+			}
+		case "completed":
+			// 允许补偿式重入：此前 accept stage 已完成，但 workflow_run 可能尚未收口。
+		default:
+			return fmt.Errorf("accept stage_run(%d) 状态为 %s，不允许人工放行完成", stageRunID, stageStatus.String())
 		}
 	}
 	if s.completeTrigger != nil {
-		return s.completeTrigger(ctx, workflowRunID)
+		return s.completeTrigger(WithManualCompleteBypass(ctx), workflowRunID)
 	}
 	return nil
 }

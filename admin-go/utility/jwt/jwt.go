@@ -2,6 +2,10 @@ package jwt
 
 import (
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -22,28 +26,68 @@ var (
 	secret       []byte
 	memberSecret []byte
 	expireTime   time.Duration
+	configMu     sync.RWMutex
 )
 
-func init() {
-	ctx := gctx.New()
-	key, err := g.Cfg().Get(ctx, "jwt.secret")
-	if err != nil || key.IsEmpty() {
-		panic("jwt.secret 未配置，禁止使用默认密钥")
+func loadConfig() error {
+	configMu.RLock()
+	if len(secret) > 0 && len(memberSecret) > 0 && expireTime > 0 {
+		configMu.RUnlock()
+		return nil
 	}
-	secret = []byte(key.String())
-	// 会员端独立 secret，未配置时回退到管理端 secret
-	mKey, _ := g.Cfg().Get(ctx, "jwt.memberSecret", "")
-	if mKey.String() != "" {
-		memberSecret = []byte(mKey.String())
+	configMu.RUnlock()
+
+	configMu.Lock()
+	defer configMu.Unlock()
+
+	if len(secret) > 0 && len(memberSecret) > 0 && expireTime > 0 {
+		return nil
+	}
+
+	ctx := gctx.New()
+	key := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+	if key == "" {
+		cfgValue, err := g.Cfg().Get(ctx, "jwt.secret")
+		if err == nil && !cfgValue.IsEmpty() {
+			key = strings.TrimSpace(cfgValue.String())
+		}
+	}
+	if key == "" {
+		return fmt.Errorf("jwt.secret 未配置")
+	}
+	secret = []byte(key)
+
+	memberKey := strings.TrimSpace(os.Getenv("JWT_MEMBER_SECRET"))
+	if memberKey == "" {
+		mKey, _ := g.Cfg().Get(ctx, "jwt.memberSecret", "")
+		memberKey = strings.TrimSpace(mKey.String())
+	}
+	if memberKey != "" {
+		memberSecret = []byte(memberKey)
 	} else {
 		memberSecret = secret
 	}
-	hours, _ := g.Cfg().Get(ctx, "jwt.expire", 24)
-	expireTime = time.Duration(hours.Int()) * time.Hour
+
+	hours := 24
+	if raw := strings.TrimSpace(os.Getenv("JWT_EXPIRE_HOURS")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			hours = parsed
+		}
+	} else {
+		cfgHours, _ := g.Cfg().Get(ctx, "jwt.expire", 24)
+		if cfgHours.Int() > 0 {
+			hours = cfgHours.Int()
+		}
+	}
+	expireTime = time.Duration(hours) * time.Hour
+	return nil
 }
 
 // GenerateToken 生成 JWT Token
 func GenerateToken(userID int64, username string, deptID int64, isAdmin bool) (string, error) {
+	if err := loadConfig(); err != nil {
+		return "", err
+	}
 	now := time.Now()
 	claims := Claims{
 		UserID:   userID,
@@ -62,6 +106,9 @@ func GenerateToken(userID int64, username string, deptID int64, isAdmin bool) (s
 
 // ParseToken 解析 JWT Token
 func ParseToken(tokenStr string) (*Claims, error) {
+	if err := loadConfig(); err != nil {
+		return nil, err
+	}
 	token, err := gojwt.ParseWithClaims(tokenStr, &Claims{}, func(t *gojwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*gojwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("不支持的签名算法: %v", t.Header["alg"])
@@ -89,6 +136,9 @@ type MemberClaims struct {
 
 // GenerateMemberToken 生成会员 JWT Token
 func GenerateMemberToken(memberID int64, phone string, isCoach int, coachID int64, currentRole string) (string, error) {
+	if err := loadConfig(); err != nil {
+		return "", err
+	}
 	now := time.Now()
 	claims := MemberClaims{
 		MemberID:    memberID,
@@ -108,6 +158,9 @@ func GenerateMemberToken(memberID int64, phone string, isCoach int, coachID int6
 
 // VerifyAnyToken 只验证 token 签名合法且未过期，不关心是哪种身份
 func VerifyAnyToken(tokenStr string) bool {
+	if err := loadConfig(); err != nil {
+		return false
+	}
 	_, err := ParseToken(tokenStr)
 	if err == nil {
 		return true
@@ -118,6 +171,9 @@ func VerifyAnyToken(tokenStr string) bool {
 
 // ParseMemberToken 解析会员 JWT Token
 func ParseMemberToken(tokenStr string) (*MemberClaims, error) {
+	if err := loadConfig(); err != nil {
+		return nil, err
+	}
 	token, err := gojwt.ParseWithClaims(tokenStr, &MemberClaims{}, func(t *gojwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*gojwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("不支持的签名算法: %v", t.Header["alg"])

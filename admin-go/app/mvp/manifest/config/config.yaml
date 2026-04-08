@@ -43,5 +43,5 @@ engine:
     maxStaleCount: 3      # 连续无进展次数阈值
     maxRetries: 3         # 最大自动重试次数
   scheduler:
-    maxConcurrent: 20     # 最大并发任务数
+    maxConcurrent: 1      # 默认单并发，优先保证低配服务器稳定
     pollInterval: 2       # 调度轮询间隔（秒）

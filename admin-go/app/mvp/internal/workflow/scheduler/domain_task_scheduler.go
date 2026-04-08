@@ -27,25 +27,27 @@ type CompletionCallback func(ctx context.Context, workflowRunID int64)
 // 核心策略与旧 engine.Scheduler 一致：批次门控 + 依赖检查 + 资源冲突 + 并发控制。
 type DomainTaskScheduler struct {
 	mu             sync.Mutex
-	running        map[int64]bool          // 正在执行的任务 ID
-	lockedRes      map[string]int64        // 资源 → 占用任务 ID
+	running        map[int64]bool   // 正在执行的任务 ID
+	lockedRes      map[string]int64 // 资源 → 占用任务 ID
 	maxConcurrency int
 	lockMgr        *ResourceLockManager
 	executor       TaskExecutor
 	onAllDone      CompletionCallback
 	cancelFns      map[int64]context.CancelFunc // workflowRunID → cancel
+	workflowCtxs   map[int64]context.Context    // workflowRunID → scheduler ctx
 }
 
 // NewDomainTaskScheduler 创建领域任务调度器。
 func NewDomainTaskScheduler() *DomainTaskScheduler {
 	ctx := context.Background()
-	maxConcurrent := engine.GetConfigInt(ctx, "scheduler.max_concurrent", "engine.scheduler.maxConcurrent", 20)
+	maxConcurrent := engine.GetSchedulerMaxConcurrency(ctx)
 	return &DomainTaskScheduler{
 		running:        make(map[int64]bool),
 		lockedRes:      make(map[string]int64),
 		maxConcurrency: maxConcurrent,
 		lockMgr:        NewResourceLockManager(),
 		cancelFns:      make(map[int64]context.CancelFunc),
+		workflowCtxs:   make(map[int64]context.Context),
 	}
 }
 
@@ -65,6 +67,7 @@ func (s *DomainTaskScheduler) Start(ctx context.Context, workflowRunID int64) er
 		oldCancel = oc
 	}
 	s.cancelFns[workflowRunID] = cancel
+	s.workflowCtxs[workflowRunID] = schedCtx
 	s.mu.Unlock()
 
 	// 在锁外调用 oldCancel，避免 panic 导致死锁
@@ -92,6 +95,7 @@ func (s *DomainTaskScheduler) Stop(workflowRunID int64) {
 		cancel()
 		delete(s.cancelFns, workflowRunID)
 	}
+	delete(s.workflowCtxs, workflowRunID)
 	s.mu.Unlock()
 }
 
@@ -274,13 +278,20 @@ func (s *DomainTaskScheduler) scheduleOnce(ctx context.Context, workflowRunID in
 
 		// 执行
 		if s.executor != nil {
+			execCtx := s.workflowCtxs[workflowRunID]
+			if execCtx == nil {
+				execCtx = ctx
+			}
+			if execCtx == nil || execCtx.Err() != nil {
+				return
+			}
 			go func(wfID, tID int64) {
 				defer func() {
 					if r := recover(); r != nil {
 						g.Log().Errorf(context.Background(), "[DomainTaskScheduler] ExecuteDomainTask panic: task=%d err=%v", tID, r)
 					}
 				}()
-				s.executor.ExecuteDomainTask(context.Background(), wfID, tID)
+				s.executor.ExecuteDomainTask(execCtx, wfID, tID)
 			}(workflowRunID, taskID)
 		}
 	}

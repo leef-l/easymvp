@@ -126,19 +126,9 @@ func (e *GeminiCLIExecutor) Execute(ctx context.Context, req *Request) *Result {
 	}
 
 	if req.Workspace != nil && e.wsMgr != nil {
-		if fErr := e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: true}); fErr != nil {
-			g.Log().Warningf(ctx, "[GeminiCLIExecutor] workspace finalize 失败: task=%d err=%v", req.TaskID, fErr)
-		} else {
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						g.Log().Errorf(context.Background(), "[GeminiCLIExecutor] workspace cleanup panic: task=%d err=%v", req.TaskID, r)
-					}
-				}()
-				if cleanErr := e.wsMgr.Cleanup(context.Background(), req.TaskID); cleanErr != nil {
-					g.Log().Warningf(context.Background(), "[GeminiCLIExecutor] workspace cleanup 失败: task=%d err=%v", req.TaskID, cleanErr)
-				}
-			}()
+		if err := finalizeWorkspaceSuccess(ctx, e.wsMgr, req.TaskID, "GeminiCLIExecutor"); err != nil {
+			_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: false, Error: err.Error(), Retain: true})
+			return &Result{Success: false, Error: err}
 		}
 	}
 

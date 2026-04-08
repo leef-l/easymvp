@@ -70,7 +70,7 @@ func (s *Sensor) Perceive(ctx context.Context, workflowRunID int64) (*Situation,
 	progress := &ProgressMetrics{}
 	health := &HealthMetrics{}
 	resource := &ResourceMetrics{
-		MaxConcurrency: engine.GetConfigInt(ctx, "workflow.scheduler.max_concurrency", "workflow.scheduler.maxConcurrency", 20),
+		MaxConcurrency: engine.GetSchedulerMaxConcurrency(ctx),
 		TokensConsumed: wf["tokens_consumed"].Int64(),
 	}
 	trend := &TrendMetrics{

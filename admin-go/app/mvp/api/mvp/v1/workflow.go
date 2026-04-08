@@ -90,6 +90,20 @@ type WorkflowResetToDesignRes struct {
 	Message string `json:"message"`
 }
 
+// WorkflowCancelReq 人工取消工作流请求
+type WorkflowCancelReq struct {
+	g.Meta    `path:"/workflow/cancel" method:"post" tags:"项目流程" summary:"人工取消工作流"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	Reason    string              `json:"reason" dc:"取消原因"`
+}
+
+// WorkflowCancelRes 人工取消工作流响应
+type WorkflowCancelRes struct {
+	g.Meta        `mime:"application/json"`
+	WorkflowRunID snowflake.JsonInt64 `json:"workflowRunID"`
+	Message       string              `json:"message"`
+}
+
 // WorkflowRetryTaskReq 重新执行失败任务请求
 type WorkflowRetryTaskReq struct {
 	g.Meta    `path:"/workflow/retry-task" method:"post" tags:"项目流程" summary:"重新执行失败任务"`
@@ -100,6 +114,25 @@ type WorkflowRetryTaskReq struct {
 // WorkflowRetryTaskRes 重新执行失败任务响应
 type WorkflowRetryTaskRes struct {
 	g.Meta `mime:"application/json"`
+}
+
+// WorkflowForceStageReq 强制跳转/重启阶段请求
+type WorkflowForceStageReq struct {
+	g.Meta        `path:"/workflow/force-stage" method:"post" tags:"项目流程" summary:"强制跳转到指定阶段"`
+	ProjectID     snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	TargetStage   string              `json:"targetStage" v:"required|in:design,review,execute,accept,rework" dc:"目标阶段"`
+	PlanVersionID snowflake.JsonInt64 `json:"planVersionID" dc:"review/execute 阶段可指定方案版本ID"`
+	FailedTaskID  snowflake.JsonInt64 `json:"failedTaskID" dc:"rework 阶段可指定失败任务ID"`
+	SourceStage   string              `json:"sourceStage" v:"in:,execute,accept" dc:"rework 回流来源阶段"`
+	Reason        string              `json:"reason" dc:"强制切换原因"`
+}
+
+// WorkflowForceStageRes 强制跳转/重启阶段响应
+type WorkflowForceStageRes struct {
+	g.Meta        `mime:"application/json"`
+	WorkflowRunID snowflake.JsonInt64 `json:"workflowRunID"`
+	StageRunID    snowflake.JsonInt64 `json:"stageRunID"`
+	CurrentStage  string              `json:"currentStage"`
 }
 
 // WorkflowSkipTaskReq 跳过失败任务请求
@@ -113,6 +146,32 @@ type WorkflowSkipTaskReq struct {
 // WorkflowSkipTaskRes 跳过失败任务响应
 type WorkflowSkipTaskRes struct {
 	g.Meta `mime:"application/json"`
+}
+
+// WorkflowUpdateDomainTaskReq 人工修改领域任务请求
+type WorkflowUpdateDomainTaskReq struct {
+	g.Meta                   `path:"/workflow/update-domain-task" method:"post" tags:"项目流程" summary:"人工修改领域任务"`
+	ProjectID                snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	TaskID                   snowflake.JsonInt64 `json:"taskID" v:"required" dc:"任务ID"`
+	Name                     string              `json:"name" dc:"任务名称"`
+	Description              string              `json:"description" dc:"任务描述"`
+	RoleType                 string              `json:"roleType" dc:"角色类型"`
+	RoleLevel                string              `json:"roleLevel" dc:"角色等级"`
+	ExecutionMode            string              `json:"executionMode" dc:"执行方式"`
+	BatchNo                  *int                `json:"batchNo" dc:"批次号"`
+	Sort                     *int                `json:"sort" dc:"排序"`
+	AffectedResources        []string            `json:"affectedResources" dc:"影响资源列表"`
+	ReplaceAffectedResources bool                `json:"replaceAffectedResources" dc:"是否覆盖影响资源列表"`
+	RestartAfterUpdate       bool                `json:"restartAfterUpdate" dc:"修改后是否重置为 pending 并重新调度"`
+	Reason                   string              `json:"reason" dc:"人工修改原因"`
+}
+
+// WorkflowUpdateDomainTaskRes 人工修改领域任务响应
+type WorkflowUpdateDomainTaskRes struct {
+	g.Meta  `mime:"application/json"`
+	TaskID  snowflake.JsonInt64 `json:"taskID"`
+	Status  string              `json:"status"`
+	Message string              `json:"message,omitempty"`
 }
 
 // WorkflowProjectStatusReq 获取项目状态请求

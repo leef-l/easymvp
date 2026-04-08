@@ -12,7 +12,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 )
 
-var jsonCodeBlockRe = regexp.MustCompile("(?s)```json\\s*\\n?(\\{[\\s\\S]*?\\})\\s*```")
+var jsonCodeBlockRe = regexp.MustCompile("(?s)```(?:json)?\\s*\\n?(.*?)\\s*```")
 
 // getReviewRoleModel 获取审核角色的 AI 模型信息
 func getReviewRoleModel(ctx context.Context, projectID int64, roleType string) (*ModelInfo, error) {
@@ -25,7 +25,7 @@ func getReviewRoleModel(ctx context.Context, projectID int64, roleType string) (
 	model, err := g.DB().Ctx(ctx).Model("ai_model m").
 		LeftJoin("ai_plan p", "p.id = m.plan_id").
 		LeftJoin("ai_provider pv", "pv.id = m.provider_id").
-		Fields("m.model_code, m.max_tokens, pv.provider_type, pv.base_url, p.api_key, p.api_secret, m.role_prompt").
+		Fields("m.model_code, m.max_tokens, pv.provider_type, pv.supported_protocols, pv.base_url, p.api_key, p.api_secret, m.role_prompt").
 		Where("m.id", modelID).
 		Where("m.deleted_at IS NULL").
 		One()
@@ -39,14 +39,15 @@ func getReviewRoleModel(ctx context.Context, projectID int64, roleType string) (
 	}
 
 	return &ModelInfo{
-		ModelID:      modelID,
-		ModelCode:    model["model_code"].String(),
-		ProviderType: model["provider_type"].String(),
-		BaseURL:      model["base_url"].String(),
-		APIKey:       model["api_key"].String(),
-		APISecret:    model["api_secret"].String(),
-		SystemPrompt: systemPrompt,
-		MaxTokens:    model["max_tokens"].Int(),
+		ModelID:            modelID,
+		ModelCode:          model["model_code"].String(),
+		ProviderType:       model["provider_type"].String(),
+		SupportedProtocols: decodeProviderProtocols(model["supported_protocols"].String(), model["provider_type"].String()),
+		BaseURL:            model["base_url"].String(),
+		APIKey:             model["api_key"].String(),
+		APISecret:          model["api_secret"].String(),
+		SystemPrompt:       systemPrompt,
+		MaxTokens:          model["max_tokens"].Int(),
 	}, nil
 }
 
@@ -225,28 +226,43 @@ func rollbackConfirmedTasks(ctx context.Context, projectID int64) {
 func parseJSONFromAI(content string, v interface{}) error {
 	content = strings.TrimSpace(content)
 
-	// 尝试直接解析
-	if err := json.Unmarshal([]byte(content), v); err == nil {
+	// 尝试直接从整段内容中解出首个 JSON 值。
+	if err := decodeJSONPrefix(content, v); err == nil {
 		return nil
 	}
 
-	// 从 ```json 代码块中提取
+	// 从 markdown 代码块中提取
 	if match := jsonCodeBlockRe.FindStringSubmatch(content); len(match) == 2 {
-		if err := json.Unmarshal([]byte(match[1]), v); err == nil {
+		if err := decodeJSONPrefix(strings.TrimSpace(match[1]), v); err == nil {
 			return nil
 		}
 	}
 
-	// 查找最外层的 { ... }
-	start := strings.Index(content, "{")
-	end := strings.LastIndex(content, "}")
-	if start >= 0 && end > start {
-		if err := json.Unmarshal([]byte(content[start:end+1]), v); err == nil {
+	// 逐个尝试以 { / [ 开始的 JSON 前缀，兼容“解释 + JSON”混排输出。
+	for idx, ch := range content {
+		if ch != '{' && ch != '[' {
+			continue
+		}
+		if err := decodeJSONPrefix(content[idx:], v); err == nil {
 			return nil
 		}
 	}
 
 	return fmt.Errorf("无法从 AI 回复中提取有效 JSON")
+}
+
+func decodeJSONPrefix(content string, v interface{}) error {
+	decoder := json.NewDecoder(strings.NewReader(content))
+	decoder.UseNumber()
+
+	var raw json.RawMessage
+	if err := decoder.Decode(&raw); err != nil {
+		return err
+	}
+	if len(raw) == 0 {
+		return fmt.Errorf("empty json payload")
+	}
+	return json.Unmarshal(raw, v)
 }
 
 // ModelInfo 已在 executor.go 中定义，此处复用

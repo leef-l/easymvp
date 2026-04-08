@@ -198,10 +198,11 @@ func (r *Reporter) generateReportContent(ctx context.Context, projectID int64, s
 	}
 
 	p, err := provider.GetProvider(provider.Config{
-		ProviderType: modelInfo.ProviderType,
-		BaseURL:      modelInfo.BaseURL,
-		APIKey:       modelInfo.APIKey,
-		APISecret:    modelInfo.APISecret,
+		ProviderType:       modelInfo.ProviderType,
+		SupportedProtocols: modelInfo.SupportedProtocols,
+		BaseURL:            modelInfo.BaseURL,
+		APIKey:             modelInfo.APIKey,
+		APISecret:          modelInfo.APISecret,
 	})
 	if err != nil {
 		return r.templateReport(stageType, metrics)
@@ -232,11 +233,11 @@ func (r *Reporter) templateReport(stageType string, metrics string) string {
 
 func stageTypeLabel(stageType string) string {
 	labels := map[string]string{
-		"design":  "设计",
-		"review":  "审核",
-		"execute": "执行",
-		"accept":  "验收",
-		"rework":  "返工",
+		"design":   "设计",
+		"review":   "审核",
+		"execute":  "执行",
+		"accept":   "验收",
+		"rework":   "返工",
 		"complete": "完成",
 	}
 	if l, ok := labels[stageType]; ok {

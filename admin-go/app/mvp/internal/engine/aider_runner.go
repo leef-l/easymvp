@@ -15,6 +15,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	"easymvp/app/mvp/internal/activity"
+	providerutil "easymvp/utility/provider"
 	"easymvp/utility/worktreeguard"
 )
 
@@ -35,6 +36,7 @@ type AiderConfig struct {
 	APIKey               string        // API Key
 	BaseURL              string        // API Base URL（不带 /v1）
 	ProviderType         string        // provider 类型（anthropic / openai_compatible）
+	SupportedProtocols   []string      // 供应商支持的协议类型
 	SystemPrompt         string        // 系统提示词
 	WorkDir              string        // 工作目录（项目代码所在目录）
 	Files                []string      // 需要编辑的文件列表
@@ -284,13 +286,13 @@ func (r *AiderRunner) buildEnv(cfg *AiderConfig) []string {
 		"PYTHONLEGACYWINDOWSSTDIO=0",
 	)
 
-	switch cfg.ProviderType {
-	case "anthropic":
+	switch r.resolveProtocol(cfg) {
+	case providerutil.TypeAnthropic:
 		env = append(env,
 			"ANTHROPIC_API_KEY="+cfg.APIKey,
 			"ANTHROPIC_BASE_URL="+cfg.BaseURL,
 		)
-	case "openai_compatible":
+	case providerutil.TypeOpenAICompatible:
 		env = append(env,
 			"OPENAI_API_KEY="+cfg.APIKey,
 			"OPENAI_API_BASE="+cfg.BaseURL,
@@ -364,17 +366,28 @@ func (r *AiderRunner) writeMessageFile(message string) (string, error) {
 
 // formatModel 格式化模型名称（Aider 需要 provider/model 格式）
 func (r *AiderRunner) formatModel(cfg *AiderConfig) string {
-	switch cfg.ProviderType {
-	case "anthropic":
+	switch r.resolveProtocol(cfg) {
+	case providerutil.TypeAnthropic:
 		if !strings.HasPrefix(cfg.ModelCode, "anthropic/") {
 			return "anthropic/" + cfg.ModelCode
 		}
-	case "openai_compatible":
+	case providerutil.TypeOpenAICompatible:
 		if !strings.HasPrefix(cfg.ModelCode, "openai/") {
 			return "openai/" + cfg.ModelCode
 		}
 	}
 	return cfg.ModelCode
+}
+
+func (r *AiderRunner) resolveProtocol(cfg *AiderConfig) string {
+	if cfg == nil {
+		return providerutil.TypeAnthropic
+	}
+	return providerutil.ResolveProtocol(providerutil.Config{
+		ProviderType:       cfg.ProviderType,
+		SupportedProtocols: cfg.SupportedProtocols,
+		BaseURL:            cfg.BaseURL,
+	})
 }
 
 // BuildConfigFromModel 从数据库模型信息构建 AiderConfig
@@ -383,10 +396,16 @@ func (r *AiderRunner) BuildConfigFromModel(ctx context.Context, modelInfo *Model
 		g.Log().Errorf(ctx, "[AiderRunner] BuildConfigFromModel: modelInfo 为 nil")
 		return &AiderConfig{WorkDir: workDir}
 	}
-	// 处理 base URL：腾讯云的 anthropic URL 末尾是 /v1，Aider 需要去掉
-	baseURL := modelInfo.BaseURL
-	baseURL = strings.TrimSuffix(baseURL, "/v1")
-	baseURL = strings.TrimSuffix(baseURL, "/")
+	protocol := providerutil.ResolveProtocol(providerutil.Config{
+		ProviderType:       modelInfo.ProviderType,
+		SupportedProtocols: modelInfo.SupportedProtocols,
+		BaseURL:            modelInfo.BaseURL,
+	})
+	baseURL := providerutil.ResolveBaseURLForProtocol(providerutil.Config{
+		ProviderType:       modelInfo.ProviderType,
+		SupportedProtocols: modelInfo.SupportedProtocols,
+		BaseURL:            modelInfo.BaseURL,
+	}, protocol)
 
 	timeoutSeconds := GetConfigInt(ctx, "runtime.task_timeout_seconds", "engine.runtime.taskTimeoutSeconds", 600)
 	maxSteps := GetConfigInt(ctx, "runtime.max_steps", "engine.runtime.maxSteps", 2)
@@ -396,6 +415,7 @@ func (r *AiderRunner) BuildConfigFromModel(ctx context.Context, modelInfo *Model
 		APIKey:               modelInfo.APIKey,
 		BaseURL:              baseURL,
 		ProviderType:         modelInfo.ProviderType,
+		SupportedProtocols:   modelInfo.SupportedProtocols,
 		SystemPrompt:         modelInfo.SystemPrompt,
 		WorkDir:              workDir,
 		MaxTokens:            modelInfo.MaxTokens,

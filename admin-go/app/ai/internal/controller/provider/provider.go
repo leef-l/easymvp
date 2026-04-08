@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/gogf/gf/v2/frame/g"
 
@@ -18,13 +19,14 @@ type cProvider struct{}
 // Create 创建AI供应商表
 func (c *cProvider) Create(ctx context.Context, req *v1.ProviderCreateReq) (res *v1.ProviderCreateRes, err error) {
 	err = service.Provider().Create(ctx, &model.ProviderCreateInput{
-		Name: req.Name,
-		Code: req.Code,
-		ProviderType: req.ProviderType,
-		BaseURL: req.BaseURL,
-		Icon: req.Icon,
-		Status: req.Status,
-		Sort: req.Sort,
+		Name:               req.Name,
+		Code:               req.Code,
+		ProviderType:       req.ProviderType,
+		SupportedProtocols: req.SupportedProtocols,
+		BaseURL:            req.BaseURL,
+		Icon:               req.Icon,
+		Status:             req.Status,
+		Sort:               req.Sort,
 	})
 	return
 }
@@ -32,14 +34,15 @@ func (c *cProvider) Create(ctx context.Context, req *v1.ProviderCreateReq) (res 
 // Update 更新AI供应商表
 func (c *cProvider) Update(ctx context.Context, req *v1.ProviderUpdateReq) (res *v1.ProviderUpdateRes, err error) {
 	err = service.Provider().Update(ctx, &model.ProviderUpdateInput{
-		ID: req.ID,
-		Name: req.Name,
-		Code: req.Code,
-		ProviderType: req.ProviderType,
-		BaseURL: req.BaseURL,
-		Icon: req.Icon,
-		Status: req.Status,
-		Sort: req.Sort,
+		ID:                 req.ID,
+		Name:               req.Name,
+		Code:               req.Code,
+		ProviderType:       req.ProviderType,
+		SupportedProtocols: req.SupportedProtocols,
+		BaseURL:            req.BaseURL,
+		Icon:               req.Icon,
+		Status:             req.Status,
+		Sort:               req.Sort,
 	})
 	return
 }
@@ -82,18 +85,19 @@ func (c *cProvider) List(ctx context.Context, req *v1.ProviderListReq) (res *v1.
 		OrderDir:  req.OrderDir,
 		StartTime: req.StartTime,
 		EndTime:   req.EndTime,
-		Status: req.Status,
-		Name: req.Name,
+		Status:    req.Status,
+		Name:      req.Name,
 	})
 	return
 }
+
 // Export 导出AI供应商表
 func (c *cProvider) Export(ctx context.Context, req *v1.ProviderExportReq) (res *v1.ProviderExportRes, err error) {
 	list, err := service.Provider().Export(ctx, &model.ProviderListInput{
 		StartTime: req.StartTime,
 		EndTime:   req.EndTime,
-		Status: req.Status,
-		Name: req.Name,
+		Status:    req.Status,
+		Name:      req.Name,
 	})
 	if err != nil {
 		return
@@ -104,17 +108,18 @@ func (c *cProvider) Export(ctx context.Context, req *v1.ProviderExportReq) (res 
 	r.Response.Header().Set("Content-Disposition", `attachment; filename="provider.csv"`)
 	r.Response.Write("\xEF\xBB\xBF") // UTF-8 BOM
 	// 表头
-	r.Response.Writeln("供应商名称,供应商代码,Provider类型,API基础地址,图标URL,状态,排序,创建时间")
+	r.Response.Writeln("供应商名称,供应商代码,默认Provider类型,支持协议列表,API基础地址,图标URL,状态,排序,创建时间")
 	// 数据行
 	for _, item := range list {
-		r.Response.Writefln("%v,%v,%v,%v,%v,%v,%v,%v",
+		r.Response.Writefln("%v,%v,%v,%v,%v,%v,%v,%v,%v",
 			item.Name,
-			 item.Code,
-			 item.ProviderType,
-			 item.BaseURL,
-			 item.Icon,
-			 item.Status,
-			 item.Sort,
+			item.Code,
+			item.ProviderType,
+			strings.Join(item.SupportedProtocols, "|"),
+			item.BaseURL,
+			item.Icon,
+			item.Status,
+			item.Sort,
 			item.CreatedAt,
 		)
 	}
@@ -142,8 +147,6 @@ func (c *cProvider) ImportTemplate(ctx context.Context, req *v1.ProviderImportTe
 	r.Response.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	r.Response.Header().Set("Content-Disposition", `attachment; filename="provider_template.csv"`)
 	r.Response.Write("\xEF\xBB\xBF") // UTF-8 BOM
-	r.Response.Writeln("供应商名称,供应商代码,Provider类型,API基础地址,图标URL,状态,排序")
+	r.Response.Writeln("供应商名称,供应商代码,默认Provider类型,支持协议列表,API基础地址,图标URL,状态,排序")
 	return
 }
-
-

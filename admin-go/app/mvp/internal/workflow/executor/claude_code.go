@@ -21,6 +21,15 @@ type ClaudeCodeExecutor struct {
 	wsMgr workspace.Manager
 }
 
+type claudeCLIResponse struct {
+	Subtype           string            `json:"subtype"`
+	IsError           bool              `json:"is_error"`
+	Result            string            `json:"result"`
+	StopReason        string            `json:"stop_reason"`
+	TerminalReason    string            `json:"terminal_reason"`
+	PermissionDenials []json.RawMessage `json:"permission_denials"`
+}
+
 // NewClaudeCodeExecutor 创建 Claude Code 执行器。
 func NewClaudeCodeExecutor(wsMgr workspace.Manager) *ClaudeCodeExecutor {
 	return &ClaudeCodeExecutor{wsMgr: wsMgr}
@@ -86,7 +95,7 @@ func (e *ClaudeCodeExecutor) Execute(ctx context.Context, req *Request) *Result 
 		if req.ModelInfo != nil {
 			envVars["AI_MODEL_API_KEY"] = req.ModelInfo.APIKey
 			envVars["AI_MODEL_CODE"] = req.ModelInfo.ModelCode
-			envVars["AI_MODEL_BASE_URL"] = resolveModelBaseURL(req.ModelInfo, engineCfg["base_url"].String())
+			envVars["AI_MODEL_BASE_URL"] = resolveProtocolBaseURL(req.ModelInfo, engineCfg["base_url"].String(), "anthropic")
 		}
 		cmdStr = renderCommandTemplate(cmdTemplate, envVars)
 	} else {
@@ -102,13 +111,14 @@ func (e *ClaudeCodeExecutor) Execute(ctx context.Context, req *Request) *Result 
 	cmd := exec.CommandContext(cmdCtx, "bash", "-c", cmdStr)
 	cmd.Dir = workDir
 	cmd.Env = os.Environ()
-	// 设置 API Key 和 Base URL（支持自定义代理地址）
-	if req.ModelInfo != nil && req.ModelInfo.APIKey != "" {
-		cmd.Env = append(cmd.Env, "ANTHROPIC_API_KEY="+req.ModelInfo.APIKey)
-	}
-	baseURL := resolveModelBaseURL(req.ModelInfo, engineCfg["base_url"].String())
-	if baseURL != "" {
-		cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+baseURL)
+	// Claude CLI 使用项目级凭据时，Anthropic 基础地址不能带 /v1。
+	if shouldUseClaudeProjectCredentials(req.ModelInfo) {
+		if req.ModelInfo != nil && req.ModelInfo.APIKey != "" {
+			cmd.Env = append(cmd.Env, "ANTHROPIC_API_KEY="+req.ModelInfo.APIKey)
+		}
+		if baseURL := resolveProtocolBaseURL(req.ModelInfo, engineCfg["base_url"].String(), "anthropic"); baseURL != "" {
+			cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+baseURL)
+		}
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -128,23 +138,56 @@ func (e *ClaudeCodeExecutor) Execute(ctx context.Context, req *Request) *Result 
 		}
 		return &Result{Success: false, Error: fmt.Errorf("%s", errMsg)}
 	}
+	if blockedErr := detectClaudeBlockedByPermissions(output); blockedErr != nil {
+		errMsg := blockedErr.Error()
+		if output != "" {
+			errMsg = errMsg + "\n" + truncateOutput(output, 2000)
+		}
+		if req.Workspace != nil && e.wsMgr != nil {
+			_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: false, Error: errMsg})
+		}
+		return &Result{Success: false, Error: fmt.Errorf("%s", errMsg)}
+	}
 
 	if req.Workspace != nil && e.wsMgr != nil {
-		if fErr := e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: true}); fErr != nil {
-			g.Log().Warningf(ctx, "[ClaudeCodeExecutor] workspace finalize 失败: task=%d err=%v", req.TaskID, fErr)
-		} else {
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						g.Log().Errorf(context.Background(), "[ClaudeCodeExecutor] workspace cleanup panic: task=%d err=%v", req.TaskID, r)
-					}
-				}()
-				if cleanErr := e.wsMgr.Cleanup(context.Background(), req.TaskID); cleanErr != nil {
-					g.Log().Warningf(context.Background(), "[ClaudeCodeExecutor] workspace cleanup 失败: task=%d err=%v", req.TaskID, cleanErr)
-				}
-			}()
+		if err := finalizeWorkspaceSuccess(ctx, e.wsMgr, req.TaskID, "ClaudeCodeExecutor"); err != nil {
+			_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: false, Error: err.Error(), Retain: true})
+			return &Result{Success: false, Error: err}
 		}
 	}
 
 	return &Result{Success: true, Output: truncateOutput(output, 10000)}
+}
+
+func detectClaudeBlockedByPermissions(output string) error {
+	candidate := strings.TrimSpace(output)
+	if start := strings.Index(candidate, "{"); start >= 0 {
+		if end := strings.LastIndex(candidate, "}"); end > start {
+			candidate = candidate[start : end+1]
+		}
+	}
+
+	var response claudeCLIResponse
+	if err := json.Unmarshal([]byte(candidate), &response); err == nil {
+		if response.IsError {
+			msg := strings.TrimSpace(response.Result)
+			if msg == "" {
+				msg = "Claude Code 返回错误结果"
+			}
+			return fmt.Errorf("%s", msg)
+		}
+		if len(response.PermissionDenials) > 0 {
+			return fmt.Errorf("Claude Code 运行过程中遭遇权限拒绝，任务未实际落地")
+		}
+		if strings.Contains(response.Result, "请授权后我将执行") || strings.Contains(response.Result, "请授权后我会执行") {
+			return fmt.Errorf("Claude Code 需要人工授权后才能继续写入，任务未实际落地")
+		}
+		return nil
+	}
+
+	lower := strings.ToLower(output)
+	if strings.Contains(lower, "\"permission_denials\"") || strings.Contains(output, "请授权后我将执行") || strings.Contains(output, "请授权后我会执行") {
+		return fmt.Errorf("Claude Code 需要人工授权后才能继续写入，任务未实际落地")
+	}
+	return nil
 }

@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -171,6 +172,12 @@ func (m *GitWorktreeManager) Finalize(ctx context.Context, taskID int64, req Fin
 		} else {
 			extra["diff_summary"] = diffSummary
 		}
+
+		if syncErr := syncWorktreeCommit(ctx, resolveMainWorkDir(ws.WorkspacePath), ws.WorkspacePath, taskID); syncErr != nil {
+			extra["error_message"] = syncErr.Error()
+			_ = m.repo.updateStatus(ctx, ws.ID, StatusFailed, extra)
+			return fmt.Errorf("同步 worktree 变更失败: %w", syncErr)
+		}
 	}
 
 	// 设置最终状态
@@ -297,6 +304,253 @@ func gitDiffStat(worktreePath string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil
+}
+
+func syncWorktreeCommit(ctx context.Context, mainWorkDir, worktreePath string, taskID int64) error {
+	if err := ensureGitIdentity(mainWorkDir); err != nil {
+		return err
+	}
+	if err := ensureGitIdentity(worktreePath); err != nil {
+		return err
+	}
+
+	if err := gitAddAll(worktreePath); err != nil {
+		return fmt.Errorf("暂存 worktree 变更失败: %w", err)
+	}
+	hasChanges, err := gitHasStagedChanges(worktreePath)
+	if err != nil {
+		return fmt.Errorf("检查 worktree 变更失败: %w", err)
+	}
+	if !hasChanges {
+		return nil
+	}
+
+	commitMessage := fmt.Sprintf("mvp task %d: apply workspace changes", taskID)
+	if err := gitCommit(worktreePath, commitMessage); err != nil {
+		return fmt.Errorf("提交 worktree 变更失败: %w", err)
+	}
+
+	commitHash, err := gitHeadRef(worktreePath)
+	if err != nil {
+		return fmt.Errorf("读取 worktree 提交失败: %w", err)
+	}
+
+	dirtyFiles, err := listDirtyMainWorktreeFiles(mainWorkDir)
+	if err != nil {
+		return err
+	}
+	if len(dirtyFiles) == 0 {
+		if err := gitCherryPick(mainWorkDir, commitHash); err != nil {
+			return fmt.Errorf("cherry-pick 到主工作区失败: %w", err)
+		}
+		g.Log().Infof(ctx, "[Workspace] SyncBack: taskID=%d commit=%s mode=cherry-pick", taskID, commitHash)
+		return nil
+	}
+
+	changedFiles, err := gitChangedFiles(worktreePath, commitHash)
+	if err != nil {
+		return fmt.Errorf("读取 worktree 变更文件失败: %w", err)
+	}
+	if err := syncChangedFilesToMain(mainWorkDir, worktreePath, changedFiles, dirtyFiles); err != nil {
+		return err
+	}
+
+	g.Log().Infof(ctx, "[Workspace] SyncBack: taskID=%d commit=%s mode=copy", taskID, commitHash)
+	return nil
+}
+
+func ensureGitIdentity(dir string) error {
+	name, _ := gitConfigGet(dir, "user.name")
+	if strings.TrimSpace(name) == "" {
+		if err := gitConfigSet(dir, "user.name", "EasyMVP"); err != nil {
+			return fmt.Errorf("设置 git user.name 失败: %w", err)
+		}
+	}
+
+	email, _ := gitConfigGet(dir, "user.email")
+	if strings.TrimSpace(email) == "" {
+		if err := gitConfigSet(dir, "user.email", "mvp@easymvp.local"); err != nil {
+			return fmt.Errorf("设置 git user.email 失败: %w", err)
+		}
+	}
+	return nil
+}
+
+func gitConfigGet(dir, key string) (string, error) {
+	cmd := exec.Command("git", "-C", dir, "config", "--get", key)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func gitConfigSet(dir, key, value string) error {
+	cmd := exec.Command("git", "-C", dir, "config", key, value)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: %s", err, string(output))
+	}
+	return nil
+}
+
+func listDirtyMainWorktreeFiles(mainWorkDir string) (map[string]struct{}, error) {
+	cmd := exec.Command("git", "-C", mainWorkDir, "status", "--porcelain=v1", "--untracked-files=all")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("读取主工作区 git 状态失败: %w", err)
+	}
+
+	result := make(map[string]struct{})
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || len(line) < 4 {
+			continue
+		}
+		path := strings.TrimSpace(line[3:])
+		if strings.Contains(path, " -> ") {
+			parts := strings.Split(path, " -> ")
+			path = strings.TrimSpace(parts[len(parts)-1])
+		}
+		path = strings.ReplaceAll(path, "\\", "/")
+		if path == "" || path == "." || path == ".mvp-worktrees" || strings.HasPrefix(path, ".mvp-worktrees/") {
+			continue
+		}
+		result[path] = struct{}{}
+	}
+	return result, nil
+}
+
+func gitAddAll(dir string) error {
+	cmd := exec.Command("git", "-C", dir, "add", "-A")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: %s", err, string(output))
+	}
+	return nil
+}
+
+func gitHasStagedChanges(dir string) (bool, error) {
+	cmd := exec.Command("git", "-C", dir, "diff", "--cached", "--quiet", "--exit-code")
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return true, nil
+		}
+		return false, err
+	}
+	return false, nil
+}
+
+func gitCommit(dir, message string) error {
+	cmd := exec.Command("git", "-C", dir, "commit", "--no-verify", "-m", message)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: %s", err, string(output))
+	}
+	return nil
+}
+
+func gitCherryPick(dir, commitHash string) error {
+	cmd := exec.Command("git", "-C", dir, "cherry-pick", commitHash)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		abortCmd := exec.Command("git", "-C", dir, "cherry-pick", "--abort")
+		_, _ = abortCmd.CombinedOutput()
+		return fmt.Errorf("%s: %s", err, string(output))
+	}
+	return nil
+}
+
+type gitChangedFile struct {
+	OldPath string
+	NewPath string
+	Status  string
+}
+
+func gitChangedFiles(dir, commitHash string) ([]gitChangedFile, error) {
+	cmd := exec.Command("git", "-C", dir, "diff-tree", "--no-commit-id", "--name-status", "-r", "-M", commitHash)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	var result []gitChangedFile
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		item := gitChangedFile{Status: fields[0]}
+		if strings.HasPrefix(fields[0], "R") || strings.HasPrefix(fields[0], "C") {
+			if len(fields) < 3 {
+				continue
+			}
+			item.OldPath = filepath.Clean(fields[1])
+			item.NewPath = filepath.Clean(fields[2])
+		} else {
+			item.NewPath = filepath.Clean(fields[1])
+		}
+		result = append(result, item)
+	}
+	return result, nil
+}
+
+func syncChangedFilesToMain(mainWorkDir, worktreePath string, changedFiles []gitChangedFile, dirtyFiles map[string]struct{}) error {
+	for _, file := range changedFiles {
+		targets := []string{}
+		if file.OldPath != "" {
+			targets = append(targets, file.OldPath)
+		}
+		if file.NewPath != "" {
+			targets = append(targets, file.NewPath)
+		}
+		for _, target := range targets {
+			if _, exists := dirtyFiles[target]; exists {
+				return fmt.Errorf("主工作区存在冲突中的未提交变更: %s", target)
+			}
+		}
+
+		if strings.HasPrefix(file.Status, "D") || strings.HasPrefix(file.Status, "R") {
+			if file.OldPath != "" {
+				_ = os.Remove(filepath.Join(mainWorkDir, file.OldPath))
+			}
+		}
+		if strings.HasPrefix(file.Status, "D") {
+			continue
+		}
+
+		srcPath := filepath.Join(worktreePath, file.NewPath)
+		srcInfo, err := os.Stat(srcPath)
+		if err != nil {
+			return fmt.Errorf("读取 worktree 文件失败: %s: %w", file.NewPath, err)
+		}
+		dstPath := filepath.Join(mainWorkDir, file.NewPath)
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+			return fmt.Errorf("创建目标目录失败: %s: %w", file.NewPath, err)
+		}
+		if err := copyFile(srcPath, dstPath, srcInfo.Mode()); err != nil {
+			return fmt.Errorf("同步文件失败: %s: %w", file.NewPath, err)
+		}
+	}
+	return nil
+}
+
+func copyFile(srcPath, dstPath string, mode os.FileMode) error {
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	dst, err := os.OpenFile(dstPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return err
+	}
+	return nil
 }
 
 // resolveMainWorkDir 从 worktree 路径反推主工作目录。

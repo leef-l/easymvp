@@ -1,24 +1,81 @@
 # Docker 生产环境变量说明
 
-本文说明 `docker/prod/docker-compose.yml` 里用到的环境变量，及 Linux / Windows 下的常见设置方式。
+> 更新日期：2026-04-08
 
-## 需要设置的变量
+本文说明 `docker/prod/docker-compose.yml` 里实际用到的环境变量，并补充当前生产 compose 的边界。
 
-生产环境至少建议设置这些变量：
+## 当前 compose 的组成
+
+`docker/prod/docker-compose.yml` 当前会启动：
+
+- `redis`
+- `system`
+- `ai`
+- `mvp`
+- `frontend`
+- `nginx`
+- `gotools`（仅 `tools` profile）
+
+注意：
+
+- 这套 compose 依赖“宿主机已有 MySQL”，不会自建数据库容器
+- `frontend` 当前仍以 `pnpm dev:antd` 方式运行，更接近“部署便利版”而不是严格的静态化生产方案
+
+## 必填变量
+
+生产环境至少要提供：
 
 - `REDIS_PASSWORD`
 - `MYSQL_PASSWORD`
 - `JWT_SECRET`
 
-按需设置的变量：
+## 常用可选变量
+
+按当前 compose，常见可调参数包括：
 
 - `DB_HOST`
 - `DB_PORT`
 - `MYSQL_USER`
 - `MYSQL_DATABASE`
+- `REDIS_PORT`
 - `SYSTEM_PORT`
+- `AI_PORT`
+- `MVP_PORT`
 - `FRONTEND_PORT`
+- `NGINX_PORT`
 - `VITE_GLOB_API_URL`
+- `WORK_DIR`
+
+## 推荐的 `.env` 示例
+
+建议在 `docker/prod/.env` 中统一维护：
+
+```env
+REDIS_PASSWORD=your-redis-password
+MYSQL_PASSWORD=your-mysql-password
+JWT_SECRET=your-jwt-secret
+
+DB_HOST=host.docker.internal
+DB_PORT=3306
+MYSQL_USER=easymvp
+MYSQL_DATABASE=easymvp
+
+REDIS_PORT=6379
+SYSTEM_PORT=8000
+AI_PORT=8001
+MVP_PORT=8002
+FRONTEND_PORT=5555
+NGINX_PORT=80
+
+VITE_GLOB_API_URL=http://localhost:8000
+WORK_DIR=/www/wwwroot/projects
+```
+
+然后执行：
+
+```bash
+docker compose --env-file docker/prod/.env -f docker/prod/docker-compose.yml up -d
+```
 
 ## Linux 设置方式
 
@@ -35,8 +92,6 @@ export JWT_SECRET='your-jwt-secret'
 ```bash
 docker compose -f docker/prod/docker-compose.yml up -d
 ```
-
-这种方式只对当前 shell 生效，关闭终端后失效。
 
 ### 方式二：写入当前用户 shell 配置
 
@@ -60,28 +115,11 @@ source ~/.zshrc
 
 ### 方式三：使用 `.env` 文件
 
-可以在 `docker/prod/` 下自建一个 `.env` 文件，例如：
-
-```env
-REDIS_PASSWORD=your-redis-password
-MYSQL_PASSWORD=your-mysql-password
-JWT_SECRET=your-jwt-secret
-DB_HOST=host.docker.internal
-DB_PORT=3306
-MYSQL_USER=easymvp
-MYSQL_DATABASE=easymvp
-SYSTEM_PORT=8000
-FRONTEND_PORT=5555
-VITE_GLOB_API_URL=http://localhost:8000
-```
-
-然后执行：
+这是最推荐的方式，便于管理和复用：
 
 ```bash
 docker compose --env-file docker/prod/.env -f docker/prod/docker-compose.yml up -d
 ```
-
-这是最推荐的方式，便于管理和复用。
 
 ## Windows 设置方式
 
@@ -99,8 +137,6 @@ $env:JWT_SECRET = 'your-jwt-secret'
 docker compose -f docker/prod/docker-compose.yml up -d
 ```
 
-这种方式只对当前 PowerShell 窗口生效。
-
 ### 方式二：CMD 当前窗口临时生效
 
 ```cmd
@@ -110,14 +146,12 @@ set JWT_SECRET=your-jwt-secret
 docker compose -f docker/prod/docker-compose.yml up -d
 ```
 
-这种方式只对当前 CMD 窗口生效。
-
 ### 方式三：系统环境变量
 
 在 Windows 图形界面中：
 
 1. 打开“系统属性”
-2. 进入“高级” → “环境变量”
+2. 进入“高级” -> “环境变量”
 3. 在“用户变量”或“系统变量”中新增：
    - `REDIS_PASSWORD`
    - `MYSQL_PASSWORD`
@@ -132,36 +166,11 @@ docker compose -f docker/prod/docker-compose.yml up -d
 [System.Environment]::SetEnvironmentVariable('JWT_SECRET', 'your-jwt-secret', 'User')
 ```
 
-设置完成后，关闭并重新打开终端，再执行：
-
-```powershell
-docker compose -f docker/prod/docker-compose.yml up -d
-```
-
 ### 方式四：使用 `.env` 文件
-
-在 `docker/prod/` 下创建 `.env`：
-
-```env
-REDIS_PASSWORD=your-redis-password
-MYSQL_PASSWORD=your-mysql-password
-JWT_SECRET=your-jwt-secret
-DB_HOST=host.docker.internal
-DB_PORT=3306
-MYSQL_USER=easymvp
-MYSQL_DATABASE=easymvp
-SYSTEM_PORT=8000
-FRONTEND_PORT=5555
-VITE_GLOB_API_URL=http://localhost:8000
-```
-
-然后执行：
 
 ```powershell
 docker compose --env-file docker/prod/.env -f docker/prod/docker-compose.yml up -d
 ```
-
-这也是 Windows 下最推荐的方式。
 
 ## 推荐做法
 
@@ -173,10 +182,11 @@ docker compose --env-file docker/prod/.env -f docker/prod/docker-compose.yml up 
 
 - 使用 `docker/prod/.env`
 - 不要把真实密码和密钥提交到 git
+- 明确宿主机 MySQL 访问策略和 `WORK_DIR` 挂载路径
 
 ## 验证环境变量是否生效
 
-Linux:
+Linux：
 
 ```bash
 echo $REDIS_PASSWORD
@@ -184,7 +194,7 @@ echo $MYSQL_PASSWORD
 echo $JWT_SECRET
 ```
 
-PowerShell:
+PowerShell：
 
 ```powershell
 $env:REDIS_PASSWORD
@@ -192,7 +202,7 @@ $env:MYSQL_PASSWORD
 $env:JWT_SECRET
 ```
 
-CMD:
+CMD：
 
 ```cmd
 echo %REDIS_PASSWORD%

@@ -314,9 +314,14 @@ func (s *Service) runCoordinatorOptimize(ctx context.Context, stageRunID, workfl
 	var errMsg string
 
 	if err != nil {
-		taskStatus = "failed"
 		errMsg = err.Error()
 		g.Log().Warningf(ctx, "[ReviewStage] 协调员优化失败: %v", err)
+		s.createIssue(ctx, workflowRunID, stageRunID, planVersionID, 0, "warning", "coordinator_optimize_skip", "coordinator", "",
+			fmt.Sprintf("协调员优化已跳过，不影响审核主链: %v", err))
+		outputJSON, _ = json.Marshal(g.Map{
+			"skipped": true,
+			"reason":  errMsg,
+		})
 	} else {
 		var coErr error
 		outputJSON, coErr = json.Marshal(result)
@@ -365,9 +370,9 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 	}
 
 	outputPayload := g.Map{
-		"passed":       passed,
-		"summary":      summary,
-		"error_count":  errorCount,
+		"passed":        passed,
+		"summary":       summary,
+		"error_count":   errorCount,
 		"warning_count": warningCount,
 	}
 	outputJSON, marshalErr := json.Marshal(outputPayload)

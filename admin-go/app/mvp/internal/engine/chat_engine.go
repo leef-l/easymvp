@@ -35,14 +35,15 @@ func GetEngine() *ChatEngine {
 
 // ModelInfo 模型信息
 type ModelInfo struct {
-	ModelID      int64
-	ModelCode    string
-	ProviderType string
-	BaseURL      string
-	APIKey       string
-	APISecret    string
-	SystemPrompt string
-	MaxTokens    int
+	ModelID            int64
+	ModelCode          string
+	ProviderType       string
+	SupportedProtocols []string
+	BaseURL            string
+	APIKey             string
+	APISecret          string
+	SystemPrompt       string
+	MaxTokens          int
 }
 
 // SendMessage 发送用户消息并触发 AI 回复
@@ -215,7 +216,7 @@ func (e *ChatEngine) resolveModel(ctx context.Context, projectID int64, roleType
 	model, err := g.DB().Model("ai_model m").
 		LeftJoin("ai_plan p", "p.id = m.plan_id").
 		LeftJoin("ai_provider pv", "pv.id = m.provider_id").
-		Fields("m.model_code, m.max_tokens, pv.provider_type, pv.base_url, p.api_key, p.api_secret").
+		Fields("m.model_code, m.max_tokens, pv.provider_type, pv.supported_protocols, pv.base_url, p.api_key, p.api_secret").
 		Where("m.id", modelID).
 		Where("m.deleted_at IS NULL").
 		One()
@@ -227,14 +228,15 @@ func (e *ChatEngine) resolveModel(ctx context.Context, projectID int64, roleType
 	}
 
 	return &ModelInfo{
-		ModelID:      modelID,
-		ModelCode:    model["model_code"].String(),
-		ProviderType: model["provider_type"].String(),
-		BaseURL:      model["base_url"].String(),
-		APIKey:       model["api_key"].String(),
-		APISecret:    model["api_secret"].String(),
-		SystemPrompt: systemPrompt,
-		MaxTokens:    model["max_tokens"].Int(),
+		ModelID:            modelID,
+		ModelCode:          model["model_code"].String(),
+		ProviderType:       model["provider_type"].String(),
+		SupportedProtocols: decodeProviderProtocols(model["supported_protocols"].String(), model["provider_type"].String()),
+		BaseURL:            model["base_url"].String(),
+		APIKey:             model["api_key"].String(),
+		APISecret:          model["api_secret"].String(),
+		SystemPrompt:       systemPrompt,
+		MaxTokens:          model["max_tokens"].Int(),
 	}, nil
 }
 

@@ -86,7 +86,7 @@ func (e *CodexCLIExecutor) Execute(ctx context.Context, req *Request) *Result {
 		if req.ModelInfo != nil {
 			envVars["AI_MODEL_API_KEY"] = req.ModelInfo.APIKey
 			envVars["AI_MODEL_CODE"] = req.ModelInfo.ModelCode
-			envVars["AI_MODEL_BASE_URL"] = resolveModelBaseURL(req.ModelInfo, engineCfg["base_url"].String())
+			envVars["AI_MODEL_BASE_URL"] = resolveProtocolBaseURL(req.ModelInfo, engineCfg["base_url"].String(), "openai_compatible")
 		}
 		cmdStr = renderCommandTemplate(cmdTemplate, envVars)
 	} else {
@@ -105,7 +105,7 @@ func (e *CodexCLIExecutor) Execute(ctx context.Context, req *Request) *Result {
 	if req.ModelInfo != nil && req.ModelInfo.APIKey != "" {
 		cmd.Env = append(cmd.Env, "OPENAI_API_KEY="+req.ModelInfo.APIKey)
 	}
-	if baseURL := resolveModelBaseURL(req.ModelInfo, engineCfg["base_url"].String()); baseURL != "" {
+	if baseURL := resolveProtocolBaseURL(req.ModelInfo, engineCfg["base_url"].String(), "openai_compatible"); baseURL != "" {
 		cmd.Env = append(cmd.Env, "OPENAI_BASE_URL="+baseURL)
 	}
 
@@ -128,19 +128,9 @@ func (e *CodexCLIExecutor) Execute(ctx context.Context, req *Request) *Result {
 	}
 
 	if req.Workspace != nil && e.wsMgr != nil {
-		if fErr := e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: true}); fErr != nil {
-			g.Log().Warningf(ctx, "[CodexCLIExecutor] workspace finalize 失败: task=%d err=%v", req.TaskID, fErr)
-		} else {
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						g.Log().Errorf(context.Background(), "[CodexCLIExecutor] workspace cleanup panic: task=%d err=%v", req.TaskID, r)
-					}
-				}()
-				if cleanErr := e.wsMgr.Cleanup(context.Background(), req.TaskID); cleanErr != nil {
-					g.Log().Warningf(context.Background(), "[CodexCLIExecutor] workspace cleanup 失败: task=%d err=%v", req.TaskID, cleanErr)
-				}
-			}()
+		if err := finalizeWorkspaceSuccess(ctx, e.wsMgr, req.TaskID, "CodexCLIExecutor"); err != nil {
+			_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: false, Error: err.Error(), Retain: true})
+			return &Result{Success: false, Error: err}
 		}
 	}
 
