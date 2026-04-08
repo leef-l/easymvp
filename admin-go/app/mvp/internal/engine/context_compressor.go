@@ -263,7 +263,10 @@ func (c *ContextCompressor) CompressProjectContext(ctx context.Context, projectI
 		return nil
 	}
 
-	project, _ := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).Fields("name").One()
+	project, projErr := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).Fields("name").One()
+	if projErr != nil {
+		g.Log().Warningf(ctx, "[Compressor] 查询项目名称失败: projectID=%d err=%v", projectID, projErr)
+	}
 	projectName := ""
 	if !project.IsEmpty() {
 		projectName = project["name"].String()
@@ -289,9 +292,12 @@ func BuildTaskSystemPrompt(ctx context.Context, projectID int64, taskID int64, r
 
 	if roleType == "architect" || roleLevel == "max" {
 		// 架构师/max：读全局摘要（恒定大小，已包含所有历史）
-		project, _ := g.DB().Ctx(ctx).Model("mvp_project").
+		project, projErr := g.DB().Ctx(ctx).Model("mvp_project").
 			Where("id", projectID).
 			Fields("global_context, name, description").One()
+		if projErr != nil {
+			g.Log().Warningf(ctx, "[Compressor] 查询项目上下文失败: projectID=%d err=%v", projectID, projErr)
+		}
 		if !project.IsEmpty() {
 			sb.WriteString("\n\n## 项目信息\n")
 			sb.WriteString(fmt.Sprintf("项目名称：%s\n项目简介：%s\n", project["name"].String(), project["description"].String()))
@@ -304,13 +310,16 @@ func BuildTaskSystemPrompt(ctx context.Context, projectID int64, taskID int64, r
 		}
 	} else {
 		// pro/lite：只读直接依赖任务的摘要
-		deps, _ := g.DB().Ctx(ctx).Model("mvp_task_dependency d").
+		deps, depsErr := g.DB().Ctx(ctx).Model("mvp_task_dependency d").
 			LeftJoin("mvp_task t", "t.id = d.depends_on_id").
 			Where("d.task_id", taskID).
 			Where("t.status", "completed").
 			Where("t.context_summary IS NOT NULL").
 			Fields("t.name, t.context_summary").
 			All()
+		if depsErr != nil {
+			g.Log().Warningf(ctx, "[Compressor] 查询依赖摘要失败: taskID=%d err=%v", taskID, depsErr)
+		}
 
 		if len(deps) > 0 {
 			sb.WriteString("\n\n## 前置任务摘要\n")

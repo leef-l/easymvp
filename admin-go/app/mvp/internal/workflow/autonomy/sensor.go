@@ -170,12 +170,15 @@ func (s *Sensor) Perceive(ctx context.Context, workflowRunID int64) (*Situation,
 		health.MedianTaskDuration = durations[len(durations)/2]
 	}
 
-	stageRuns, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).
+	stageRuns, srErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
 		Fields("stage_type, stage_no").
 		Where("workflow_run_id", workflowRunID).
 		WhereNull("deleted_at").
 		OrderAsc("stage_no").
 		All()
+	if srErr != nil {
+		g.Log().Warningf(ctx, "[Sensor] 查询阶段运行记录失败: wfRunID=%d err=%v", workflowRunID, srErr)
+	}
 	for _, sr := range stageRuns {
 		switch sr["stage_type"].String() {
 		case "rework":

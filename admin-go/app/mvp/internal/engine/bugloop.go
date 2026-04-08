@@ -281,9 +281,12 @@ func (s *Scheduler) AutoDispatchBugFix(ctx context.Context, projectID int64, ana
 	implTaskID := auditTask["source_task_id"].Int64()
 	if implTaskID == 0 {
 		// 旧数据 fallback：从 mvp_task_dependency 查找
-		dep, _ := g.DB().Ctx(ctx).Model("mvp_task_dependency").
+		dep, depErr := g.DB().Ctx(ctx).Model("mvp_task_dependency").
 			Where("task_id", auditTaskID).
 			One()
+		if depErr != nil {
+			g.Log().Warningf(ctx, "[AutoDispatchBugFix] 查询依赖关系失败: taskID=%d err=%v", auditTaskID, depErr)
+		}
 		if !dep.IsEmpty() {
 			implTaskID = dep["depends_on_id"].Int64()
 		}
@@ -326,10 +329,13 @@ func (s *Scheduler) AutoDispatchFailureFix(ctx context.Context, projectID int64,
 	}
 
 	maxRounds := GetConfigInt(ctx, "failure_handoff.max_rounds", "engine.failureHandoff.maxRounds", 3)
-	rounds, _ := g.DB().Ctx(ctx).Model("mvp_task_log").
+	rounds, rndErr := g.DB().Ctx(ctx).Model("mvp_task_log").
 		Where("task_id", implTaskID).
 		Where("action", "escalate_to_architect").
 		Count()
+	if rndErr != nil {
+		g.Log().Warningf(ctx, "[AutoDispatchFailureFix] 查询轮次失败: taskID=%d err=%v", implTaskID, rndErr)
+	}
 	if rounds >= maxRounds {
 		pauseReason := fmt.Sprintf("任务 %d 多次在角色协作后仍无法稳定修复，已达到托底上限 %d 次，请人工介入。", implTaskID, maxRounds)
 		if err = s.Pause(ctx, projectID, pauseReason); err != nil {

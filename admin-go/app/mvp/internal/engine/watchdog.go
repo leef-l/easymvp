@@ -334,10 +334,13 @@ func (w *Watchdog) checkFailedTasks(ctx context.Context) {
 	}
 	runningProjects := make(map[int64]bool)
 	if len(pidList) > 0 {
-		projects, _ := g.DB().Model("mvp_project").Ctx(ctx).
+		projects, projErr := g.DB().Model("mvp_project").Ctx(ctx).
 			WhereIn("id", pidList).
 			Where("status", "running").
 			Fields("id").All()
+		if projErr != nil {
+			g.Log().Warningf(ctx, "[Watchdog] 查询运行中项目失败: err=%v", projErr)
+		}
 		for _, p := range projects {
 			runningProjects[p["id"].Int64()] = true
 		}
