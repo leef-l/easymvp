@@ -14,7 +14,8 @@ import (
 // RetryTask 重新执行失败的任务
 func (s *Scheduler) RetryTask(projectID int64, taskID int64) error {
 	// 查询当前状态，通过状态机校验
-	task, err := g.DB().Model("mvp_task").Where("id", taskID).Fields("status").One()
+	ctx := context.Background()
+	task, err := g.DB().Ctx(ctx).Model("mvp_task").Where("id", taskID).Fields("status").One()
 	if err != nil || task.IsEmpty() {
 		return fmt.Errorf("任务不存在")
 	}
@@ -40,7 +41,7 @@ func (s *Scheduler) RetryTask(projectID int64, taskID int64) error {
 // 将任务标记为 completed（跳过），并尝试推进批次
 func (s *Scheduler) SkipTask(ctx context.Context, projectID int64, taskID int64, reason string) error {
 	// 查询当前状态，只允许跳过 failed/bug_found
-	task, err := g.DB().Model("mvp_task").
+	task, err := g.DB().Ctx(ctx).Model("mvp_task").
 		Where("id", taskID).
 		Where("project_id", projectID).
 		Fields("status").
@@ -97,7 +98,7 @@ func (s *Scheduler) batchCheckDependencies(ctx context.Context, taskIDs []int64)
 	}
 
 	// 一次性查出所有候选任务的依赖关系及其状态
-	deps, err := g.DB().Model("mvp_task_dependency d").
+	deps, err := g.DB().Ctx(ctx).Model("mvp_task_dependency d").
 		LeftJoin("mvp_task t", "t.id = d.depends_on_id").
 		Fields("d.task_id, d.depends_on_id, t.status").
 		WhereIn("d.task_id", taskIDs).

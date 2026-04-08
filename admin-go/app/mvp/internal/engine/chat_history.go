@@ -14,7 +14,7 @@ import (
 // loadHistory 加载对话历史（排除当前正在 streaming 的消息）
 func (e *ChatEngine) loadHistory(ctx context.Context, conversationID int64, excludeID int64) ([]provider.Message, error) {
 	var records []gdb.Record
-	err := g.DB().Model("mvp_message").
+	err := g.DB().Model("mvp_message").Ctx(ctx).
 		Where("conversation_id", conversationID).
 		Where("deleted_at IS NULL").
 		Where("status", "completed").

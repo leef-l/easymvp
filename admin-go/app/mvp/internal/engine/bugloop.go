@@ -33,7 +33,7 @@ func (s *Scheduler) ReportBug(ctx context.Context, projectID int64, auditorTaskI
 	logTaskAction(auditorTaskID, "bug_found", "auditing", "bug_found", bugDescription, "auditor")
 
 	// 2. 找到审计任务依赖的实施员任务
-	dep, err := g.DB().Model("mvp_task_dependency").
+	dep, err := g.DB().Ctx(ctx).Model("mvp_task_dependency").
 		Where("task_id", auditorTaskID).
 		One()
 	if err != nil || dep.IsEmpty() {
@@ -74,7 +74,7 @@ func (s *Scheduler) createBugAnalysisTask(ctx context.Context, projectID int64, 
 	}
 
 	// 获取原实施任务信息
-	implTask, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", implTaskID).One()
+	implTask, err := g.DB().Ctx(ctx).Model("mvp_task").Where("id", implTaskID).One()
 	if err != nil || implTask.IsEmpty() {
 		g.Log().Errorf(ctx, "查询实施任务失败: %v", err)
 		return
@@ -88,7 +88,7 @@ func (s *Scheduler) createBugAnalysisTask(ctx context.Context, projectID int64, 
 
 	// 创建架构师分析任务
 	analysisTaskID := int64(snowflake.Generate())
-	_, err = g.DB().Model("mvp_task").Insert(g.Map{
+	_, err = g.DB().Ctx(ctx).Model("mvp_task").Insert(g.Map{
 		"id":             analysisTaskID,
 		"project_id":     projectID,
 		"parent_id":      implTask["parent_id"].Int64(),
@@ -126,7 +126,7 @@ func (s *Scheduler) EscalateFailedTask(ctx context.Context, projectID int64, fai
 	default:
 	}
 
-	failedTask, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", failedTaskID).One()
+	failedTask, err := g.DB().Ctx(ctx).Model("mvp_task").Where("id", failedTaskID).One()
 	if err != nil || failedTask.IsEmpty() {
 		g.Log().Errorf(ctx, "[EscalateFailedTask] 查询失败任务 %d 出错: %v", failedTaskID, err)
 		return
@@ -139,7 +139,7 @@ func (s *Scheduler) EscalateFailedTask(ctx context.Context, projectID int64, fai
 	}
 
 	analysisTaskID := int64(snowflake.Generate())
-	_, err = g.DB().Model("mvp_task").Insert(g.Map{
+	_, err = g.DB().Ctx(ctx).Model("mvp_task").Insert(g.Map{
 		"id":         analysisTaskID,
 		"project_id": projectID,
 		"parent_id":  failedTask["parent_id"].Int64(),
@@ -184,13 +184,13 @@ func (s *Scheduler) DispatchBugFix(ctx context.Context, projectID int64, analysi
 	}
 
 	// 1. 获取架构师分析结果
-	analysisTask, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", analysisTaskID).One()
+	analysisTask, err := g.DB().Ctx(ctx).Model("mvp_task").Where("id", analysisTaskID).One()
 	if err != nil || analysisTask.IsEmpty() {
 		return fmt.Errorf("架构师分析任务不存在")
 	}
 
 	// 2. 获取原实施任务
-	implTask, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", implTaskID).One()
+	implTask, err := g.DB().Ctx(ctx).Model("mvp_task").Where("id", implTaskID).One()
 	if err != nil || implTask.IsEmpty() {
 		return fmt.Errorf("原实施任务不存在")
 	}
@@ -228,7 +228,7 @@ func (s *Scheduler) AutoDispatchBugFix(ctx context.Context, projectID int64, ana
 	default:
 	}
 
-	analysisTask, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", analysisTaskID).One()
+	analysisTask, err := g.DB().Ctx(ctx).Model("mvp_task").Where("id", analysisTaskID).One()
 	if err != nil || analysisTask.IsEmpty() {
 		return
 	}
@@ -237,7 +237,7 @@ func (s *Scheduler) AutoDispatchBugFix(ctx context.Context, projectID int64, ana
 	auditTaskID := analysisTask["source_task_id"].Int64()
 	if auditTaskID == 0 {
 		// 旧数据 fallback：查找同父节点下 bug_found 的实施任务
-		implTask, err := g.DB().Model("mvp_task").
+		implTask, err := g.DB().Ctx(ctx).Model("mvp_task").
 			Where("project_id", projectID).
 			Where("parent_id", analysisTask["parent_id"].Int64()).
 			Where("role_type", "implementer").
@@ -252,7 +252,7 @@ func (s *Scheduler) AutoDispatchBugFix(ctx context.Context, projectID int64, ana
 	}
 
 	// 第二跳：从审计任务找到原实施任务
-	auditTask, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", auditTaskID).One()
+	auditTask, err := g.DB().Ctx(ctx).Model("mvp_task").Where("id", auditTaskID).One()
 	if err != nil || auditTask.IsEmpty() {
 		return
 	}
@@ -260,7 +260,7 @@ func (s *Scheduler) AutoDispatchBugFix(ctx context.Context, projectID int64, ana
 	implTaskID := auditTask["source_task_id"].Int64()
 	if implTaskID == 0 {
 		// 旧数据 fallback：从 mvp_task_dependency 查找
-		dep, _ := g.DB().Model("mvp_task_dependency").
+		dep, _ := g.DB().Ctx(ctx).Model("mvp_task_dependency").
 			Where("task_id", auditTaskID).
 			One()
 		if !dep.IsEmpty() {
@@ -284,7 +284,7 @@ func (s *Scheduler) AutoDispatchFailureFix(ctx context.Context, projectID int64,
 	default:
 	}
 
-	analysisTask, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", analysisTaskID).One()
+	analysisTask, err := g.DB().Ctx(ctx).Model("mvp_task").Where("id", analysisTaskID).One()
 	if err != nil || analysisTask.IsEmpty() {
 		return
 	}
@@ -305,7 +305,7 @@ func (s *Scheduler) AutoDispatchFailureFix(ctx context.Context, projectID int64,
 	}
 
 	maxRounds := GetConfigInt(ctx, "failure_handoff.max_rounds", "engine.failureHandoff.maxRounds", 3)
-	rounds, _ := g.DB().Model("mvp_task_log").
+	rounds, _ := g.DB().Ctx(ctx).Model("mvp_task_log").
 		Where("task_id", implTaskID).
 		Where("action", "escalate_to_architect").
 		Count()
@@ -399,7 +399,7 @@ func notifyProjectArchitectConversation(ctx context.Context, projectID int64, co
 }
 
 func ensureProjectArchitectConversation(ctx context.Context, projectID int64) (int64, int64, int64, error) {
-	conv, err := g.DB().Model("mvp_conversation").
+	conv, err := g.DB().Ctx(ctx).Model("mvp_conversation").
 		Where("project_id", projectID).
 		Where("role_type", "architect").
 		Where("task_id IS NULL OR task_id = 0").
@@ -412,7 +412,7 @@ func ensureProjectArchitectConversation(ctx context.Context, projectID int64) (i
 		return conv["id"].Int64(), conv["created_by"].Int64(), conv["dept_id"].Int64(), nil
 	}
 
-	project, err := g.DB().Model("mvp_project").
+	project, err := g.DB().Ctx(ctx).Model("mvp_project").
 		Fields("created_by, dept_id").
 		Where("id", projectID).
 		Where("deleted_at IS NULL").
@@ -425,7 +425,7 @@ func ensureProjectArchitectConversation(ctx context.Context, projectID int64) (i
 	}
 
 	convID := int64(snowflake.Generate())
-	_, err = g.DB().Model("mvp_conversation").Insert(g.Map{
+	_, err = g.DB().Ctx(ctx).Model("mvp_conversation").Insert(g.Map{
 		"id":         convID,
 		"project_id": projectID,
 		"title":      "架构师对话",

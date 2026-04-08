@@ -88,7 +88,7 @@ func updateTaskStatus(ctx context.Context, taskID int64, fromStatus, toStatus st
 		data[k] = v
 	}
 
-	result, err := g.DB().Model("mvp_task").
+	result, err := g.DB().Model("mvp_task").Ctx(ctx).
 		Where("id", taskID).
 		Where("status", fromStatus). // CAS: 只有当前状态匹配才更新
 		Update(data)

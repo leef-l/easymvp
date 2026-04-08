@@ -74,7 +74,7 @@ func getCompressionParams(projectCategory string) compressionParams {
 
 // CompressTaskContext 压缩单个任务的上下文
 func (c *ContextCompressor) CompressTaskContext(ctx context.Context, projectID int64, taskID int64) error {
-	task, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", taskID).One()
+	task, err := g.DB().Ctx(ctx).Model("mvp_task").Where("id", taskID).One()
 	if err != nil {
 		return fmt.Errorf("查询任务失败: %w", err)
 	}
@@ -127,7 +127,7 @@ func (c *ContextCompressor) CompressTaskContext(ctx context.Context, projectID i
 
 // getProjectCompressionParams 获取项目的压缩参数
 func (c *ContextCompressor) getProjectCompressionParams(ctx context.Context, projectID int64) compressionParams {
-	project, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Fields("project_category").One()
+	project, err := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).Fields("project_category").One()
 	if err != nil || project.IsEmpty() {
 		return getCompressionParams("")
 	}
@@ -142,7 +142,7 @@ func (c *ContextCompressor) getProjectCompressionParams(ctx context.Context, pro
 // 然后用批次摘要更新全局上下文（优化3）
 func (c *ContextCompressor) CompressBatchContext(ctx context.Context, projectID int64, batchNo int) {
 	// 收集该批次所有已完成任务的摘要
-	tasks, err := g.DB().Model("mvp_task").
+	tasks, err := g.DB().Ctx(ctx).Model("mvp_task").
 		Where("project_id", projectID).
 		Where("batch_no", batchNo).
 		Where("status", "completed").
@@ -193,7 +193,7 @@ func (c *ContextCompressor) mergeIntoGlobalContext(ctx context.Context, projectI
 	mu := c.getProjectLock(projectID)
 	mu.Lock()
 	defer mu.Unlock()
-	project, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).
+	project, err := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).
 		Fields("global_context, name, project_category").One()
 	if err != nil || project.IsEmpty() {
 		return
@@ -227,7 +227,7 @@ func (c *ContextCompressor) mergeIntoGlobalContext(ctx context.Context, projectI
 
 // CompressProjectContext 压缩架构师对话为初始全局上下文（确认方案时调用）
 func (c *ContextCompressor) CompressProjectContext(ctx context.Context, projectID int64) error {
-	messages, err := g.DB().Model("mvp_message m").
+	messages, err := g.DB().Ctx(ctx).Model("mvp_message m").
 		LeftJoin("mvp_conversation cv", "cv.id = m.conversation_id").
 		Where("cv.project_id", projectID).
 		Where("cv.task_id IS NULL").
@@ -263,7 +263,7 @@ func (c *ContextCompressor) CompressProjectContext(ctx context.Context, projectI
 		return nil
 	}
 
-	project, _ := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Fields("name").One()
+	project, _ := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).Fields("name").One()
 	projectName := ""
 	if !project.IsEmpty() {
 		projectName = project["name"].String()
@@ -289,7 +289,7 @@ func BuildTaskSystemPrompt(ctx context.Context, projectID int64, taskID int64, r
 
 	if roleType == "architect" || roleLevel == "max" {
 		// 架构师/max：读全局摘要（恒定大小，已包含所有历史）
-		project, _ := g.DB().Model("mvp_project").
+		project, _ := g.DB().Ctx(ctx).Model("mvp_project").
 			Where("id", projectID).
 			Fields("global_context, name, description").One()
 		if !project.IsEmpty() {
@@ -304,7 +304,7 @@ func BuildTaskSystemPrompt(ctx context.Context, projectID int64, taskID int64, r
 		}
 	} else {
 		// pro/lite：只读直接依赖任务的摘要
-		deps, _ := g.DB().Model("mvp_task_dependency d").
+		deps, _ := g.DB().Ctx(ctx).Model("mvp_task_dependency d").
 			LeftJoin("mvp_task t", "t.id = d.depends_on_id").
 			Where("d.task_id", taskID).
 			Where("t.status", "completed").
@@ -419,7 +419,7 @@ func (c *ContextCompressor) aiMergeGlobal(ctx context.Context, modelInfo *ModelI
 // ----------------------------------------------------------------
 
 func (c *ContextCompressor) collectTaskDialog(ctx context.Context, taskID int64) string {
-	messages, err := g.DB().Model("mvp_message m").
+	messages, err := g.DB().Ctx(ctx).Model("mvp_message m").
 		LeftJoin("mvp_conversation cv", "cv.id = m.conversation_id").
 		Where("cv.task_id", taskID).
 		Where("m.deleted_at IS NULL").
@@ -444,7 +444,7 @@ func (c *ContextCompressor) getCompressModel(ctx context.Context, projectID int6
 		return nil, fmt.Errorf("找不到架构师模型配置: %w", err)
 	}
 
-	model, err := g.DB().Model("ai_model m").
+	model, err := g.DB().Ctx(ctx).Model("ai_model m").
 		LeftJoin("ai_plan p", "p.id = m.plan_id").
 		LeftJoin("ai_provider pv", "pv.id = m.provider_id").
 		Fields("m.model_code, m.max_tokens, pv.provider_type, pv.base_url, p.api_key, p.api_secret").
@@ -466,7 +466,7 @@ func (c *ContextCompressor) getCompressModel(ctx context.Context, projectID int6
 }
 
 func (c *ContextCompressor) saveSummary(ctx context.Context, taskID int64, summary string) {
-	if _, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", taskID).Update(g.Map{
+	if _, err := g.DB().Ctx(ctx).Model("mvp_task").Where("id", taskID).Update(g.Map{
 		"context_summary": summary,
 		"updated_at":      gtime.Now(),
 	}); err != nil {
@@ -475,7 +475,7 @@ func (c *ContextCompressor) saveSummary(ctx context.Context, taskID int64, summa
 }
 
 func (c *ContextCompressor) saveProjectContext(ctx context.Context, projectID int64, globalCtx string) {
-	if _, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Update(g.Map{
+	if _, err := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).Update(g.Map{
 		"global_context": globalCtx,
 		"updated_at":     gtime.Now(),
 	}); err != nil {

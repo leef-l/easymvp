@@ -35,7 +35,7 @@ type ReviewIssue struct {
 // 返回审核结果。调用者根据结果决定是进入 running 还是回退 designing
 func RunReview(ctx context.Context, projectID int64) (*ReviewResult, error) {
 	// 获取项目信息
-	project, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).One()
+	project, err := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).One()
 	if err != nil {
 		return nil, fmt.Errorf("查询项目信息失败: %w", err)
 	}
@@ -46,7 +46,7 @@ func RunReview(ctx context.Context, projectID int64) (*ReviewResult, error) {
 	projectCategory := project["project_category"].String()
 
 	// 获取所有 draft 任务
-	tasks, err := g.DB().Model("mvp_task").
+	tasks, err := g.DB().Ctx(ctx).Model("mvp_task").
 		Where("project_id", projectID).
 		Where("status", "draft").
 		Where("deleted_at IS NULL").
@@ -312,7 +312,7 @@ func containsGarbage(path string) bool {
 
 // getProjectCategory 获取项目分类名称
 func getProjectCategory(ctx context.Context, projectID int64) string {
-	val, err := g.DB().Model("mvp_project").Ctx(ctx).
+	val, err := g.DB().Ctx(ctx).Model("mvp_project").
 		Where("id", projectID).WhereNull("deleted_at").
 		Value("project_category")
 	if err != nil || val.IsEmpty() {

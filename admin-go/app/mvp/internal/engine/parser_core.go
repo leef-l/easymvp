@@ -60,7 +60,7 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 
 	// 获取项目分类用于分类感知校验
 	projectCategory := ""
-	project, _ := g.DB().Model("mvp_project").Where("id", projectID).Fields("project_category").One()
+	project, _ := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).Fields("project_category").One()
 	if !project.IsEmpty() {
 		projectCategory = project["project_category"].String()
 	}
@@ -71,7 +71,7 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 	}
 
 	// 2. 查询项目的创建人和部门（任务继承项目的 created_by 和 dept_id）
-	projectInfo, err := g.DB().Model("mvp_project").
+	projectInfo, err := g.DB().Ctx(ctx).Model("mvp_project").
 		Where("id", projectID).
 		Fields("created_by, dept_id").
 		One()
@@ -327,7 +327,7 @@ func (p *TaskParser) DryParseTaskCount(aiReply string) int {
 // ConfirmDraftTasks 确认草稿任务：draft → pending
 // 全量确认：所有 draft 必须全部成功，任何失败则回滚已转换的任务
 func (p *TaskParser) ConfirmDraftTasks(ctx context.Context, projectID int64) (int, error) {
-	taskIDs, err := g.DB().Model("mvp_task").
+	taskIDs, err := g.DB().Ctx(ctx).Model("mvp_task").
 		Where("project_id", projectID).
 		Where("status", "draft").
 		Where("deleted_at IS NULL").
@@ -366,7 +366,7 @@ func (p *TaskParser) ConfirmDraftTasks(ctx context.Context, projectID int64) (in
 
 // GetDraftCount 获取项目草稿任务数量
 func (p *TaskParser) GetDraftCount(ctx context.Context, projectID int64) int {
-	count, _ := g.DB().Model("mvp_task").
+	count, _ := g.DB().Ctx(ctx).Model("mvp_task").
 		Where("project_id", projectID).
 		Where("status", "draft").
 		Where("deleted_at IS NULL").

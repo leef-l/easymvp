@@ -27,18 +27,19 @@ func (s *Scheduler) getActiveBatchFromDB(projectID int64) int {
 
 // persistActiveBatch 将活跃批次号持久化到 DB
 func (s *Scheduler) persistActiveBatch(projectID int64, batchNo int) {
-	if _, err := g.DB().Model("mvp_project").Where("id", projectID).Update(g.Map{
+	ctx := context.Background()
+	if _, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Update(g.Map{
 		"active_batch_no": batchNo,
 		"updated_at":      gtime.Now(),
 	}); err != nil {
-		g.Log().Errorf(context.Background(), "[Scheduler] 持久化活跃批次失败: project=%d, batch=%d, err=%v", projectID, batchNo, err)
+		g.Log().Errorf(ctx, "[Scheduler] 持久化活跃批次失败: project=%d, batch=%d, err=%v", projectID, batchNo, err)
 	}
 }
 
 // advanceBatchIfDone 检查任务所在批次是否全部完成，完成则推进活跃批次
 // 事件驱动：只在任务完成时调用，不在轮询中反复检查
 func (s *Scheduler) advanceBatchIfDone(projectID int64, taskID int64) {
-	task, err := g.DB().Model("mvp_task").Where("id", taskID).Fields("batch_no").One()
+	task, err := g.DB().Model("mvp_task").Ctx(context.Background()).Where("id", taskID).Fields("batch_no").One()
 	if err != nil || task.IsEmpty() {
 		return
 	}
@@ -173,7 +174,7 @@ func (s *Scheduler) tryLockResources(taskID int64, resources []string) bool {
 		resJSON, jsonErr := json.Marshal(resources)
 		if jsonErr != nil {
 			g.Log().Warningf(context.Background(), "[Scheduler] 序列化资源锁信息失败: task=%d err=%v", taskID, jsonErr)
-		} else if _, upErr := g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+		} else if _, upErr := g.DB().Model("mvp_task").Ctx(context.Background()).Where("id", taskID).Update(g.Map{
 			"locked_resources": string(resJSON),
 		}); upErr != nil {
 			g.Log().Warningf(context.Background(), "[Scheduler] 更新任务资源锁失败: task=%d err=%v", taskID, upErr)

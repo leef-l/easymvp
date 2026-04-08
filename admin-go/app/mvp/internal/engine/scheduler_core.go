@@ -62,13 +62,14 @@ func NewScheduler(maxConcurrency int) *Scheduler {
 
 // recoverResourceLocks 进程启动时从 DB 恢复 running 任务的资源锁
 func (s *Scheduler) recoverResourceLocks() {
-	tasks, err := g.DB().Model("mvp_task").
+	ctx := context.Background()
+	tasks, err := g.DB().Model("mvp_task").Ctx(ctx).
 		Where("status", "running").
 		Where("deleted_at IS NULL").
 		Fields("id, locked_resources").
 		All()
 	if err != nil {
-		g.Log().Errorf(context.Background(), "[Scheduler] 恢复资源锁失败: %v", err)
+		g.Log().Errorf(ctx, "[Scheduler] 恢复资源锁失败: %v", err)
 		return
 	}
 
@@ -364,7 +365,7 @@ func (s *Scheduler) releaseTaskResources(taskID int64) {
 
 	// 锁外清理 DB，失败只记日志不回滚内存
 	if wasRunning {
-		if _, err := g.DB().Model("mvp_task").Where("id", taskID).Update(g.Map{
+		if _, err := g.DB().Model("mvp_task").Ctx(context.Background()).Where("id", taskID).Update(g.Map{
 			"locked_resources": nil,
 			"heartbeat_at":     nil,
 		}); err != nil {
@@ -375,7 +376,8 @@ func (s *Scheduler) releaseTaskResources(taskID int64) {
 
 // checkProjectDone 检查项目所有任务是否全部完成
 func (s *Scheduler) checkProjectDone(projectID int64) {
-	count, err := g.DB().Model("mvp_task").
+	ctx := context.Background()
+	count, err := g.DB().Model("mvp_task").Ctx(ctx).
 		Where("project_id", projectID).
 		Where("deleted_at IS NULL").
 		WhereNotIn("status", []string{"completed", "draft"}).
@@ -385,7 +387,7 @@ func (s *Scheduler) checkProjectDone(projectID int64) {
 	}
 
 	if count == 0 {
-		g.DB().Model("mvp_project").Where("id", projectID).Update(g.Map{
+		g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Update(g.Map{
 			"status":          "completed",
 			"active_batch_no": 0,
 			"updated_at":      gtime.Now(),

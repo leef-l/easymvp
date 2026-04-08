@@ -17,7 +17,7 @@ import (
 // ensureConversation 确保任务有对应的对话
 func (e *Executor) ensureConversation(ctx context.Context, projectID int64, taskID int64, roleType string) (int64, error) {
 	// 查找已有的任务对话
-	conv, err := g.DB().Model("mvp_conversation").
+	conv, err := g.DB().Ctx(ctx).Model("mvp_conversation").
 		Where("project_id", projectID).
 		Where("task_id", taskID).
 		Where("deleted_at IS NULL").
@@ -30,7 +30,7 @@ func (e *Executor) ensureConversation(ctx context.Context, projectID int64, task
 	}
 
 	// 创建新对话
-	project, err := g.DB().Model("mvp_project").
+	project, err := g.DB().Ctx(ctx).Model("mvp_project").
 		Fields("created_by, dept_id").
 		Where("id", projectID).
 		Where("deleted_at IS NULL").
@@ -43,7 +43,7 @@ func (e *Executor) ensureConversation(ctx context.Context, projectID int64, task
 	}
 
 	convID := int64(snowflake.Generate())
-	_, err = g.DB().Model("mvp_conversation").Insert(g.Map{
+	_, err = g.DB().Ctx(ctx).Model("mvp_conversation").Insert(g.Map{
 		"id":         convID,
 		"project_id": projectID,
 		"task_id":    taskID,
@@ -63,7 +63,7 @@ func (e *Executor) ensureConversation(ctx context.Context, projectID int64, task
 
 // loadConversationHistory 加载对话历史
 func (e *Executor) loadConversationHistory(ctx context.Context, conversationID int64, excludeID int64) ([]provider.Message, error) {
-	records, err := g.DB().Model("mvp_message").
+	records, err := g.DB().Ctx(ctx).Model("mvp_message").
 		Where("conversation_id", conversationID).
 		Where("deleted_at IS NULL").
 		Where("status", "completed").
@@ -94,7 +94,7 @@ func (e *Executor) buildTaskPrompt(task gdb.Record) string {
 
 	// 如果有依赖任务的结果，附加上下文
 	taskID := task["id"].Int64()
-	deps, _ := g.DB().Model("mvp_task_dependency d").
+	deps, _ := g.DB().Ctx(context.Background()).Model("mvp_task_dependency d").
 		LeftJoin("mvp_task t", "t.id = d.depends_on_id").
 		Fields("t.name, t.result").
 		Where("d.task_id", taskID).
@@ -120,7 +120,7 @@ func (e *Executor) buildTaskPrompt(task gdb.Record) string {
 // 使用依赖表的唯一索引（uk_dep）做幂等保护，防止并发重复创建
 func (e *Executor) createAuditTask(ctx context.Context, projectID int64, implTaskID int64, implTask gdb.Record) {
 	// 检查是否已有审计任务（通过依赖关系）
-	count, _ := g.DB().Model("mvp_task_dependency").
+	count, _ := g.DB().Ctx(ctx).Model("mvp_task_dependency").
 		Where("depends_on_id", implTaskID).
 		Count()
 	if count > 0 {
@@ -135,7 +135,7 @@ func (e *Executor) createAuditTask(ctx context.Context, projectID int64, implTas
 		rootTaskID = implTaskID
 	}
 
-	if _, err := g.DB().Model("mvp_task").Insert(g.Map{
+	if _, err := g.DB().Ctx(ctx).Model("mvp_task").Insert(g.Map{
 		"id":             auditTaskID,
 		"project_id":     projectID,
 		"parent_id":      implTask["parent_id"].Int64(),
@@ -158,12 +158,12 @@ func (e *Executor) createAuditTask(ctx context.Context, projectID int64, implTas
 	}
 
 	// 添加依赖关系（uk_dep 唯一索引保证幂等，重复插入会静默失败）
-	if _, err := g.DB().Model("mvp_task_dependency").Insert(g.Map{
+	if _, err := g.DB().Ctx(ctx).Model("mvp_task_dependency").Insert(g.Map{
 		"task_id":       auditTaskID,
 		"depends_on_id": implTaskID,
 	}); err != nil {
 		// 唯一索引冲突说明已被并发创建，清理多余的审计任务
 		g.Log().Warningf(ctx, "[Executor] 审计任务依赖已存在（并发重复），回滚: implTask=%d, err=%v", implTaskID, err)
-		g.DB().Model("mvp_task").Where("id", auditTaskID).Delete()
+		g.DB().Ctx(ctx).Model("mvp_task").Where("id", auditTaskID).Delete()
 	}
 }

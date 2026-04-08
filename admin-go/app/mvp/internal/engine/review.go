@@ -22,7 +22,7 @@ func getReviewRoleModel(ctx context.Context, projectID int64, roleType string) (
 	}
 
 	modelID := role["model_id"].Int64()
-	model, err := g.DB().Model("ai_model m").
+	model, err := g.DB().Ctx(ctx).Model("ai_model m").
 		LeftJoin("ai_plan p", "p.id = m.plan_id").
 		LeftJoin("ai_provider pv", "pv.id = m.provider_id").
 		Fields("m.model_code, m.max_tokens, pv.provider_type, pv.base_url, p.api_key, p.api_secret, m.role_prompt").
@@ -53,7 +53,7 @@ func getReviewRoleModel(ctx context.Context, projectID int64, roleType string) (
 // HandleReviewFailure 审核失败时的处理：退回 designing + 通知架构师
 func HandleReviewFailure(ctx context.Context, projectID int64, result *ReviewResult) error {
 	// 1. 退回项目状态
-	_, err := g.DB().Model("mvp_project").Where("id", projectID).Update(g.Map{
+	_, err := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).Update(g.Map{
 		"status":     "designing",
 		"updated_at": gtime.Now(),
 	})
@@ -202,7 +202,7 @@ func HandleReviewSuccess(ctx context.Context, projectID int64, result *ReviewRes
 
 // rollbackConfirmedTasks 将项目中已确认的 pending 任务回退为 draft
 func rollbackConfirmedTasks(ctx context.Context, projectID int64) {
-	taskIDs, err := g.DB().Model("mvp_task").
+	taskIDs, err := g.DB().Ctx(ctx).Model("mvp_task").
 		Where("project_id", projectID).
 		Where("status", "pending").
 		Where("deleted_at IS NULL").
