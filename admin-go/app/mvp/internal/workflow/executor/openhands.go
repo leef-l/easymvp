@@ -55,7 +55,7 @@ func (e *OpenHandsExecutor) Execute(ctx context.Context, req *Request) *Result {
 	}
 
 	// 2. 确定工作目录
-	project, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", req.ProjectID).One()
+	project, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", req.ProjectID).Fields("work_dir").One()
 	if projErr != nil || project.IsEmpty() {
 		return &Result{Success: false, Error: fmt.Errorf("项目 %d 不存在或查询失败: %v", req.ProjectID, projErr)}
 	}
@@ -90,7 +90,9 @@ func (e *OpenHandsExecutor) Execute(ctx context.Context, req *Request) *Result {
 	var files []string
 	resJSON := req.TaskRecord["affected_resources"].String()
 	if resJSON != "" && resJSON != "[]" && resJSON != "null" {
-		_ = json.Unmarshal([]byte(resJSON), &files)
+		if err := json.Unmarshal([]byte(resJSON), &files); err != nil {
+			g.Log().Warningf(ctx, "[OpenHandsExecutor] affected_resources JSON 解析失败: %v", err)
+		}
 	}
 	if len(files) > 0 {
 		envVars["AI_TASK_FILES"] = strings.Join(files, ",")

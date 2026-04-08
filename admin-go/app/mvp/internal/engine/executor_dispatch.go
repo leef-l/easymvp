@@ -323,7 +323,9 @@ func (e *Executor) executeChatMode(ctx context.Context, projectID int64, taskID 
 	}
 
 	// 压缩任务上下文为摘要（同步执行，确保不丢失）
-	if err := GetCompressor().CompressTaskContext(context.Background(), projectID, taskID); err != nil {
+	compressCtx, compressCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer compressCancel()
+	if err := GetCompressor().CompressTaskContext(compressCtx, projectID, taskID); err != nil {
 		g.Log().Errorf(ctx, "[Executor] 压缩任务上下文失败（非致命）: task=%d, err=%v", taskID, err)
 	}
 

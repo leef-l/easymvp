@@ -333,9 +333,13 @@ func (s *DomainTaskScheduler) releaseTaskResources(taskID int64) {
 	s.mu.Unlock()
 
 	// DB 清理
-	_, _ = g.DB().Model("mvp_domain_task").Ctx(context.Background()).Where("id", taskID).
-		Update(g.Map{"locked_resources": nil, "heartbeat_at": nil})
-	_ = s.lockMgr.ReleaseLocks(context.Background(), taskID)
+	if _, upErr := g.DB().Model("mvp_domain_task").Ctx(context.Background()).Where("id", taskID).
+		Update(g.Map{"locked_resources": nil, "heartbeat_at": nil}); upErr != nil {
+		g.Log().Warningf(context.Background(), "[Scheduler] 释放任务锁状态失败: task=%d err=%v", taskID, upErr)
+	}
+	if rlErr := s.lockMgr.ReleaseLocks(context.Background(), taskID); rlErr != nil {
+		g.Log().Warningf(context.Background(), "[Scheduler] 释放资源锁失败: task=%d err=%v", taskID, rlErr)
+	}
 }
 
 // checkAllDone 检查 workflow 的所有任务是否完成。
@@ -466,10 +470,15 @@ func (s *DomainTaskScheduler) allDepsCompleted(ctx context.Context, task gdb.Rec
 	if depsJSON != "" && depsJSON != "null" && depsJSON != "[]" {
 		var depIDs []int64
 		if err := json.Unmarshal([]byte(depsJSON), &depIDs); err == nil && len(depIDs) > 0 {
+			// 批量查询所有依赖任务状态（避免 N+1）
+			depStatuses, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+				WhereIn("id", depIDs).Fields("id, status").All()
+			statusMap := make(map[int64]string, len(depStatuses))
+			for _, d := range depStatuses {
+				statusMap[d["id"].Int64()] = d["status"].String()
+			}
 			for _, depID := range depIDs {
-				status, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
-					Where("id", depID).Value("status")
-				st := status.String()
+				st := statusMap[depID]
 				if st != domainTask.StatusCompleted && st != "skipped" {
 					return false
 				}

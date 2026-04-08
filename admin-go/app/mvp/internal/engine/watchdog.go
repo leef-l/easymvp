@@ -322,11 +322,31 @@ func (w *Watchdog) checkFailedTasks(ctx context.Context) {
 		taskType  string
 		errMsg    string
 	}
+
+	// 批量收集项目 ID 并一次查询状态（避免 N+1）
+	projectIDs := make(map[int64]struct{})
+	for _, task := range tasks {
+		projectIDs[task["project_id"].Int64()] = struct{}{}
+	}
+	pidList := make([]int64, 0, len(projectIDs))
+	for pid := range projectIDs {
+		pidList = append(pidList, pid)
+	}
+	runningProjects := make(map[int64]bool)
+	if len(pidList) > 0 {
+		projects, _ := g.DB().Model("mvp_project").Ctx(ctx).
+			WhereIn("id", pidList).
+			Where("status", "running").
+			Fields("id").All()
+		for _, p := range projects {
+			runningProjects[p["id"].Int64()] = true
+		}
+	}
+
 	var candidates []failedTaskInfo
 	for _, task := range tasks {
 		projectID := task["project_id"].Int64()
-		project, _ := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Fields("status").One()
-		if project.IsEmpty() || project["status"].String() != "running" {
+		if !runningProjects[projectID] {
 			continue
 		}
 		candidates = append(candidates, failedTaskInfo{

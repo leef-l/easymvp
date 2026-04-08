@@ -265,14 +265,31 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 		workflowRunID int64
 		retryCount    int
 	}
+
+	// 批量收集 workflow_run ID 并一次查询状态（避免 N+1）
+	wfRunIDs := make(map[int64]struct{})
+	for _, task := range tasks {
+		wfRunIDs[task["workflow_run_id"].Int64()] = struct{}{}
+	}
+	wfIDList := make([]int64, 0, len(wfRunIDs))
+	for wfID := range wfRunIDs {
+		wfIDList = append(wfIDList, wfID)
+	}
+	activeWfRuns := make(map[int64]bool)
+	if len(wfIDList) > 0 {
+		wfRecords, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+			WhereIn("id", wfIDList).
+			WhereIn("status", []string{"executing", "reworking"}).
+			Fields("id").All()
+		for _, r := range wfRecords {
+			activeWfRuns[r["id"].Int64()] = true
+		}
+	}
+
 	var candidates []candidate
 	for _, task := range tasks {
 		wfRunID := task["workflow_run_id"].Int64()
-		wfStatus, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-			Where("id", wfRunID).Value("status")
-		status := wfStatus.String()
-		// 只在 executing/reworking 状态下自动重试
-		if status != "executing" && status != "reworking" {
+		if !activeWfRuns[wfRunID] {
 			continue
 		}
 		candidates = append(candidates, candidate{
@@ -378,6 +395,20 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 func (w *DomainTaskWatchdog) checkCircuitBreaker(ctx context.Context, wfIDs map[int64]bool) {
 	seen := wfIDs
 
+	// 批量查询所有 wfRunID 对应的 projectID（避免 N+1）
+	wfIDList := make([]int64, 0, len(seen))
+	for wfID := range seen {
+		wfIDList = append(wfIDList, wfID)
+	}
+	wfProjectMap := make(map[int64]int64)
+	if len(wfIDList) > 0 {
+		wfRecords, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+			WhereIn("id", wfIDList).Fields("id, project_id").All()
+		for _, r := range wfRecords {
+			wfProjectMap[r["id"].Int64()] = r["project_id"].Int64()
+		}
+	}
+
 	for wfRunID := range seen {
 		result := w.circuitBreaker.Check(ctx, wfRunID)
 		if !result.ShouldBreak {
@@ -386,12 +417,10 @@ func (w *DomainTaskWatchdog) checkCircuitBreaker(ctx context.Context, wfIDs map[
 
 		g.Log().Errorf(ctx, "[WatchdogV2] 熔断触发: workflowRun=%d reason=%s", wfRunID, result.Reason)
 
-		// 查 projectID
-		projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-			Where("id", wfRunID).Value("project_id")
+		projectID := wfProjectMap[wfRunID]
 
 		// 记录熔断决策
-		_, _ = w.circuitBreaker.RecordBreak(ctx, wfRunID, projectID.Int64(), result)
+		_, _ = w.circuitBreaker.RecordBreak(ctx, wfRunID, projectID, result)
 
 		// 暂停项目
 		if w.pauseFn != nil {
@@ -403,7 +432,7 @@ func (w *DomainTaskWatchdog) checkCircuitBreaker(ctx context.Context, wfIDs map[
 
 		// 异步触发重规划评估（暂停成功后才执行）
 		if w.replanFn != nil {
-			pid := projectID.Int64()
+			pid := projectID
 			reason := result.Reason
 			go func() {
 				defer func() {
