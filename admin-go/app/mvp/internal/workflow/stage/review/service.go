@@ -127,8 +127,10 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 	now := time.Now()
 
 	// 标记开始
-	_, _ = g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).
-		Update(g.Map{"status": "running", "started_at": now, "updated_at": now})
+	if _, stErr := g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).
+		Update(g.Map{"status": "running", "started_at": now, "updated_at": now}); stErr != nil {
+		g.Log().Warningf(ctx, "[ReviewStage] precheck stage_task 标记 running 失败: id=%d err=%v", stageTaskID, stErr)
+	}
 
 	workDir := project["work_dir"].String()
 	projectCategory := project["project_category"].String()
@@ -227,8 +229,10 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 	if result.HasErrors {
 		status = "failed"
 	}
-	_, _ = g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).
-		Update(g.Map{"status": status, "completed_at": time.Now(), "updated_at": time.Now()})
+	if _, stErr := g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).
+		Update(g.Map{"status": status, "completed_at": time.Now(), "updated_at": time.Now()}); stErr != nil {
+		g.Log().Warningf(ctx, "[ReviewStage] precheck stage_task 完成更新失败: id=%d err=%v", stageTaskID, stErr)
+	}
 
 	g.Log().Infof(ctx, "[ReviewStage] Precheck done hasErrors=%v blueprintCount=%d", result.HasErrors, len(blueprints))
 	return result, nil
@@ -238,8 +242,10 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 func (s *Service) runAuditorReview(ctx context.Context, stageRunID, workflowRunID, planVersionID, projectID int64, blueprints gdb.Result) (bool, error) {
 	stageTaskID := s.createStageTask(ctx, stageRunID, TaskTypeAuditorReview, "auditor")
 	now := time.Now()
-	_, _ = g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).
-		Update(g.Map{"status": "running", "started_at": now, "updated_at": now})
+	if _, stErr := g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).
+		Update(g.Map{"status": "running", "started_at": now, "updated_at": now}); stErr != nil {
+		g.Log().Warningf(ctx, "[ReviewStage] auditor stage_task 标记 running 失败: id=%d err=%v", stageTaskID, stErr)
+	}
 
 	// 复用旧引擎的审计员审核逻辑
 	result, err := engine.RunAuditorReviewForBlueprints(ctx, projectID, blueprints)
@@ -278,7 +284,9 @@ func (s *Service) runAuditorReview(ctx context.Context, stageRunID, workflowRunI
 	if errMsg != "" {
 		updateData["error_message"] = errMsg
 	}
-	_, _ = g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).Update(updateData)
+	if _, stErr := g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).Update(updateData); stErr != nil {
+		g.Log().Warningf(ctx, "[ReviewStage] auditor stage_task 完成更新失败: id=%d err=%v", stageTaskID, stErr)
+	}
 
 	if err != nil {
 		return false, err
@@ -290,8 +298,10 @@ func (s *Service) runAuditorReview(ctx context.Context, stageRunID, workflowRunI
 func (s *Service) runCoordinatorOptimize(ctx context.Context, stageRunID, workflowRunID, planVersionID, projectID int64, blueprints gdb.Result) error {
 	stageTaskID := s.createStageTask(ctx, stageRunID, TaskTypeCoordinatorOptimize, "coordinator")
 	now := time.Now()
-	_, _ = g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).
-		Update(g.Map{"status": "running", "started_at": now, "updated_at": now})
+	if _, stErr := g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).
+		Update(g.Map{"status": "running", "started_at": now, "updated_at": now}); stErr != nil {
+		g.Log().Warningf(ctx, "[ReviewStage] coordinator stage_task 标记 running 失败: id=%d err=%v", stageTaskID, stErr)
+	}
 
 	result, err := engine.RunCoordinatorOptimizeForBlueprints(ctx, projectID, blueprints)
 
@@ -316,7 +326,9 @@ func (s *Service) runCoordinatorOptimize(ctx context.Context, stageRunID, workfl
 	if errMsg != "" {
 		updateData["error_message"] = errMsg
 	}
-	_, _ = g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).Update(updateData)
+	if _, stErr := g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).Update(updateData); stErr != nil {
+		g.Log().Warningf(ctx, "[ReviewStage] coordinator stage_task 完成更新失败: id=%d err=%v", stageTaskID, stErr)
+	}
 	return err
 }
 

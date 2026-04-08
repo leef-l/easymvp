@@ -150,29 +150,41 @@ func (a *MetaAssessor) calcGateMetrics(ctx context.Context, projectID int64, per
 	}
 
 	// 误报：decision_level=C 且 human_override=1 且 override 动作=approve
-	fpCount, _ := m.Clone().
+	fpCount, fpErr := m.Clone().
 		Where("decision_level", "C").
 		Where("human_override", 1).
 		Where("outcome", "success"). // 人工放行后成功 → 误报
 		Count()
+	if fpErr != nil {
+		g.Log().Warningf(ctx, "[MetaAssessor] 查询闸门误报数失败: %v", fpErr)
+	}
 
-	totalGateBlocked, _ := m.Clone().
+	totalGateBlocked, gbErr := m.Clone().
 		Where("decision_level", "C").
 		Count()
+	if gbErr != nil {
+		g.Log().Warningf(ctx, "[MetaAssessor] 查询闸门阻断总数失败: %v", gbErr)
+	}
 
 	if totalGateBlocked > 0 {
 		falsePositive = float64(fpCount) / float64(totalGateBlocked)
 	}
 
 	// 漏报：decision_level=A 且 outcome=failure（自动执行但失败了）
-	fnCount, _ := m.Clone().
+	fnCount, fnErr := m.Clone().
 		Where("decision_level", "A").
 		Where("outcome", "failure").
 		Count()
+	if fnErr != nil {
+		g.Log().Warningf(ctx, "[MetaAssessor] 查询闸门漏报数失败: %v", fnErr)
+	}
 
-	totalAutoExec, _ := m.Clone().
+	totalAutoExec, aeErr := m.Clone().
 		Where("decision_level", "A").
 		Count()
+	if aeErr != nil {
+		g.Log().Warningf(ctx, "[MetaAssessor] 查询自动执行总数失败: %v", aeErr)
+	}
 
 	if totalAutoExec > 0 {
 		falseNegative = float64(fnCount) / float64(totalAutoExec)
@@ -246,7 +258,10 @@ func (a *MetaAssessor) detectDrifts(ctx context.Context, projectID int64, policy
 	}
 
 	// 4. 从 Learner 中检测各策略效果偏差
-	learningRecords, _ := a.learner.ListByProject(ctx, projectID)
+	learningRecords, lrErr := a.learner.ListByProject(ctx, projectID)
+	if lrErr != nil {
+		g.Log().Warningf(ctx, "[MetaAssessor] 获取学习记录失败: projectID=%d err=%v", projectID, lrErr)
+	}
 	for _, rec := range learningRecords {
 		if rec.SampleCount < a.learner.MinSamples {
 			continue

@@ -77,11 +77,13 @@ func (r *CategoryResolver) ResolveByProject(ctx context.Context, projectID int64
 						g.Log().Errorf(context.Background(), "[CategoryResolver] 回填 category_code panic: %v", r)
 					}
 				}()
-				_, _ = g.DB().Model("mvp_project").Ctx(context.Background()).
+				if _, bfErr := g.DB().Model("mvp_project").Ctx(context.Background()).
 					Where("id", projectID).
 					Where("category_code IS NULL OR category_code = ''").
 					Data(g.Map{"category_code": info.CategoryCode}).
-					Update()
+					Update(); bfErr != nil {
+					g.Log().Warningf(context.Background(), "[CategoryResolver] 回填 category_code 失败: projectID=%d err=%v", projectID, bfErr)
+				}
 			}()
 			return info, nil
 		}

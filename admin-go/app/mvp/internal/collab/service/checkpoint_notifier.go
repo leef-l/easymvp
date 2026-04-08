@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 
@@ -33,7 +34,8 @@ func (n *CheckpointNotifier) OnCheckpointOpened(evt event.Event) {
 				g.Log().Errorf(context.Background(), "[CheckpointNotifier] OnCheckpointOpened panic: %v", r)
 			}
 		}()
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 		if !n.adapter.IsEnabled(ctx) {
 			return
 		}
@@ -106,7 +108,8 @@ func (n *CheckpointNotifier) OnActionFailed(evt event.Event) {
 				g.Log().Errorf(context.Background(), "[CheckpointNotifier] OnActionFailed panic: %v", r)
 			}
 		}()
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 		if !n.adapter.IsEnabled(ctx) {
 			return
 		}
@@ -136,7 +139,8 @@ func (n *CheckpointNotifier) OnGateBlocked(evt event.Event) {
 				g.Log().Errorf(context.Background(), "[CheckpointNotifier] OnGateBlocked panic: %v", r)
 			}
 		}()
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 		if !n.adapter.IsEnabled(ctx) {
 			return
 		}

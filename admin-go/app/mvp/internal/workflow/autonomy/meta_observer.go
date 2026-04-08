@@ -3,6 +3,7 @@ package autonomy
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -61,8 +62,10 @@ func (o *MetaObserver) Record(ctx context.Context, input *ObservationInput) {
 				g.Log().Warningf(ctx, "[MetaObserver] Record panic recovered: %v", r)
 			}
 		}()
-		// 使用独立 context，避免调用方 context 取消导致写入失败
-		o.doRecord(context.Background(), input)
+		// 使用独立 context（带超时），避免调用方 context 取消导致写入失败
+		bgCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		o.doRecord(bgCtx, input)
 	}()
 }
 

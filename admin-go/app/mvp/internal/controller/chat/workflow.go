@@ -387,53 +387,72 @@ func (c *cWorkflow) ResetToDesign(ctx context.Context, req *v1.WorkflowResetToDe
 		wfRunID := wfRun["id"].Int64()
 
 		// 1. 软删除 domain_task
-		_, _ = g.DB().Model("mvp_domain_task").Ctx(ctx).
+		if _, dtErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
 			Where("workflow_run_id", wfRunID).WhereNull("deleted_at").
-			Update(g.Map{"deleted_at": now, "updated_at": now})
+			Update(g.Map{"deleted_at": now, "updated_at": now}); dtErr != nil {
+			g.Log().Errorf(ctx, "[ResetToDesign] 软删除 domain_task 失败: wfRunID=%d err=%v", wfRunID, dtErr)
+		}
 
 		// 2. 软删除 stage_task
-		_, _ = g.DB().Model("mvp_stage_task").Ctx(ctx).
+		if _, stErr := g.DB().Model("mvp_stage_task").Ctx(ctx).
 			Where("workflow_run_id", wfRunID).WhereNull("deleted_at").
-			Update(g.Map{"deleted_at": now, "updated_at": now})
+			Update(g.Map{"deleted_at": now, "updated_at": now}); stErr != nil {
+			g.Log().Errorf(ctx, "[ResetToDesign] 软删除 stage_task 失败: wfRunID=%d err=%v", wfRunID, stErr)
+		}
 
 		// 3. 软删除 stage_run
-		_, _ = g.DB().Model("mvp_stage_run").Ctx(ctx).
+		if _, srErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
 			Where("workflow_run_id", wfRunID).WhereNull("deleted_at").
-			Update(g.Map{"deleted_at": now, "updated_at": now})
+			Update(g.Map{"deleted_at": now, "updated_at": now}); srErr != nil {
+			g.Log().Errorf(ctx, "[ResetToDesign] 软删除 stage_run 失败: wfRunID=%d err=%v", wfRunID, srErr)
+		}
 
 		// 4. supersede 所有 plan_version 及蓝图
-		pvIDs, _ := g.DB().Model("mvp_plan_version").Ctx(ctx).
+		pvIDs, pvErr := g.DB().Model("mvp_plan_version").Ctx(ctx).
 			Where("project_id", projectID).
 			WhereIn("status", g.Slice{"draft", "active"}).
 			WhereNull("deleted_at").Fields("id").Array()
+		if pvErr != nil {
+			g.Log().Errorf(ctx, "[ResetToDesign] 查询 plan_version 失败: projectID=%d err=%v", projectID, pvErr)
+		}
 		if len(pvIDs) > 0 {
 			idList := make([]int64, 0, len(pvIDs))
 			for _, v := range pvIDs {
 				idList = append(idList, v.Int64())
 			}
-			_, _ = g.DB().Model("mvp_plan_version").Ctx(ctx).
+			if _, upErr := g.DB().Model("mvp_plan_version").Ctx(ctx).
 				WhereIn("id", idList).
-				Update(g.Map{"status": "superseded", "updated_at": now})
-			_, _ = g.DB().Model("mvp_task_blueprint").Ctx(ctx).
+				Update(g.Map{"status": "superseded", "updated_at": now}); upErr != nil {
+				g.Log().Errorf(ctx, "[ResetToDesign] supersede plan_version 失败: err=%v", upErr)
+			}
+			if _, bpErr := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
 				WhereIn("plan_version_id", idList).WhereNull("deleted_at").
-				Update(g.Map{"blueprint_status": "superseded", "updated_at": now})
+				Update(g.Map{"blueprint_status": "superseded", "updated_at": now}); bpErr != nil {
+				g.Log().Errorf(ctx, "[ResetToDesign] supersede blueprint 失败: err=%v", bpErr)
+			}
 		}
 
 		// 5. 清理 worktree（软删除 workspace 记录）
-		_, _ = g.DB().Model("mvp_task_workspace").Ctx(ctx).
+		if _, wsErr := g.DB().Model("mvp_task_workspace").Ctx(ctx).
 			Where("project_id", projectID).WhereNull("deleted_at").
-			Update(g.Map{"deleted_at": now, "updated_at": now})
+			Update(g.Map{"deleted_at": now, "updated_at": now}); wsErr != nil {
+			g.Log().Errorf(ctx, "[ResetToDesign] 软删除 workspace 失败: projectID=%d err=%v", projectID, wsErr)
+		}
 
 		// 6. 清理审核/验收相关记录
-		_, _ = g.DB().Model("mvp_review_issue").Ctx(ctx).
+		if _, riErr := g.DB().Model("mvp_review_issue").Ctx(ctx).
 			Where("workflow_run_id", wfRunID).WhereNull("deleted_at").
-			Update(g.Map{"deleted_at": now, "updated_at": now})
-		_, _ = g.DB().Model("mvp_accept_run").Ctx(ctx).
+			Update(g.Map{"deleted_at": now, "updated_at": now}); riErr != nil {
+			g.Log().Errorf(ctx, "[ResetToDesign] 软删除 review_issue 失败: wfRunID=%d err=%v", wfRunID, riErr)
+		}
+		if _, arErr := g.DB().Model("mvp_accept_run").Ctx(ctx).
 			Where("workflow_run_id", wfRunID).WhereNull("deleted_at").
-			Update(g.Map{"deleted_at": now, "updated_at": now})
+			Update(g.Map{"deleted_at": now, "updated_at": now}); arErr != nil {
+			g.Log().Errorf(ctx, "[ResetToDesign] 软删除 accept_run 失败: wfRunID=%d err=%v", wfRunID, arErr)
+		}
 
 		// 7. workflow_run 回到 designing
-		_, _ = g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		if _, wfUpErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 			Where("id", wfRunID).
 			Update(g.Map{
 				"status":                  "designing",
@@ -442,13 +461,17 @@ func (c *cWorkflow) ResetToDesign(ctx context.Context, req *v1.WorkflowResetToDe
 				"pause_reason":            nil,
 				"status_before_pause":     nil,
 				"updated_at":             now,
-			})
+			}); wfUpErr != nil {
+			g.Log().Errorf(ctx, "[ResetToDesign] workflow_run 重置失败: wfRunID=%d err=%v", wfRunID, wfUpErr)
+		}
 	}
 
 	// 8. project 回到 designing
-	_, _ = g.DB().Model("mvp_project").Ctx(ctx).
+	if _, pErr := g.DB().Model("mvp_project").Ctx(ctx).
 		Where("id", projectID).
-		Update(g.Map{"status": "designing", "pause_reason": nil, "updated_at": now})
+		Update(g.Map{"status": "designing", "pause_reason": nil, "updated_at": now}); pErr != nil {
+		g.Log().Errorf(ctx, "[ResetToDesign] project 重置失败: projectID=%d err=%v", projectID, pErr)
+	}
 
 	g.Log().Infof(ctx, "[ResetToDesign] 项目已回到设计阶段: projectID=%d", projectID)
 	return &v1.WorkflowResetToDesignRes{Message: "已回到设计阶段，可重新拆分方案"}, nil

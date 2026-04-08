@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 
@@ -30,7 +31,8 @@ func (n *ReportNotifier) OnStageCompleted(evt event.Event) {
 				g.Log().Errorf(context.Background(), "[ReportNotifier] OnStageCompleted panic: %v", r)
 			}
 		}()
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 		if !n.adapter.IsEnabled(ctx) {
 			return
 		}
@@ -70,7 +72,8 @@ func (n *ReportNotifier) OnWorkflowCompleted(evt event.Event) {
 				g.Log().Errorf(context.Background(), "[ReportNotifier] OnWorkflowCompleted panic: %v", r)
 			}
 		}()
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 		if !n.adapter.IsEnabled(ctx) {
 			return
 		}
