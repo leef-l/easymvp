@@ -94,12 +94,15 @@ func (e *Executor) buildTaskPrompt(task gdb.Record) string {
 
 	// 如果有依赖任务的结果，附加上下文
 	taskID := task["id"].Int64()
-	deps, _ := g.DB().Ctx(context.Background()).Model("mvp_task_dependency d").
+	deps, depsErr := g.DB().Ctx(context.Background()).Model("mvp_task_dependency d").
 		LeftJoin("mvp_task t", "t.id = d.depends_on_id").
 		Fields("t.name, t.result").
 		Where("d.task_id", taskID).
 		Where("t.status", "completed").
 		All()
+	if depsErr != nil {
+		g.Log().Warningf(context.Background(), "[ExecutorChat] 查询依赖任务失败: taskID=%d err=%v", taskID, depsErr)
+	}
 
 	if len(deps) > 0 {
 		prompt += "\n\n## 前置任务结果（供参考）"
@@ -120,9 +123,12 @@ func (e *Executor) buildTaskPrompt(task gdb.Record) string {
 // 使用依赖表的唯一索引（uk_dep）做幂等保护，防止并发重复创建
 func (e *Executor) createAuditTask(ctx context.Context, projectID int64, implTaskID int64, implTask gdb.Record) {
 	// 检查是否已有审计任务（通过依赖关系）
-	count, _ := g.DB().Ctx(ctx).Model("mvp_task_dependency").
+	count, cntErr := g.DB().Ctx(ctx).Model("mvp_task_dependency").
 		Where("depends_on_id", implTaskID).
 		Count()
+	if cntErr != nil {
+		g.Log().Warningf(ctx, "[ExecutorChat] 查询审计依赖失败: taskID=%d err=%v", implTaskID, cntErr)
+	}
 	if count > 0 {
 		return
 	}

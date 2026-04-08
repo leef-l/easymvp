@@ -41,13 +41,16 @@ func (e *Executor) buildAiderTaskPrompt(task gdb.Record, resources []string) str
 	}
 
 	taskID := task["id"].Int64()
-	deps, _ := g.DB().Model("mvp_task_dependency d").
+	deps, depsErr := g.DB().Model("mvp_task_dependency d").
 		LeftJoin("mvp_task t", "t.id = d.depends_on_id").
 		Fields("t.name, t.result").
 		Where("d.task_id", taskID).
 		Where("t.status", "completed").
 		Limit(2).
 		All()
+	if depsErr != nil {
+		g.Log().Warningf(context.Background(), "[ExecutorCLI] 查询依赖任务失败: taskID=%d err=%v", taskID, depsErr)
+	}
 
 	if len(deps) > 0 {
 		prompt += "\n\n前置结果摘要："

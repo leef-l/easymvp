@@ -122,11 +122,14 @@ func (s *Scheduler) Resume(ctx context.Context, projectID int64) error {
 	}
 
 	// 检查是否有 pending 任务（说明之前已经审核过，直接恢复执行）
-	pendingCount, _ := g.DB().Ctx(ctx).Model("mvp_task").
+	pendingCount, pcErr := g.DB().Ctx(ctx).Model("mvp_task").
 		Where("project_id", projectID).
 		Where("status", "pending").
 		Where("deleted_at IS NULL").
 		Count()
+	if pcErr != nil {
+		return fmt.Errorf("查询 pending 任务数失败: %w", pcErr)
+	}
 	if pendingCount > 0 {
 		// 直接恢复执行
 		_, err = g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).Update(g.Map{
@@ -235,11 +238,14 @@ func CreateProject(ctx context.Context, name, projectCategory, description, work
 	}
 	modelPromptMap := make(map[int64]string)
 	if len(modelIDs) > 0 {
-		models, _ := g.DB().Ctx(ctx).Model("ai_model").
+		models, modErr := g.DB().Ctx(ctx).Model("ai_model").
 			Fields("id, role_prompt").
 			WhereIn("id", modelIDs).
 			Where("deleted_at IS NULL").
 			All()
+		if modErr != nil {
+			g.Log().Warningf(ctx, "[CreateProject] 批量查询模型失败: err=%v", modErr)
+		}
 		for _, m := range models {
 			modelPromptMap[m["id"].Int64()] = m["role_prompt"].String()
 		}
