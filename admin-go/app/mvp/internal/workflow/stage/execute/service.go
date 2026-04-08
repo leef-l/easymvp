@@ -267,7 +267,7 @@ func (e *domainTaskExecutor) handleFailure(ctx context.Context, taskID int64, er
 // 启动时立即写一次，之后每 30s 更新。
 func touchHeartbeatLoop(ctx context.Context, taskID int64) {
 	// 立即写一次心跳，消除启动空窗期
-	_, _ = g.DB().Model("mvp_domain_task").
+	_, _ = g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("id", taskID).
 		Where("status", domainTask.StatusRunning).
 		Update(g.Map{"heartbeat_at": gtime.Now()})

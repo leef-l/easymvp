@@ -333,7 +333,7 @@ func (s *DomainTaskScheduler) releaseTaskResources(taskID int64) {
 	s.mu.Unlock()
 
 	// DB 清理
-	_, _ = g.DB().Model("mvp_domain_task").Where("id", taskID).
+	_, _ = g.DB().Model("mvp_domain_task").Ctx(context.Background()).Where("id", taskID).
 		Update(g.Map{"locked_resources": nil, "heartbeat_at": nil})
 	_ = s.lockMgr.ReleaseLocks(context.Background(), taskID)
 }

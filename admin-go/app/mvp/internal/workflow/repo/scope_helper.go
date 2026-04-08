@@ -15,7 +15,7 @@ type ProjectScope struct {
 // GetProjectScopeByWorkflowRun 根据 workflow_run_id 获取项目归属信息。
 // 结果可缓存在调用方，避免重复查询。
 func GetProjectScopeByWorkflowRun(ctx context.Context, workflowRunID int64) *ProjectScope {
-	row, err := g.DB().Model("mvp_workflow_run AS wr").
+	row, err := g.DB().Model("mvp_workflow_run AS wr").Ctx(ctx).
 		LeftJoin("mvp_project AS p", "p.id = wr.project_id").
 		Fields("p.created_by, p.dept_id").
 		Where("wr.id", workflowRunID).
@@ -36,7 +36,7 @@ func GetProjectScopeByWorkflowRun(ctx context.Context, workflowRunID int64) *Pro
 
 // GetProjectScopeByProject 根据 project_id 获取项目归属信息。
 func GetProjectScopeByProject(ctx context.Context, projectID int64) *ProjectScope {
-	row, err := g.DB().Model("mvp_project").
+	row, err := g.DB().Model("mvp_project").Ctx(ctx).
 		Fields("created_by, dept_id").
 		Where("id", projectID).
 		One()

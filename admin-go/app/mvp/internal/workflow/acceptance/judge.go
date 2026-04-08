@@ -106,7 +106,7 @@ func resolveProjectModel(ctx context.Context, projectID int64, roleType string) 
 	}
 
 	modelID := role["model_id"].Int64()
-	model, err := g.DB().Model("ai_model m").
+	model, err := g.DB().Model("ai_model m").Ctx(ctx).
 		LeftJoin("ai_plan p", "p.id = m.plan_id").
 		LeftJoin("ai_provider pv", "pv.id = m.provider_id").
 		Fields("m.model_code, pv.provider_type, pv.base_url, p.api_key, p.api_secret").

@@ -36,7 +36,7 @@ func (e *AutoExecutor) NeedsWorkspace() bool { return true }
 func (e *AutoExecutor) Execute(ctx context.Context, req *Request) *Result {
 	// 查询已启用的执行器配置
 	enabledEngines := make(map[string]bool)
-	rows, err := g.DB().Model("ai_engine_config").
+	rows, err := g.DB().Model("ai_engine_config").Ctx(ctx).
 		Fields("engine_code").
 		Where("status", 1).
 		Where("deleted_at IS NULL").
