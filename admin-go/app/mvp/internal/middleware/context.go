@@ -54,7 +54,7 @@ const (
 // 一个用户可能有多个角色，取最宽松的（数值最小的）。
 func resolveUserDataScope(ctx context.Context, userID int64) (int, []int64) {
 	// 查用户关联的所有角色
-	roles, err := g.DB().Model("system_user_role AS ur").
+	roles, err := g.DB().Ctx(ctx).Model("system_user_role AS ur").
 		LeftJoin("system_role AS r", "r.id = ur.role_id").
 		Fields("r.id, r.data_scope").
 		Where("ur.user_id", userID).
@@ -80,7 +80,7 @@ func resolveUserDataScope(ctx context.Context, userID int64) (int, []int64) {
 	// 如果最宽松的是自定义，则查询自定义部门列表
 	var customDeptIDs []int64
 	if bestScope == DataScopeCustom && len(customRoleIDs) > 0 {
-		depts, _ := g.DB().Model("system_role_dept").
+		depts, _ := g.DB().Ctx(ctx).Model("system_role_dept").
 			Fields("DISTINCT dept_id").
 			WhereIn("role_id", customRoleIDs).
 			All()
@@ -95,7 +95,7 @@ func resolveUserDataScope(ctx context.Context, userID int64) (int, []int64) {
 // getChildDeptIDs 获取某部门及其所有子部门 ID（递归）。
 func getChildDeptIDs(ctx context.Context, parentDeptID int64) []int64 {
 	result := []int64{parentDeptID}
-	children, err := g.DB().Model("system_dept").
+	children, err := g.DB().Ctx(ctx).Model("system_dept").
 		Fields("id").
 		Where("parent_id", parentDeptID).
 		Where("status", 1).
@@ -218,7 +218,7 @@ func CheckProjectAccess(ctx context.Context, projectID int64) error {
 	}
 
 	// 查项目的 created_by 和 dept_id
-	project, err := g.DB().Model("mvp_project").
+	project, err := g.DB().Ctx(ctx).Model("mvp_project").
 		Fields("created_by, dept_id").
 		Where("id", projectID).
 		WhereNull("deleted_at").

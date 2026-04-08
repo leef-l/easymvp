@@ -23,7 +23,7 @@ func (c *cChat) Send(ctx context.Context, req *v1.ChatSendReq) (res *v1.ChatSend
 	userID := middleware.GetUserID(ctx)
 	deptID := middleware.GetDeptID(ctx)
 
-	conv, convErr := g.DB().Model("mvp_conversation").Where("id", req.ConversationID).Where("deleted_at IS NULL").One()
+	conv, convErr := g.DB().Ctx(ctx).Model("mvp_conversation").Where("id", req.ConversationID).Where("deleted_at IS NULL").One()
 	if convErr != nil || conv.IsEmpty() {
 		return nil, fmt.Errorf("对话不存在")
 	}
@@ -54,7 +54,7 @@ func (c *cChat) SSE(ctx context.Context, req *v1.ChatSSEReq) (res *v1.ChatSSERes
 	r.Response.Header().Set("Access-Control-Allow-Origin", "*")
 
 	// 1. 先检查消息状态，如果已完成直接返回全部内容
-	msg, msgErr := g.DB().Model("mvp_message").Where("id", messageID).Where("deleted_at IS NULL").One()
+	msg, msgErr := g.DB().Ctx(ctx).Model("mvp_message").Where("id", messageID).Where("deleted_at IS NULL").One()
 	if msgErr != nil || msg.IsEmpty() {
 		writeSSEEvent(r, "error", `{"error":"消息不存在"}`)
 		writeSSEEvent(r, "done", `{"done":true}`)
@@ -65,7 +65,7 @@ func (c *cChat) SSE(ctx context.Context, req *v1.ChatSSEReq) (res *v1.ChatSSERes
 	userID := middleware.GetUserID(ctx)
 	if userID != 1 {
 		convID := msg["conversation_id"].Int64()
-		conv, convErr := g.DB().Model("mvp_conversation").Where("id", convID).Where("deleted_at IS NULL").One()
+		conv, convErr := g.DB().Ctx(ctx).Model("mvp_conversation").Where("id", convID).Where("deleted_at IS NULL").One()
 		if convErr != nil || conv.IsEmpty() || conv["created_by"].Int64() != userID {
 			writeSSEEvent(r, "error", `{"error":"无权访问"}`)
 			writeSSEEvent(r, "done", `{"done":true}`)
@@ -85,7 +85,7 @@ func (c *cChat) SSE(ctx context.Context, req *v1.ChatSSEReq) (res *v1.ChatSSERes
 	}
 
 	// 2. 消息正在 streaming，先发送已有的 chunks
-	chunks, chunkErr := g.DB().Model("mvp_message_chunk").
+	chunks, chunkErr := g.DB().Ctx(ctx).Model("mvp_message_chunk").
 		Where("message_id", messageID).
 		Order("chunk_index ASC").
 		All()
@@ -127,13 +127,13 @@ func (c *cChat) SSE(ctx context.Context, req *v1.ChatSSEReq) (res *v1.ChatSSERes
 func (c *cChat) History(ctx context.Context, req *v1.ChatHistoryReq) (res *v1.ChatHistoryRes, err error) {
 	userID := middleware.GetUserID(ctx)
 	if userID != 1 {
-		conv, convErr := g.DB().Model("mvp_conversation").Where("id", req.ConversationID).Where("deleted_at IS NULL").One()
+		conv, convErr := g.DB().Ctx(ctx).Model("mvp_conversation").Where("id", req.ConversationID).Where("deleted_at IS NULL").One()
 		if convErr != nil || conv.IsEmpty() || conv["created_by"].Int64() != userID {
 			return nil, fmt.Errorf("无权访问该对话")
 		}
 	}
 
-	records, err := g.DB().Model("mvp_message m").
+	records, err := g.DB().Ctx(ctx).Model("mvp_message m").
 		LeftJoin("ai_model am", "am.id = m.model_id").
 		Fields("m.id, m.role, m.message_type, m.content, m.status, m.created_at, am.name as model_name").
 		Where("m.conversation_id", req.ConversationID).

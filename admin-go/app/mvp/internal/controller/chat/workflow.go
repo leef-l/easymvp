@@ -545,7 +545,7 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 	}
 
 	// 查找该项目的架构师对话
-	conv, err := g.DB().Model("mvp_conversation").
+	conv, err := g.DB().Ctx(ctx).Model("mvp_conversation").
 		Where("project_id", projectID).
 		Where("role_type", "architect").
 		Where("task_id IS NULL OR task_id = 0").
@@ -558,7 +558,7 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 	// 收集对话中所有 completed 的 assistant 回复（任务可能分散在多轮"继续"对话中）
 	convID := conv["id"].Int64()
 
-	allMsgs, err := g.DB().Model("mvp_message").
+	allMsgs, err := g.DB().Ctx(ctx).Model("mvp_message").
 		Where("conversation_id", convID).
 		Where("role", "assistant").
 		Where("status", "completed").
@@ -724,7 +724,7 @@ func (c *cWorkflow) ProjectStatus(ctx context.Context, req *v1.WorkflowProjectSt
 		return nil, err
 	}
 
-	project, err := g.DB().Model("mvp_project").Where("id", projectID).Where("deleted_at IS NULL").One()
+	project, err := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).Where("deleted_at IS NULL").One()
 	if err != nil {
 		return nil, err
 	}
@@ -786,7 +786,7 @@ func projectStatusV2(ctx context.Context, project gdb.Record) (*v1.WorkflowProje
 		Count  int    `json:"count"`
 	}
 	var counts []StatusCount
-	if scanErr := g.DB().Model("mvp_task_blueprint AS bp").
+	if scanErr := g.DB().Ctx(ctx).Model("mvp_task_blueprint AS bp").
 		InnerJoin("mvp_plan_version AS pv", "pv.id = bp.plan_version_id").
 		Where("pv.project_id", projectID).
 		WhereIn("pv.status", g.Slice{"draft", "active"}).
@@ -849,7 +849,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 	}
 
 	// 1. AI 供应商
-	count, e := g.DB().Model("ai_provider").
+	count, e := g.DB().Ctx(ctx).Model("ai_provider").
 		Where("status", 1).Where("base_url != ''").Where("deleted_at IS NULL").Count()
 	if e != nil {
 		addItem("ai_provider", "AI 供应商", "/ai/provider", "error", "查询失败: "+e.Error())
@@ -860,7 +860,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 	}
 
 	// 2. AI 套餐
-	count, e = g.DB().Model("ai_plan").
+	count, e = g.DB().Ctx(ctx).Model("ai_plan").
 		Where("status", 1).Where("api_key != ''").Where("deleted_at IS NULL").Count()
 	if e != nil {
 		addItem("ai_plan", "AI 套餐", "/ai/plan", "error", "查询失败: "+e.Error())
@@ -871,7 +871,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 	}
 
 	// 3. 架构师模型
-	count, e = g.DB().Model("ai_model").
+	count, e = g.DB().Ctx(ctx).Model("ai_model").
 		Where("capability", "architect").Where("status", 1).Where("deleted_at IS NULL").Count()
 	if e != nil {
 		addItem("ai_model_architect", "AI 模型（架构师）", "/ai/model", "error", "查询失败: "+e.Error())
@@ -882,7 +882,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 	}
 
 	// 4. 实施员模型
-	count, e = g.DB().Model("ai_model").
+	count, e = g.DB().Ctx(ctx).Model("ai_model").
 		WhereIn("capability", g.Slice{"implementer", "coding", "chat"}).
 		Where("status", 1).Where("deleted_at IS NULL").Count()
 	if e != nil {
@@ -905,7 +905,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 	}
 
 	// 6. AI 执行引擎
-	count, e = g.DB().Model("ai_engine").
+	count, e = g.DB().Ctx(ctx).Model("ai_engine").
 		Where("status", 1).Where("deleted_at IS NULL").Count()
 	if e != nil {
 		addItem("ai_engine", "AI 执行引擎", "/ai/engine", "error", "查询失败: "+e.Error())
@@ -916,7 +916,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 	}
 
 	// 7. Aider 引擎配置
-	aiderCfg, e := g.DB().Model("ai_engine_config").
+	aiderCfg, e := g.DB().Ctx(ctx).Model("ai_engine_config").
 		Where("engine_code", "aider").Where("deleted_at IS NULL").One()
 	if e != nil || aiderCfg.IsEmpty() {
 		addItem("ai_engine_config_aider", "Aider 引擎配置", "/ai/engine", "error", "未配置 Aider 引擎参数")
@@ -928,7 +928,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 	}
 
 	// 8. OpenHands 引擎配置
-	ohCfg, e := g.DB().Model("ai_engine_config").
+	ohCfg, e := g.DB().Ctx(ctx).Model("ai_engine_config").
 		Where("engine_code", "openhands").Where("deleted_at IS NULL").One()
 	if e != nil || ohCfg.IsEmpty() {
 		addItem("ai_engine_config_openhands", "OpenHands 引擎配置", "/ai/engine", "warning", "未配置 OpenHands 引擎参数（非必须，仅使用 Aider 可忽略）")
@@ -939,7 +939,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 	}
 
 	// 9. 角色引擎授权
-	count, e = g.DB().Model("system_role_ai_engine").Count()
+	count, e = g.DB().Ctx(ctx).Model("system_role_ai_engine").Count()
 	if e != nil {
 		addItem("role_ai_engine", "角色引擎授权", "", "error", "查询失败: "+e.Error())
 	} else if count == 0 {
@@ -997,7 +997,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 		"scheduler.max_concurrent",
 		"scheduler.poll_interval",
 	}
-	count, e = g.DB().Model("mvp_config").
+	count, e = g.DB().Ctx(ctx).Model("mvp_config").
 		WhereIn("config_key", requiredKeys).Where("deleted_at IS NULL").Count()
 	if e != nil {
 		addItem("engine_config", "引擎核心配置", "/mvp/config", "error", "查询失败: "+e.Error())
@@ -2333,15 +2333,15 @@ func (c *cWorkflow) AutonomyMode(ctx context.Context, req *v1.WorkflowAutonomyMo
 // SetAutonomyMode 设置自治模式（写入 mvp_config）
 func (c *cWorkflow) SetAutonomyMode(ctx context.Context, req *v1.WorkflowSetAutonomyModeReq) (res *v1.WorkflowSetAutonomyModeRes, err error) {
 	// 检查是否已有记录
-	count, _ := g.DB().Model("mvp_config").Ctx(ctx).
+	count, _ := g.DB().Ctx(ctx).Model("mvp_config").
 		Where("config_key", "autonomy.mode").
 		WhereNull("deleted_at").Count()
 	if count > 0 {
-		_, err = g.DB().Model("mvp_config").Ctx(ctx).
+		_, err = g.DB().Ctx(ctx).Model("mvp_config").
 			Where("config_key", "autonomy.mode").
 			Update(g.Map{"config_value": req.Mode})
 	} else {
-		_, err = g.DB().Model("mvp_config").Ctx(ctx).Insert(g.Map{
+		_, err = g.DB().Ctx(ctx).Model("mvp_config").Insert(g.Map{
 			"config_key":   "autonomy.mode",
 			"config_value": req.Mode,
 			"category":     "autonomy",

@@ -208,7 +208,9 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 	switch decision.Decision {
 	case acceptance.DecisionPassed:
 		// 标记 accept_run completed → 完成 accept stage → 推进到 complete
-		_, _ = s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "running", "completed", g.Map{})
+		if _, upErr := s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "running", "completed", g.Map{}); upErr != nil {
+			g.Log().Warningf(ctx, "[AcceptStage] 更新 accept_run 状态失败: %v", upErr)
+		}
 		if s.stageCompleter != nil {
 			if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
 				g.Log().Errorf(ctx, "[AcceptStage] CompleteStage 失败: %v", err)
@@ -241,7 +243,9 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 			}
 		}
 		// rework 已成功触发 → 标记 accept_run completed + 完成 accept stage
-		_, _ = s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "running", "completed", g.Map{})
+		if _, upErr := s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "running", "completed", g.Map{}); upErr != nil {
+			g.Log().Warningf(ctx, "[AcceptStage] 更新 accept_run 状态失败: %v", upErr)
+		}
 		if s.stageCompleter != nil {
 			if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
 				g.Log().Errorf(ctx, "[AcceptStage] CompleteStage 失败: %v", err)

@@ -101,7 +101,7 @@ func (s *sRolePreset) Detail(ctx context.Context, id snowflake.JsonInt64) (out *
 	}
 	// 填充模型名称
 	if out.ModelID > 0 {
-		modelRecord, _ := g.DB().Model("ai_model").Fields("name").Where("id", out.ModelID).Where("deleted_at IS NULL").One()
+		modelRecord, _ := g.DB().Ctx(ctx).Model("ai_model").Fields("name").Where("id", out.ModelID).Where("deleted_at IS NULL").One()
 		if !modelRecord.IsEmpty() {
 			out.ModelName = modelRecord["name"].String()
 		}
@@ -168,7 +168,7 @@ func (s *sRolePreset) fillRefFields(ctx context.Context, list []*model.RolePrese
 		return
 	}
 	// 查模型名称
-	models, _ := g.DB().Model("ai_model").
+	models, _ := g.DB().Ctx(ctx).Model("ai_model").
 		Fields("id, name").
 		WhereIn("id", modelIDs).
 		Where("deleted_at IS NULL").

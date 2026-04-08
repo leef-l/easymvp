@@ -52,7 +52,7 @@ const (
 
 // resolveUserDataScope 查询用户最大权限的 data_scope。
 func resolveUserDataScope(ctx context.Context, userID int64) (int, []int64) {
-	roles, err := g.DB().Model("system_user_role AS ur").
+	roles, err := g.DB().Ctx(ctx).Model("system_user_role AS ur").
 		LeftJoin("system_role AS r", "r.id = ur.role_id").
 		Fields("r.id, r.data_scope").
 		Where("ur.user_id", userID).
@@ -77,7 +77,7 @@ func resolveUserDataScope(ctx context.Context, userID int64) (int, []int64) {
 
 	var customDeptIDs []int64
 	if bestScope == DataScopeCustom && len(customRoleIDs) > 0 {
-		depts, _ := g.DB().Model("system_role_dept").
+		depts, _ := g.DB().Ctx(ctx).Model("system_role_dept").
 			Fields("DISTINCT dept_id").
 			WhereIn("role_id", customRoleIDs).
 			All()
@@ -92,7 +92,7 @@ func resolveUserDataScope(ctx context.Context, userID int64) (int, []int64) {
 // getChildDeptIDs 获取某部门及其所有子部门 ID（递归）
 func getChildDeptIDs(ctx context.Context, parentDeptID int64) []int64 {
 	result := []int64{parentDeptID}
-	children, err := g.DB().Model("system_dept").
+	children, err := g.DB().Ctx(ctx).Model("system_dept").
 		Fields("id").
 		Where("parent_id", parentDeptID).
 		Where("status", 1).

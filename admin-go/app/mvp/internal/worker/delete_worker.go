@@ -164,7 +164,10 @@ func EnqueueDelete(ctx context.Context, entity string, ids []int64) error {
 		Entity: entity,
 		IDs:    ids,
 	}
-	payload, _ := json.Marshal(job)
+	payload, marshalErr := json.Marshal(job)
+	if marshalErr != nil {
+		return fmt.Errorf("序列化删除任务失败: %w", marshalErr)
+	}
 	_, err := redis.LPush(ctx, redisQueueKey, string(payload))
 	if err != nil {
 		return fmt.Errorf("推入删除队列失败: %w", err)
