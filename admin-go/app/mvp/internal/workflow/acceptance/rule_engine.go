@@ -264,13 +264,16 @@ func (e *RuleEngine) checkRequiredStageOutputs(ctx context.Context, in *AcceptCo
 	}
 
 	// 批量查询已完成的阶段类型（避免 N+1）
-	completedStages, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).
+	completedStages, csErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
 		Where("workflow_run_id", in.WorkflowRunID).
 		Where("status", "completed").
 		WhereNull("deleted_at").
 		WhereIn("stage_type", cfg.RequiredStageOutputs).
 		Fields("DISTINCT stage_type").
 		All()
+	if csErr != nil {
+		g.Log().Warningf(ctx, "[RuleEngine] 查询已完成阶段失败: wfRunID=%d err=%v", in.WorkflowRunID, csErr)
+	}
 	completedSet := make(map[string]bool, len(completedStages))
 	for _, r := range completedStages {
 		completedSet[r["stage_type"].String()] = true

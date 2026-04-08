@@ -271,10 +271,13 @@ func (c *cWorkflow) ConfirmPlan(ctx context.Context, req *v1.WorkflowConfirmPlan
 	now := gtime.Now()
 
 	// 清理旧的执行数据，让每次确认方案都从干净状态开始
-	wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+	wfRun, wfErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 		Where("project_id", projectID).
 		WhereNotIn("status", g.Slice{"completed", "canceled"}).
 		WhereNull("deleted_at").OrderDesc("run_no").One()
+	if wfErr != nil {
+		g.Log().Warningf(ctx, "[ConfirmPlan] 查询活跃 workflow_run 失败: projectID=%d err=%v", projectID, wfErr)
+	}
 	if !wfRun.IsEmpty() {
 		wfRunID := wfRun["id"].Int64()
 		// 软删除旧的领域任务、阶段任务、阶段实例、审核问题、验收记录
@@ -372,10 +375,13 @@ func (c *cWorkflow) ResetToDesign(ctx context.Context, req *v1.WorkflowResetToDe
 	now := gtime.Now()
 
 	// 查活跃 workflow_run
-	wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+	wfRun, wfErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 		Where("project_id", projectID).
 		WhereNotIn("status", g.Slice{"completed", "canceled"}).
 		WhereNull("deleted_at").OrderDesc("run_no").One()
+	if wfErr != nil {
+		return nil, fmt.Errorf("查询活跃 workflow_run 失败: %w", wfErr)
+	}
 
 	if !wfRun.IsEmpty() {
 		wfRunID := wfRun["id"].Int64()
