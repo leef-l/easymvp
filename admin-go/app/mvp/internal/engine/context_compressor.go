@@ -74,7 +74,7 @@ func getCompressionParams(projectCategory string) compressionParams {
 
 // CompressTaskContext 压缩单个任务的上下文
 func (c *ContextCompressor) CompressTaskContext(ctx context.Context, projectID int64, taskID int64) error {
-	task, err := g.DB().Ctx(ctx).Model("mvp_task").Where("id", taskID).One()
+	task, err := g.DB().Ctx(ctx).Model("mvp_task").Where("id", taskID).WhereNull("deleted_at").One()
 	if err != nil {
 		return fmt.Errorf("查询任务失败: %w", err)
 	}
@@ -127,7 +127,7 @@ func (c *ContextCompressor) CompressTaskContext(ctx context.Context, projectID i
 
 // getProjectCompressionParams 获取项目的压缩参数
 func (c *ContextCompressor) getProjectCompressionParams(ctx context.Context, projectID int64) compressionParams {
-	project, err := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).Fields("project_category").One()
+	project, err := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).WhereNull("deleted_at").Fields("project_category").One()
 	if err != nil || project.IsEmpty() {
 		return getCompressionParams("")
 	}
@@ -263,7 +263,7 @@ func (c *ContextCompressor) CompressProjectContext(ctx context.Context, projectI
 		return nil
 	}
 
-	project, projErr := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).Fields("name").One()
+	project, projErr := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).WhereNull("deleted_at").Fields("name").One()
 	if projErr != nil {
 		g.Log().Warningf(ctx, "[Compressor] 查询项目名称失败: projectID=%d err=%v", projectID, projErr)
 	}

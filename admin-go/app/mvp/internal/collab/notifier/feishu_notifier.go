@@ -175,7 +175,7 @@ func (n *FeishuNotifier) getConversationOpenIDs(ctx context.Context, conversatio
 	if userID == 0 {
 		// 降级：用项目创建人
 		proj, projErr := g.DB().Ctx(ctx).Model("mvp_project").
-			Where("id", conv["project_id"].Int64()).Fields("created_by").One()
+			Where("id", conv["project_id"].Int64()).WhereNull("deleted_at").Fields("created_by").One()
 		if projErr != nil {
 			g.Log().Warningf(ctx, "[FeishuNotifier] 查询项目创建人失败: err=%v", projErr)
 		}
@@ -224,7 +224,7 @@ func (n *FeishuNotifier) getUserOpenID(ctx context.Context, userID int64) string
 // getProjectName 获取项目名称。
 func (n *FeishuNotifier) getProjectName(ctx context.Context, projectID int64) string {
 	proj, projErr := g.DB().Ctx(ctx).Model("mvp_project").
-		Where("id", projectID).Fields("name").One()
+		Where("id", projectID).WhereNull("deleted_at").Fields("name").One()
 	if projErr != nil {
 		g.Log().Warningf(ctx, "[FeishuNotifier] 查询项目名称失败: projectID=%d err=%v", projectID, projErr)
 	}

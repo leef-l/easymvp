@@ -249,7 +249,7 @@ func (s *Scheduler) scheduleOnce(ctx context.Context, projectID int64) {
 
 	// --- 阶段 1.5：阶段锁 —— 按项目状态过滤允许执行的角色 ---
 	projectStatus := ""
-	proj, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Fields("status").One()
+	proj, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).WhereNull("deleted_at").Fields("status").One()
 	if projErr != nil {
 		g.Log().Warningf(ctx, "[Scheduler] 查询项目状态失败: project=%d err=%v", projectID, projErr)
 	}

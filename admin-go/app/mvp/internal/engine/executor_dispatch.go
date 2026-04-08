@@ -49,7 +49,7 @@ func (e *Executor) Execute(ctx context.Context, projectID int64, taskID int64) {
 	}()
 
 	// 1. 查询任务信息
-	task, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", taskID).One()
+	task, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", taskID).WhereNull("deleted_at").One()
 	if err != nil || task.IsEmpty() {
 		e.scheduler.OnTaskFailed(projectID, taskID, "任务不存在")
 		return
@@ -362,7 +362,7 @@ func (e *Executor) executeChatMode(ctx context.Context, projectID int64, taskID 
 
 // resolveTaskModel 解析任务使用的 AI 模型
 func (e *Executor) resolveTaskModel(ctx context.Context, projectID int64, taskID int64, roleType string, modelID int64) (*ModelInfo, error) {
-	task, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", taskID).Fields("role_level").One()
+	task, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", taskID).WhereNull("deleted_at").Fields("role_level").One()
 	if err != nil {
 		g.Log().Warningf(ctx, "[Executor] 查询 task role_level 失败: task=%d, err=%v", taskID, err)
 	}

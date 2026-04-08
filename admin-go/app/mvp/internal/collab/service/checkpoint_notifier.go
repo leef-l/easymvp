@@ -60,7 +60,7 @@ func (n *CheckpointNotifier) OnCheckpointOpened(evt event.Event) {
 
 		projectID := action["project_id"].Int64()
 		project, projErr := g.DB().Model("mvp_project").Ctx(ctx).
-			Where("id", projectID).Fields("name, created_by").One()
+			Where("id", projectID).WhereNull("deleted_at").Fields("name, created_by").One()
 		if projErr != nil {
 			g.Log().Warningf(ctx, "[CheckpointNotifier] 查询项目失败: projectID=%d err=%v", projectID, projErr)
 		}
@@ -215,7 +215,7 @@ func (n *CheckpointNotifier) lookupProjectOwner(ctx context.Context, workflowRun
 	}
 	projectID := val.Int64()
 	createdBy, cbErr := g.DB().Model("mvp_project").Ctx(ctx).
-		Where("id", projectID).Value("created_by")
+		Where("id", projectID).WhereNull("deleted_at").Value("created_by")
 	if cbErr != nil {
 		g.Log().Warningf(ctx, "[CheckpointNotifier] 查询 created_by 失败: projectID=%d err=%v", projectID, cbErr)
 		return 0

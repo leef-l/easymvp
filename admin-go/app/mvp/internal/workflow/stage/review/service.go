@@ -55,21 +55,21 @@ func (s *Service) RunReview(ctx context.Context, stageRunID int64, planVersionID
 	g.Log().Infof(ctx, "[ReviewStage] RunReview start stageRunID=%d planVersionID=%d", stageRunID, planVersionID)
 
 	// 查 stage_run 获取 workflow_run_id
-	stageRun, err := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).One()
+	stageRun, err := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).WhereNull("deleted_at").One()
 	if err != nil || stageRun.IsEmpty() {
 		return fmt.Errorf("stage_run(%d) 不存在", stageRunID)
 	}
 	workflowRunID := stageRun["workflow_run_id"].Int64()
 
 	// 查 workflow_run 获取 project_id
-	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).One()
+	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).WhereNull("deleted_at").One()
 	if err != nil || wfRun.IsEmpty() {
 		return fmt.Errorf("workflow_run(%d) 不存在", workflowRunID)
 	}
 	projectID := wfRun["project_id"].Int64()
 
 	// 获取项目信息
-	project, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).One()
+	project, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).WhereNull("deleted_at").One()
 	if err != nil || project.IsEmpty() {
 		return fmt.Errorf("项目(%d) 不存在", projectID)
 	}
@@ -338,7 +338,7 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 	now := gtime.Now()
 
 	// 统计问题
-	stageRun, srErr := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).One()
+	stageRun, srErr := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).WhereNull("deleted_at").One()
 	if srErr != nil || stageRun.IsEmpty() {
 		g.Log().Errorf(ctx, "[ReviewService] concludeReview 查询 stage_run 失败: stageRun=%d err=%v", stageRunID, srErr)
 		return fmt.Errorf("查询 stage_run(%d) 失败: %v", stageRunID, srErr)

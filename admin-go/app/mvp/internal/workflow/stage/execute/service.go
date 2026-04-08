@@ -48,7 +48,7 @@ func (s *Service) SetAnalysisCompletedFn(fn AnalysisCompletedFn) { s.onAnalysisC
 // InstantiateAndStart 将审核通过的蓝图实例化为领域任务并启动调度。
 func (s *Service) InstantiateAndStart(ctx context.Context, stageRunID int64, planVersionID int64) error {
 	// 获取 workflow_run_id
-	stageRun, err := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).One()
+	stageRun, err := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).WhereNull("deleted_at").One()
 	if err != nil || stageRun.IsEmpty() {
 		return fmt.Errorf("stage_run(%d) 不存在", stageRunID)
 	}
@@ -139,7 +139,7 @@ func (e *domainTaskExecutor) ExecuteDomainTask(ctx context.Context, workflowRunI
 	}()
 
 	// 查任务详情
-	taskRecord, err := g.DB().Model("mvp_domain_task").Ctx(ctx).Where("id", taskID).One()
+	taskRecord, err := g.DB().Model("mvp_domain_task").Ctx(ctx).Where("id", taskID).WhereNull("deleted_at").One()
 	if err != nil || taskRecord.IsEmpty() {
 		e.scheduler.OnTaskFailed(ctx, taskID, "任务不存在")
 		return
@@ -174,7 +174,7 @@ func (e *domainTaskExecutor) ExecuteDomainTask(ctx context.Context, workflowRunI
 	// 如果执行器需要工作空间隔离，准备 worktree
 	var ws *workspace.TaskWorkspace
 	if exec.NeedsWorkspace() && e.wsMgr != nil {
-		project, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID.Int64()).One()
+		project, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID.Int64()).WhereNull("deleted_at").One()
 		if projErr != nil {
 			g.Log().Warningf(ctx, "[domainTaskExecutor] 查询项目失败: projectID=%d err=%v", projectID.Int64(), projErr)
 		}

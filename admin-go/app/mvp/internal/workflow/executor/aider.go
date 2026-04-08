@@ -27,7 +27,7 @@ func (e *AiderExecutor) NeedsWorkspace() bool   { return true }
 
 // Execute 执行 Aider 任务。
 func (e *AiderExecutor) Execute(ctx context.Context, req *Request) *Result {
-	project, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", req.ProjectID).One()
+	project, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", req.ProjectID).WhereNull("deleted_at").One()
 	if err != nil || project.IsEmpty() {
 		return &Result{Success: false, Error: fmt.Errorf("项目 %d 不存在或查询失败: %v", req.ProjectID, err)}
 	}

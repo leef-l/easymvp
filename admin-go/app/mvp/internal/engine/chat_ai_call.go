@@ -203,7 +203,7 @@ func (e *ChatEngine) tryParseArchitectTasks(conversationID int64, aiReply string
 	ctx := context.Background()
 
 	// 查对话的角色类型和项目ID
-	conv, err := g.DB().Model("mvp_conversation").Ctx(ctx).Where("id", conversationID).One()
+	conv, err := g.DB().Model("mvp_conversation").Ctx(ctx).Where("id", conversationID).WhereNull("deleted_at").One()
 	if err != nil || conv.IsEmpty() {
 		return
 	}
@@ -216,7 +216,7 @@ func (e *ChatEngine) tryParseArchitectTasks(conversationID int64, aiReply string
 	projectID := conv["project_id"].Int64()
 
 	// 判断引擎版本
-	ev, evErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Value("engine_version")
+	ev, evErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).WhereNull("deleted_at").Value("engine_version")
 	if evErr != nil {
 		g.Log().Warningf(ctx, "[ChatEngine] 查询 engine_version 失败: projectID=%d err=%v", projectID, evErr)
 	}

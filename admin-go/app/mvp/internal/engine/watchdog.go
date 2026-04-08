@@ -269,7 +269,7 @@ func TouchHeartbeat(ctx context.Context, taskID int64) {
 // getLatestChunkID 获取任务关联的最新 chunk ID
 func (w *Watchdog) getLatestChunkID(ctx context.Context, taskID int64) int64 {
 	// 直接从 task 的 conversation_id 查 chunk，避免多表 join
-	task, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", taskID).Fields("conversation_id").One()
+	task, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", taskID).WhereNull("deleted_at").Fields("conversation_id").One()
 	if err != nil || task.IsEmpty() || task["conversation_id"].Int64() == 0 {
 		return 0
 	}

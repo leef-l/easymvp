@@ -55,7 +55,7 @@ func (e *OpenHandsExecutor) Execute(ctx context.Context, req *Request) *Result {
 	}
 
 	// 2. 确定工作目录
-	project, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", req.ProjectID).Fields("work_dir").One()
+	project, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", req.ProjectID).WhereNull("deleted_at").Fields("work_dir").One()
 	if projErr != nil || project.IsEmpty() {
 		return &Result{Success: false, Error: fmt.Errorf("项目 %d 不存在或查询失败: %v", req.ProjectID, projErr)}
 	}

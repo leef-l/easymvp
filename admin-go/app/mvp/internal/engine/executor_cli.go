@@ -71,7 +71,7 @@ func (e *Executor) buildAiderTaskPrompt(task gdb.Record, resources []string) str
 // executeWithAider 使用 Aider 执行实施类任务（真实代码编辑）
 func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID int64, task gdb.Record, modelInfo *ModelInfo) {
 	// 1. 查询项目获取工作目录
-	project, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Fields("work_dir").One()
+	project, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).WhereNull("deleted_at").Fields("work_dir").One()
 	if err != nil || project.IsEmpty() {
 		e.failTask(ctx, projectID, taskID, "项目不存在")
 		return

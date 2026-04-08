@@ -39,7 +39,7 @@ func (s *Scheduler) persistActiveBatch(projectID int64, batchNo int) {
 // advanceBatchIfDone 检查任务所在批次是否全部完成，完成则推进活跃批次
 // 事件驱动：只在任务完成时调用，不在轮询中反复检查
 func (s *Scheduler) advanceBatchIfDone(projectID int64, taskID int64) {
-	task, err := g.DB().Model("mvp_task").Ctx(context.Background()).Where("id", taskID).Fields("batch_no").One()
+	task, err := g.DB().Model("mvp_task").Ctx(context.Background()).Where("id", taskID).WhereNull("deleted_at").Fields("batch_no").One()
 	if err != nil || task.IsEmpty() {
 		return
 	}
@@ -132,7 +132,7 @@ func (s *Scheduler) OnTaskFailed(projectID int64, taskID int64, errMsg string) {
 			}
 		}()
 		ctx := s.getProjectContext(projectID)
-		task, tErr := g.DB().Ctx(ctx).Model("mvp_task").Where("id", taskID).Fields("name").One()
+		task, tErr := g.DB().Ctx(ctx).Model("mvp_task").Where("id", taskID).WhereNull("deleted_at").Fields("name").One()
 		if tErr != nil {
 			g.Log().Warningf(ctx, "[Scheduler] 查询任务名称失败: taskID=%d err=%v", taskID, tErr)
 		}

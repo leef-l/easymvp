@@ -15,7 +15,7 @@ import (
 func (s *Scheduler) RetryTask(projectID int64, taskID int64) error {
 	// 查询当前状态，通过状态机校验
 	ctx := context.Background()
-	task, err := g.DB().Ctx(ctx).Model("mvp_task").Where("id", taskID).Fields("status").One()
+	task, err := g.DB().Ctx(ctx).Model("mvp_task").Where("id", taskID).WhereNull("deleted_at").Fields("status").One()
 	if err != nil || task.IsEmpty() {
 		return fmt.Errorf("任务不存在")
 	}

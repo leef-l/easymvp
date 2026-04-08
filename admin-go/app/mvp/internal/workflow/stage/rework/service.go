@@ -61,14 +61,14 @@ func (s *Service) HandleRework(ctx context.Context, stageRunID int64, failedTask
 // HandleReworkWithSource 处理返工流程（指定来源阶段）。
 func (s *Service) HandleReworkWithSource(ctx context.Context, stageRunID int64, failedTaskID int64, sourceStage string) error {
 	// 1. 查询 stage_run 和 workflow_run 信息
-	stageRun, err := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).One()
+	stageRun, err := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).WhereNull("deleted_at").One()
 	if err != nil || stageRun.IsEmpty() {
 		return fmt.Errorf("stage_run(%d) 不存在", stageRunID)
 	}
 	workflowRunID := stageRun["workflow_run_id"].Int64()
 
 	// 2. 查询失败任务详情
-	failedTask, err := g.DB().Model("mvp_domain_task").Ctx(ctx).Where("id", failedTaskID).One()
+	failedTask, err := g.DB().Model("mvp_domain_task").Ctx(ctx).Where("id", failedTaskID).WhereNull("deleted_at").One()
 	if err != nil || failedTask.IsEmpty() {
 		return fmt.Errorf("failed domain_task(%d) 不存在", failedTaskID)
 	}
@@ -162,7 +162,7 @@ func (s *Service) HandleReworkWithSource(ctx context.Context, stageRunID int64, 
 // 解析分析结果，回写原失败任务，推进回 execute stage。
 func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, analysisTaskID int64) error {
 	// 1. 获取分析任务
-	analysisTask, err := g.DB().Model("mvp_domain_task").Ctx(ctx).Where("id", analysisTaskID).One()
+	analysisTask, err := g.DB().Model("mvp_domain_task").Ctx(ctx).Where("id", analysisTaskID).WhereNull("deleted_at").One()
 	if err != nil || analysisTask.IsEmpty() {
 		return fmt.Errorf("分析任务(%d) 不存在", analysisTaskID)
 	}

@@ -60,7 +60,7 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 
 	// 获取项目分类用于分类感知校验
 	projectCategory := ""
-	project, projErr := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).Fields("project_category").One()
+	project, projErr := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).WhereNull("deleted_at").Fields("project_category").One()
 	if projErr != nil {
 		g.Log().Warningf(ctx, "[Parser] 查询项目分类失败: projectID=%d err=%v", projectID, projErr)
 	}

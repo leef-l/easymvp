@@ -106,7 +106,7 @@ func (n *ReportNotifier) lookupProjectOwner(ctx context.Context, workflowRunID i
 		return 0
 	}
 	createdBy, err := g.DB().Model("mvp_project").Ctx(ctx).
-		Where("id", val.Int64()).Value("created_by")
+		Where("id", val.Int64()).WhereNull("deleted_at").Value("created_by")
 	if err != nil {
 		g.Log().Warningf(ctx, "[ReportNotifier] 查询 project 失败: id=%d err=%v", val.Int64(), err)
 		return 0
@@ -125,7 +125,7 @@ func (n *ReportNotifier) lookupProjectName(ctx context.Context, workflowRunID in
 		return "未知项目"
 	}
 	name, nameErr := g.DB().Model("mvp_project").Ctx(ctx).
-		Where("id", val.Int64()).Value("name")
+		Where("id", val.Int64()).WhereNull("deleted_at").Value("name")
 	if nameErr != nil {
 		g.Log().Warningf(ctx, "[ReportNotifier] 查询项目名称失败: projectID=%d err=%v", val.Int64(), nameErr)
 	}

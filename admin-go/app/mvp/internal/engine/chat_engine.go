@@ -75,7 +75,7 @@ func (e *ChatEngine) SendMessage(ctx context.Context, conversationID int64, cont
 	}
 
 	// 3. 展开消息中的 "读取：路径" 指令（限制在项目工作目录内）
-	project, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Fields("work_dir").One()
+	project, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).WhereNull("deleted_at").Fields("work_dir").One()
 	if projErr != nil {
 		g.Log().Warningf(ctx, "[ChatEngine] 查询项目 work_dir 失败: projectID=%d err=%v", projectID, projErr)
 	}
@@ -147,7 +147,7 @@ func (e *ChatEngine) SendFeishuMessage(ctx context.Context, conversationID, proj
 	}
 
 	// 3. 展开消息中的 "读取：路径" 指令
-	project, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).Fields("work_dir").One()
+	project, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).WhereNull("deleted_at").Fields("work_dir").One()
 	if projErr != nil {
 		g.Log().Warningf(ctx, "[ChatEngine] 查询项目 work_dir 失败: projectID=%d err=%v", projectID, projErr)
 	}

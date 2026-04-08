@@ -258,7 +258,7 @@ func (s *StageService) FailStage(ctx context.Context, stageRunID int64, reason s
 	g.Log().Infof(ctx, "[StageService] FailStage stageRunID=%d reason=%s", stageRunID, reason)
 
 	// 查 stage_run 关联的 workflow_run（只查一次）
-	stageRun, srErr := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).One()
+	stageRun, srErr := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).WhereNull("deleted_at").One()
 	if srErr != nil {
 		g.Log().Errorf(ctx, "[StageService] FailStage 查询 stage_run 失败: stageRun=%d err=%v", stageRunID, srErr)
 		return nil
