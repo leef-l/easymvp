@@ -263,15 +263,22 @@ func (e *RuleEngine) checkRequiredStageOutputs(ctx context.Context, in *AcceptCo
 		return nil
 	}
 
+	// 批量查询已完成的阶段类型（避免 N+1）
+	completedStages, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).
+		Where("workflow_run_id", in.WorkflowRunID).
+		Where("status", "completed").
+		WhereNull("deleted_at").
+		WhereIn("stage_type", cfg.RequiredStageOutputs).
+		Fields("DISTINCT stage_type").
+		All()
+	completedSet := make(map[string]bool, len(completedStages))
+	for _, r := range completedStages {
+		completedSet[r["stage_type"].String()] = true
+	}
+
 	var hits []RuleHit
 	for _, stageType := range cfg.RequiredStageOutputs {
-		count, err := g.DB().Model("mvp_stage_run").Ctx(ctx).
-			Where("workflow_run_id", in.WorkflowRunID).
-			Where("stage_type", stageType).
-			Where("status", "completed").
-			WhereNull("deleted_at").
-			Count()
-		if err != nil || count == 0 {
+		if !completedSet[stageType] {
 			hits = append(hits, RuleHit{
 				RuleCode:        ruleCode,
 				RuleName:        ruleName,

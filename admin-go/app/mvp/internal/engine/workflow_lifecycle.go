@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
@@ -56,7 +57,9 @@ func (s *Scheduler) ConfirmPlan(ctx context.Context, projectID int64) error {
 				g.Log().Errorf(context.Background(), "[Workflow] runReviewAsync panic: project=%d err=%v", projectID, r)
 			}
 		}()
-		s.runReviewAsync(context.Background(), projectID)
+		reviewCtx, reviewCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer reviewCancel()
+		s.runReviewAsync(reviewCtx, projectID)
 	}()
 
 	return nil

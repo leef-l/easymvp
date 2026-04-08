@@ -17,20 +17,23 @@ func NewResourceLockManager() *ResourceLockManager { return &ResourceLockManager
 
 // AcquireLocks 为任务获取资源锁。
 func (m *ResourceLockManager) AcquireLocks(ctx context.Context, workflowRunID, taskID int64, resources []string) error {
+	if len(resources) == 0 {
+		return nil
+	}
+	now := time.Now()
+	batch := make([]g.Map, 0, len(resources))
 	for _, res := range resources {
-		_, err := g.DB().Model("mvp_task_resource_lock").Ctx(ctx).Insert(g.Map{
+		batch = append(batch, g.Map{
 			"id":              snowflake.Generate(),
 			"workflow_run_id": workflowRunID,
 			"task_id":         taskID,
 			"resource_path":   res,
 			"lock_status":     "held",
-			"locked_at":       time.Now(),
+			"locked_at":       now,
 		})
-		if err != nil {
-			return err
-		}
 	}
-	return nil
+	_, err := g.DB().Model("mvp_task_resource_lock").Ctx(ctx).Insert(batch)
+	return err
 }
 
 // ReleaseLocks 释放任务的所有资源锁。

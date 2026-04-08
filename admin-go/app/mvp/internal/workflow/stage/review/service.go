@@ -575,7 +575,7 @@ func (s *Service) buildRejectNotification(ctx context.Context, stageRunID int64,
 func (s *Service) createStageTask(ctx context.Context, stageRunID int64, taskType, roleType string) int64 {
 	id := int64(snowflake.Generate())
 	now := time.Now()
-	_, _ = g.DB().Model("mvp_stage_task").Ctx(ctx).Insert(g.Map{
+	if _, err := g.DB().Model("mvp_stage_task").Ctx(ctx).Insert(g.Map{
 		"id":           id,
 		"stage_run_id": stageRunID,
 		"task_type":    taskType,
@@ -583,7 +583,9 @@ func (s *Service) createStageTask(ctx context.Context, stageRunID int64, taskTyp
 		"status":       "pending",
 		"created_at":   now,
 		"updated_at":   now,
-	})
+	}); err != nil {
+		g.Log().Errorf(ctx, "[ReviewService] 创建阶段子任务失败: stageRun=%d type=%s err=%v", stageRunID, taskType, err)
+	}
 	return id
 }
 
@@ -608,5 +610,7 @@ func (s *Service) createIssue(ctx context.Context, workflowRunID, stageRunID, pl
 	if blueprintID > 0 {
 		data["blueprint_id"] = blueprintID
 	}
-	_, _ = g.DB().Model("mvp_review_issue").Ctx(ctx).Insert(data)
+	if _, err := g.DB().Model("mvp_review_issue").Ctx(ctx).Insert(data); err != nil {
+		g.Log().Errorf(ctx, "[ReviewService] 创建审核问题失败: wfRun=%d severity=%s err=%v", workflowRunID, severity, err)
+	}
 }

@@ -16,7 +16,8 @@ import (
 
 // runAICall 异步调用 AI（goroutine 中运行，不依赖前端连接）
 func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *ModelInfo) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
 
 	defer func() {
 		if r := recover(); r != nil {

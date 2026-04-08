@@ -45,13 +45,19 @@ func (c *cWorkflow) MetaObservationStats(ctx context.Context, req *v1.WorkflowMe
 	}
 
 	// 总数
-	total, _ := g.DB().Model("mvp_observation_record").Ctx(ctx).
+	total, err := g.DB().Model("mvp_observation_record").Ctx(ctx).
 		Where("project_id", projectID).WhereNull("deleted_at").Count()
+	if err != nil {
+		return nil, err
+	}
 
 	// 按 outcome 分组
-	outcomeRecords, _ := g.DB().Model("mvp_observation_record").Ctx(ctx).
+	outcomeRecords, err := g.DB().Model("mvp_observation_record").Ctx(ctx).
 		Where("project_id", projectID).WhereNull("deleted_at").
 		Fields("outcome, COUNT(*) as cnt").Group("outcome").All()
+	if err != nil {
+		return nil, err
+	}
 
 	outcomeDist := g.Map{}
 	for _, r := range outcomeRecords {
@@ -59,9 +65,12 @@ func (c *cWorkflow) MetaObservationStats(ctx context.Context, req *v1.WorkflowMe
 	}
 
 	// 按 decision_level 分��
-	levelRecords, _ := g.DB().Model("mvp_observation_record").Ctx(ctx).
+	levelRecords, err := g.DB().Model("mvp_observation_record").Ctx(ctx).
 		Where("project_id", projectID).WhereNull("deleted_at").
 		Fields("decision_level, COUNT(*) as cnt").Group("decision_level").All()
+	if err != nil {
+		return nil, err
+	}
 
 	levelDist := g.Map{}
 	for _, r := range levelRecords {
@@ -69,9 +78,12 @@ func (c *cWorkflow) MetaObservationStats(ctx context.Context, req *v1.WorkflowMe
 	}
 
 	// 人工干预率
-	overrideCount, _ := g.DB().Model("mvp_observation_record").Ctx(ctx).
+	overrideCount, err := g.DB().Model("mvp_observation_record").Ctx(ctx).
 		Where("project_id", projectID).WhereNull("deleted_at").
 		Where("human_override", 1).Count()
+	if err != nil {
+		return nil, err
+	}
 
 	overrideRate := 0.0
 	if total > 0 {
