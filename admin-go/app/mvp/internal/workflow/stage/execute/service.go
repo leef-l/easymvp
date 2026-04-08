@@ -237,8 +237,11 @@ func (e *domainTaskExecutor) handleSuccess(ctx context.Context, taskID int64, re
 
 	// 检查是否为 failure_analysis 任务 → 路由到 rework OnAnalysisCompleted
 	if e.onAnalysisCompleted != nil {
-		task, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		task, taskErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
 			Where("id", taskID).Fields("task_kind, stage_run_id").One()
+		if taskErr != nil {
+			g.Log().Warningf(ctx, "[domainTaskExecutor] 查询任务类型失败: task=%d err=%v", taskID, taskErr)
+		}
 		if !task.IsEmpty() && task["task_kind"].String() == "failure_analysis" {
 			stageRunID := task["stage_run_id"].Int64()
 			if err := e.onAnalysisCompleted(ctx, stageRunID, taskID); err != nil {

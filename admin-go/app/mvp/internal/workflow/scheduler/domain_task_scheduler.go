@@ -483,8 +483,12 @@ func (s *DomainTaskScheduler) allDepsCompleted(ctx context.Context, task gdb.Rec
 		var depIDs []int64
 		if err := json.Unmarshal([]byte(depsJSON), &depIDs); err == nil && len(depIDs) > 0 {
 			// 批量查询所有依赖任务状态（避免 N+1）
-			depStatuses, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+			depStatuses, dsErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
 				WhereIn("id", depIDs).Fields("id, status").All()
+			if dsErr != nil {
+				g.Log().Warningf(ctx, "[DomainTaskScheduler] 查询依赖状态失败: err=%v", dsErr)
+				return false
+			}
 			statusMap := make(map[int64]string, len(depStatuses))
 			for _, d := range depStatuses {
 				statusMap[d["id"].Int64()] = d["status"].String()
@@ -502,8 +506,12 @@ func (s *DomainTaskScheduler) allDepsCompleted(ctx context.Context, task gdb.Rec
 	// 回退：单依赖 parent_task_id
 	parentID := task["parent_task_id"].Int64()
 	if parentID > 0 {
-		status, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		status, stErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
 			Where("id", parentID).Value("status")
+		if stErr != nil {
+			g.Log().Warningf(ctx, "[DomainTaskScheduler] 查询父任务状态失败: parentID=%d err=%v", parentID, stErr)
+			return false
+		}
 		st := status.String()
 		return st == domainTask.StatusCompleted || st == "skipped"
 	}

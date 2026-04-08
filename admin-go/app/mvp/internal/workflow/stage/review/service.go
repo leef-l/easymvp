@@ -350,16 +350,22 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 		"error_count":  errorCount,
 		"warning_count": warningCount,
 	}
-	outputJSON, _ := json.Marshal(outputPayload)
+	outputJSON, marshalErr := json.Marshal(outputPayload)
+	if marshalErr != nil {
+		g.Log().Warningf(ctx, "[ReviewService] outputPayload 序列化失败: stageTask=%d err=%v", stageTaskID, marshalErr)
+		outputJSON = []byte("{}")
+	}
 
-	_, _ = g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).
+	if _, stErr := g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).
 		Update(g.Map{
 			"status":         "completed",
 			"started_at":     now,
 			"completed_at":   now,
 			"output_payload": string(outputJSON),
 			"updated_at":     now,
-		})
+		}); stErr != nil {
+		g.Log().Errorf(ctx, "[ReviewService] 更新 stage_task 状态失败: stageTask=%d err=%v", stageTaskID, stErr)
+	}
 
 	if passed {
 		// 审核通过：更新 plan_version review_status
