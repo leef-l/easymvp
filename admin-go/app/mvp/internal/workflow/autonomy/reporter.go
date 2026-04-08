@@ -40,7 +40,11 @@ func (r *Reporter) GenerateStageReport(ctx context.Context, workflowRunID int64,
 
 	stageLabel := stageTypeLabel(stageType)
 	title := fmt.Sprintf("%s阶段报告", stageLabel)
-	metricsJSON, _ := json.Marshal(metrics)
+	metricsJSON, marshalErr := json.Marshal(metrics)
+	if marshalErr != nil {
+		g.Log().Warningf(ctx, "[Reporter] metrics 序列化失败: %v", marshalErr)
+		metricsJSON = []byte("{}")
+	}
 
 	_, err = r.reportRepo.Create(ctx, g.Map{
 		"workflow_run_id": workflowRunID,

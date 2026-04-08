@@ -48,7 +48,10 @@ func (b *SSEBridge) ServeWorkflowEvents(ctx context.Context, w http.ResponseWrit
 		case <-ctx.Done():
 			return
 		case evt := <-ch:
-			data, _ := json.Marshal(evt)
+			data, mErr := json.Marshal(evt)
+			if mErr != nil {
+				data = []byte(`{"error":"marshal failed"}`)
+			}
 			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.EventType, data)
 			flusher.Flush()
 		}

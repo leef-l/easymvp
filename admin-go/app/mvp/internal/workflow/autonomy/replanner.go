@@ -97,8 +97,14 @@ func (r *Replanner) Evaluate(ctx context.Context, input *ReplanInput) (*ReplanRe
 	if mode == ModeAuto {
 		humanAction = ActionApproved
 	}
-	triggerCtx, _ := json.Marshal(input)
-	recommendation, _ := json.Marshal(rec)
+	triggerCtx, tcErr := json.Marshal(input)
+	if tcErr != nil {
+		triggerCtx = []byte("{}")
+	}
+	recommendation, recErr := json.Marshal(rec)
+	if recErr != nil {
+		recommendation = []byte("{}")
+	}
 	decisionID, err := r.decisionRepo.Create(ctx, g.Map{
 		"workflow_run_id": input.WorkflowRunID,
 		"project_id":      input.ProjectID,

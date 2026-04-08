@@ -211,7 +211,9 @@ func (s *DomainTaskScheduler) scheduleOnce(ctx context.Context, workflowRunID in
 		var resources []string
 		resJSON := task["affected_resources"].String()
 		if resJSON != "" && resJSON != "[]" && resJSON != "null" {
-			json.Unmarshal([]byte(resJSON), &resources)
+			if umErr := json.Unmarshal([]byte(resJSON), &resources); umErr != nil {
+				g.Log().Warningf(ctx, "[Scheduler] affected_resources 解析失败: task=%d err=%v", taskID, umErr)
+			}
 		}
 
 		hasConflict := false

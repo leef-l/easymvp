@@ -74,7 +74,11 @@ func (s *Service) Finalize(ctx context.Context, stageRunID, workflowRunID int64)
 	s.collectWorkflowDuration(ctx, workflowRunID, summary)
 
 	// 5. 写入 output_ref
-	summaryJSON, _ := json.Marshal(summary)
+	summaryJSON, marshalErr := json.Marshal(summary)
+	if marshalErr != nil {
+		g.Log().Warningf(ctx, "[CompleteStage] summary 序列化失败: %v", marshalErr)
+		summaryJSON = []byte("{}")
+	}
 	_, err = g.DB().Model("mvp_stage_run").Ctx(ctx).
 		Where("id", stageRunID).
 		Update(g.Map{"output_ref": string(summaryJSON)})

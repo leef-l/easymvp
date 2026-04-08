@@ -259,7 +259,8 @@ func (s *Scheduler) scheduleOnce(ctx context.Context, projectID int64) {
 	allowedRoles := stageAllowedRoles(projectStatus)
 
 	// --- 阶段 2：锁外查 DB，获取候选任务 ---
-	query := g.DB().Model("mvp_task").
+	query := g.DB().Model("mvp_task").Ctx(ctx).
+		Fields("id, batch_no, affected_resources, role_type, sort").
 		Where("project_id", projectID).
 		Where("status", "pending").
 		WhereNull("deleted_at")

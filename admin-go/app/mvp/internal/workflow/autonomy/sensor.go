@@ -250,7 +250,7 @@ func (s *Sensor) RecordSnapshot(ctx context.Context, sit *Situation) error {
 	if s == nil || s.snapshotRepo == nil || sit == nil {
 		return nil
 	}
-	snapshotData, _ := json.Marshal(g.Map{
+	snapshotData, sdErr := json.Marshal(g.Map{
 		"workflowStatus": sit.WorkflowStatus,
 		"activeStage":    sit.ActiveStage,
 		"categoryCode":   sit.CategoryCode,
@@ -260,7 +260,13 @@ func (s *Sensor) RecordSnapshot(ctx context.Context, sit *Situation) error {
 		"trend":          sit.Trend,
 		"snapshotAt":     sit.SnapshotAt,
 	})
-	anomalyData, _ := json.Marshal(sit.AnomalySignals)
+	if sdErr != nil {
+		snapshotData = []byte("{}")
+	}
+	anomalyData, adErr := json.Marshal(sit.AnomalySignals)
+	if adErr != nil {
+		anomalyData = []byte("[]")
+	}
 	scope := repo.GetProjectScopeByProject(ctx, sit.ProjectID)
 	_, err := s.snapshotRepo.Create(ctx, g.Map{
 		"workflow_run_id": sit.WorkflowRunID,

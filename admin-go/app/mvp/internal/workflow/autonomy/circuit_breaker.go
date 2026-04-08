@@ -97,11 +97,17 @@ func (cb *CircuitBreaker) Check(ctx context.Context, workflowRunID int64) *Circu
 
 // RecordBreak 记录熔断决策。熔断暂停始终执行，但决策记录模式跟随全局配置。
 func (cb *CircuitBreaker) RecordBreak(ctx context.Context, workflowRunID, projectID int64, result *CircuitBreakResult) (int64, error) {
-	metricsJSON, _ := json.Marshal(result.Metrics)
-	recommendation, _ := json.Marshal(map[string]interface{}{
+	metricsJSON, mErr := json.Marshal(result.Metrics)
+	if mErr != nil {
+		metricsJSON = []byte("{}")
+	}
+	recommendation, rErr := json.Marshal(map[string]interface{}{
 		"action": "pause",
 		"reason": result.Reason,
 	})
+	if rErr != nil {
+		recommendation = []byte(`{"action":"pause"}`)
+	}
 
 	// 熔断暂停本身始终自动执行（保护性措施），但记录中标注当前模式供前端展示
 	mode := GetAutonomyMode(ctx)

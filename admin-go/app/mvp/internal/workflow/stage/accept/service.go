@@ -300,7 +300,10 @@ func BuildReworkInput(acceptRunID int64, issues []acceptance.RuleHit) string {
 		"accept_run_id": acceptRunID,
 		"issues":        issues,
 	}
-	data, _ := json.Marshal(input)
+	data, err := json.Marshal(input)
+	if err != nil {
+		return fmt.Sprintf(`{"accept_run_id":%d,"error":"marshal failed"}`, acceptRunID)
+	}
 	return string(data)
 }
 
