@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	v1 "easymvp/app/mvp/api/mvp/v1"
+	"easymvp/app/mvp/internal/workspace"
 	"easymvp/utility/snowflake"
 )
 
@@ -301,6 +302,78 @@ func (c *cWorkflow) DeliveryReviews(ctx context.Context, req *v1.WorkflowDeliver
 	return &v1.WorkflowDeliveryReviewsRes{Items: items}, nil
 }
 
+// DeliveryApply 人工确认并回写交付结果。
+func (c *cWorkflow) DeliveryApply(ctx context.Context, req *v1.WorkflowDeliveryApplyReq) (res *v1.WorkflowDeliveryApplyRes, err error) {
+	projectID := int64(req.ProjectID)
+	if err := checkProjectOwnership(ctx, projectID); err != nil {
+		return nil, err
+	}
+
+	wfRun, err := latestWorkflowRunForProject(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("项目无工作流运行")
+	}
+	workflowRunID := wfRun["id"].Int64()
+
+	taskIDs := normalizeDeliveryApplyTaskIDs(req.TaskIDs)
+
+	query := g.DB().Model("mvp_task_workspace w").Ctx(ctx).
+		InnerJoin("mvp_domain_task t", "t.id = w.task_id").
+		Where("w.workflow_run_id", workflowRunID).
+		WhereNull("w.deleted_at").
+		WhereNull("t.deleted_at").
+		Where("w.delivery_status", workspace.DeliveryStatusReady).
+		WhereIn("w.sync_status", g.Slice{workspace.SyncStatusPending, workspace.SyncStatusFailed}).
+		Fields("w.id, w.task_id, w.sync_status, w.delivery_status, t.name, t.batch_no, t.sort")
+	if len(taskIDs) > 0 {
+		query = query.WhereIn("w.task_id", taskIDs)
+	}
+
+	records, err := query.OrderAsc("t.batch_no").OrderAsc("t.sort").All()
+	if err != nil {
+		return nil, fmt.Errorf("查询待回写交付失败: %w", err)
+	}
+	if len(records) == 0 {
+		return &v1.WorkflowDeliveryApplyRes{Items: []v1.DeliveryApplyItem{}}, nil
+	}
+
+	wsMgr := workspace.NewGitWorktreeManager()
+	items := make([]v1.DeliveryApplyItem, 0, len(records))
+	var (
+		appliedCount int
+		failedCount  int
+	)
+	for _, record := range records {
+		taskID := record["task_id"].Int64()
+		item := v1.DeliveryApplyItem{
+			WorkspaceID:    snowflake.JsonInt64(record["id"].Int64()),
+			TaskID:         snowflake.JsonInt64(taskID),
+			TaskName:       record["name"].String(),
+			DeliveryStatus: record["delivery_status"].String(),
+			SyncStatus:     record["sync_status"].String(),
+			Status:         "applied",
+		}
+
+		if applyErr := wsMgr.ApplyDelivery(ctx, taskID); applyErr != nil {
+			failedCount++
+			item.Status = "failed"
+			item.Message = applyErr.Error()
+			item.SyncStatus = workspace.SyncStatusFailed
+		} else {
+			appliedCount++
+			item.Message = strings.TrimSpace(req.Reason)
+			item.SyncStatus = workspace.SyncStatusApplied
+		}
+		items = append(items, item)
+	}
+
+	return &v1.WorkflowDeliveryApplyRes{
+		AppliedCount: appliedCount,
+		FailedCount:  failedCount,
+		Items:        items,
+	}, nil
+}
+
 func buildDeliveryReviewReasons(ws taskWorkspaceMeta) []string {
 	if ws.DeliveryStatus != "ready" {
 		return nil
@@ -320,6 +393,23 @@ func buildDeliveryReviewReasons(ws taskWorkspaceMeta) []string {
 		reasons = append(reasons, "高风险任务需人工复核")
 	}
 	return reasons
+}
+
+func normalizeDeliveryApplyTaskIDs(taskIDs []snowflake.JsonInt64) []int64 {
+	result := make([]int64, 0, len(taskIDs))
+	seen := make(map[int64]struct{}, len(taskIDs))
+	for _, raw := range taskIDs {
+		taskID := int64(raw)
+		if taskID <= 0 {
+			continue
+		}
+		if _, exists := seen[taskID]; exists {
+			continue
+		}
+		seen[taskID] = struct{}{}
+		result = append(result, taskID)
+	}
+	return result
 }
 
 func deliveryReviewRiskRank(riskLevel string) int {

@@ -469,6 +469,66 @@ func (m *GitWorktreeManager) Cleanup(ctx context.Context, taskID int64) error {
 	return nil
 }
 
+// ApplyDelivery 人工确认并将 pending 交付回写到主工作区。
+func (m *GitWorktreeManager) ApplyDelivery(ctx context.Context, taskID int64) error {
+	ws, err := m.repo.getByTaskID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("查询工作空间失败: %w", err)
+	}
+	if ws == nil {
+		return fmt.Errorf("任务 %d 没有关联的工作空间", taskID)
+	}
+	if ws.DeliveryStatus != DeliveryStatusReady {
+		return fmt.Errorf("任务 %d 交付状态为 %s，不允许回写", taskID, ws.DeliveryStatus)
+	}
+	if ws.SyncStatus == SyncStatusApplied {
+		return nil
+	}
+	if ws.SyncStatus != SyncStatusPending && ws.SyncStatus != SyncStatusFailed {
+		return fmt.Errorf("任务 %d 回写状态为 %s，不允许回写", taskID, ws.SyncStatus)
+	}
+	if !isGitRepo(ws.WorkspacePath) {
+		return fmt.Errorf("任务 %d 的工作空间不可用: %s", taskID, ws.WorkspacePath)
+	}
+
+	mainWorkDir := resolveMainWorkDir(ws.WorkspacePath)
+	if !isGitRepo(mainWorkDir) {
+		return fmt.Errorf("主工作区不是 git 仓库: %s", mainWorkDir)
+	}
+
+	if err := syncWorktreeCommit(ctx, mainWorkDir, ws.WorkspacePath, taskID); err != nil {
+		_ = m.repo.updateStatus(ctx, ws.ID, ws.Status, g.Map{
+			"sync_status":   SyncStatusFailed,
+			"error_message": err.Error(),
+		})
+		return err
+	}
+
+	extra := g.Map{
+		"delivery_status": ws.DeliveryStatus,
+		"sync_status":     SyncStatusApplied,
+		"risk_level":      ws.RiskLevel,
+		"patch_ref":       ws.PatchRef,
+		"delivery_ref":    ws.DeliveryRef,
+		"delivery_title":  ws.DeliveryTitle,
+		"diff_summary":    ws.DiffSummary,
+		"error_message":   nil,
+	}
+	if err := m.repo.updateStatus(ctx, ws.ID, ws.Status, extra); err != nil {
+		return fmt.Errorf("更新工作空间回写状态失败: %w", err)
+	}
+
+	payload := buildDeliveryEventPayload(ws, taskID, deliveryPolicy{
+		DeliveryMode: ws.DeliveryMode,
+		SyncStrategy: ws.SyncStrategy,
+		RiskLevel:    ws.RiskLevel,
+	}, extra)
+	recordWorkspaceEvent(ctx, ws, taskID, event.EventTaskSyncApplied, payload)
+
+	g.Log().Infof(ctx, "[Workspace] ManualApplyDelivery: taskID=%d workspace=%s", taskID, ws.WorkspacePath)
+	return nil
+}
+
 // --- git 命令封装 ---
 
 // isGitRepo 检查目录是否是 Git 仓库。
@@ -678,14 +738,21 @@ func syncWorktreeCommit(ctx context.Context, mainWorkDir, worktreePath string, t
 	}
 	if len(dirtyFiles) == 0 {
 		if err := gitCherryPick(mainWorkDir, commitHash); err != nil {
-			return fmt.Errorf("cherry-pick 到主工作区失败: %w", err)
+			g.Log().Warningf(ctx, "[Workspace] cherry-pick 失败，降级为文件同步: taskID=%d commit=%s err=%v", taskID, commitHash, err)
+		} else {
+			g.Log().Infof(ctx, "[Workspace] SyncBack: taskID=%d commit=%s mode=cherry-pick", taskID, commitHash)
+			return nil
 		}
-		g.Log().Infof(ctx, "[Workspace] SyncBack: taskID=%d commit=%s mode=cherry-pick", taskID, commitHash)
-		return nil
 	}
 
 	if err := syncChangedFilesToMain(mainWorkDir, worktreePath, changedFiles, dirtyFiles); err != nil {
 		return err
+	}
+
+	if len(dirtyFiles) == 0 {
+		if err := commitSyncedFilesToMain(mainWorkDir, taskID); err != nil {
+			return err
+		}
 	}
 
 	g.Log().Infof(ctx, "[Workspace] SyncBack: taskID=%d commit=%s mode=copy", taskID, commitHash)
@@ -871,6 +938,25 @@ func syncChangedFilesToMain(mainWorkDir, worktreePath string, changedFiles []git
 		if err := copyFile(srcPath, dstPath, srcInfo.Mode()); err != nil {
 			return fmt.Errorf("同步文件失败: %s: %w", file.NewPath, err)
 		}
+	}
+	return nil
+}
+
+func commitSyncedFilesToMain(mainWorkDir string, taskID int64) error {
+	if err := gitAddAll(mainWorkDir); err != nil {
+		return fmt.Errorf("暂存主工作区同步结果失败: %w", err)
+	}
+	hasChanges, err := gitHasStagedChanges(mainWorkDir)
+	if err != nil {
+		return fmt.Errorf("检查主工作区同步结果失败: %w", err)
+	}
+	if !hasChanges {
+		return nil
+	}
+
+	commitMessage := fmt.Sprintf("mvp task %d: apply workspace changes", taskID)
+	if err := gitCommit(mainWorkDir, commitMessage); err != nil {
+		return fmt.Errorf("提交主工作区同步结果失败: %w", err)
 	}
 	return nil
 }

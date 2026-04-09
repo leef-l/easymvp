@@ -240,9 +240,9 @@ func classifyTaskRisk(profile *taskDeliveryProfile) string {
 		}
 	}
 
-	if len(profile.AffectedResources) <= 2 {
+	if len(profile.AffectedResources) <= 3 {
 		switch profile.ExecutionMode {
-		case "aider", "claude_code", "codex_cli", "gemini_cli":
+		case "auto", "aider", "claude_code", "codex_cli", "gemini_cli":
 			return RiskLevelLow
 		}
 	}

@@ -598,6 +598,33 @@ type WorkflowDeliveryReviewsRes struct {
 	Items  []DeliveryReviewItem `json:"items"`
 }
 
+// WorkflowDeliveryApplyReq 人工确认并回写交付结果请求
+type WorkflowDeliveryApplyReq struct {
+	g.Meta    `path:"/workflow/delivery-apply" method:"post" tags:"项目流程" summary:"人工确认并回写交付结果"`
+	ProjectID snowflake.JsonInt64   `json:"projectID" v:"required" dc:"项目ID"`
+	TaskIDs   []snowflake.JsonInt64 `json:"taskIDs" dc:"待回写任务ID列表；为空时默认处理全部 pending 交付"`
+	Reason    string                `json:"reason" dc:"人工确认说明"`
+}
+
+// DeliveryApplyItem 交付回写结果项
+type DeliveryApplyItem struct {
+	WorkspaceID    snowflake.JsonInt64 `json:"workspaceID"`
+	TaskID         snowflake.JsonInt64 `json:"taskID"`
+	TaskName       string              `json:"taskName"`
+	Status         string              `json:"status"`
+	Message        string              `json:"message,omitempty"`
+	DeliveryStatus string              `json:"deliveryStatus,omitempty"`
+	SyncStatus     string              `json:"syncStatus,omitempty"`
+}
+
+// WorkflowDeliveryApplyRes 人工确认并回写交付结果响应
+type WorkflowDeliveryApplyRes struct {
+	g.Meta       `mime:"application/json"`
+	AppliedCount int                 `json:"appliedCount"`
+	FailedCount  int                 `json:"failedCount"`
+	Items        []DeliveryApplyItem `json:"items"`
+}
+
 // WorkflowTaskReplayReq 任务执行回放请求
 type WorkflowTaskReplayReq struct {
 	g.Meta    `path:"/workflow/task-replay" method:"get" tags:"项目流程" summary:"任务执行回放"`

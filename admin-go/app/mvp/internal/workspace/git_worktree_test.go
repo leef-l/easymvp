@@ -108,6 +108,60 @@ func TestSyncWorktreeCommitFallsBackWhenMainHasUnrelatedDirtyChanges(t *testing.
 	}
 }
 
+func TestSyncWorktreeCommitFallsBackToCopyOnCherryPickConflict(t *testing.T) {
+	mainDir := t.TempDir()
+	runGit(t, mainDir, "init")
+	runGit(t, mainDir, "config", "user.name", "Test User")
+	runGit(t, mainDir, "config", "user.email", "test@example.com")
+
+	targetPath := filepath.Join(mainDir, "shared.txt")
+	if err := os.WriteFile(targetPath, []byte("base\n"), 0644); err != nil {
+		t.Fatalf("write shared file: %v", err)
+	}
+	runGit(t, mainDir, "add", "shared.txt")
+	runGit(t, mainDir, "commit", "-m", "init")
+
+	worktreeA := filepath.Join(mainDir, ".mvp-worktrees", "task-11")
+	worktreeB := filepath.Join(mainDir, ".mvp-worktrees", "task-12")
+	if err := os.MkdirAll(filepath.Dir(worktreeA), 0755); err != nil {
+		t.Fatalf("mkdir worktree parent: %v", err)
+	}
+	runGit(t, mainDir, "worktree", "add", "-b", "mvp-task-11", worktreeA, "HEAD")
+	runGit(t, mainDir, "worktree", "add", "-b", "mvp-task-12", worktreeB, "HEAD")
+
+	if err := os.WriteFile(filepath.Join(worktreeA, "shared.txt"), []byte("first\n"), 0644); err != nil {
+		t.Fatalf("write worktreeA file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreeB, "shared.txt"), []byte("second\n"), 0644); err != nil {
+		t.Fatalf("write worktreeB file: %v", err)
+	}
+
+	if err := syncWorktreeCommit(context.Background(), mainDir, worktreeA, 11); err != nil {
+		t.Fatalf("syncWorktreeCommit(worktreeA) error = %v", err)
+	}
+	if err := syncWorktreeCommit(context.Background(), mainDir, worktreeB, 12); err != nil {
+		t.Fatalf("syncWorktreeCommit(worktreeB) error = %v", err)
+	}
+
+	content, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("read synced file: %v", err)
+	}
+	if got := string(content); got != "second\n" {
+		t.Fatalf("shared.txt content = %q", got)
+	}
+
+	status := runGit(t, mainDir, "status", "--short")
+	if strings.TrimSpace(status) != "" {
+		t.Fatalf("expected clean main worktree after fallback commit, got %q", status)
+	}
+
+	logOutput := runGit(t, mainDir, "log", "--oneline", "-1")
+	if !strings.Contains(logOutput, "mvp task 12: apply workspace changes") {
+		t.Fatalf("unexpected latest commit after fallback: %q", logOutput)
+	}
+}
+
 func TestValidateSyncBackPathsRejectsSuspiciousFile(t *testing.T) {
 	changedFiles := []gitChangedFile{
 		{Status: "A", NewPath: "运行方式："},
