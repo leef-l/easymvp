@@ -55,6 +55,32 @@ func TestValidateMarksSuspiciousTitleLikePath(t *testing.T) {
 	}
 }
 
+func TestValidateFromSubdirStillSeesRepoRootSuspiciousPath(t *testing.T) {
+	t.Parallel()
+
+	repoDir := initGitRepo(t)
+	workDir := filepath.Join(repoDir, "frontend", "src", "components")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir frontend src components: %v", err)
+	}
+
+	snapshot, err := Capture(context.Background(), workDir)
+	if err != nil {
+		t.Fatalf("capture snapshot: %v", err)
+	}
+
+	writeFile(t, repoDir, "运行方式：", "bad\n")
+
+	result, err := snapshot.Validate(context.Background(), workDir, []string{"frontend/e2e/snake.spec.ts"})
+	if err != nil {
+		t.Fatalf("validate snapshot: %v", err)
+	}
+
+	if len(result.Suspicious) != 1 || result.Suspicious[0] != "运行方式：" {
+		t.Fatalf("expected repo-root suspicious path to be flagged from subdir validate, got %#v", result.Suspicious)
+	}
+}
+
 func TestIsSuspiciousPathRejectsColonTitles(t *testing.T) {
 	t.Parallel()
 
@@ -159,6 +185,28 @@ func TestPruneEmbeddedAllowedDuplicatesRemovesRepeatedAncestorPath(t *testing.T)
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, "frontend/src/components/ControlPanel/ControlPanel.tsx")); err != nil {
 		t.Fatalf("expected allowed path to remain, stat err=%v", err)
+	}
+}
+
+func TestPruneSuspiciousDeltaPathsRemovesTitleFiles(t *testing.T) {
+	t.Parallel()
+
+	repoDir := initGitRepo(t)
+	workDir := filepath.Join(repoDir, "frontend")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir frontend: %v", err)
+	}
+	writeFile(t, repoDir, "运行方式：", "bad\n")
+
+	pruned, err := PruneSuspiciousDeltaPaths(workDir, []string{"运行方式："})
+	if err != nil {
+		t.Fatalf("PruneSuspiciousDeltaPaths() error = %v", err)
+	}
+	if len(pruned) != 1 || pruned[0] != "运行方式：" {
+		t.Fatalf("unexpected pruned paths: %#v", pruned)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "运行方式：")); !os.IsNotExist(err) {
+		t.Fatalf("expected suspicious title file to be removed, stat err=%v", err)
 	}
 }
 

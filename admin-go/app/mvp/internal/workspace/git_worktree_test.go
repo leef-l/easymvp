@@ -108,6 +108,36 @@ func TestSyncWorktreeCommitFallsBackWhenMainHasUnrelatedDirtyChanges(t *testing.
 	}
 }
 
+func TestValidateSyncBackPathsRejectsSuspiciousFile(t *testing.T) {
+	changedFiles := []gitChangedFile{
+		{Status: "A", NewPath: "运行方式："},
+		{Status: "A", NewPath: "frontend/e2e/snake.spec.ts"},
+	}
+
+	err := validateSyncBackPaths(changedFiles, []string{"frontend/e2e/snake.spec.ts", "frontend/playwright.config.ts"})
+	if err == nil {
+		t.Fatal("expected suspicious syncBack path to be rejected")
+	}
+	if !strings.Contains(err.Error(), "检测到可疑文件: 运行方式：") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateSyncBackPathsRejectsOutOfScopeFile(t *testing.T) {
+	changedFiles := []gitChangedFile{
+		{Status: "A", NewPath: "frontend/e2e/snake.spec.ts"},
+		{Status: "A", NewPath: "frontend/extra.md"},
+	}
+
+	err := validateSyncBackPaths(changedFiles, []string{"frontend/e2e/snake.spec.ts", "frontend/playwright.config.ts"})
+	if err == nil {
+		t.Fatal("expected out-of-scope syncBack path to be rejected")
+	}
+	if !strings.Contains(err.Error(), "检测到越界修改: frontend/extra.md") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestEnsureRepositoryBaselineCreatesInitialCommitForEmptyRepo(t *testing.T) {
 	mainDir := t.TempDir()
 	runGit(t, mainDir, "init")

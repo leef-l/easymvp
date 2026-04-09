@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -15,6 +17,7 @@ import (
 
 	"easymvp/app/mvp/internal/workflow/event"
 	"easymvp/utility/snowflake"
+	"easymvp/utility/worktreeguard"
 )
 
 const worktreeDir = ".mvp-worktrees"
@@ -656,6 +659,19 @@ func syncWorktreeCommit(ctx context.Context, mainWorkDir, worktreePath string, t
 		return fmt.Errorf("读取 worktree 提交失败: %w", err)
 	}
 
+	changedFiles, err := gitChangedFiles(worktreePath, commitHash)
+	if err != nil {
+		return fmt.Errorf("读取 worktree 变更文件失败: %w", err)
+	}
+	allowPaths, err := loadTaskAllowedPaths(ctx, taskID)
+	if err != nil {
+		g.Log().Warningf(ctx, "[Workspace] 读取任务允许路径失败，退化为仅校验可疑文件: taskID=%d err=%v", taskID, err)
+		allowPaths = nil
+	}
+	if err := validateSyncBackPaths(changedFiles, allowPaths); err != nil {
+		return err
+	}
+
 	dirtyFiles, err := listDirtyMainWorktreeFiles(mainWorkDir)
 	if err != nil {
 		return err
@@ -668,10 +684,6 @@ func syncWorktreeCommit(ctx context.Context, mainWorkDir, worktreePath string, t
 		return nil
 	}
 
-	changedFiles, err := gitChangedFiles(worktreePath, commitHash)
-	if err != nil {
-		return fmt.Errorf("读取 worktree 变更文件失败: %w", err)
-	}
 	if err := syncChangedFilesToMain(mainWorkDir, worktreePath, changedFiles, dirtyFiles); err != nil {
 		return err
 	}
@@ -861,6 +873,108 @@ func syncChangedFilesToMain(mainWorkDir, worktreePath string, changedFiles []git
 		}
 	}
 	return nil
+}
+
+func loadTaskAllowedPaths(ctx context.Context, taskID int64) (_ []string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("读取任务允许路径 panic: %v", r)
+		}
+	}()
+
+	record, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		Where("id", taskID).
+		WhereNull("deleted_at").
+		Fields("affected_resources").
+		One()
+	if err != nil {
+		return nil, err
+	}
+	if record.IsEmpty() {
+		return nil, nil
+	}
+
+	raw := strings.TrimSpace(record["affected_resources"].String())
+	if raw == "" || raw == "null" {
+		return nil, nil
+	}
+
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil, err
+	}
+	normalized, _ := worktreeguard.NormalizeRelativePaths(values)
+	return normalized, nil
+}
+
+func validateSyncBackPaths(changedFiles []gitChangedFile, allowPaths []string) error {
+	allowSet := make(map[string]struct{}, len(allowPaths))
+	for _, allowPath := range allowPaths {
+		allowSet[allowPath] = struct{}{}
+	}
+
+	var invalid []string
+	var suspicious []string
+	seenInvalid := map[string]struct{}{}
+	seenSuspicious := map[string]struct{}{}
+
+	for _, item := range changedFiles {
+		for _, filePath := range changedFileTargets(item) {
+			filePath = path.Clean(strings.ReplaceAll(strings.TrimSpace(filePath), "\\", "/"))
+			if filePath == "" || filePath == "." {
+				continue
+			}
+			if worktreeguard.IsSuspiciousPath(filePath) {
+				if _, exists := seenSuspicious[filePath]; !exists {
+					seenSuspicious[filePath] = struct{}{}
+					suspicious = append(suspicious, filePath)
+				}
+				continue
+			}
+			if len(allowSet) > 0 && !isAllowedSyncBackPath(filePath, allowSet) {
+				if _, exists := seenInvalid[filePath]; !exists {
+					seenInvalid[filePath] = struct{}{}
+					invalid = append(invalid, filePath)
+				}
+			}
+		}
+	}
+
+	if len(suspicious) == 0 && len(invalid) == 0 {
+		return nil
+	}
+
+	sort.Strings(suspicious)
+	sort.Strings(invalid)
+
+	var issues []string
+	if len(suspicious) > 0 {
+		issues = append(issues, "检测到可疑文件: "+strings.Join(suspicious, ", "))
+	}
+	if len(invalid) > 0 {
+		issues = append(issues, "检测到越界修改: "+strings.Join(invalid, ", "))
+	}
+	return fmt.Errorf("syncBack 校验失败: %s", strings.Join(issues, "；"))
+}
+
+func changedFileTargets(item gitChangedFile) []string {
+	targets := make([]string, 0, 2)
+	if strings.TrimSpace(item.OldPath) != "" {
+		targets = append(targets, item.OldPath)
+	}
+	if strings.TrimSpace(item.NewPath) != "" {
+		targets = append(targets, item.NewPath)
+	}
+	return targets
+}
+
+func isAllowedSyncBackPath(filePath string, allowSet map[string]struct{}) bool {
+	for allowPath := range allowSet {
+		if filePath == allowPath || strings.HasPrefix(filePath, allowPath+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func copyFile(srcPath, dstPath string, mode os.FileMode) error {

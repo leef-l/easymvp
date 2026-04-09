@@ -471,6 +471,18 @@ func (r *AiderRunner) RunTask(ctx context.Context, projectID int64, taskID int64
 		g.Log().Warningf(ctx, "[AiderRunner] 校验 git 变更失败: %v", err)
 		return result
 	}
+	if len(validation.Suspicious) > 0 {
+		if pruned, pruneErr := worktreeguard.PruneSuspiciousDeltaPaths(workDir, validation.Suspicious); pruneErr != nil {
+			g.Log().Warningf(ctx, "[AiderRunner] 清理可疑标题文件失败: %v", pruneErr)
+		} else if len(pruned) > 0 {
+			g.Log().Infof(ctx, "[AiderRunner] 已清理可疑标题文件: %v", pruned)
+			validation, err = snapshot.Validate(ctx, workDir, cfg.AllowPaths)
+			if err != nil {
+				g.Log().Warningf(ctx, "[AiderRunner] 清理后重新校验 git 变更失败: %v", err)
+				return result
+			}
+		}
+	}
 	if validation.HasIssues() {
 		summary := validation.Summary()
 		if summary == "" {

@@ -42,7 +42,8 @@ func Capture(ctx context.Context, workDir string) (*Snapshot, error) {
 		return &Snapshot{}, nil
 	}
 
-	paths, err := readGitStatus(ctx, workDir)
+	rootDir := strings.TrimSpace(string(output))
+	paths, err := readGitStatus(ctx, rootDir)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +61,7 @@ func (s *Snapshot) Validate(ctx context.Context, workDir string, allowPaths []st
 		return result, nil
 	}
 
-	currentPaths, err := readGitStatus(ctx, workDir)
+	currentPaths, err := readGitStatus(ctx, ResolveRepoRoot(workDir))
 	if err != nil {
 		return nil, err
 	}
@@ -133,6 +134,30 @@ func PruneEmbeddedAllowedDuplicates(ctx context.Context, workDir string, allowPa
 			return pruned, err
 		}
 		pruned = append(pruned, currentPath)
+	}
+	sort.Strings(pruned)
+	return pruned, nil
+}
+
+func PruneSuspiciousDeltaPaths(workDir string, suspicious []string) ([]string, error) {
+	baseDir := ResolveRepoRoot(workDir)
+	var pruned []string
+	for _, currentPath := range suspicious {
+		currentPath = strings.TrimSpace(strings.ReplaceAll(currentPath, "\\", "/"))
+		if currentPath == "" || !IsSuspiciousPath(currentPath) {
+			continue
+		}
+
+		cleanPath := path.Clean(currentPath)
+		if cleanPath == "." || cleanPath == "" || cleanPath == ".." || strings.HasPrefix(cleanPath, "../") || strings.HasPrefix(cleanPath, "/") {
+			continue
+		}
+
+		absPath := filepath.Join(baseDir, filepath.FromSlash(cleanPath))
+		if err := os.RemoveAll(absPath); err != nil && !os.IsNotExist(err) {
+			return pruned, err
+		}
+		pruned = append(pruned, cleanPath)
 	}
 	sort.Strings(pruned)
 	return pruned, nil
