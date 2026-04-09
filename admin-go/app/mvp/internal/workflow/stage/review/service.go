@@ -35,6 +35,12 @@ type Service struct {
 	executeTriggerFn ExecuteTriggerFn
 }
 
+type reviewConclusion struct {
+	passed            bool
+	summary           string
+	blockedByWarnings bool
+}
+
 // NewService 创建审核阶段服务。
 func NewService(sc StageCompleter, ir *repo.ReviewIssueRepo) *Service {
 	return &Service{stageCompleter: sc, issueRepo: ir}
@@ -369,11 +375,15 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 		g.Log().Warningf(ctx, "[ReviewService] 查询 warning 数失败: stageRun=%d err=%v", stageRunID, wcErr)
 	}
 
+	conclusion := finalizeReviewConclusion(passed, warningCount, summary)
+
 	outputPayload := g.Map{
-		"passed":        passed,
-		"summary":       summary,
-		"error_count":   errorCount,
-		"warning_count": warningCount,
+		"passed":              conclusion.passed,
+		"requested_passed":    passed,
+		"summary":             conclusion.summary,
+		"error_count":         errorCount,
+		"warning_count":       warningCount,
+		"blocked_by_warnings": conclusion.blockedByWarnings,
 	}
 	outputJSON, marshalErr := json.Marshal(outputPayload)
 	if marshalErr != nil {
@@ -392,7 +402,7 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 		g.Log().Errorf(ctx, "[ReviewService] 更新 stage_task 状态失败: stageTask=%d err=%v", stageTaskID, stErr)
 	}
 
-	if passed {
+	if conclusion.passed {
 		// 审核通过：更新 plan_version review_status
 		if _, pvErr := g.DB().Model("mvp_plan_version").Ctx(ctx).
 			Where("id", planVersionID).
@@ -493,7 +503,7 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 		}
 
 		// 标记 review stage 失败（仅标记 stage_run，不级联终止 workflow）
-		s.stageCompleter.FailStageOnly(ctx, stageRunID, summary)
+		s.stageCompleter.FailStageOnly(ctx, stageRunID, conclusion.summary)
 
 		// 回退到 design 阶段（StartStage("design") 会同时更新 workflow_run.status 和 project.status）
 		designRollbackOK := false
@@ -525,13 +535,33 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 		}
 
 		// 通知架构师对话
-		notifyMsg := s.buildRejectNotification(ctx, stageRunID, summary)
+		notifyMsg := s.buildRejectNotification(ctx, stageRunID, conclusion.summary)
 		engine.NotifyProjectArchitectConversation(ctx, projectID, notifyMsg)
 
-		g.Log().Infof(ctx, "[ReviewStage] 审核不通过 planVersionID=%d reason=%s designRollbackOK=%v", planVersionID, summary, designRollbackOK)
+		g.Log().Infof(ctx, "[ReviewStage] 审核不通过 planVersionID=%d reason=%s designRollbackOK=%v", planVersionID, conclusion.summary, designRollbackOK)
 	}
 
 	return nil
+}
+
+func finalizeReviewConclusion(passed bool, warningCount int, summary string) reviewConclusion {
+	if !passed {
+		return reviewConclusion{
+			passed:  false,
+			summary: summary,
+		}
+	}
+	if warningCount > 0 {
+		return reviewConclusion{
+			passed:            false,
+			summary:           fmt.Sprintf("审核发现 %d 条警告，需全部修复后才能进入执行阶段", warningCount),
+			blockedByWarnings: true,
+		}
+	}
+	return reviewConclusion{
+		passed:  true,
+		summary: summary,
+	}
 }
 
 // DesignRollbackFn 回退到 design 阶段的回调。
@@ -589,7 +619,7 @@ func (s *Service) buildRejectNotification(ctx context.Context, stageRunID int64,
 	}
 
 	if len(warnings) > 0 {
-		msg += "### 警告（建议修复）\n"
+		msg += "### 警告（当前会阻塞执行，必须修复）\n"
 		for i, issue := range warnings {
 			taskRef := ""
 			if tn := issue["task_name"].String(); tn != "" {
@@ -620,7 +650,10 @@ func (s *Service) buildRejectNotification(ctx context.Context, stageRunID int64,
 		}
 	}
 
-	msg += "请根据以上反馈修改方案后重新确认。"
+	msg += "请逐条处理以上问题，重新给出修订结果。"
+	msg += "\n\n如果是整体重排方案，请直接输出完整 JSON：{\"tasks\": [...]}，系统会自动解析为新的方案版本。"
+	msg += "\n如果只是修正个别任务，请输出局部修订 JSON：{\"task_patches\": [{\"task_name\": \"原任务名\", \"description\": \"修订后的描述\", \"affected_resources\": [\"路径\"], \"depends_on\": [\"依赖任务名\"], \"reason\": \"修订原因\"}]}"
+	msg += "\n如果内容太长，可以拆成多段发送；每一段都请输出独立合法 JSON。若你还有后续分段，请在当前消息最后单独追加一行 [AUTO_CONTINUE_NEXT]，系统才会自动继续索取下一段；最后一段不要追加该标记。"
 	return msg
 }
 

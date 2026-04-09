@@ -157,6 +157,92 @@ func TestEnsureRepositoryBaselineKeepsExistingHead(t *testing.T) {
 	}
 }
 
+func TestGitDiffStatIncludesUntrackedFiles(t *testing.T) {
+	mainDir := t.TempDir()
+	runGit(t, mainDir, "init")
+	runGit(t, mainDir, "config", "user.name", "Test User")
+	runGit(t, mainDir, "config", "user.email", "test@example.com")
+
+	if err := os.WriteFile(filepath.Join(mainDir, "README.md"), []byte("hello\n"), 0644); err != nil {
+		t.Fatalf("write initial file: %v", err)
+	}
+	runGit(t, mainDir, "add", "README.md")
+	runGit(t, mainDir, "commit", "-m", "init")
+
+	worktreePath := filepath.Join(mainDir, ".mvp-worktrees", "task-3")
+	if err := os.MkdirAll(filepath.Dir(worktreePath), 0755); err != nil {
+		t.Fatalf("mkdir worktree parent: %v", err)
+	}
+	runGit(t, mainDir, "worktree", "add", "-b", "mvp-task-3", worktreePath, "HEAD")
+
+	if err := os.WriteFile(filepath.Join(worktreePath, "README.md"), []byte("hello stat\n"), 0644); err != nil {
+		t.Fatalf("update tracked file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "new.txt"), []byte("new\n"), 0644); err != nil {
+		t.Fatalf("create untracked file: %v", err)
+	}
+
+	diffStat, err := gitDiffStat(worktreePath)
+	if err != nil {
+		t.Fatalf("gitDiffStat() error = %v", err)
+	}
+	if !strings.Contains(diffStat, "README.md") {
+		t.Fatalf("diffStat missing tracked file: %q", diffStat)
+	}
+	if !strings.Contains(diffStat, "new.txt") {
+		t.Fatalf("diffStat missing untracked file: %q", diffStat)
+	}
+}
+
+func TestGitDiffPatchIncludesUntrackedFiles(t *testing.T) {
+	mainDir := t.TempDir()
+	runGit(t, mainDir, "init")
+	runGit(t, mainDir, "config", "user.name", "Test User")
+	runGit(t, mainDir, "config", "user.email", "test@example.com")
+
+	if err := os.WriteFile(filepath.Join(mainDir, "README.md"), []byte("hello\n"), 0644); err != nil {
+		t.Fatalf("write initial file: %v", err)
+	}
+	runGit(t, mainDir, "add", "README.md")
+	runGit(t, mainDir, "commit", "-m", "init")
+
+	worktreePath := filepath.Join(mainDir, ".mvp-worktrees", "task-4")
+	if err := os.MkdirAll(filepath.Dir(worktreePath), 0755); err != nil {
+		t.Fatalf("mkdir worktree parent: %v", err)
+	}
+	runGit(t, mainDir, "worktree", "add", "-b", "mvp-task-4", worktreePath, "HEAD")
+
+	if err := os.WriteFile(filepath.Join(worktreePath, "README.md"), []byte("hello patch\n"), 0644); err != nil {
+		t.Fatalf("update tracked file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "new.txt"), []byte("new\n"), 0644); err != nil {
+		t.Fatalf("create untracked file: %v", err)
+	}
+
+	patchContent, hasPatch, err := gitDiffPatch(worktreePath)
+	if err != nil {
+		t.Fatalf("gitDiffPatch() error = %v", err)
+	}
+	if !hasPatch {
+		t.Fatal("expected patch content")
+	}
+	if !strings.Contains(patchContent, "diff --git a/README.md b/README.md") {
+		t.Fatalf("patch missing tracked file diff: %q", patchContent)
+	}
+	if !strings.Contains(patchContent, "diff --git a/new.txt b/new.txt") {
+		t.Fatalf("patch missing untracked file diff: %q", patchContent)
+	}
+}
+
+func TestResolveMainWorkDir(t *testing.T) {
+	t.Parallel()
+
+	worktreePath := filepath.Join("/tmp/demo", ".mvp-worktrees", "task-42")
+	if got := resolveMainWorkDir(worktreePath); got != filepath.Join("/tmp/demo") {
+		t.Fatalf("resolveMainWorkDir() = %q", got)
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)

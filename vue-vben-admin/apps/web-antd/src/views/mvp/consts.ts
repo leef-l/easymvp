@@ -175,6 +175,14 @@ export const stageTypeMap: Record<string, { label: string; color: string }> = {
   complete: { label: '完成', color: 'default' },
 };
 
+/** 阶段运行状态映射 */
+export const stageRunStatusMap: Record<string, { label: string; color: string }> = {
+  pending: { label: '待启动', color: 'default' },
+  running: { label: '进行中', color: 'processing' },
+  completed: { label: '已完成', color: 'success' },
+  failed: { label: '失败', color: 'error' },
+};
+
 // ==================== 执行方式 ====================
 
 /** 执行方式选项 */

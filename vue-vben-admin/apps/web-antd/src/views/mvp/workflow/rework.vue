@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
@@ -71,7 +71,22 @@ async function loadData() {
   }
 }
 
-onMounted(loadData);
+function resetReworkState() {
+  hasRework.value = false;
+  reworkRounds.value = 0;
+  currentStage.value = null;
+  history.value = [];
+}
+
+watch(
+  resolvedProjectId,
+  (value) => {
+    resetReworkState();
+    if (!value) return;
+    loadData();
+  },
+  { immediate: true },
+);
 </script>
 
 <template>

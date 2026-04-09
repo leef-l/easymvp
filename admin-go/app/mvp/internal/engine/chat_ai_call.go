@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"easymvp/app/mvp/internal/activity"
+	"easymvp/app/mvp/internal/consts"
 	"easymvp/utility/provider"
 )
 
@@ -181,6 +182,14 @@ func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *M
 		g.Log().Errorf(ctx, "更新消息状态失败: %v", updateErr)
 	}
 
+	if architectReplyRequestsContinuation(fullContent.String()) {
+		if e.shouldAutoContinueArchitectReply(ctx, conversationID) {
+			e.autoContinueArchitectReply(ctx, conversationID)
+		}
+	} else {
+		e.tryParseArchitectTasks(conversationID, replyID, fullContent.String())
+	}
+
 	// 6. 通知 SSE Hub 流式输出完成
 	doneJSON, dErr := json.Marshal(map[string]interface{}{
 		"done": true,
@@ -209,7 +218,7 @@ func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *M
 var feishuNotifyAIReply = func(ctx context.Context, conversationID int64, content string) {}
 
 // tryParseArchitectTasks 尝试从架构师回复中解析任务清单
-func (e *ChatEngine) tryParseArchitectTasks(conversationID int64, aiReply string) {
+func (e *ChatEngine) tryParseArchitectTasks(conversationID, messageID int64, aiReply string) {
 	ctx := context.Background()
 
 	// 查对话的角色类型和项目ID
@@ -224,6 +233,12 @@ func (e *ChatEngine) tryParseArchitectTasks(conversationID int64, aiReply string
 	}
 
 	projectID := conv["project_id"].Int64()
+	replyForParse := aiReply
+	if combinedReply, windowErr := collectArchitectReplyWindow(ctx, conversationID); windowErr != nil {
+		g.Log().Warningf(ctx, "[ChatEngine] 汇总架构师回复窗口失败: conversationID=%d err=%v", conversationID, windowErr)
+	} else if strings.TrimSpace(combinedReply) != "" {
+		replyForParse = combinedReply
+	}
 
 	// 判断引擎版本
 	ev, evErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).WhereNull("deleted_at").Value("engine_version")
@@ -231,12 +246,12 @@ func (e *ChatEngine) tryParseArchitectTasks(conversationID int64, aiReply string
 		g.Log().Warningf(ctx, "[ChatEngine] 查询 engine_version 失败: projectID=%d err=%v", projectID, evErr)
 	}
 	if ev.String() == "workflow_v2" {
-		e.tryParseArchitectBlueprints(ctx, projectID, conv["id"].Int64(), conversationID, aiReply)
+		e.tryParseArchitectBlueprints(ctx, projectID, conv["id"].Int64(), messageID, replyForParse)
 		return
 	}
 
 	// Legacy：写入 mvp_task
-	count, err := GetParser().ParseAndCreateTasks(ctx, projectID, aiReply)
+	count, err := GetParser().ParseAndCreateTasks(ctx, projectID, replyForParse)
 	if err != nil {
 		g.Log().Warningf(ctx, "[ChatEngine] 解析任务失败: %v", err)
 		return
@@ -271,15 +286,10 @@ func (e *ChatEngine) tryParseArchitectBlueprints(ctx context.Context, projectID,
 		g.Log().Warningf(ctx, "[ChatEngine] 查询项目分类失败: projectID=%d err=%v", projectID, pcErr)
 	}
 
-	tasks, err := GetParser().ExtractAndNormalize(ctx, aiReply, projectCategory.String())
-	if err != nil || len(tasks) == 0 {
-		return
-	}
-
 	// 查活跃的 workflow_run
 	wfRun, wfErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
 		Where("project_id", projectID).
-		WhereIn("status", g.Slice{"pending", "running", "paused"}).
+		WhereNotIn("status", g.Slice{consts.WorkflowRunStatusCompleted, consts.WorkflowRunStatusCanceled}).
 		WhereNull("deleted_at").
 		OrderDesc("run_no").
 		One()
@@ -289,6 +299,40 @@ func (e *ChatEngine) tryParseArchitectBlueprints(ctx context.Context, projectID,
 	var wfRunID int64
 	if !wfRun.IsEmpty() {
 		wfRunID = wfRun["id"].Int64()
+	}
+
+	fastPlan, fastErr := GetParser().FastExtract(aiReply)
+	if fastErr == nil && fastPlan != nil && len(fastPlan.Tasks) > 0 {
+		tasks := GetParser().NormalizeTasks(ctx, fastPlan.Tasks, projectCategory.String())
+		pvID, bpCount, createErr := blueprintCreatorFn(ctx, projectID, wfRunID, conversationID, messageID, tasks)
+		if createErr != nil {
+			g.Log().Warningf(ctx, "[ChatEngine] V2 创建蓝图失败: %v", createErr)
+			return
+		}
+		g.Log().Infof(ctx, "[ChatEngine] V2 架构师回复解析出 %d 个蓝图, planVersion=%d, 项目 %d", bpCount, pvID, projectID)
+		return
+	}
+
+	patches, patchErr := extractArchitectTaskPatches(aiReply)
+	if patchErr == nil && len(patches) > 0 {
+		if blueprintPatchApplierFn == nil {
+			g.Log().Warningf(ctx, "[ChatEngine] V2 蓝图 patch 回调未注册，跳过")
+			return
+		}
+		pvID, patchedCount, applyErr := blueprintPatchApplierFn(ctx, projectID, wfRunID, conversationID, messageID, patches)
+		if applyErr != nil {
+			g.Log().Warningf(ctx, "[ChatEngine] V2 应用蓝图修订失败: %v", applyErr)
+			NotifyProjectArchitectConversation(ctx, projectID,
+				fmt.Sprintf("## 方案修订未生效\n\n系统已识别到局部修订 JSON，但未能回写到当前方案：%v\n\n请确认 `task_name` 与现有蓝图名称一致，或直接输出完整 `{\"tasks\": [...]}` 新方案。", applyErr))
+			return
+		}
+		g.Log().Infof(ctx, "[ChatEngine] V2 架构师局部修订已应用 %d 个蓝图, planVersion=%d, 项目 %d", patchedCount, pvID, projectID)
+		return
+	}
+
+	tasks, err := GetParser().ExtractAndNormalize(ctx, aiReply, projectCategory.String())
+	if err != nil || len(tasks) == 0 {
+		return
 	}
 
 	pvID, bpCount, err := blueprintCreatorFn(ctx, projectID, wfRunID, conversationID, messageID, tasks)

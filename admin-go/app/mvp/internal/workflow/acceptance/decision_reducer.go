@@ -12,6 +12,14 @@ import (
 	"easymvp/app/mvp/internal/workflow/repo"
 )
 
+var manualReviewGloballyEnabled = func(ctx context.Context) bool {
+	return engine.GetConfigInt(ctx, "accept.manual_review_enabled", "accept.manualReviewEnabled", 1) == 1
+}
+
+var manualReviewProjectTypeEnabled = func(ctx context.Context, projectType string) bool {
+	return engine.IsFeatureEnabledForProjectType(ctx, "accept.manual_review_project_types", "accept.manualReviewProjectTypes", projectType)
+}
+
 // DecisionReducer 统一裁决归并器。
 // 合并硬规则命中结果与 LLM 质量判断，产出统一决策。
 type DecisionReducer struct {
@@ -68,6 +76,14 @@ func (r *DecisionReducer) Reduce(ctx context.Context, in *AcceptContext, hits []
 		}
 	}
 
+	manualReviewRequired := requiresManualReview(hits)
+	if result.Decision == DecisionPassed && manualReviewRequired {
+		result.Decision = DecisionManualReview
+		if result.Score > 85 {
+			result.Score = 85
+		}
+	}
+
 	// LLM 融合（仅在 judge 可用且硬规则未直接 failed 时触发）
 	var llmSummary string
 	if r.judge != nil && result.Decision != DecisionFailed {
@@ -113,11 +129,14 @@ func (r *DecisionReducer) Reduce(ctx context.Context, in *AcceptContext, hits []
 	if llmSummary != "" {
 		result.Summary += "; LLM评审: " + llmSummary
 	}
+	if manualReviewRequired && result.Decision == DecisionManualReview {
+		result.Summary += "; 交付结果命中人工审核规则"
+	}
 
 	// 灰度：manual_review 未启用或该项目类型未在白名单时，uncertain 自动降级为 passed
 	if result.Decision == DecisionManualReview {
-		globalDisabled := engine.GetConfigInt(ctx, "accept.manual_review_enabled", "accept.manualReviewEnabled", 1) == 0
-		typeDisabled := !engine.IsFeatureEnabledForProjectType(ctx, "accept.manual_review_project_types", "accept.manualReviewProjectTypes", in.ProjectType)
+		globalDisabled := !manualReviewGloballyEnabled(ctx)
+		typeDisabled := !manualReviewProjectTypeEnabled(ctx, in.ProjectType)
 		if globalDisabled || typeDisabled {
 			result.Decision = DecisionPassed
 			result.Summary += " (人工审核已禁用，自动放行)"
@@ -137,30 +156,42 @@ func (r *DecisionReducer) Reduce(ctx context.Context, in *AcceptContext, hits []
 	return result, nil
 }
 
+func requiresManualReview(hits []RuleHit) bool {
+	for _, hit := range hits {
+		if hit.RuleCode == "software.delivery_review_required" {
+			return true
+		}
+	}
+	return false
+}
+
 // persistIssues 将规则命中结果持久化为 accept_issue。
 func (r *DecisionReducer) persistIssues(ctx context.Context, in *AcceptContext, hits []RuleHit) error {
+	if r.issueRepo == nil {
+		return nil
+	}
 	now := gtime.Now()
 	var items []g.Map
 	for _, h := range hits {
 		items = append(items, g.Map{
-			"accept_run_id":   in.AcceptRunID,
-			"workflow_run_id": in.WorkflowRunID,
-			"project_id":      in.ProjectID,
-			"domain_task_id":  h.DomainTaskID,
-			"issue_type":      h.RuleType,
-			"rule_code":       h.RuleCode,
-			"severity":        h.Severity,
-			"title":           h.Title,
-			"detail":          h.Detail,
-			"expected_value":  h.ExpectedValue,
-			"actual_value":    h.ActualValue,
+			"accept_run_id":    in.AcceptRunID,
+			"workflow_run_id":  in.WorkflowRunID,
+			"project_id":       in.ProjectID,
+			"domain_task_id":   h.DomainTaskID,
+			"issue_type":       h.RuleType,
+			"rule_code":        h.RuleCode,
+			"severity":         h.Severity,
+			"title":            h.Title,
+			"detail":           h.Detail,
+			"expected_value":   h.ExpectedValue,
+			"actual_value":     h.ActualValue,
 			"suggested_action": h.SuggestedAction,
-			"resource_ref":    h.ResourceRef,
-			"status":          "open",
-			"created_by":      in.CreatedBy,
-			"dept_id":         in.DeptID,
-			"created_at":      now,
-			"updated_at":      now,
+			"resource_ref":     h.ResourceRef,
+			"status":           "open",
+			"created_by":       in.CreatedBy,
+			"dept_id":          in.DeptID,
+			"created_at":       now,
+			"updated_at":       now,
 		})
 	}
 	return r.issueRepo.BatchCreate(ctx, items)

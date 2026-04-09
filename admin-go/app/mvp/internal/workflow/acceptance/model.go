@@ -16,24 +16,24 @@ type AcceptContext struct {
 
 // RuleHit 规则命中结果。
 type RuleHit struct {
-	RuleCode       string `json:"rule_code"`
-	RuleName       string `json:"rule_name"`
-	RuleType       string `json:"rule_type"`       // artifact/process/quality
-	ScopeType      string `json:"scope_type"`      // project/task/file/stage
-	Severity       string `json:"severity"`         // info/warn/error/blocker
-	Title          string `json:"title"`
-	Detail         string `json:"detail"`
-	ExpectedValue  string `json:"expected_value"`
-	ActualValue    string `json:"actual_value"`
+	RuleCode        string `json:"rule_code"`
+	RuleName        string `json:"rule_name"`
+	RuleType        string `json:"rule_type"`  // artifact/process/quality
+	ScopeType       string `json:"scope_type"` // project/task/file/stage
+	Severity        string `json:"severity"`   // info/warn/error/blocker
+	Title           string `json:"title"`
+	Detail          string `json:"detail"`
+	ExpectedValue   string `json:"expected_value"`
+	ActualValue     string `json:"actual_value"`
 	SuggestedAction string `json:"suggested_action"`
-	DomainTaskID   int64  `json:"domain_task_id,omitempty"`
-	ResourceRef    string `json:"resource_ref,omitempty"`
+	DomainTaskID    int64  `json:"domain_task_id,omitempty"`
+	ResourceRef     string `json:"resource_ref,omitempty"`
 }
 
 // EvidenceItem 证据条目。
 type EvidenceItem struct {
-	EvidenceType string `json:"evidence_type"` // task_output/file/log/diff/stage_output/handoff/summary
-	SourceType   string `json:"source_type"`   // domain_task/stage_run/file/handoff_record/workflow_run
+	EvidenceType string `json:"evidence_type"` // task_output/file/log/diff/delivery/stage_output/handoff/ci/summary
+	SourceType   string `json:"source_type"`   // domain_task/stage_run/file/handoff_record/workflow_run/task_log/project_repo/workspace
 	SourceID     int64  `json:"source_id,omitempty"`
 	ContentRef   string `json:"content_ref,omitempty"`
 	Summary      string `json:"summary"`
@@ -41,9 +41,9 @@ type EvidenceItem struct {
 
 // DecisionResult 最终裁决结果。
 type DecisionResult struct {
-	Decision string  `json:"decision"` // passed/failed/manual_review
-	Score    float64 `json:"score"`
-	Summary  string  `json:"summary"`
+	Decision string    `json:"decision"` // passed/failed/manual_review
+	Score    float64   `json:"score"`
+	Summary  string    `json:"summary"`
 	Issues   []RuleHit `json:"issues,omitempty"`
 }
 

@@ -30,13 +30,16 @@ const (
 	EventReviewDecisionReady = "review.decision_ready"
 
 	// Task 级
-	EventTaskCreated   = "task.created"
-	EventTaskStarted   = "task.started"
-	EventTaskCompleted = "task.completed"
-	EventTaskFailed    = "task.failed"
-	EventTaskEscalated = "task.escalated"
-	EventTaskRetried   = "task.retried"
-	EventTaskSkipped   = "task.skipped"
+	EventTaskCreated          = "task.created"
+	EventTaskStarted          = "task.started"
+	EventTaskCompleted        = "task.completed"
+	EventTaskDeliveryPrepared = "task.delivery_prepared"
+	EventTaskFailed           = "task.failed"
+	EventTaskEscalated        = "task.escalated"
+	EventTaskReviewRequired   = "task.review_required"
+	EventTaskRetried          = "task.retried"
+	EventTaskSkipped          = "task.skipped"
+	EventTaskSyncApplied      = "task.sync_applied"
 
 	// Resource 级
 	EventResourceLocked     = "resource.locked"
@@ -54,10 +57,10 @@ const (
 
 // EntityType 实体类型常量。
 const (
-	EntityWorkflowRun = "workflow_run"
-	EntityStageRun    = "stage_run"
-	EntityPlanVersion = "plan_version"
-	EntityDomainTask  = "domain_task"
+	EntityWorkflowRun     = "workflow_run"
+	EntityStageRun        = "stage_run"
+	EntityPlanVersion     = "plan_version"
+	EntityDomainTask      = "domain_task"
 	EntityReviewIssue     = "review_issue"
 	EntityBlueprint       = "task_blueprint"
 	EntityDecisionAction  = "decision_action"

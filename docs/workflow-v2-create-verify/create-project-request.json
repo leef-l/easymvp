@@ -1,0 +1,8 @@
+{
+  "name": "workflow-v2-create-verify-20260409",
+  "categoryCode": "software_dev",
+  "description": "Workflow V2 create-project real verification on 2026-04-09",
+  "workDir": "/www/wwwroot/project/easymvp/test-workspaces/workflow-v2-create-verify/repo",
+  "engineVersion": "workflow_v2",
+  "selectedRoles": []
+}

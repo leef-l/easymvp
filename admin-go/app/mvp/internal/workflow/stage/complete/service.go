@@ -6,28 +6,31 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 )
 
 // CompletionSummary 项目完成总结。
 type CompletionSummary struct {
-	WorkflowRunID  int64             `json:"workflow_run_id"`
-	ProjectID      int64             `json:"project_id"`
-	TotalTasks     int               `json:"total_tasks"`
-	CompletedTasks int               `json:"completed_tasks"`
-	FailedTasks    int               `json:"failed_tasks"`
-	EscalatedTasks int               `json:"escalated_tasks"`
-	SkippedTasks   int               `json:"skipped_tasks"`
-	SuccessRate    float64           `json:"success_rate"`
-	TotalDuration  string            `json:"total_duration"`
-	AvgTaskDuration string           `json:"avg_task_duration"`
-	StageDurations map[string]string `json:"stage_durations"`
-	ReworkRounds   int               `json:"rework_rounds"`
-	HandoffCount   int               `json:"handoff_count"`
-	StartedAt      string            `json:"started_at"`
-	FinishedAt     string            `json:"finished_at"`
+	WorkflowRunID   int64             `json:"workflow_run_id"`
+	ProjectID       int64             `json:"project_id"`
+	TotalTasks      int               `json:"total_tasks"`
+	CompletedTasks  int               `json:"completed_tasks"`
+	FailedTasks     int               `json:"failed_tasks"`
+	EscalatedTasks  int               `json:"escalated_tasks"`
+	SkippedTasks    int               `json:"skipped_tasks"`
+	SuccessRate     float64           `json:"success_rate"`
+	TotalDuration   string            `json:"total_duration"`
+	AvgTaskDuration string            `json:"avg_task_duration"`
+	StageDurations  map[string]string `json:"stage_durations"`
+	ReworkRounds    int               `json:"rework_rounds"`
+	HandoffCount    int               `json:"handoff_count"`
+	StartedAt       string            `json:"started_at"`
+	FinishedAt      string            `json:"finished_at"`
 }
 
 // Service 完成阶段服务。
@@ -37,6 +40,55 @@ type Service struct{}
 // NewService 创建完成阶段服务。
 func NewService() *Service {
 	return &Service{}
+}
+
+func normalizeDBUTCGTime(value *gtime.Time) *gtime.Time {
+	if value == nil || value.IsZero() {
+		return nil
+	}
+
+	raw := strings.TrimSpace(value.String())
+	switch raw {
+	case "", "0000-00-00 00:00:00":
+		return nil
+	}
+
+	for _, layout := range []string{
+		"2006-01-02 15:04:05.999999",
+		"2006-01-02 15:04:05.999",
+		time.DateTime,
+		time.RFC3339Nano,
+		time.RFC3339,
+	} {
+		if parsed, err := time.ParseInLocation(layout, raw, time.UTC); err == nil {
+			return gtime.NewFromTime(parsed.In(time.Local))
+		}
+	}
+
+	return value
+}
+
+func applyTaskMetricRows(summary *CompletionSummary, rows gdb.Result, skippedCount int) {
+	for _, row := range rows {
+		cnt := row["cnt"].Int()
+		switch row["status"].String() {
+		case "completed":
+			summary.CompletedTasks = cnt
+		case "failed":
+			summary.FailedTasks = cnt
+		case "escalated":
+			summary.EscalatedTasks = cnt
+		case "skipped":
+			summary.SkippedTasks = cnt
+		}
+		summary.TotalTasks += cnt
+	}
+	if skippedCount > summary.SkippedTasks {
+		summary.SkippedTasks = skippedCount
+	}
+	if summary.TotalTasks > 0 {
+		summary.SuccessRate = math.Round(float64(summary.CompletedTasks)/float64(summary.TotalTasks)*10000) / 10000
+	}
 }
 
 // Finalize 执行项目完成流程：收集指标 → 生成总结 → 写入 output_ref。
@@ -104,24 +156,16 @@ func (s *Service) collectTaskMetrics(ctx context.Context, workflowRunID int64, s
 		return err
 	}
 
-	for _, row := range tasks {
-		cnt := row["cnt"].Int()
-		switch row["status"].String() {
-		case "completed":
-			summary.CompletedTasks = cnt
-		case "failed":
-			summary.FailedTasks = cnt
-		case "escalated":
-			summary.EscalatedTasks = cnt
-		case "skipped":
-			summary.SkippedTasks = cnt
-		}
-		summary.TotalTasks += cnt
+	skippedCount, skippedErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		Where("result", "skipped").
+		WhereNull("deleted_at").
+		Count()
+	if skippedErr != nil {
+		return skippedErr
 	}
 
-	if summary.TotalTasks > 0 {
-		summary.SuccessRate = math.Round(float64(summary.CompletedTasks)/float64(summary.TotalTasks)*10000) / 10000
-	}
+	applyTaskMetricRows(summary, tasks, skippedCount)
 
 	// 平均任务耗时
 	avgDur, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
@@ -197,8 +241,8 @@ func (s *Service) collectWorkflowDuration(ctx context.Context, workflowRunID int
 		return
 	}
 
-	startedAt := wfRun["started_at"].GTime()
-	finishedAt := wfRun["finished_at"].GTime()
+	startedAt := normalizeDBUTCGTime(wfRun["started_at"].GTime())
+	finishedAt := normalizeDBUTCGTime(wfRun["finished_at"].GTime())
 
 	if startedAt != nil {
 		summary.StartedAt = startedAt.ISO8601()

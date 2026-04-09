@@ -2,8 +2,13 @@ package acceptance
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
@@ -43,12 +48,28 @@ func (c *EvidenceCollector) Collect(ctx context.Context, in *AcceptContext) ([]E
 	// 3. 收集 handoff_record（返工记录）
 	handoffItems, err := c.collectHandoffs(ctx, in.WorkflowRunID)
 	if err != nil {
-		g.Log().Warningf(ctx, "[EvidenceCollector] 收集交接���录失败: %v", err)
+		g.Log().Warningf(ctx, "[EvidenceCollector] 收集交接记录失败: %v", err)
 	} else {
 		items = append(items, handoffItems...)
 	}
 
-	// 4. 持久化证据
+	// 4. 收集 workspace 交付结果
+	workspaceItems, err := c.collectWorkspaceArtifacts(ctx, in.WorkflowRunID)
+	if err != nil {
+		g.Log().Warningf(ctx, "[EvidenceCollector] 收集 workspace 交付结果失败: %v", err)
+	} else {
+		items = append(items, workspaceItems...)
+	}
+
+	// 5. 收集 CI/构建/静态检查证据
+	ciItems, err := c.collectCIArtifacts(ctx, in)
+	if err != nil {
+		g.Log().Warningf(ctx, "[EvidenceCollector] 收集 CI 证据失败: %v", err)
+	} else {
+		items = append(items, ciItems...)
+	}
+
+	// 6. 持久化证据
 	if len(items) > 0 {
 		now := gtime.Now()
 		var dbItems []g.Map
@@ -65,7 +86,7 @@ func (c *EvidenceCollector) Collect(ctx context.Context, in *AcceptContext) ([]E
 			})
 		}
 		if err := c.evidenceRepo.BatchCreate(ctx, dbItems); err != nil {
-			return items, fmt.Errorf("��久化证据失败: %w", err)
+			return items, fmt.Errorf("持久化证据失败: %w", err)
 		}
 	}
 
@@ -145,4 +166,247 @@ func (c *EvidenceCollector) collectHandoffs(ctx context.Context, workflowRunID i
 		})
 	}
 	return items, nil
+}
+
+func (c *EvidenceCollector) collectWorkspaceArtifacts(ctx context.Context, workflowRunID int64) ([]EvidenceItem, error) {
+	records, err := queryWorkspaceArtifactRecords(ctx, workflowRunID)
+	if err != nil {
+		return nil, err
+	}
+
+	var items []EvidenceItem
+	for _, record := range records {
+		patchRef := record["patch_ref"].String()
+		deliveryRef := record["delivery_ref"].String()
+		diffSummary := record["diff_summary"].String()
+		if patchRef == "" && diffSummary == "" && deliveryRef == "" {
+			continue
+		}
+
+		summary := fmt.Sprintf(
+			"workspace task=%d mode=%s delivery=%s sync=%s",
+			record["task_id"].Int64(),
+			record["delivery_mode"].String(),
+			record["delivery_status"].String(),
+			record["sync_status"].String(),
+		)
+		contentRef := patchRef
+		if contentRef == "" {
+			contentRef = diffSummary
+		}
+
+		if contentRef != "" {
+			items = append(items, EvidenceItem{
+				EvidenceType: "diff",
+				SourceType:   "workspace",
+				SourceID:     record["id"].Int64(),
+				ContentRef:   contentRef,
+				Summary:      summary,
+			})
+		}
+		if deliveryRef != "" {
+			items = append(items, EvidenceItem{
+				EvidenceType: "delivery",
+				SourceType:   "workspace",
+				SourceID:     record["id"].Int64(),
+				ContentRef:   deliveryRef,
+				Summary: fmt.Sprintf(
+					"delivery task=%d mode=%s title=%s",
+					record["task_id"].Int64(),
+					record["delivery_mode"].String(),
+					record["delivery_title"].String(),
+				),
+			})
+		}
+	}
+
+	return items, nil
+}
+
+func queryWorkspaceArtifactRecords(ctx context.Context, workflowRunID int64) (gdb.Result, error) {
+	records, err := g.DB().Model("mvp_task_workspace").Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at").
+		Fields("id, task_id, delivery_mode, delivery_status, sync_status, patch_ref, delivery_ref, delivery_title, diff_summary").
+		OrderAsc("task_id").
+		All()
+	if err == nil || !isUnknownWorkspaceArtifactColumnErr(err) {
+		return records, err
+	}
+
+	if isDeliveryReferenceArtifactColumnErr(err) {
+		records, err = g.DB().Model("mvp_task_workspace").Ctx(ctx).
+			Where("workflow_run_id", workflowRunID).
+			WhereNull("deleted_at").
+			Fields("id, task_id, delivery_mode, delivery_status, sync_status, patch_ref, diff_summary").
+			OrderAsc("task_id").
+			All()
+		if err == nil || !isUnknownWorkspaceArtifactColumnErr(err) {
+			return records, err
+		}
+	}
+
+	return g.DB().Model("mvp_task_workspace").Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at").
+		Fields("id, task_id, diff_summary").
+		OrderAsc("task_id").
+		All()
+}
+
+func isUnknownWorkspaceArtifactColumnErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "unknown column")
+}
+
+func isDeliveryReferenceArtifactColumnErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "delivery_ref") || strings.Contains(msg, "delivery_title")
+}
+
+func (c *EvidenceCollector) collectCIArtifacts(ctx context.Context, in *AcceptContext) ([]EvidenceItem, error) {
+	items := make([]EvidenceItem, 0)
+	items = append(items, collectCIArtifactFiles(in.WorkDir)...)
+
+	logRecords, err := g.DB().Model("mvp_task_log tl").Ctx(ctx).
+		InnerJoin("mvp_domain_task dt", "dt.id = tl.task_id").
+		Where("dt.workflow_run_id", in.WorkflowRunID).
+		WhereNull("tl.deleted_at").
+		WhereNull("dt.deleted_at").
+		Fields("tl.id, tl.task_id, tl.action, tl.message, tl.created_at").
+		OrderDesc("tl.created_at").
+		Limit(200).
+		All()
+	if err != nil {
+		return items, err
+	}
+
+	for _, record := range logRecords {
+		action := record["action"].String()
+		message := record["message"].String()
+		if !isCIRelatedLog(action, message) {
+			continue
+		}
+
+		summary := fmt.Sprintf("[task=%d action=%s] %s", record["task_id"].Int64(), action, trimSummary(message, 160))
+		items = append(items, EvidenceItem{
+			EvidenceType: "ci",
+			SourceType:   "task_log",
+			SourceID:     record["id"].Int64(),
+			ContentRef:   trimSummary(message, 500),
+			Summary:      summary,
+		})
+	}
+
+	return items, nil
+}
+
+func collectCIArtifactFiles(workDir string) []EvidenceItem {
+	if strings.TrimSpace(workDir) == "" {
+		return nil
+	}
+
+	candidates := []string{
+		filepath.Join(workDir, ".easymvp", "ci", "latest.json"),
+		filepath.Join(workDir, ".easymvp", "ci", "latest.log"),
+		filepath.Join(workDir, ".easymvp", "ci", "latest.txt"),
+		filepath.Join(workDir, ".gitlab-ci.yml"),
+		filepath.Join(workDir, "Jenkinsfile"),
+		filepath.Join(workDir, ".circleci", "config.yml"),
+	}
+
+	items := make([]EvidenceItem, 0)
+	for _, path := range candidates {
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		summary := fmt.Sprintf("检测到 CI 文件: %s", filepath.Base(path))
+		if strings.HasSuffix(path, "latest.json") {
+			summary = summarizeCIJSON(path)
+		}
+		items = append(items, EvidenceItem{
+			EvidenceType: "ci",
+			SourceType:   "project_repo",
+			ContentRef:   path,
+			Summary:      summary,
+		})
+	}
+
+	workflowDir := filepath.Join(workDir, ".github", "workflows")
+	if entries, err := os.ReadDir(workflowDir); err == nil {
+		count := 0
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			name := strings.ToLower(entry.Name())
+			if strings.HasSuffix(name, ".yml") || strings.HasSuffix(name, ".yaml") {
+				count++
+			}
+		}
+		if count > 0 {
+			items = append(items, EvidenceItem{
+				EvidenceType: "ci",
+				SourceType:   "project_repo",
+				ContentRef:   workflowDir,
+				Summary:      fmt.Sprintf("检测到 GitHub Actions 工作流 %d 个", count),
+			})
+		}
+	}
+
+	return items
+}
+
+func summarizeCIJSON(path string) string {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "检测到 CI 结果文件 latest.json"
+	}
+
+	var payload map[string]interface{}
+	if json.Unmarshal(content, &payload) != nil {
+		return "检测到 CI 结果文件 latest.json"
+	}
+
+	parts := make([]string, 0, 4)
+	for _, key := range []string{"status", "tool", "pipeline", "summary"} {
+		if value := strings.TrimSpace(g.NewVar(payload[key]).String()); value != "" {
+			parts = append(parts, key+"="+value)
+		}
+	}
+	if len(parts) == 0 {
+		return "检测到 CI 结果文件 latest.json"
+	}
+	return "CI 结果：" + strings.Join(parts, " ")
+}
+
+func isCIRelatedLog(action, message string) bool {
+	text := strings.ToLower(strings.TrimSpace(action + " " + message))
+	if text == "" {
+		return false
+	}
+	keywords := []string{
+		"ci", "build", "compile", "test", "lint", "static check",
+		"单元测试", "构建", "编译", "静态检查", "验收脚本",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(text, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func trimSummary(text string, limit int) string {
+	text = strings.TrimSpace(text)
+	if len(text) <= limit {
+		return text
+	}
+	return text[:limit] + "..."
 }

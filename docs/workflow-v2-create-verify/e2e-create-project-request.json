@@ -1,0 +1,8 @@
+{
+  "name": "workflow-v2-e2e-verify-20260409-rerun",
+  "categoryCode": "software_dev",
+  "description": "Workflow V2 full chain verification rerun after fixes on 2026-04-09",
+  "workDir": "/www/wwwroot/project/easymvp/test-workspaces/workflow-v2-e2e-verify/repo",
+  "engineVersion": "workflow_v2",
+  "selectedRoles": []
+}

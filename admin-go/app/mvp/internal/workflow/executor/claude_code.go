@@ -12,6 +12,7 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 
+	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/workspace"
 )
 
@@ -134,6 +135,7 @@ func (e *ClaudeCodeExecutor) Execute(ctx context.Context, req *Request) *Result 
 			cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+baseURL)
 		}
 	}
+	engine.GetCommandResourcePolicy(ctx).Apply(cmd)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

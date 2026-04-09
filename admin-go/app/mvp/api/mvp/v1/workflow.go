@@ -261,6 +261,34 @@ type SystemCheckItem struct {
 	Link    string `json:"link"` // 前端跳转路径
 }
 
+// WorkflowRegressionScenariosReq 回归样例清单请求
+type WorkflowRegressionScenariosReq struct {
+	g.Meta `path:"/workflow/regression-scenarios" method:"get" tags:"项目流程" summary:"回归样例清单"`
+}
+
+// RegressionScenarioItem 回归样例项
+type RegressionScenarioItem struct {
+	ScenarioCode string   `json:"scenarioCode"`
+	Name         string   `json:"name"`
+	WorkspaceDir string   `json:"workspaceDir"`
+	Status       string   `json:"status"`
+	Goal         string   `json:"goal"`
+	Checkpoints  []string `json:"checkpoints"`
+}
+
+// WorkflowRegressionScenariosRes 回归样例清单响应
+type WorkflowRegressionScenariosRes struct {
+	g.Meta       `mime:"application/json"`
+	Version      int                      `json:"version"`
+	UpdatedAt    string                   `json:"updatedAt"`
+	ManifestPath string                   `json:"manifestPath,omitempty"`
+	ReadyCount   int                      `json:"readyCount"`
+	PlannedCount int                      `json:"plannedCount"`
+	Valid        bool                     `json:"valid"`
+	Message      string                   `json:"message,omitempty"`
+	Scenarios    []RegressionScenarioItem `json:"scenarios"`
+}
+
 // ==================== 项目分类 API ====================
 
 // WorkflowCategoriesReq 获取项目分类列表请求
@@ -360,6 +388,20 @@ type WorkflowManualRejectReq struct {
 // WorkflowManualRejectRes 手动驳回响应
 type WorkflowManualRejectRes struct {
 	g.Meta `mime:"application/json"`
+}
+
+// WorkflowReviewIssueReplanReq 将审核问题转为方案修订请求
+type WorkflowReviewIssueReplanReq struct {
+	g.Meta    `path:"/workflow/review-issue-replan" method:"post" tags:"项目流程" summary:"将审核问题转为方案修订"`
+	ProjectID snowflake.JsonInt64   `json:"projectID" v:"required" dc:"项目ID"`
+	IssueIDs  []snowflake.JsonInt64 `json:"issueIDs" v:"required" dc:"问题ID列表"`
+	Reason    string                `json:"reason" dc:"附加修订原因"`
+}
+
+// WorkflowReviewIssueReplanRes 将审核问题转为方案修订响应
+type WorkflowReviewIssueReplanRes struct {
+	g.Meta  `mime:"application/json"`
+	Message string `json:"message,omitempty"`
 }
 
 // ==================== Timeline / Rework / Stage History ====================
@@ -475,6 +517,131 @@ type WorkflowCompletionSummaryRes struct {
 	FinishedAt      string              `json:"finishedAt"`
 }
 
+// ==================== 项目轨迹 / 任务回放 ====================
+
+// WorkflowProjectTraceReq 项目级轨迹总览请求
+type WorkflowProjectTraceReq struct {
+	g.Meta    `path:"/workflow/project-trace" method:"get" tags:"项目流程" summary:"项目级轨迹总览"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// ProjectTraceStageItem 项目轨迹阶段项
+type ProjectTraceStageItem struct {
+	ID         snowflake.JsonInt64 `json:"id"`
+	StageType  string              `json:"stageType"`
+	StageNo    int                 `json:"stageNo"`
+	Status     string              `json:"status"`
+	StartedAt  *gtime.Time         `json:"startedAt,omitempty"`
+	FinishedAt *gtime.Time         `json:"finishedAt,omitempty"`
+	Error      string              `json:"error,omitempty"`
+}
+
+// WorkflowProjectTraceRes 项目级轨迹总览响应
+type WorkflowProjectTraceRes struct {
+	g.Meta                 `mime:"application/json"`
+	WorkflowRunID          snowflake.JsonInt64     `json:"workflowRunID"`
+	ProjectID              snowflake.JsonInt64     `json:"projectID"`
+	WorkflowStatus         string                  `json:"workflowStatus"`
+	CurrentStage           string                  `json:"currentStage,omitempty"`
+	TotalEvents            int                     `json:"totalEvents"`
+	TotalStages            int                     `json:"totalStages"`
+	TotalTasks             int                     `json:"totalTasks"`
+	ReworkRounds           int                     `json:"reworkRounds"`
+	OpenReviewIssues       int                     `json:"openReviewIssues"`
+	OpenAcceptIssues       int                     `json:"openAcceptIssues"`
+	PendingCheckpoints     int                     `json:"pendingCheckpoints"`
+	PendingActions         int                     `json:"pendingActions"`
+	PendingDeliveryReviews int                     `json:"pendingDeliveryReviews"`
+	HighRiskTasks          int                     `json:"highRiskTasks"`
+	PRDraftTasks           int                     `json:"prDraftTasks"`
+	ManualSyncTasks        int                     `json:"manualSyncTasks"`
+	AcceptDecision         string                  `json:"acceptDecision,omitempty"`
+	AcceptScore            float64                 `json:"acceptScore"`
+	DeliveryModes          map[string]int          `json:"deliveryModes"`
+	SyncStatuses           map[string]int          `json:"syncStatuses"`
+	Stages                 []ProjectTraceStageItem `json:"stages"`
+	RecentEvents           []TimelineEvent         `json:"recentEvents"`
+}
+
+// WorkflowDeliveryReviewsReq 交付闸门明细请求
+type WorkflowDeliveryReviewsReq struct {
+	g.Meta    `path:"/workflow/delivery-reviews" method:"get" tags:"项目流程" summary:"交付闸门明细"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// DeliveryReviewItem 交付闸门明细项
+type DeliveryReviewItem struct {
+	WorkspaceID    snowflake.JsonInt64 `json:"workspaceID"`
+	TaskID         snowflake.JsonInt64 `json:"taskID"`
+	WorkflowRunID  snowflake.JsonInt64 `json:"workflowRunID"`
+	TaskName       string              `json:"taskName"`
+	TaskStatus     string              `json:"taskStatus"`
+	RoleType       string              `json:"roleType"`
+	ExecutionMode  string              `json:"executionMode"`
+	BatchNo        int                 `json:"batchNo"`
+	DeliveryMode   string              `json:"deliveryMode,omitempty"`
+	DeliveryStatus string              `json:"deliveryStatus,omitempty"`
+	SyncStrategy   string              `json:"syncStrategy,omitempty"`
+	SyncStatus     string              `json:"syncStatus,omitempty"`
+	RiskLevel      string              `json:"riskLevel,omitempty"`
+	PatchRef       string              `json:"patchRef,omitempty"`
+	DeliveryRef    string              `json:"deliveryRef,omitempty"`
+	DeliveryTitle  string              `json:"deliveryTitle,omitempty"`
+	DiffSummary    string              `json:"diffSummary,omitempty"`
+	Reasons        []string            `json:"reasons"`
+	UpdatedAt      *gtime.Time         `json:"updatedAt,omitempty"`
+}
+
+// WorkflowDeliveryReviewsRes 交付闸门明细响应
+type WorkflowDeliveryReviewsRes struct {
+	g.Meta `mime:"application/json"`
+	Items  []DeliveryReviewItem `json:"items"`
+}
+
+// WorkflowTaskReplayReq 任务执行回放请求
+type WorkflowTaskReplayReq struct {
+	g.Meta    `path:"/workflow/task-replay" method:"get" tags:"项目流程" summary:"任务执行回放"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	TaskID    snowflake.JsonInt64 `json:"taskID" v:"required" dc:"任务ID"`
+}
+
+// TaskReplayLogItem 任务日志条目
+type TaskReplayLogItem struct {
+	ID         snowflake.JsonInt64 `json:"id"`
+	Action     string              `json:"action"`
+	FromStatus string              `json:"fromStatus,omitempty"`
+	ToStatus   string              `json:"toStatus,omitempty"`
+	Message    string              `json:"message,omitempty"`
+	Operator   string              `json:"operator,omitempty"`
+	CreatedAt  *gtime.Time         `json:"createdAt,omitempty"`
+}
+
+// TaskReplayHandoffItem 任务交接条目
+type TaskReplayHandoffItem struct {
+	ID          snowflake.JsonInt64 `json:"id"`
+	HandoffType string              `json:"handoffType"`
+	FromTaskID  snowflake.JsonInt64 `json:"fromTaskID,omitempty"`
+	ToTaskID    snowflake.JsonInt64 `json:"toTaskID,omitempty"`
+	Reason      string              `json:"reason,omitempty"`
+	Payload     string              `json:"payload,omitempty"`
+	CreatedAt   *gtime.Time         `json:"createdAt,omitempty"`
+}
+
+// WorkflowTaskReplayRes 任务执行回放响应
+type WorkflowTaskReplayRes struct {
+	g.Meta        `mime:"application/json"`
+	WorkflowRunID snowflake.JsonInt64     `json:"workflowRunID"`
+	StageRunID    snowflake.JsonInt64     `json:"stageRunID,omitempty"`
+	StageType     string                  `json:"stageType,omitempty"`
+	Task          DomainTaskItem          `json:"task"`
+	Logs          []TaskReplayLogItem     `json:"logs"`
+	Events        []TimelineEvent         `json:"events"`
+	Issues        []AcceptIssueItem       `json:"issues"`
+	Evidence      []AcceptEvidenceItem    `json:"evidence"`
+	Handoffs      []TaskReplayHandoffItem `json:"handoffs"`
+	Actions       []DecisionActionDTO     `json:"actions"`
+}
+
 // ==================== 执行控制台 ====================
 
 // WorkflowExecutionStatusReq 执行阶段实时状态请求
@@ -517,6 +684,17 @@ type DomainTaskItem struct {
 	ErrorMessage      string              `json:"errorMessage,omitempty"`
 	Result            string              `json:"result,omitempty"`
 	RetryCount        int                 `json:"retryCount"`
+	WorkspaceStatus   string              `json:"workspaceStatus,omitempty"`
+	CleanupStatus     string              `json:"cleanupStatus,omitempty"`
+	DeliveryMode      string              `json:"deliveryMode,omitempty"`
+	DeliveryStatus    string              `json:"deliveryStatus,omitempty"`
+	SyncStrategy      string              `json:"syncStrategy,omitempty"`
+	SyncStatus        string              `json:"syncStatus,omitempty"`
+	RiskLevel         string              `json:"riskLevel,omitempty"`
+	PatchRef          string              `json:"patchRef,omitempty"`
+	DeliveryRef       string              `json:"deliveryRef,omitempty"`
+	DeliveryTitle     string              `json:"deliveryTitle,omitempty"`
+	DiffSummary       string              `json:"diffSummary,omitempty"`
 }
 
 // ResourceLockItem 资源锁详情
@@ -679,6 +857,130 @@ type WorkflowAcceptReworkReq struct {
 // WorkflowAcceptReworkRes 驳回并返工响应
 type WorkflowAcceptReworkRes struct {
 	g.Meta `mime:"application/json"`
+}
+
+// WorkflowAcceptIssueReworkReq 将验收问题转为返工请求
+type WorkflowAcceptIssueReworkReq struct {
+	g.Meta    `path:"/workflow/accept-issue-rework" method:"post" tags:"项目流程" summary:"将验收问题转为返工"`
+	ProjectID snowflake.JsonInt64   `json:"projectID" v:"required" dc:"项目ID"`
+	IssueIDs  []snowflake.JsonInt64 `json:"issueIDs" v:"required" dc:"问题ID列表"`
+	Reason    string                `json:"reason" dc:"附加返工原因"`
+}
+
+// WorkflowAcceptIssueReworkRes 将验收问题转为返工响应
+type WorkflowAcceptIssueReworkRes struct {
+	g.Meta  `mime:"application/json"`
+	Message string `json:"message,omitempty"`
+}
+
+// ==================== 验证修复 API ====================
+
+// WorkflowVerificationStartReq 启动项目验证请求
+type WorkflowVerificationStartReq struct {
+	g.Meta    `path:"/workflow/verification-start" method:"post" tags:"项目流程" summary:"启动项目验证"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	Reason    string              `json:"reason" dc:"启动原因"`
+}
+
+// WorkflowVerificationStartRes 启动项目验证响应
+type WorkflowVerificationStartRes struct {
+	g.Meta            `mime:"application/json"`
+	VerificationRunID snowflake.JsonInt64 `json:"verificationRunID"`
+	WorkflowRunID     snowflake.JsonInt64 `json:"workflowRunID"`
+	Status            string              `json:"status"`
+	Message           string              `json:"message,omitempty"`
+}
+
+// WorkflowVerificationStatusReq 验证状态总览请求
+type WorkflowVerificationStatusReq struct {
+	g.Meta    `path:"/workflow/verification-status" method:"get" tags:"项目流程" summary:"验证状态总览"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// WorkflowVerificationStatusRes 验证状态总览响应
+type WorkflowVerificationStatusRes struct {
+	g.Meta            `mime:"application/json"`
+	VerificationRunID snowflake.JsonInt64 `json:"verificationRunID"`
+	WorkflowRunID     snowflake.JsonInt64 `json:"workflowRunID"`
+	VerificationRound int                 `json:"verificationRound"`
+	Status            string              `json:"status"`
+	Decision          string              `json:"decision"`
+	RunnerType        string              `json:"runnerType,omitempty"`
+	TriggerSource     string              `json:"triggerSource,omitempty"`
+	Summary           string              `json:"summary"`
+	StartedAt         *gtime.Time         `json:"startedAt,omitempty"`
+	FinishedAt        *gtime.Time         `json:"finishedAt,omitempty"`
+	BlockerCount      int                 `json:"blockerCount"`
+	ErrorCount        int                 `json:"errorCount"`
+	WarnCount         int                 `json:"warnCount"`
+	InfoCount         int                 `json:"infoCount"`
+	EvidenceCount     int                 `json:"evidenceCount"`
+}
+
+// WorkflowVerificationIssuesReq 验证问题列表请求
+type WorkflowVerificationIssuesReq struct {
+	g.Meta    `path:"/workflow/verification-issues" method:"get" tags:"项目流程" summary:"验证问题列表"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+	Severity  string              `json:"severity" dc:"按严重级别过滤(blocker/error/warn/info)"`
+}
+
+// VerificationIssueItem 验证问题条目
+type VerificationIssueItem struct {
+	ID              snowflake.JsonInt64 `json:"id"`
+	IssueType       string              `json:"issueType"`
+	Severity        string              `json:"severity"`
+	Title           string              `json:"title"`
+	Detail          string              `json:"detail"`
+	ExpectedValue   string              `json:"expectedValue"`
+	ActualValue     string              `json:"actualValue"`
+	SuggestedAction string              `json:"suggestedAction"`
+	DomainTaskID    snowflake.JsonInt64 `json:"domainTaskID,omitempty"`
+	ResourceRef     string              `json:"resourceRef,omitempty"`
+	Status          string              `json:"status"`
+	CreatedAt       *gtime.Time         `json:"createdAt"`
+}
+
+// WorkflowVerificationIssuesRes 验证问题列表响应
+type WorkflowVerificationIssuesRes struct {
+	g.Meta `mime:"application/json"`
+	Issues []VerificationIssueItem `json:"issues"`
+}
+
+// WorkflowVerificationEvidenceReq 验证证据列表请求
+type WorkflowVerificationEvidenceReq struct {
+	g.Meta    `path:"/workflow/verification-evidence" method:"get" tags:"项目流程" summary:"验证证据列表"`
+	ProjectID snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
+}
+
+// VerificationEvidenceItem 验证证据条目
+type VerificationEvidenceItem struct {
+	ID           snowflake.JsonInt64 `json:"id"`
+	EvidenceType string              `json:"evidenceType"`
+	SourceType   string              `json:"sourceType"`
+	SourceID     snowflake.JsonInt64 `json:"sourceID,omitempty"`
+	ContentRef   string              `json:"contentRef,omitempty"`
+	Summary      string              `json:"summary"`
+	CreatedAt    *gtime.Time         `json:"createdAt"`
+}
+
+// WorkflowVerificationEvidenceRes 验证证据列表响应
+type WorkflowVerificationEvidenceRes struct {
+	g.Meta   `mime:"application/json"`
+	Evidence []VerificationEvidenceItem `json:"evidence"`
+}
+
+// WorkflowVerificationRepairReq 将验证问题转为返工请求
+type WorkflowVerificationRepairReq struct {
+	g.Meta    `path:"/workflow/verification-repair" method:"post" tags:"项目流程" summary:"将验证问题转为返工"`
+	ProjectID snowflake.JsonInt64   `json:"projectID" v:"required" dc:"项目ID"`
+	IssueIDs  []snowflake.JsonInt64 `json:"issueIDs" v:"required" dc:"问题ID列表"`
+	Reason    string                `json:"reason" dc:"附加返工原因"`
+}
+
+// WorkflowVerificationRepairRes 将验证问题转为返工响应
+type WorkflowVerificationRepairRes struct {
+	g.Meta  `mime:"application/json"`
+	Message string `json:"message,omitempty"`
 }
 
 // ==================== 自治管理 API ====================

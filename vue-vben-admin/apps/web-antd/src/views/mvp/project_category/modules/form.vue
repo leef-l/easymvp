@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+
 import { useVbenModal } from '@vben/common-ui';
-import { useVbenForm } from '#/adapter/form';
+
 import { message } from 'ant-design-vue';
+
+import { useVbenForm } from '#/adapter/form';
 import {
-  getProjectCategoryDetail,
   createProjectCategory,
+  getProjectCategoryDetail,
   updateProjectCategory,
 } from '#/api/mvp/project_category';
-
 
 const emit = defineEmits<{ success: [] }>();
 const isEdit = ref(false);
@@ -44,6 +46,26 @@ const [Form, formApi] = useVbenForm({
       fieldName: 'description',
       label: '分类说明',
       componentProps: { placeholder: '请输入分类说明', maxlength: 255 },
+    },
+    {
+      component: 'Textarea',
+      fieldName: 'verificationProfileJson',
+      label: '分类默认验证配置(JSON)',
+      componentProps: {
+        placeholder: '{\n  "mode": "local",\n  "steps": [\n    { "name": "unit test", "command": ["go", "test", "./..."] }\n  ]\n}',
+        rows: 8,
+        maxlength: 20_000,
+      },
+    },
+    {
+      component: 'Textarea',
+      fieldName: 'verificationGateJson',
+      label: '分类验证放行规则(JSON)',
+      componentProps: {
+        placeholder: '{\n  "allowedDecisions": ["passed"],\n  "minExecutedSteps": 1,\n  "requiredCheckKinds": ["test"]\n}',
+        rows: 8,
+        maxlength: 20_000,
+      },
     },
     {
       component: 'Switch',
@@ -87,7 +109,7 @@ const [Modal, modalApi] = useVbenModal({
   },
   async onOpenChange(isOpen: boolean) {
     if (isOpen) {
-      const data = modalApi.getData<{ id?: string } | null>();
+      const data = modalApi.getData<null | { id?: string }>();
       if (data?.id) {
         isEdit.value = true;
         editId.value = data.id;
@@ -112,7 +134,7 @@ const [Modal, modalApi] = useVbenModal({
 </script>
 
 <template>
-  <Modal class="w-[600px]">
+  <Modal class="w-[960px]">
     <Form />
   </Modal>
 </template>

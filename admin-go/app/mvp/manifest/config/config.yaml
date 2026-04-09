@@ -45,3 +45,27 @@ engine:
   scheduler:
     maxConcurrent: 1      # 默认单并发，优先保证低配服务器稳定
     pollInterval: 2       # 调度轮询间隔（秒）
+  commandResource:
+    enabled: 1
+    nodeMaxOldSpaceMB: 1024        # npm/pnpm/node 构建内存上限
+    npmJobs: 1                     # npm 安装/构建并发
+    npmNetworkConcurrency: 4       # npm/pnpm 网络并发
+    pnpmChildConcurrency: 1        # pnpm 子进程并发
+    pnpmWorkspaceConcurrency: 1    # pnpm workspace 并发
+    goMaxProcs: 1                  # go test/build 默认并发核数
+    goMemLimitMB: 768              # Go 运行时内存上限
+    composeParallelLimit: 1        # docker compose 并行操作上限
+    turboConcurrency: 1            # turbo build 并发
+    makeJobs: 1                    # make -j 并发
+    cargoBuildJobs: 1              # cargo build 并发
+    processAddressSpaceMB: 1536    # prlimit 进程地址空间上限（Linux）
+  workspace:
+    delivery:
+      defaultMode: "patch"                # 结果形态：patch / pr / manual
+      defaultSyncStrategy: "auto_apply"   # 全局兜底策略
+      lowRiskMode: "patch"                # 低风险默认自动回写
+      lowRiskSyncStrategy: "auto_apply"
+      mediumRiskMode: "patch"             # 中风险保留 patch，但默认人工确认
+      mediumRiskSyncStrategy: "manual"
+      highRiskMode: "manual"              # 高风险先进入人工交付路径
+      highRiskSyncStrategy: "manual"

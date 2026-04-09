@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue';
+import { ref, computed, watch } from 'vue';
 import {
   Card, Row, Col, Statistic, Table, Tag, Button, Space, Tabs, Progress,
   Descriptions, Popconfirm, message, Empty, Spin, Alert, Select,
@@ -89,18 +89,36 @@ async function loadAll() {
   }
 }
 
-onMounted(async () => {
-  // 没有 URL 参数时才加载项目列表供选择
-  if (!route.query.projectID) {
-    await loadProjects();
-  }
-  await loadAll();
-});
+function resetMetaState() {
+  stats.value = null;
+  observations.value = [];
+  assessment.value = null;
+  assessmentHistory.value = [];
+  recommendations.value = [];
+  learningRecords.value = [];
+}
 
-// 选中项目后自动加载数据
-watch(selectedProjectID, (val) => {
-  if (val) loadAll();
-});
+watch(
+  () => route.query.projectID,
+  async (value) => {
+    if (value) {
+      selectedProjectID.value = '';
+      return;
+    }
+    await loadProjects();
+  },
+  { immediate: true },
+);
+
+watch(
+  projectID,
+  async (value) => {
+    resetMetaState();
+    if (!value) return;
+    await loadAll();
+  },
+  { immediate: true },
+);
 
 // ==================== 操作 ====================
 const assessmentRunning = ref(false);

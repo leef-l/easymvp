@@ -1,9 +1,12 @@
 package projectcategory
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
@@ -29,35 +32,55 @@ type sProjectCategory struct{}
 
 // Create 创建项目分类配置表
 func (s *sProjectCategory) Create(ctx context.Context, in *model.ProjectCategoryCreateInput) error {
+	verificationProfileJSON, err := normalizeOptionalJSON(in.VerificationProfileJson, "分类默认验证配置")
+	if err != nil {
+		return err
+	}
+	verificationGateJSON, err := normalizeOptionalJSON(in.VerificationGateJson, "分类验证放行规则")
+	if err != nil {
+		return err
+	}
 	id := snowflake.Generate()
-	_, err := dao.MvpProjectCategory.Ctx(ctx).Data(g.Map{
-		dao.MvpProjectCategory.Columns().Id:        id,
-		dao.MvpProjectCategory.Columns().CategoryCode: in.CategoryCode,
-		dao.MvpProjectCategory.Columns().DisplayName: in.DisplayName,
-		dao.MvpProjectCategory.Columns().FamilyCode: in.FamilyCode,
-		dao.MvpProjectCategory.Columns().Description: in.Description,
-		dao.MvpProjectCategory.Columns().Status: in.Status,
-		dao.MvpProjectCategory.Columns().Sort: in.Sort,
-		dao.MvpProjectCategory.Columns().CreatedBy: middleware.GetUserID(ctx),
-		dao.MvpProjectCategory.Columns().DeptId: middleware.GetDeptID(ctx),
-		dao.MvpProjectCategory.Columns().CreatedAt: gtime.Now(),
-		dao.MvpProjectCategory.Columns().UpdatedAt: gtime.Now(),
+	_, err = dao.MvpProjectCategory.Ctx(ctx).Data(g.Map{
+		dao.MvpProjectCategory.Columns().Id:                      id,
+		dao.MvpProjectCategory.Columns().CategoryCode:            in.CategoryCode,
+		dao.MvpProjectCategory.Columns().DisplayName:             in.DisplayName,
+		dao.MvpProjectCategory.Columns().FamilyCode:              in.FamilyCode,
+		dao.MvpProjectCategory.Columns().Description:             in.Description,
+		dao.MvpProjectCategory.Columns().VerificationProfileJson: verificationProfileJSON,
+		dao.MvpProjectCategory.Columns().VerificationGateJson:    verificationGateJSON,
+		dao.MvpProjectCategory.Columns().Status:                  in.Status,
+		dao.MvpProjectCategory.Columns().Sort:                    in.Sort,
+		dao.MvpProjectCategory.Columns().CreatedBy:               middleware.GetUserID(ctx),
+		dao.MvpProjectCategory.Columns().DeptId:                  middleware.GetDeptID(ctx),
+		dao.MvpProjectCategory.Columns().CreatedAt:               gtime.Now(),
+		dao.MvpProjectCategory.Columns().UpdatedAt:               gtime.Now(),
 	}).Insert()
 	return err
 }
 
 // Update 更新项目分类配置表
 func (s *sProjectCategory) Update(ctx context.Context, in *model.ProjectCategoryUpdateInput) error {
-	data := g.Map{
-		dao.MvpProjectCategory.Columns().CategoryCode: in.CategoryCode,
-		dao.MvpProjectCategory.Columns().DisplayName: in.DisplayName,
-		dao.MvpProjectCategory.Columns().FamilyCode: in.FamilyCode,
-		dao.MvpProjectCategory.Columns().Description: in.Description,
-		dao.MvpProjectCategory.Columns().Status: in.Status,
-		dao.MvpProjectCategory.Columns().Sort: in.Sort,
-		dao.MvpProjectCategory.Columns().UpdatedAt: gtime.Now(),
+	verificationProfileJSON, err := normalizeOptionalJSON(in.VerificationProfileJson, "分类默认验证配置")
+	if err != nil {
+		return err
 	}
-	_, err := dao.MvpProjectCategory.Ctx(ctx).Where(dao.MvpProjectCategory.Columns().Id, in.ID).Data(data).Update()
+	verificationGateJSON, err := normalizeOptionalJSON(in.VerificationGateJson, "分类验证放行规则")
+	if err != nil {
+		return err
+	}
+	data := g.Map{
+		dao.MvpProjectCategory.Columns().CategoryCode:            in.CategoryCode,
+		dao.MvpProjectCategory.Columns().DisplayName:             in.DisplayName,
+		dao.MvpProjectCategory.Columns().FamilyCode:              in.FamilyCode,
+		dao.MvpProjectCategory.Columns().Description:             in.Description,
+		dao.MvpProjectCategory.Columns().VerificationProfileJson: verificationProfileJSON,
+		dao.MvpProjectCategory.Columns().VerificationGateJson:    verificationGateJSON,
+		dao.MvpProjectCategory.Columns().Status:                  in.Status,
+		dao.MvpProjectCategory.Columns().Sort:                    in.Sort,
+		dao.MvpProjectCategory.Columns().UpdatedAt:               gtime.Now(),
+	}
+	_, err = dao.MvpProjectCategory.Ctx(ctx).Where(dao.MvpProjectCategory.Columns().Id, in.ID).Data(data).Update()
 	return err
 }
 
@@ -127,6 +150,7 @@ func (s *sProjectCategory) List(ctx context.Context, in *model.ProjectCategoryLi
 	}
 	return
 }
+
 // Export 导出项目分类配置表（不分页）
 func (s *sProjectCategory) Export(ctx context.Context, in *model.ProjectCategoryListInput) (list []*model.ProjectCategoryListOutput, err error) {
 	m := s.applyListFilter(ctx, in)
@@ -136,8 +160,6 @@ func (s *sProjectCategory) Export(ctx context.Context, in *model.ProjectCategory
 	}
 	return
 }
-
-
 
 // BatchUpdate 批量编辑项目分类配置表
 func (s *sProjectCategory) BatchUpdate(ctx context.Context, in *model.ProjectCategoryBatchUpdateInput) error {
@@ -150,7 +172,6 @@ func (s *sProjectCategory) BatchUpdate(ctx context.Context, in *model.ProjectCat
 	_, err := dao.MvpProjectCategory.Ctx(ctx).WhereIn(dao.MvpProjectCategory.Columns().Id, in.IDs).Data(data).Update()
 	return err
 }
-
 
 // Import 导入项目分类配置表
 func (s *sProjectCategory) Import(ctx context.Context, file *ghttp.UploadFile) (success int, fail int, err error) {
@@ -199,6 +220,24 @@ func (s *sProjectCategory) Import(ctx context.Context, file *ghttp.UploadFile) (
 		}
 		idx++
 		if idx < len(record) {
+			if value, jsonErr := normalizeOptionalJSON(record[idx], "分类默认验证配置"); jsonErr == nil {
+				data[dao.MvpProjectCategory.Columns().VerificationProfileJson] = value
+			} else {
+				fail++
+				continue
+			}
+		}
+		idx++
+		if idx < len(record) {
+			if value, jsonErr := normalizeOptionalJSON(record[idx], "分类验证放行规则"); jsonErr == nil {
+				data[dao.MvpProjectCategory.Columns().VerificationGateJson] = value
+			} else {
+				fail++
+				continue
+			}
+		}
+		idx++
+		if idx < len(record) {
 			data[dao.MvpProjectCategory.Columns().Status] = record[idx]
 		}
 		idx++
@@ -215,3 +254,17 @@ func (s *sProjectCategory) Import(ctx context.Context, file *ghttp.UploadFile) (
 	return
 }
 
+func normalizeOptionalJSON(raw string, label string) (string, error) {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return "", nil
+	}
+	if !json.Valid([]byte(text)) {
+		return "", fmt.Errorf("%s 不是合法 JSON", label)
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, []byte(text)); err != nil {
+		return "", fmt.Errorf("压缩 %s 失败: %w", label, err)
+	}
+	return compact.String(), nil
+}

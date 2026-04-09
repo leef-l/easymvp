@@ -182,6 +182,7 @@ func (r *AiderRunner) runOnce(ctx context.Context, cfg *AiderConfig) *AiderResul
 	}
 	cmd.Dir = cfg.WorkDir
 	cmd.Env = append(cmd.Environ(), env...)
+	GetCommandResourcePolicy(cmdCtx).Apply(cmd)
 
 	stdout := &aiderActivityWriter{onActivity: cfg.OnActivity}
 	stderr := &aiderActivityWriter{onActivity: cfg.OnActivity}
@@ -306,7 +307,7 @@ func (r *AiderRunner) buildEnv(cfg *AiderConfig) []string {
 		)
 	}
 
-	return env
+	return GetCommandResourcePolicy(context.Background()).EnvSlice(env)
 }
 
 // writeModelMetadata 生成临时 model metadata JSON 文件
@@ -402,7 +403,7 @@ func (r *AiderRunner) BuildConfigFromModel(ctx context.Context, modelInfo *Model
 		SupportedProtocols: modelInfo.SupportedProtocols,
 		BaseURL:            modelInfo.BaseURL,
 	})
-	baseURL := providerutil.ResolveBaseURLForProtocol(providerutil.Config{
+	baseURL := providerutil.ResolveCLIBaseURLForProtocol(providerutil.Config{
 		ProviderType:       modelInfo.ProviderType,
 		SupportedProtocols: modelInfo.SupportedProtocols,
 		BaseURL:            modelInfo.BaseURL,

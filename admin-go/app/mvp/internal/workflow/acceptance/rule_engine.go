@@ -25,14 +25,17 @@ func NewRuleEngine(ruleRepo *repo.AcceptRuleRepo) *RuleEngine {
 
 // ruleConfig 规则配置通用结构。
 type ruleConfig struct {
-	ForbidStatus        []string `json:"forbid_status"`
-	RequiredFiles       []string `json:"required_files"`
-	TaskKinds           []string `json:"task_kinds"`
-	RequireNonEmpty     bool     `json:"require_non_empty_result"`
-	RequiredExtensions  []string `json:"required_extensions"`
-	RequiredStageOutputs []string `json:"required_stage_outputs"`
-	RequiredSections    []string `json:"required_sections"`
-	RequiredKeywords    []string `json:"required_keywords"`
+	ForbidStatus                     []string `json:"forbid_status"`
+	RequiredFiles                    []string `json:"required_files"`
+	TaskKinds                        []string `json:"task_kinds"`
+	RequireNonEmpty                  bool     `json:"require_non_empty_result"`
+	RequiredExtensions               []string `json:"required_extensions"`
+	RequiredStageOutputs             []string `json:"required_stage_outputs"`
+	RequiredSections                 []string `json:"required_sections"`
+	RequiredKeywords                 []string `json:"required_keywords"`
+	RequireManualReviewDeliveryModes []string `json:"require_manual_review_delivery_modes"`
+	RequireManualReviewSyncStatuses  []string `json:"require_manual_review_sync_statuses"`
+	MinRiskLevel                     string   `json:"min_risk_level"`
 }
 
 // LoadAndEvaluate 加载项目类型对应的规则并执行评估。
@@ -94,11 +97,105 @@ func (e *RuleEngine) evaluateRule(ctx context.Context, in *AcceptContext, ruleCo
 		return e.checkRequiredExtensions(ctx, in, ruleCode, ruleName, ruleType, scopeType, cfg)
 	case "document.summary_present":
 		return e.checkRequiredStageOutputs(ctx, in, ruleCode, ruleName, ruleType, scopeType, cfg)
+	case "software.delivery_review_required":
+		return e.checkDeliveryReviewRequired(ctx, in, ruleCode, ruleName, ruleType, scopeType, cfg)
 	default:
 		// 未实现的规则直接跳过
 		g.Log().Debugf(ctx, "[RuleEngine] 规则 %s 尚无评估实现，跳过", ruleCode)
 		return nil
 	}
+}
+
+func (e *RuleEngine) checkDeliveryReviewRequired(ctx context.Context, in *AcceptContext, ruleCode, ruleName, ruleType, scopeType string, cfg *ruleConfig) []RuleHit {
+	if len(cfg.RequireManualReviewDeliveryModes) == 0 &&
+		len(cfg.RequireManualReviewSyncStatuses) == 0 &&
+		strings.TrimSpace(cfg.MinRiskLevel) == "" {
+		return nil
+	}
+
+	records, err := g.DB().Model("mvp_task_workspace").Ctx(ctx).
+		Where("workflow_run_id", in.WorkflowRunID).
+		WhereNull("deleted_at").
+		Fields("task_id, delivery_mode, delivery_status, sync_status, risk_level, patch_ref").
+		OrderAsc("task_id").
+		All()
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unknown column") {
+			g.Log().Warningf(ctx, "[RuleEngine] 跳过交付审核规则，workspace delivery 列尚未迁移: %v", err)
+			return nil
+		}
+		g.Log().Warningf(ctx, "[RuleEngine] 查询 workspace 交付结果失败: %v", err)
+		return nil
+	}
+
+	allowedModes := make(map[string]struct{}, len(cfg.RequireManualReviewDeliveryModes))
+	for _, mode := range cfg.RequireManualReviewDeliveryModes {
+		mode = strings.ToLower(strings.TrimSpace(mode))
+		if mode != "" {
+			allowedModes[mode] = struct{}{}
+		}
+	}
+	allowedSyncStatuses := make(map[string]struct{}, len(cfg.RequireManualReviewSyncStatuses))
+	for _, status := range cfg.RequireManualReviewSyncStatuses {
+		status = strings.ToLower(strings.TrimSpace(status))
+		if status != "" {
+			allowedSyncStatuses[status] = struct{}{}
+		}
+	}
+
+	minRiskLevel := strings.ToLower(strings.TrimSpace(cfg.MinRiskLevel))
+	var hits []RuleHit
+	for _, record := range records {
+		taskID := record["task_id"].Int64()
+		deliveryMode := strings.ToLower(strings.TrimSpace(record["delivery_mode"].String()))
+		deliveryStatus := strings.ToLower(strings.TrimSpace(record["delivery_status"].String()))
+		syncStatus := strings.ToLower(strings.TrimSpace(record["sync_status"].String()))
+		riskLevel := strings.ToLower(strings.TrimSpace(record["risk_level"].String()))
+		patchRef := strings.TrimSpace(record["patch_ref"].String())
+
+		reasons := make([]string, 0, 3)
+		if _, ok := allowedModes[deliveryMode]; ok {
+			reasons = append(reasons, "交付形态="+deliveryMode)
+		}
+		if _, ok := allowedSyncStatuses[syncStatus]; ok {
+			reasons = append(reasons, "回写状态="+syncStatus)
+		}
+		if riskLevelAtLeast(riskLevel, minRiskLevel) {
+			reasons = append(reasons, "风险等级="+riskLevel)
+		}
+		if len(reasons) == 0 {
+			continue
+		}
+
+		actualValue := fmt.Sprintf("delivery=%s, deliveryStatus=%s, sync=%s, risk=%s", deliveryMode, deliveryStatus, syncStatus, riskLevel)
+		hits = append(hits, RuleHit{
+			RuleCode:        ruleCode,
+			RuleName:        ruleName,
+			RuleType:        ruleType,
+			ScopeType:       scopeType,
+			Severity:        SeverityWarn,
+			Title:           fmt.Sprintf("任务 %d 的交付结果需要人工审核", taskID),
+			Detail:          fmt.Sprintf("命中条件：%s", strings.Join(reasons, "；")),
+			ExpectedValue:   "低风险 patch 自动回写，或人工确认后再放行",
+			ActualValue:     actualValue,
+			SuggestedAction: "查看 patch/交付证据并人工确认后放行或返工",
+			DomainTaskID:    taskID,
+			ResourceRef:     patchRef,
+		})
+	}
+	return hits
+}
+
+func riskLevelAtLeast(actual, threshold string) bool {
+	if threshold == "" {
+		return false
+	}
+	order := map[string]int{
+		"low":    1,
+		"medium": 2,
+		"high":   3,
+	}
+	return order[actual] > 0 && order[threshold] > 0 && order[actual] >= order[threshold]
 }
 
 // checkNoFailedTasks 检查是否存在禁止状态的��务。

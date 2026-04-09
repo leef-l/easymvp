@@ -2,6 +2,7 @@ package projectcategory
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -18,12 +19,14 @@ type cProjectCategory struct{}
 // Create 创建项目分类配置表
 func (c *cProjectCategory) Create(ctx context.Context, req *v1.ProjectCategoryCreateReq) (res *v1.ProjectCategoryCreateRes, err error) {
 	err = service.ProjectCategory().Create(ctx, &model.ProjectCategoryCreateInput{
-		CategoryCode: req.CategoryCode,
-		DisplayName: req.DisplayName,
-		FamilyCode: req.FamilyCode,
-		Description: req.Description,
-		Status: req.Status,
-		Sort: req.Sort,
+		CategoryCode:            req.CategoryCode,
+		DisplayName:             req.DisplayName,
+		FamilyCode:              req.FamilyCode,
+		Description:             req.Description,
+		VerificationProfileJson: req.VerificationProfileJson,
+		VerificationGateJson:    req.VerificationGateJson,
+		Status:                  req.Status,
+		Sort:                    req.Sort,
 	})
 	return
 }
@@ -31,13 +34,15 @@ func (c *cProjectCategory) Create(ctx context.Context, req *v1.ProjectCategoryCr
 // Update 更新项目分类配置表
 func (c *cProjectCategory) Update(ctx context.Context, req *v1.ProjectCategoryUpdateReq) (res *v1.ProjectCategoryUpdateRes, err error) {
 	err = service.ProjectCategory().Update(ctx, &model.ProjectCategoryUpdateInput{
-		ID: req.ID,
-		CategoryCode: req.CategoryCode,
-		DisplayName: req.DisplayName,
-		FamilyCode: req.FamilyCode,
-		Description: req.Description,
-		Status: req.Status,
-		Sort: req.Sort,
+		ID:                      req.ID,
+		CategoryCode:            req.CategoryCode,
+		DisplayName:             req.DisplayName,
+		FamilyCode:              req.FamilyCode,
+		Description:             req.Description,
+		VerificationProfileJson: req.VerificationProfileJson,
+		VerificationGateJson:    req.VerificationGateJson,
+		Status:                  req.Status,
+		Sort:                    req.Sort,
 	})
 	return
 }
@@ -74,21 +79,22 @@ func (c *cProjectCategory) Detail(ctx context.Context, req *v1.ProjectCategoryDe
 func (c *cProjectCategory) List(ctx context.Context, req *v1.ProjectCategoryListReq) (res *v1.ProjectCategoryListRes, err error) {
 	res = &v1.ProjectCategoryListRes{}
 	res.List, res.Total, err = service.ProjectCategory().List(ctx, &model.ProjectCategoryListInput{
-		PageNum:   req.PageNum,
-		PageSize:  req.PageSize,
-		OrderBy:   req.OrderBy,
-		OrderDir:  req.OrderDir,
-		StartTime: req.StartTime,
-		EndTime:   req.EndTime,
+		PageNum:     req.PageNum,
+		PageSize:    req.PageSize,
+		OrderBy:     req.OrderBy,
+		OrderDir:    req.OrderDir,
+		StartTime:   req.StartTime,
+		EndTime:     req.EndTime,
 		DisplayName: req.DisplayName,
 	})
 	return
 }
+
 // Export 导出项目分类配置表
 func (c *cProjectCategory) Export(ctx context.Context, req *v1.ProjectCategoryExportReq) (res *v1.ProjectCategoryExportRes, err error) {
 	list, err := service.ProjectCategory().Export(ctx, &model.ProjectCategoryListInput{
-		StartTime: req.StartTime,
-		EndTime:   req.EndTime,
+		StartTime:   req.StartTime,
+		EndTime:     req.EndTime,
 		DisplayName: req.DisplayName,
 	})
 	if err != nil {
@@ -99,20 +105,22 @@ func (c *cProjectCategory) Export(ctx context.Context, req *v1.ProjectCategoryEx
 	r.Response.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	r.Response.Header().Set("Content-Disposition", `attachment; filename="project_category.csv"`)
 	r.Response.Write("\xEF\xBB\xBF") // UTF-8 BOM
-	// 表头
-	r.Response.Writeln("稳定分类编码,展示名称,能力家族编码,分类说明,1启用 0停用,排序,创建时间")
-	// 数据行
+	writer := csv.NewWriter(r.Response.Writer)
+	_ = writer.Write([]string{"稳定分类编码", "展示名称", "能力家族编码", "分类说明", "分类默认验证配置(JSON)", "分类验证放行规则(JSON)", "1启用 0停用", "排序", "创建时间"})
 	for _, item := range list {
-		r.Response.Writefln("%v,%v,%v,%v,%v,%v,%v",
+		_ = writer.Write([]string{
 			item.CategoryCode,
-			 item.DisplayName,
-			 item.FamilyCode,
-			 item.Description,
-			 item.Status,
-			 item.Sort,
-			item.CreatedAt,
-		)
+			item.DisplayName,
+			item.FamilyCode,
+			item.Description,
+			item.VerificationProfileJson,
+			item.VerificationGateJson,
+			fmt.Sprintf("%d", item.Status),
+			fmt.Sprintf("%d", item.Sort),
+			fmt.Sprintf("%v", item.CreatedAt),
+		})
 	}
+	writer.Flush()
 	return
 }
 
@@ -137,8 +145,6 @@ func (c *cProjectCategory) ImportTemplate(ctx context.Context, req *v1.ProjectCa
 	r.Response.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	r.Response.Header().Set("Content-Disposition", `attachment; filename="project_category_template.csv"`)
 	r.Response.Write("\xEF\xBB\xBF") // UTF-8 BOM
-	r.Response.Writeln("稳定分类编码,展示名称,能力家族编码,分类说明,1启用 0停用,排序")
+	r.Response.Writeln("稳定分类编码,展示名称,能力家族编码,分类说明,分类默认验证配置(JSON),分类验证放行规则(JSON),1启用 0停用,排序")
 	return
 }
-
-

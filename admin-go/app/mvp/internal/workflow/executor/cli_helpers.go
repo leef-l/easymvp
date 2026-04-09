@@ -48,9 +48,9 @@ func resolveProtocolBaseURL(modelInfo *engine.ModelInfo, fallback string, protoc
 		return ""
 	}
 	if modelInfo == nil {
-		return providerutil.ResolveBaseURLForProtocol(providerutil.Config{BaseURL: raw}, protocol)
+		return providerutil.ResolveCLIBaseURLForProtocol(providerutil.Config{BaseURL: raw}, protocol)
 	}
-	return providerutil.ResolveBaseURLForProtocol(providerutil.Config{
+	return providerutil.ResolveCLIBaseURLForProtocol(providerutil.Config{
 		ProviderType:       modelInfo.ProviderType,
 		SupportedProtocols: modelInfo.SupportedProtocols,
 		BaseURL:            raw,
@@ -78,7 +78,7 @@ func resolveClaudeModelCode(modelInfo *engine.ModelInfo) string {
 }
 
 func normalizeClaudeBaseURL(raw string) string {
-	return providerutil.ResolveBaseURLForProtocol(providerutil.Config{BaseURL: raw}, providerutil.TypeAnthropic)
+	return providerutil.ResolveCLIBaseURLForProtocol(providerutil.Config{BaseURL: raw}, providerutil.TypeAnthropic)
 }
 
 func shouldUseClaudePermissionBypass() bool {

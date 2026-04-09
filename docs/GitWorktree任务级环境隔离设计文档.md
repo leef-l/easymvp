@@ -1,6 +1,6 @@
 # GitWorktree任务级环境隔离设计文档
 
-> 更新日期：2026-04-08
+> 更新日期：2026-04-09
 
 本文只描述当前 `internal/workspace` 包已经实现的内容，不再保留“建议新增”的隔离方案。
 
@@ -134,10 +134,18 @@ mvp-task-{task_id}
 
 更新本文档时，和旧版本相比有一个必须明确写出来的边界：
 
-- 当前 `workspace` 包负责的是“准备隔离目录、记录 diff、清理目录”
-- 当前 `workspace` 包本身没有实现“把 worktree 变更自动 merge / cherry-pick 回主工作区”
+- 当前 `workspace` 包已经负责：
+  - 准备隔离目录
+  - 收集 `diff_summary / patch_ref`
+  - 根据风险矩阵决定 `patch / pr / manual` 交付路径
+  - 在 `sync_strategy=auto_apply` 时把 worktree 变更同步回主工作区
+  - 记录交付事件与清理状态
+- 当前 `workspace` 包仍然不负责：
+  - 容器或沙箱级安全隔离
+  - 真正远端 PR 创建
+  - 复杂冲突协商后的自动合并策略
 
-因此，本文档不再写“系统已经自动回写主工作区”。如果后续要把 worktree 变更正式沉淀回项目主目录，需要在工作流主链里单独补齐合入策略。
+因此，当前系统已经具备“受控自动回写”的能力，但不是“所有任务默认直接 merge 回主工作区”。
 
 ### 9.2 核心接口
 
@@ -154,74 +162,32 @@ type WorkspaceManager interface {
 
 ## 十、基线选择策略
 
-### 10.1 默认策略
+当前实现基于主工作区当前 `HEAD` 创建 worktree。
 
-基于主工作区当前 HEAD 创建 worktree。
+这是代码中的实际行为：
 
-适合当前阶段，实施简单。
+1. `Prepare` 时先确保主目录可作为 Git 基线使用
+2. `git worktree add -b mvp-task-{taskID}` 从当前 `HEAD` 拉出任务分支
+3. `Finalize` 时按交付策略决定写 patch、生成 PR 草稿说明，或自动回写主工作区
 
-### 10.2 后续增强
-
-可升级为基于：
-
-1. `workflow_run` 开始时的基线提交
-2. `batch` 开始时的基线提交
-3. 上游已确认变更后的最新提交
-
-当前建议先用默认策略，避免过早引入复杂的多版本仓库管理。
+当前没有引入 `workflow_run` / `batch` 级独立基线版本管理。
 
 ---
 
 ## 十一、回写策略
 
-这里是最关键的设计点。
+当前实现不是方案讨论，而是明确的交付矩阵：
 
-### 11.1 方案 A：直接保留 worktree 结果，不自动回写
+1. 所有成功任务都会优先尝试生成 `diff_summary` 与 `patch_ref`
+2. 风险矩阵默认值为：
+   - `low -> patch + auto_apply`
+   - `medium -> patch + manual`
+   - `high -> manual + manual`
+3. 当 `delivery_mode=pr` 时，会额外生成 PR 草稿说明文件
+4. 当 `sync_strategy=auto_apply` 时，会通过 `syncWorktreeCommit(...)` 将变更同步回主工作区
+5. 当 `sync_strategy=manual` 时，只保留交付物和待审核/待回写状态，不直接改主工作区
 
-优点：
-
-1. 安全
-2. 实现简单
-
-缺点：
-
-1. 结果不能自动进入主工作区
-2. 需要人工处理
-
-### 11.2 方案 B：生成 diff，再自动应用到主工作区
-
-优点：
-
-1. 主工作区仍是统一结果源
-2. 可控
-
-缺点：
-
-1. 需要处理 patch 冲突
-
-### 11.3 方案 C：成功任务直接 merge/worktree 回写
-
-优点：
-
-1. 自动化程度高
-
-缺点：
-
-1. 风险高
-2. 与当前主链不够匹配
-
-### 11.4 当前推荐
-
-建议分阶段：
-
-1. 第一阶段：先记录 worktree + diff，不自动 merge
-2. 第二阶段：对低风险任务开放自动 patch 回写
-3. 第三阶段：再考虑更复杂的自动合并
-
-如果你们想要最快可用，当前也可以采用：
-
-1. Aider 先继续直接写 worktree
-2. 执行完成后使用受控 patch 回写主工作区
+因此，当前系统已经不再是“只保留 worktree 结果，不做主工作区沉淀”的第一阶段实现。
 
 ---
 
@@ -248,45 +214,29 @@ type WorkspaceManager interface {
 
 ## 十三、与调度器的衔接点
 
-### 13.1 调度前准备
+当前衔接点已经落地为：
 
-在任务 `pending -> running` 之间插入：
-
-1. `PrepareTaskWorkspace`
-
-### 13.2 执行器运行
-
-执行器获取 workspace 路径后启动。
-
-### 13.3 任务完成/失败
-
-在：
-
-- `OnTaskCompleted`
-- `OnTaskFailed`
-
-之后补：
-
-1. `FinalizeTaskWorkspace`
-2. `CleanupTaskWorkspace` 或保留
+1. 任务 `pending -> running` 前调用 `Prepare`
+2. 执行器通过 `workspace_path` 在 task worktree 中运行
+3. 任务成功后调用 `Finalize`：
+   - 生成 `diff_summary / patch_ref / delivery_ref`
+   - 记录交付事件
+   - 视 `sync_strategy` 决定自动回写或待人工回写
+4. 任务失败后也会进入 `Finalize`，并将交付状态标为 `skipped/failed`
+5. `Cleanup` 与定时清理负责收尾目录和状态
 
 ---
 
 ## 十四、清理策略
 
-### 14.1 默认保留策略
+当前清理语义已经体现在 `cleanup_status` 中：
 
-1. 成功：保留 24 小时
-2. 失败：保留 72 小时
-3. 取消：保留 24 小时
+1. 默认进入 `pending`
+2. 显式保留时写为 `retained`
+3. 清理成功后写为 `done`
+4. 清理失败时写为 `failed`
 
-### 14.2 定时清理
-
-建议增加定时任务：
-
-1. 清理已失效 worktree
-2. 清理 orphan 目录
-3. 清理失效数据库记录
+失败任务默认不会立即删除 worktree，而是留给后续清理链路补偿处理。
 
 ---
 
@@ -294,12 +244,7 @@ type WorkspaceManager interface {
 
 ### 15.1 主工作区不是 Git 仓库
 
-策略：
-
-1. 直接降级回现有模式
-2. 或阻止需要隔离的执行器运行
-
-建议对写仓任务默认阻止，并返回清晰错误。
+当前实现会自动初始化最小 Git 基线，而不是直接降级回非隔离模式。
 
 ### 15.2 worktree 创建失败
 
@@ -311,13 +256,7 @@ type WorkspaceManager interface {
 
 ### 15.4 回写主工作区冲突
 
-策略：
-
-1. 标记任务为 `completed_with_conflict` 或 `failed`
-2. 保留 worktree
-3. 通知人工处理
-
-当前阶段建议直接保留 worktree 并标记失败/警告。
+当前 `auto_apply` 回写失败会直接把 `sync_status` 置为 `failed`，并保留交付物供人工处理。
 
 ---
 
@@ -358,53 +297,19 @@ worktree 隔离不是安全沙箱，它只解决：
 
 ---
 
-## 十八、实施计划
+## 十八、当前结论
 
-### 阶段 1：基础设施
+对于当前 EasyMVP 代码状态，`git worktree` 已不是待落地方案，而是正式使用中的任务级隔离实现。
 
-1. 新增 `mvp_task_workspace`
-2. 新增 `workspace/` 模块
-3. 实现 `git worktree prepare/cleanup`
+它当前已经解决：
 
-### 阶段 2：Aider 接入
+1. 写仓任务不直接污染主工作区
+2. 不同任务的文件改动隔离
+3. patch / PR 草稿 / 人工交付三种结果形态
+4. 低风险自动回写与中高风险人工复核的分流
 
-1. Aider 改为使用 task workspace
-2. 记录日志、diff、产物
+它当前仍不解决：
 
-### 阶段 3：CLI 执行器接入
-
-1. Claude Code
-2. Codex CLI
-3. Gemini CLI
-
-### 阶段 4：OpenHands 过渡接入
-
-1. 先用 worktree 作为目录隔离
-2. 后续升级为容器隔离
-
----
-
-## 十九、验收标准
-
-1. 写仓任务默认不直接在主工作区运行
-2. 每个任务都能定位到独立 workspace
-3. 任务失败后主工作区不残留半成品污染
-4. 可清理、可保留、可诊断
-5. 与 WorkflowRun 主链兼容
-
----
-
-## 二十、结论
-
-对于当前 EasyMVP 阶段，`git worktree` 是最合适的第一版任务级环境隔离方案。
-
-它不是最终形态，但它能用较低成本解决当前最现实的问题：
-
-1. 主工作区污染
-2. 多任务执行互相影响
-3. 写仓执行器缺少隔离
-
-推荐策略：
-
-1. 现在先上 `git worktree`
-2. OpenHands 后续再升级到更重的 sandbox/container
+1. 容器级或沙箱级隔离
+2. 远端 PR 创建与仓库托管集成
+3. 复杂冲突下的全自动合并策略

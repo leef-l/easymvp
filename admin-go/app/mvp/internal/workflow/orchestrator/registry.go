@@ -115,6 +115,9 @@ func Init() {
 		engine.RegisterBlueprintCreator(func(ctx context.Context, projectID, workflowRunID, conversationID, messageID int64, tasks []engine.ArchitectTask) (int64, int, error) {
 			return planVersionSvc.CreateFromArchitectReply(ctx, projectID, workflowRunID, conversationID, messageID, tasks)
 		})
+		engine.RegisterBlueprintPatchApplier(func(ctx context.Context, projectID, workflowRunID, conversationID, messageID int64, patches []engine.ArchitectTaskPatch) (int64, int, error) {
+			return planVersionSvc.ApplyTaskPatchesFromArchitectReply(ctx, projectID, workflowRunID, conversationID, messageID, patches)
+		})
 
 		// 完成阶段服务
 		completeStageSvc = completeStage.NewService()

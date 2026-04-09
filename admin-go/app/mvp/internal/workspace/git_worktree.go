@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -10,9 +11,14 @@ import (
 	"strings"
 
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
+
+	"easymvp/app/mvp/internal/workflow/event"
+	"easymvp/utility/snowflake"
 )
 
 const worktreeDir = ".mvp-worktrees"
+const worktreeArtifactDir = "artifacts"
 
 // GitWorktreeManager 基于 git worktree 的工作空间管理器。
 type GitWorktreeManager struct {
@@ -87,14 +93,19 @@ func (m *GitWorktreeManager) Prepare(ctx context.Context, req PrepareRequest) (*
 
 	// 4. 创建数据库记录（status=creating）
 	ws := &TaskWorkspace{
-		TaskID:        req.TaskID,
-		WorkflowRunID: req.WorkflowRunID,
-		ProjectID:     req.ProjectID,
-		WorkspaceType: TypeGitWorktree,
-		WorkspacePath: worktreePath,
-		BaseRef:       baseRef,
-		Status:        StatusCreating,
-		CleanupStatus: CleanupPending,
+		TaskID:         req.TaskID,
+		WorkflowRunID:  req.WorkflowRunID,
+		ProjectID:      req.ProjectID,
+		WorkspaceType:  TypeGitWorktree,
+		WorkspacePath:  worktreePath,
+		BaseRef:        baseRef,
+		Status:         StatusCreating,
+		CleanupStatus:  CleanupPending,
+		DeliveryMode:   DeliveryModePatch,
+		DeliveryStatus: DeliveryStatusPending,
+		SyncStrategy:   SyncStrategyAutoApply,
+		SyncStatus:     SyncStatusPending,
+		RiskLevel:      RiskLevelMedium,
 	}
 	if err := m.repo.create(ctx, ws); err != nil {
 		return nil, fmt.Errorf("创建工作空间记录失败: %w", err)
@@ -155,6 +166,15 @@ func (m *GitWorktreeManager) Finalize(ctx context.Context, taskID int64, req Fin
 	}
 
 	extra := g.Map{}
+	policy := resolveDeliveryPolicy(ctx, taskID, req)
+	extra["delivery_mode"] = policy.DeliveryMode
+	extra["delivery_status"] = DeliveryStatusPending
+	extra["sync_strategy"] = policy.SyncStrategy
+	extra["sync_status"] = SyncStatusPending
+	extra["risk_level"] = policy.RiskLevel
+	extra["patch_ref"] = nil
+	extra["delivery_ref"] = nil
+	extra["delivery_title"] = nil
 
 	// 收集 diff 摘要
 	if req.Success {
@@ -165,11 +185,69 @@ func (m *GitWorktreeManager) Finalize(ctx context.Context, taskID int64, req Fin
 			extra["diff_summary"] = diffSummary
 		}
 
-		if syncErr := syncWorktreeCommit(ctx, resolveMainWorkDir(ws.WorkspacePath), ws.WorkspacePath, taskID); syncErr != nil {
-			extra["error_message"] = syncErr.Error()
-			_ = m.repo.updateStatus(ctx, ws.ID, StatusFailed, extra)
-			return fmt.Errorf("同步 worktree 变更失败: %w", syncErr)
+		patchContent, hasPatch, patchErr := gitDiffPatch(ws.WorkspacePath)
+		if patchErr != nil {
+			g.Log().Warningf(ctx, "[Workspace] 生成 patch 失败: taskID=%d err=%v", taskID, patchErr)
+			extra["delivery_status"] = DeliveryStatusFailed
+		} else if hasPatch {
+			patchRef, writeErr := writePatchArtifact(resolveMainWorkDir(ws.WorkspacePath), taskID, patchContent)
+			if writeErr != nil {
+				g.Log().Warningf(ctx, "[Workspace] 写入 patch 失败: taskID=%d err=%v", taskID, writeErr)
+				extra["delivery_status"] = DeliveryStatusFailed
+			} else {
+				extra["patch_ref"] = patchRef
+				extra["delivery_status"] = DeliveryStatusReady
+			}
+
+			if policy.DeliveryMode == DeliveryModePR && g.NewVar(extra["patch_ref"]).String() != "" {
+				deliveryTitle, deliveryRef, artifactErr := writePRArtifact(
+					ctx,
+					ws,
+					taskID,
+					policy.RiskLevel,
+					g.NewVar(extra["patch_ref"]).String(),
+					g.NewVar(extra["diff_summary"]).String(),
+				)
+				if artifactErr != nil {
+					g.Log().Warningf(ctx, "[Workspace] 写入 PR 草稿失败: taskID=%d err=%v", taskID, artifactErr)
+					extra["delivery_status"] = DeliveryStatusFailed
+				} else {
+					extra["delivery_title"] = deliveryTitle
+					extra["delivery_ref"] = deliveryRef
+				}
+			}
+
+			if policy.SyncStrategy == SyncStrategyAutoApply {
+				if syncErr := syncWorktreeCommit(ctx, resolveMainWorkDir(ws.WorkspacePath), ws.WorkspacePath, taskID); syncErr != nil {
+					extra["sync_status"] = SyncStatusFailed
+					extra["error_message"] = syncErr.Error()
+					_ = m.repo.updateStatus(ctx, ws.ID, StatusFailed, extra)
+					return fmt.Errorf("同步 worktree 变更失败: %w", syncErr)
+				}
+				extra["sync_status"] = SyncStatusApplied
+			} else {
+				extra["sync_status"] = SyncStatusPending
+			}
+
+			if g.NewVar(extra["delivery_status"]).String() == DeliveryStatusReady {
+				payload := buildDeliveryEventPayload(ws, taskID, policy, extra)
+				recordWorkspaceEvent(ctx, ws, taskID, event.EventTaskDeliveryPrepared, payload)
+				if g.NewVar(extra["sync_status"]).String() == SyncStatusApplied {
+					recordWorkspaceEvent(ctx, ws, taskID, event.EventTaskSyncApplied, payload)
+				}
+				if shouldOpenDeliveryReviewGate(policy, g.NewVar(extra["delivery_status"]).String(), g.NewVar(extra["sync_status"]).String()) {
+					reviewPayload := buildDeliveryEventPayload(ws, taskID, policy, extra)
+					reviewPayload["reason"] = buildDeliveryReviewReason(policy, reviewPayload)
+					recordWorkspaceEvent(ctx, ws, taskID, event.EventTaskReviewRequired, reviewPayload)
+				}
+			}
+		} else {
+			extra["delivery_status"] = DeliveryStatusSkipped
+			extra["sync_status"] = SyncStatusSkipped
 		}
+	} else {
+		extra["delivery_status"] = DeliveryStatusSkipped
+		extra["sync_status"] = SyncStatusSkipped
 	}
 
 	// 设置最终状态
@@ -193,6 +271,162 @@ func (m *GitWorktreeManager) Finalize(ctx context.Context, taskID int64, req Fin
 	return nil
 }
 
+func buildDeliveryEventPayload(ws *TaskWorkspace, taskID int64, policy deliveryPolicy, extra g.Map) map[string]interface{} {
+	payload := map[string]interface{}{
+		"project_id":      ws.ProjectID,
+		"task_id":         taskID,
+		"delivery_mode":   policy.DeliveryMode,
+		"delivery_status": g.NewVar(extra["delivery_status"]).String(),
+		"sync_strategy":   policy.SyncStrategy,
+		"sync_status":     g.NewVar(extra["sync_status"]).String(),
+		"risk_level":      policy.RiskLevel,
+		"workspace_path":  ws.WorkspacePath,
+	}
+	if patchRef := g.NewVar(extra["patch_ref"]).String(); patchRef != "" {
+		payload["patch_ref"] = patchRef
+	}
+	if deliveryRef := g.NewVar(extra["delivery_ref"]).String(); deliveryRef != "" {
+		payload["delivery_ref"] = deliveryRef
+	}
+	if deliveryTitle := g.NewVar(extra["delivery_title"]).String(); deliveryTitle != "" {
+		payload["delivery_title"] = deliveryTitle
+	}
+	if diffSummary := g.NewVar(extra["diff_summary"]).String(); diffSummary != "" {
+		payload["diff_summary"] = diffSummary
+	}
+	return payload
+}
+
+func shouldOpenDeliveryReviewGate(policy deliveryPolicy, deliveryStatus, syncStatus string) bool {
+	if deliveryStatus != DeliveryStatusReady {
+		return false
+	}
+	return policy.DeliveryMode == DeliveryModePR ||
+		policy.DeliveryMode == DeliveryModeManual ||
+		syncStatus == SyncStatusPending ||
+		policy.RiskLevel == RiskLevelHigh
+}
+
+func buildDeliveryReviewReason(policy deliveryPolicy, payload map[string]interface{}) string {
+	switch {
+	case policy.DeliveryMode == DeliveryModePR:
+		return "已生成 PR 草稿交付物，等待人工审核或正式提交流程"
+	case policy.DeliveryMode == DeliveryModeManual:
+		return "当前任务要求人工处理交付结果"
+	case policy.RiskLevel == RiskLevelHigh:
+		return "高风险任务默认进入人工审核闸门"
+	case g.NewVar(payload["sync_status"]).String() == SyncStatusPending:
+		return "交付物已准备完成，等待人工确认回写主工作区"
+	default:
+		return "交付物等待人工确认"
+	}
+}
+
+func recordWorkspaceEvent(ctx context.Context, ws *TaskWorkspace, taskID int64, eventType string, payload map[string]interface{}) {
+	var payloadJSON string
+	if len(payload) > 0 {
+		if content, err := json.Marshal(payload); err == nil {
+			payloadJSON = string(content)
+		}
+	}
+
+	data := g.Map{
+		"id":              int64(snowflake.Generate()),
+		"workflow_run_id": ws.WorkflowRunID,
+		"entity_type":     event.EntityDomainTask,
+		"entity_id":       taskID,
+		"event_type":      eventType,
+		"created_at":      gtime.Now(),
+	}
+	if payloadJSON != "" {
+		data["payload"] = payloadJSON
+	}
+
+	if _, err := g.DB().Model("mvp_workflow_event").Ctx(ctx).Insert(data); err != nil {
+		g.Log().Warningf(ctx, "[Workspace] 写入交付事件失败: taskID=%d event=%s err=%v", taskID, eventType, err)
+	}
+}
+
+type prArtifact struct {
+	TaskID         int64    `json:"taskID"`
+	ProjectID      int64    `json:"projectID"`
+	WorkflowRunID  int64    `json:"workflowRunID"`
+	Title          string   `json:"title"`
+	Body           string   `json:"body"`
+	BaseRef        string   `json:"baseRef"`
+	WorkspacePath  string   `json:"workspacePath"`
+	PatchRef       string   `json:"patchRef"`
+	DiffSummary    string   `json:"diffSummary,omitempty"`
+	RiskLevel      string   `json:"riskLevel"`
+	ReviewRequired bool     `json:"reviewRequired"`
+	Resources      []string `json:"resources,omitempty"`
+}
+
+func writePRArtifact(ctx context.Context, ws *TaskWorkspace, taskID int64, riskLevel, patchRef, diffSummary string) (string, string, error) {
+	artifact := prArtifact{
+		TaskID:         taskID,
+		ProjectID:      ws.ProjectID,
+		WorkflowRunID:  ws.WorkflowRunID,
+		Title:          fmt.Sprintf("[EasyMVP] Task #%d 交付草稿", taskID),
+		BaseRef:        ws.BaseRef,
+		WorkspacePath:  ws.WorkspacePath,
+		PatchRef:       patchRef,
+		DiffSummary:    diffSummary,
+		RiskLevel:      riskLevel,
+		ReviewRequired: true,
+	}
+
+	taskRecord, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		Where("id", taskID).
+		WhereNull("deleted_at").
+		Fields("name, description, affected_resources").
+		One()
+	if err == nil && !taskRecord.IsEmpty() {
+		taskName := strings.TrimSpace(taskRecord["name"].String())
+		if taskName != "" {
+			artifact.Title = fmt.Sprintf("[EasyMVP] %s", taskName)
+		}
+
+		bodyParts := []string{
+			fmt.Sprintf("任务ID: %d", taskID),
+			fmt.Sprintf("风险等级: %s", riskLevel),
+		}
+		if desc := strings.TrimSpace(taskRecord["description"].String()); desc != "" {
+			bodyParts = append(bodyParts, "任务描述:\n"+desc)
+		}
+		if diffSummary != "" {
+			bodyParts = append(bodyParts, "变更摘要:\n"+diffSummary)
+		}
+		bodyParts = append(bodyParts, "Patch:\n"+patchRef)
+		artifact.Body = strings.Join(bodyParts, "\n\n")
+
+		var resources []string
+		if raw := strings.TrimSpace(taskRecord["affected_resources"].String()); raw != "" && raw != "[]" && raw != "null" {
+			_ = json.Unmarshal([]byte(raw), &resources)
+		}
+		artifact.Resources = resources
+	}
+
+	if artifact.Body == "" {
+		artifact.Body = fmt.Sprintf("任务ID: %d\n风险等级: %s\nPatch: %s", taskID, riskLevel, patchRef)
+	}
+
+	artifactDir := filepath.Join(resolveMainWorkDir(ws.WorkspacePath), worktreeDir, worktreeArtifactDir)
+	if err := os.MkdirAll(artifactDir, 0755); err != nil {
+		return "", "", err
+	}
+	filePath := filepath.Join(artifactDir, fmt.Sprintf("task-%d-pr.json", taskID))
+
+	content, err := json.MarshalIndent(artifact, "", "  ")
+	if err != nil {
+		return "", "", err
+	}
+	if err := os.WriteFile(filePath, append(content, '\n'), 0644); err != nil {
+		return "", "", err
+	}
+	return artifact.Title, filePath, nil
+}
+
 // Cleanup 清理工作空间目录。
 func (m *GitWorktreeManager) Cleanup(ctx context.Context, taskID int64) error {
 	ws, err := m.repo.getByTaskID(ctx, taskID)
@@ -205,6 +439,9 @@ func (m *GitWorktreeManager) Cleanup(ctx context.Context, taskID int64) error {
 
 	if ws.CleanupStatus == CleanupDone {
 		return nil // 已清理
+	}
+	if ws.CleanupStatus == CleanupRetained {
+		return nil // 显式保留
 	}
 
 	// 获取主工作目录（从 worktree 路径反推）
@@ -332,12 +569,55 @@ func gitDeleteBranch(mainDir, branchName string) error {
 
 // gitDiffStat 获取 worktree 中的变更统计。
 func gitDiffStat(worktreePath string) (string, error) {
-	cmd := exec.Command("git", "-C", worktreePath, "diff", "--stat", "HEAD")
+	if err := gitAddAll(worktreePath); err != nil {
+		return "", fmt.Errorf("暂存 diff 统计变更失败: %w", err)
+	}
+	hasChanges, err := gitHasStagedChanges(worktreePath)
+	if err != nil {
+		return "", fmt.Errorf("检查 diff 统计变更失败: %w", err)
+	}
+	if !hasChanges {
+		return "", nil
+	}
+
+	cmd := exec.Command("git", "-C", worktreePath, "diff", "--cached", "--stat", "HEAD")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil
+}
+
+func gitDiffPatch(worktreePath string) (string, bool, error) {
+	if err := gitAddAll(worktreePath); err != nil {
+		return "", false, fmt.Errorf("暂存 patch 变更失败: %w", err)
+	}
+	hasChanges, err := gitHasStagedChanges(worktreePath)
+	if err != nil {
+		return "", false, fmt.Errorf("检查 patch 变更失败: %w", err)
+	}
+	if !hasChanges {
+		return "", false, nil
+	}
+
+	cmd := exec.Command("git", "-C", worktreePath, "diff", "--cached", "--binary", "HEAD")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", false, err
+	}
+	return string(output), true, nil
+}
+
+func writePatchArtifact(mainWorkDir string, taskID int64, content string) (string, error) {
+	dir := filepath.Join(mainWorkDir, worktreeDir, worktreeArtifactDir)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, fmt.Sprintf("task-%d.patch", taskID))
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func syncWorktreeCommit(ctx context.Context, mainWorkDir, worktreePath string, taskID int64) error {

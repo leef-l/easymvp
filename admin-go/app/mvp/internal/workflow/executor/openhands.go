@@ -12,6 +12,7 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 
+	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/workspace"
 )
 
@@ -123,6 +124,7 @@ func (e *OpenHandsExecutor) Execute(ctx context.Context, req *Request) *Result {
 			"AI_MODEL_BASE_URL="+resolveProtocolBaseURL(req.ModelInfo, engineCfg["base_url"].String(), ""),
 		)
 	}
+	engine.GetCommandResourcePolicy(ctx).Apply(cmd)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import {
   Card,
@@ -29,7 +29,7 @@ import {
   getReviewIssues,
   manualApprove,
   manualReject,
-  type ReviewStageTask,
+  reviewIssueReplan,
   type ReviewIssueItem,
 } from '#/api/mvp/workflow';
 
@@ -43,6 +43,11 @@ const reviewStatus = ref<any>(null);
 const issues = ref<ReviewIssueItem[]>([]);
 const rejectReason = ref('');
 const rejectModalVisible = ref(false);
+
+function resetReviewState() {
+  reviewStatus.value = null;
+  issues.value = [];
+}
 
 /** 加载审核数据 */
 async function loadData() {
@@ -98,6 +103,7 @@ const issueColumns = [
   { title: '关联蓝图', dataIndex: 'taskName', key: 'taskName', width: 150 },
   { title: '问题描述', dataIndex: 'message', key: 'message' },
   { title: '状态', dataIndex: 'status', key: 'status', width: 80 },
+  { title: '操作', key: 'action', width: 110 },
 ];
 
 /** 手动通过 */
@@ -126,7 +132,33 @@ async function handleReject() {
   loadData();
 }
 
-onMounted(loadData);
+function handleIssueReplan(issue: ReviewIssueItem) {
+  Modal.confirm({
+    title: '将问题转为方案修订',
+    content: `问题「${issue.message}」将作为驳回原因回流到方案修订链路。`,
+    onOk: async () => {
+      await reviewIssueReplan(projectID.value, [issue.id]);
+      message.success('已发起方案修订');
+      loadData();
+    },
+  });
+}
+
+function handleIssueReplanRecord(record: Record<string, any>) {
+  handleIssueReplan(record as ReviewIssueItem);
+}
+
+watch(
+  projectID,
+  (value) => {
+    if (!value) {
+      resetReviewState();
+      return;
+    }
+    loadData();
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -262,6 +294,17 @@ onMounted(loadData);
                 >
                   {{ record.status === 'open' ? '待处理' : '已解决' }}
                 </Tag>
+              </template>
+              <template v-if="column.key === 'action'">
+                <Button
+                  v-if="record.status === 'open'"
+                  type="link"
+                  size="small"
+                  @click="handleIssueReplanRecord(record)"
+                >
+                  转修订
+                </Button>
+                <span v-else class="text-xs text-gray-400">-</span>
               </template>
             </template>
           </Table>

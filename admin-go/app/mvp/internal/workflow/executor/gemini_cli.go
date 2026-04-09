@@ -11,6 +11,7 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 
+	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/workspace"
 )
 
@@ -119,6 +120,7 @@ func (e *GeminiCLIExecutor) Execute(ctx context.Context, req *Request) *Result {
 		cmd.Env = append(cmd.Env, "GEMINI_API_KEY="+req.ModelInfo.APIKey)
 		cmd.Env = append(cmd.Env, "GOOGLE_API_KEY="+req.ModelInfo.APIKey)
 	}
+	engine.GetCommandResourcePolicy(ctx).Apply(cmd)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

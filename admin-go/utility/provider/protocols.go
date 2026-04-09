@@ -5,6 +5,13 @@ import (
 	"strings"
 )
 
+type BaseURLUsage string
+
+const (
+	BaseURLUsageAPI BaseURLUsage = "api"
+	BaseURLUsageCLI BaseURLUsage = "cli"
+)
+
 func isTencentCodingProvider(providerType string, baseURL string) bool {
 	providerType = strings.ToLower(strings.TrimSpace(providerType))
 	baseURL = strings.ToLower(strings.TrimSpace(baseURL))
@@ -69,8 +76,9 @@ func SupportsProtocol(providerType string, supported []string, target string) bo
 	return false
 }
 
-// ResolveBaseURLForProtocol 按目标协议解析规范化后的 Base URL。
-func ResolveBaseURLForProtocol(cfg Config, protocol string) string {
+func resolveBaseURLForProtocol(cfg Config, protocol string, usage BaseURLUsage) string {
+	_ = usage
+
 	raw := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
 	target, ok := normalizeProtocolValue(protocol)
 	if !ok {
@@ -107,7 +115,22 @@ func ResolveBaseURLForProtocol(cfg Config, protocol string) string {
 	return strings.TrimRight(raw, "/")
 }
 
+// ResolveBaseURLForProtocol 按目标协议解析 API 使用的规范化 Base URL。
+func ResolveBaseURLForProtocol(cfg Config, protocol string) string {
+	return resolveBaseURLForProtocol(cfg, protocol, BaseURLUsageAPI)
+}
+
+// ResolveCLIBaseURLForProtocol 按目标协议解析 CLI 使用的规范化 Base URL。
+func ResolveCLIBaseURLForProtocol(cfg Config, protocol string) string {
+	return resolveBaseURLForProtocol(cfg, protocol, BaseURLUsageCLI)
+}
+
 // ResolveBaseURL 按当前配置推导默认协议对应的 Base URL。
 func ResolveBaseURL(cfg Config) string {
 	return ResolveBaseURLForProtocol(cfg, "")
+}
+
+// ResolveCLIBaseURL 按当前配置推导默认协议对应的 CLI Base URL。
+func ResolveCLIBaseURL(cfg Config) string {
+	return ResolveCLIBaseURLForProtocol(cfg, "")
 }

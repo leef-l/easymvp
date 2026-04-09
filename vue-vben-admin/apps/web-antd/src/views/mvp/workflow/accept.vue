@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ref, onUnmounted, computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import {
   Card,
@@ -26,6 +26,7 @@ import {
   acceptReject,
   acceptRerun,
   acceptRework,
+  acceptIssueRework,
   type AcceptStatusResult,
   type AcceptIssueItem,
   type AcceptEvidenceItem,
@@ -46,6 +47,8 @@ const reworkReason = ref('');
 const rejectModalVisible = ref(false);
 const reworkModalVisible = ref(false);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+const formatScore = (percent?: number) => `${(percent ?? 0).toFixed(1)}`;
 
 /** 加载全部数据 */
 async function loadData() {
@@ -133,6 +136,44 @@ function scoreColor(score: number) {
   return '#f5222d';
 }
 
+function evidenceTypeColor(type: string) {
+  switch (type) {
+    case 'ci':
+      return 'geekblue';
+    case 'delivery':
+      return 'magenta';
+    case 'diff':
+      return 'purple';
+    case 'task_output':
+      return 'blue';
+    case 'stage_output':
+      return 'cyan';
+    case 'handoff':
+      return 'orange';
+    default:
+      return 'default';
+  }
+}
+
+function sourceTypeColor(type: string) {
+  switch (type) {
+    case 'project_repo':
+      return 'geekblue';
+    case 'task_log':
+      return 'gold';
+    case 'workspace':
+      return 'purple';
+    case 'domain_task':
+      return 'blue';
+    case 'stage_run':
+      return 'cyan';
+    case 'handoff_record':
+      return 'orange';
+    default:
+      return 'default';
+  }
+}
+
 // 问题列表列
 const issueColumns = [
   { title: '级别', dataIndex: 'severity', key: 'severity', width: 80 },
@@ -143,6 +184,7 @@ const issueColumns = [
   { title: '实际', dataIndex: 'actualValue', key: 'actualValue', width: 120 },
   { title: '建议', dataIndex: 'suggestedAction', key: 'suggestedAction', width: 160 },
   { title: '状态', dataIndex: 'status', key: 'status', width: 80 },
+  { title: '操作', key: 'action', width: 110 },
 ];
 
 // 证据列表列
@@ -150,6 +192,7 @@ const evidenceColumns = [
   { title: '类型', dataIndex: 'evidenceType', key: 'evidenceType', width: 120 },
   { title: '来源', dataIndex: 'sourceType', key: 'sourceType', width: 120 },
   { title: '摘要', dataIndex: 'summary', key: 'summary' },
+  { title: '引用', dataIndex: 'contentRef', key: 'contentRef', width: 220, ellipsis: true },
   { title: '时间', dataIndex: 'createdAt', key: 'createdAt', width: 160 },
 ];
 
@@ -205,6 +248,22 @@ async function handleRework() {
   loadData();
 }
 
+function handleIssueRework(issue: AcceptIssueItem) {
+  Modal.confirm({
+    title: '将问题转为返工',
+    content: `问题「${issue.title}」将作为返工原因回流到执行链路。`,
+    onOk: async () => {
+      await acceptIssueRework(projectID.value, [issue.id]);
+      message.success('已触发返工');
+      loadData();
+    },
+  });
+}
+
+function handleIssueReworkRecord(record: Record<string, any>) {
+  handleIssueRework(record as AcceptIssueItem);
+}
+
 /** 启动/停止轮询 */
 function startPoll() {
   stopPoll();
@@ -221,10 +280,23 @@ function stopPoll() {
   }
 }
 
-onMounted(() => {
-  loadData();
-  startPoll();
-});
+function resetAcceptState() {
+  status.value = null;
+  issues.value = [];
+  evidence.value = [];
+}
+
+watch(
+  projectID,
+  (value) => {
+    stopPoll();
+    resetAcceptState();
+    if (!value) return;
+    loadData();
+    startPoll();
+  },
+  { immediate: true },
+);
 onUnmounted(stopPoll);
 </script>
 
@@ -253,7 +325,7 @@ onUnmounted(stopPoll);
               <Progress
                 :percent="status.score"
                 :stroke-color="scoreColor(status.score)"
-                :format="(p: number) => `${p.toFixed(1)}`"
+                :format="formatScore"
                 :size="[200, 14]"
               />
             </DescriptionsItem>
@@ -325,6 +397,17 @@ onUnmounted(stopPoll);
                   {{ record.status === 'open' ? '待处理' : '已解决' }}
                 </Tag>
               </template>
+              <template v-else-if="column.key === 'action'">
+                <Button
+                  v-if="record.status === 'open'"
+                  type="link"
+                  size="small"
+                  @click="handleIssueReworkRecord(record)"
+                >
+                  转返工
+                </Button>
+                <span v-else class="text-xs text-gray-400">-</span>
+              </template>
             </template>
           </Table>
         </Card>
@@ -340,7 +423,16 @@ onUnmounted(stopPoll);
           >
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'evidenceType'">
-                <Tag color="blue">{{ record.evidenceType }}</Tag>
+                <Tag :color="evidenceTypeColor(record.evidenceType)">{{ record.evidenceType }}</Tag>
+              </template>
+              <template v-else-if="column.key === 'sourceType'">
+                <Tag :color="sourceTypeColor(record.sourceType)">{{ record.sourceType }}</Tag>
+              </template>
+              <template v-else-if="column.key === 'contentRef'">
+                <span v-if="record.contentRef" class="text-xs text-gray-500 break-all">
+                  {{ record.contentRef }}
+                </span>
+                <span v-else class="text-xs text-gray-400">-</span>
               </template>
             </template>
           </Table>

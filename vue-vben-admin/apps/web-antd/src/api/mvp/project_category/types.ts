@@ -7,6 +7,8 @@ export interface ProjectCategoryItem {
   displayName: string;
   familyCode: string;
   description?: string;
+  verificationProfileJson?: string;
+  verificationGateJson?: string;
   status?: number;
   sort?: number;
   createdAt?: string;
@@ -30,6 +32,8 @@ export interface ProjectCategoryCreateParams {
   displayName: string;
   familyCode: string;
   description?: string;
+  verificationProfileJson?: string;
+  verificationGateJson?: string;
   status?: number;
   sort?: number;
 }
@@ -41,6 +45,8 @@ export interface ProjectCategoryUpdateParams {
   displayName: string;
   familyCode: string;
   description?: string;
+  verificationProfileJson?: string;
+  verificationGateJson?: string;
   status?: number;
   sort?: number;
 }

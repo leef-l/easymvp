@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, ref, onMounted, computed } from 'vue';
+import { h, ref, computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
@@ -132,15 +132,21 @@ async function loadHistory() {
   }
 }
 
-onMounted(async () => {
-  try {
-    workflowRunId.value = (route.query.workflowRunId as string) ?? '';
-    projectId.value = (route.query.projectId as string) ?? '';
-    await Promise.all([loadSituation(), loadHistory()]);
-  } catch (e) {
-    console.warn('[situation] onMounted 初始化失败:', e);
-  }
-});
+watch(
+  [() => route.query.workflowRunId, () => route.query.projectId],
+  async ([nextWorkflowRunId, nextProjectId]) => {
+    try {
+      workflowRunId.value = (nextWorkflowRunId as string) ?? '';
+      projectId.value = (nextProjectId as string) ?? '';
+      situation.value = null;
+      history.value = [];
+      await Promise.all([loadSituation(), loadHistory()]);
+    } catch (e) {
+      console.warn('[situation] route 变更加载失败:', e);
+    }
+  },
+  { immediate: true },
+);
 </script>
 
 <template>

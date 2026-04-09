@@ -66,6 +66,29 @@ func TestResolveBaseURLForProtocolStripsGenericAnthropicV1(t *testing.T) {
 	}
 }
 
+func TestResolveCLIBaseURLForProtocolUsesTencentCodingOpenAIEndpoint(t *testing.T) {
+	got := ResolveCLIBaseURLForProtocol(Config{
+		ProviderType:       "tencent_coding",
+		SupportedProtocols: []string{"anthropic", "openai_compatible"},
+		BaseURL:            "https://api.lkeap.cloud.tencent.com/coding/anthropic/v1",
+	}, TypeOpenAICompatible)
+	want := "https://api.lkeap.cloud.tencent.com/coding/v3"
+	if got != want {
+		t.Fatalf("ResolveCLIBaseURLForProtocol() = %q, want %q", got, want)
+	}
+}
+
+func TestResolveCLIBaseURLForProtocolStripsGenericAnthropicV1(t *testing.T) {
+	got := ResolveCLIBaseURLForProtocol(Config{
+		ProviderType: "anthropic",
+		BaseURL:      "https://api.anthropic.com/v1",
+	}, TypeAnthropic)
+	want := "https://api.anthropic.com"
+	if got != want {
+		t.Fatalf("ResolveCLIBaseURLForProtocol() = %q, want %q", got, want)
+	}
+}
+
 func TestAnthropicProviderRequestUsesV1Messages(t *testing.T) {
 	p := NewAnthropic(Config{
 		ProviderType: "tencent_coding",

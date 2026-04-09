@@ -1,19 +1,25 @@
 <script setup lang="ts">
 import type { VbenFormProps } from '#/adapter/form';
 import type { VxeGridProps } from '#/adapter/vxe-table';
+import type { ProjectCategoryItem } from '#/api/mvp/project_category/types';
 
 import { Page, useVbenModal } from '@vben/common-ui';
+
 import { Button, message, Modal, Tag } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getProjectCategoryList, deleteProjectCategory, batchDeleteProjectCategory, exportProjectCategory, importProjectCategory, downloadImportTemplateProjectCategory, batchUpdateProjectCategory } from '#/api/mvp/project_category';
-import type { ProjectCategoryItem } from '#/api/mvp/project_category/types';
-import FormModal from './modules/form.vue';
+import { batchDeleteProjectCategory, batchUpdateProjectCategory, deleteProjectCategory, downloadImportTemplateProjectCategory, exportProjectCategory, getProjectCategoryList, importProjectCategory } from '#/api/mvp/project_category';
+
 import DetailDrawer from './modules/detail-drawer.vue';
+import FormModal from './modules/form.vue';
 
-/** 标签颜色池 */
-const TAG_COLORS = ['green', 'red', 'blue', 'orange', 'cyan', 'purple', 'geekblue', 'magenta'];
+function hasVerificationProfile(row: ProjectCategoryItem) {
+  return !!row.verificationProfileJson?.trim();
+}
 
+function hasVerificationGate(row: ProjectCategoryItem) {
+  return !!row.verificationGateJson?.trim();
+}
 
 /** 表单弹窗 */
 const [FormModalComp, formModalApi] = useVbenModal({
@@ -63,6 +69,8 @@ const gridOptions: VxeGridProps<ProjectCategoryItem> = {
     { field: 'displayName', title: '展示名称' },
     { field: 'familyCode', title: '能力家族编码' },
     { field: 'description', title: '分类说明' },
+    { field: 'verificationProfileJson', title: '默认验证模板', width: 120, slots: { default: 'verification_profile' } },
+    { field: 'verificationGateJson', title: '放行规则', width: 120, slots: { default: 'verification_gate' } },
     { field: 'status', title: '1启用 0停用' },
     { field: 'sort', title: '排序' },
     { field: 'createdAt', title: '创建时间', width: 180, formatter: 'formatDateTime', sortable: true },
@@ -186,7 +194,7 @@ async function handleImport() {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = '.csv,.xlsx,.xls';
-  input.onchange = async () => {
+  input.addEventListener('change', async () => {
     const file = input.files?.[0];
     if (!file) { input.remove(); return; }
     const formData = new FormData();
@@ -200,8 +208,8 @@ async function handleImport() {
     } finally {
       input.remove();
     }
-  };
-  document.body.appendChild(input);
+  });
+  document.body.append(input);
   input.click();
 }
 
@@ -252,6 +260,16 @@ function handleBatchUpdateStatus() {
         <Button v-auth="['mvp:project_category:import']" class="ml-2" @click="handleImport">导入</Button>
         <Button class="ml-2" @click="handleDownloadTemplate">模板下载</Button>
         <Button v-auth="['mvp:project_category:batch-update']" class="ml-2" @click="handleBatchUpdateStatus">批量修改状态</Button>
+      </template>
+      <template #verification_profile="{ row }">
+        <Tag :color="hasVerificationProfile(row) ? 'green' : 'default'">
+          {{ hasVerificationProfile(row) ? '已配置' : '自动探测' }}
+        </Tag>
+      </template>
+      <template #verification_gate="{ row }">
+        <Tag :color="hasVerificationGate(row) ? 'blue' : 'orange'">
+          {{ hasVerificationGate(row) ? '已配置' : '未配置' }}
+        </Tag>
       </template>
       <template #action="{ row }">
         <Button v-auth="['mvp:project_category:detail']" type="link" size="small" @click="handleView(row)">查看</Button>

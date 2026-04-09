@@ -15,13 +15,15 @@ var _ = gtime.New
 
 // ProjectCategoryCreateReq 创建项目分类配置表请求
 type ProjectCategoryCreateReq struct {
-	g.Meta `path:"/project_category/create" method:"post" tags:"项目分类配置表" summary:"创建项目分类配置表"`
-	CategoryCode string `json:"categoryCode" v:"required|max-length:64" dc:"稳定分类编码"`
-	DisplayName string `json:"displayName" v:"required|max-length:64" dc:"展示名称"`
-	FamilyCode string `json:"familyCode" v:"required|max-length:32" dc:"能力家族编码"`
-	Description string `json:"description" v:"max-length:255" dc:"分类说明"`
-	Status int `json:"status"  dc:"1启用 0停用"`
-	Sort int `json:"sort"  dc:"排序"`
+	g.Meta                  `path:"/project_category/create" method:"post" tags:"项目分类配置表" summary:"创建项目分类配置表"`
+	CategoryCode            string `json:"categoryCode" v:"required|max-length:64" dc:"稳定分类编码"`
+	DisplayName             string `json:"displayName" v:"required|max-length:64" dc:"展示名称"`
+	FamilyCode              string `json:"familyCode" v:"required|max-length:32" dc:"能力家族编码"`
+	Description             string `json:"description" v:"max-length:255" dc:"分类说明"`
+	VerificationProfileJson string `json:"verificationProfileJson" dc:"分类默认验证配置(JSON)"`
+	VerificationGateJson    string `json:"verificationGateJson" dc:"分类验证放行规则(JSON)"`
+	Status                  int    `json:"status"  dc:"1启用 0停用"`
+	Sort                    int    `json:"sort"  dc:"排序"`
 }
 
 // ProjectCategoryCreateRes 创建项目分类配置表响应
@@ -31,14 +33,16 @@ type ProjectCategoryCreateRes struct {
 
 // ProjectCategoryUpdateReq 更新项目分类配置表请求
 type ProjectCategoryUpdateReq struct {
-	g.Meta `path:"/project_category/update" method:"put" tags:"项目分类配置表" summary:"更新项目分类配置表"`
-	ID     snowflake.JsonInt64 `json:"id" v:"required#ID不能为空" dc:"项目分类配置表ID"`
-	CategoryCode string `json:"categoryCode" dc:"稳定分类编码"`
-	DisplayName string `json:"displayName" dc:"展示名称"`
-	FamilyCode string `json:"familyCode" dc:"能力家族编码"`
-	Description string `json:"description" dc:"分类说明"`
-	Status int `json:"status" dc:"1启用 0停用"`
-	Sort int `json:"sort" dc:"排序"`
+	g.Meta                  `path:"/project_category/update" method:"put" tags:"项目分类配置表" summary:"更新项目分类配置表"`
+	ID                      snowflake.JsonInt64 `json:"id" v:"required#ID不能为空" dc:"项目分类配置表ID"`
+	CategoryCode            string              `json:"categoryCode" dc:"稳定分类编码"`
+	DisplayName             string              `json:"displayName" dc:"展示名称"`
+	FamilyCode              string              `json:"familyCode" dc:"能力家族编码"`
+	Description             string              `json:"description" dc:"分类说明"`
+	VerificationProfileJson string              `json:"verificationProfileJson" dc:"分类默认验证配置(JSON)"`
+	VerificationGateJson    string              `json:"verificationGateJson" dc:"分类验证放行规则(JSON)"`
+	Status                  int                 `json:"status" dc:"1启用 0停用"`
+	Sort                    int                 `json:"sort" dc:"排序"`
 }
 
 // ProjectCategoryUpdateRes 更新项目分类配置表响应
@@ -94,13 +98,13 @@ type ProjectCategoryDetailRes struct {
 
 // ProjectCategoryListReq 获取项目分类配置表列表请求
 type ProjectCategoryListReq struct {
-	g.Meta    `path:"/project_category/list" method:"get" tags:"项目分类配置表" summary:"获取项目分类配置表列表"`
-	PageNum   int    `json:"pageNum" d:"1" dc:"页码"`
-	PageSize  int    `json:"pageSize" d:"10" dc:"每页数量"`
-	OrderBy   string `json:"orderBy" dc:"排序字段"`
-	OrderDir  string `json:"orderDir" d:"asc" dc:"排序方向:asc/desc"`
-	StartTime string `json:"startTime" dc:"开始时间"`
-	EndTime   string `json:"endTime" dc:"结束时间"`
+	g.Meta      `path:"/project_category/list" method:"get" tags:"项目分类配置表" summary:"获取项目分类配置表列表"`
+	PageNum     int    `json:"pageNum" d:"1" dc:"页码"`
+	PageSize    int    `json:"pageSize" d:"10" dc:"每页数量"`
+	OrderBy     string `json:"orderBy" dc:"排序字段"`
+	OrderDir    string `json:"orderDir" d:"asc" dc:"排序方向:asc/desc"`
+	StartTime   string `json:"startTime" dc:"开始时间"`
+	EndTime     string `json:"endTime" dc:"结束时间"`
 	DisplayName string `json:"displayName" dc:"展示名称"`
 }
 
@@ -108,13 +112,14 @@ type ProjectCategoryListReq struct {
 type ProjectCategoryListRes struct {
 	g.Meta `mime:"application/json"`
 	List   []*model.ProjectCategoryListOutput `json:"list" dc:"列表数据"`
-	Total  int                               `json:"total" dc:"总数"`
+	Total  int                                `json:"total" dc:"总数"`
 }
+
 // ProjectCategoryExportReq 导出项目分类配置表请求
 type ProjectCategoryExportReq struct {
-	g.Meta    `path:"/project_category/export" method:"get" tags:"项目分类配置表" summary:"导出项目分类配置表"`
-	StartTime string `json:"startTime" dc:"开始时间"`
-	EndTime   string `json:"endTime" dc:"结束时间"`
+	g.Meta      `path:"/project_category/export" method:"get" tags:"项目分类配置表" summary:"导出项目分类配置表"`
+	StartTime   string `json:"startTime" dc:"开始时间"`
+	EndTime     string `json:"endTime" dc:"结束时间"`
 	DisplayName string `json:"displayName" dc:"展示名称"`
 }
 
@@ -122,8 +127,6 @@ type ProjectCategoryExportReq struct {
 type ProjectCategoryExportRes struct {
 	g.Meta `mime:"text/csv"`
 }
-
-
 
 // ProjectCategoryImportReq 导入项目分类配置表请求
 type ProjectCategoryImportReq struct {
@@ -146,4 +149,3 @@ type ProjectCategoryImportTemplateReq struct {
 type ProjectCategoryImportTemplateRes struct {
 	g.Meta `mime:"text/csv"`
 }
-

@@ -165,6 +165,32 @@ export function getSystemCheck() {
   );
 }
 
+export interface RegressionScenarioItem {
+  scenarioCode: string;
+  name: string;
+  workspaceDir: string;
+  status: string;
+  goal: string;
+  checkpoints: string[];
+}
+
+export interface RegressionScenariosResult {
+  version: number;
+  updatedAt: string;
+  manifestPath?: string;
+  readyCount: number;
+  plannedCount: number;
+  valid: boolean;
+  message?: string;
+  scenarios: RegressionScenarioItem[];
+}
+
+export function getRegressionScenarios() {
+  return requestClient.get<RegressionScenariosResult>(
+    `${PREFIX}/regression-scenarios`,
+  );
+}
+
 // ==================== Timeline / Rework / Stage History ====================
 
 /** 时间线事件 */
@@ -294,6 +320,14 @@ export function manualReject(projectID: string, reason: string) {
   return requestClient.post(`${PREFIX}/manual-reject`, { projectID, reason });
 }
 
+/** 将审核问题转为方案修订 */
+export function reviewIssueReplan(projectID: string, issueIDs: string[], reason?: string) {
+  return requestClient.post<{ message?: string }>(
+    `${PREFIX}/review-issue-replan`,
+    { projectID, issueIDs, reason },
+  );
+}
+
 // ==================== 完成总结 ====================
 
 /** 完成总结 */
@@ -342,6 +376,17 @@ export interface DomainTaskItem {
   errorMessage?: string;
   result?: string;
   retryCount: number;
+  workspaceStatus?: string;
+  cleanupStatus?: string;
+  deliveryMode?: string;
+  deliveryStatus?: string;
+  syncStrategy?: string;
+  syncStatus?: string;
+  riskLevel?: string;
+  patchRef?: string;
+  deliveryRef?: string;
+  deliveryTitle?: string;
+  diffSummary?: string;
 }
 
 /** 资源锁详情 */
@@ -388,6 +433,119 @@ export function getResourceLocks(projectID: string) {
   return requestClient.get<{ locks: ResourceLockItem[] }>(
     `${PREFIX}/resource-locks`,
     { params: { projectID } },
+  );
+}
+
+// ==================== 项目轨迹 / 任务回放 ====================
+
+export interface ProjectTraceStageItem {
+  id: string;
+  stageType: string;
+  stageNo: number;
+  status: string;
+  startedAt?: string;
+  finishedAt?: string;
+  error?: string;
+}
+
+export interface ProjectTraceResult {
+  workflowRunID: string;
+  projectID: string;
+  workflowStatus: string;
+  currentStage?: string;
+  totalEvents: number;
+  totalStages: number;
+  totalTasks: number;
+  reworkRounds: number;
+  openReviewIssues: number;
+  openAcceptIssues: number;
+  pendingCheckpoints: number;
+  pendingActions: number;
+  pendingDeliveryReviews: number;
+  highRiskTasks: number;
+  prDraftTasks: number;
+  manualSyncTasks: number;
+  acceptDecision?: string;
+  acceptScore: number;
+  deliveryModes: Record<string, number>;
+  syncStatuses: Record<string, number>;
+  stages: ProjectTraceStageItem[];
+  recentEvents: TimelineEvent[];
+}
+
+export function getProjectTrace(projectID: string) {
+  return requestClient.get<ProjectTraceResult>(
+    `${PREFIX}/project-trace`,
+    { params: { projectID } },
+  );
+}
+
+export interface DeliveryReviewItem {
+  workspaceID: string;
+  taskID: string;
+  workflowRunID: string;
+  taskName: string;
+  taskStatus: string;
+  roleType: string;
+  executionMode: string;
+  batchNo: number;
+  deliveryMode?: string;
+  deliveryStatus?: string;
+  syncStrategy?: string;
+  syncStatus?: string;
+  riskLevel?: string;
+  patchRef?: string;
+  deliveryRef?: string;
+  deliveryTitle?: string;
+  diffSummary?: string;
+  reasons: string[];
+  updatedAt?: string;
+}
+
+export function getDeliveryReviews(projectID: string) {
+  return requestClient.get<{ items: DeliveryReviewItem[] }>(
+    `${PREFIX}/delivery-reviews`,
+    { params: { projectID } },
+  );
+}
+
+export interface TaskReplayLogItem {
+  id: string;
+  action: string;
+  fromStatus?: string;
+  toStatus?: string;
+  message?: string;
+  operator?: string;
+  createdAt?: string;
+}
+
+export interface TaskReplayHandoffItem {
+  id: string;
+  handoffType: string;
+  fromTaskID?: string;
+  toTaskID?: string;
+  reason?: string;
+  payload?: string;
+  createdAt?: string;
+}
+
+export interface TaskReplayResult {
+  workflowRunID: string;
+  stageRunID?: string;
+  stageType?: string;
+  task: DomainTaskItem;
+  logs: TaskReplayLogItem[];
+  events: TimelineEvent[];
+  issues: AcceptIssueItem[];
+  evidence: AcceptEvidenceItem[];
+  handoffs: TaskReplayHandoffItem[];
+  actions: AutonomyActionItem[];
+}
+
+export function getTaskReplay(projectID: string, taskID: string) {
+  return requestClient.get<TaskReplayResult>(
+    `${PREFIX}/task-replay`,
+    { params: { projectID, taskID } },
   );
 }
 
@@ -482,6 +640,104 @@ export function acceptRerun(projectID: string) {
 /** 驳回并返工 */
 export function acceptRework(projectID: string, reason: string) {
   return requestClient.post(`${PREFIX}/accept-rework`, { projectID, reason });
+}
+
+/** 将验收问题转为返工 */
+export function acceptIssueRework(projectID: string, issueIDs: string[], reason?: string) {
+  return requestClient.post<{ message?: string }>(
+    `${PREFIX}/accept-issue-rework`,
+    { projectID, issueIDs, reason },
+  );
+}
+
+// ==================== 验证修复 ====================
+
+/** 验证问题项 */
+export interface VerificationIssueItem {
+  id: string;
+  issueType: string;
+  severity: string;
+  title: string;
+  detail: string;
+  expectedValue: string;
+  actualValue: string;
+  suggestedAction: string;
+  domainTaskID?: string;
+  resourceRef?: string;
+  status: string;
+  createdAt: string;
+}
+
+/** 验证证据项 */
+export interface VerificationEvidenceItem {
+  id: string;
+  evidenceType: string;
+  sourceType: string;
+  sourceID?: string;
+  contentRef?: string;
+  summary: string;
+  createdAt: string;
+}
+
+/** 验证状态总览 */
+export interface VerificationStatusResult {
+  verificationRunID: string;
+  workflowRunID: string;
+  verificationRound: number;
+  status: string;
+  decision: string;
+  runnerType?: string;
+  triggerSource?: string;
+  summary: string;
+  startedAt?: string;
+  finishedAt?: string;
+  blockerCount: number;
+  errorCount: number;
+  warnCount: number;
+  infoCount: number;
+  evidenceCount: number;
+}
+
+/** 启动验证 */
+export function startVerification(projectID: string, reason?: string) {
+  return requestClient.post<{
+    verificationRunID: string;
+    workflowRunID: string;
+    status: string;
+    message?: string;
+  }>(`${PREFIX}/verification-start`, { projectID, reason });
+}
+
+/** 获取验证状态 */
+export function getVerificationStatus(projectID: string) {
+  return requestClient.get<VerificationStatusResult>(
+    `${PREFIX}/verification-status`,
+    { params: { projectID } },
+  );
+}
+
+/** 获取验证问题列表 */
+export function getVerificationIssues(projectID: string, severity?: string) {
+  return requestClient.get<{ issues: VerificationIssueItem[] }>(
+    `${PREFIX}/verification-issues`,
+    { params: { projectID, ...(severity ? { severity } : {}) } },
+  );
+}
+
+/** 获取验证证据列表 */
+export function getVerificationEvidence(projectID: string) {
+  return requestClient.get<{ evidence: VerificationEvidenceItem[] }>(
+    `${PREFIX}/verification-evidence`,
+    { params: { projectID } },
+  );
+}
+
+/** 将验证问题转为返工 */
+export function verificationRepair(projectID: string, issueIDs: string[], reason?: string) {
+  return requestClient.post<{ message?: string }>(
+    `${PREFIX}/verification-repair`,
+    { projectID, issueIDs, reason },
+  );
 }
 
 // ==================== 自治管理 ====================
@@ -733,7 +989,10 @@ export function createChatMenu(data: { chatId: string; menuItems?: ChatMenuItem[
 }
 
 export function getChatMenu(chatId: string) {
-  return requestClient.get<{ menuItems: any[] }>(`${PREFIX}/feishu-get-chat-menu`, { chatId });
+  return requestClient.get<{ menuItems: any[] }>(
+    `${PREFIX}/feishu-get-chat-menu`,
+    { params: { chatId } },
+  );
 }
 
 export function deleteChatMenu(data: { chatId: string; menuIds: string[] }) {

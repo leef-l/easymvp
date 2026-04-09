@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -22,9 +23,9 @@ type ReviewTrigger func(ctx context.Context, projectID, planVersionID int64) err
 
 // PlanVersionService 计划版本服务。
 type PlanVersionService struct {
-	planRepo       *repo.PlanVersionRepo
-	blueprintRepo  *repo.BlueprintRepo
-	reviewTrigger  ReviewTrigger
+	planRepo      *repo.PlanVersionRepo
+	blueprintRepo *repo.BlueprintRepo
+	reviewTrigger ReviewTrigger
 }
 
 // NewPlanVersionService 创建计划版本服务。
@@ -90,8 +91,8 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 			"status":                 consts.PlanVersionStatusDraft,
 			"review_status":          consts.PlanReviewStatusPending,
 			"summary":                fmt.Sprintf("第 %d 版方案，共 %d 个任务蓝图", versionNo, len(tasks)),
-			"created_by":            scope.CreatedBy,
-			"dept_id":               scope.DeptID,
+			"created_by":             scope.CreatedBy,
+			"dept_id":                scope.DeptID,
 			"created_at":             now,
 			"updated_at":             now,
 		})
@@ -116,8 +117,8 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 				"sort":               i + 1,
 				"affected_resources": string(affectedJSON),
 				"blueprint_status":   consts.BlueprintStatusDraft,
-				"created_by":        scope.CreatedBy,
-				"dept_id":           scope.DeptID,
+				"created_by":         scope.CreatedBy,
+				"dept_id":            scope.DeptID,
 				"created_at":         now,
 				"updated_at":         now,
 			})
@@ -174,6 +175,176 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 	g.Log().Infof(ctx, "[PlanVersionService] 创建 plan_version=%d (v%d), %d 个蓝图, project=%d",
 		pvID, versionNo, len(tasks), projectID)
 	return pvID, len(tasks), nil
+}
+
+// ApplyTaskPatchesFromArchitectReply 将架构师返回的 task_patches 回写到当前方案蓝图。
+// 适用于 review warning 后仅修订单个或少量蓝图的场景，避免每次都重建整版 plan_version。
+func (s *PlanVersionService) ApplyTaskPatchesFromArchitectReply(
+	ctx context.Context,
+	projectID, workflowRunID, conversationID, messageID int64,
+	patches []engine.ArchitectTaskPatch,
+) (int64, int, error) {
+	if len(patches) == 0 {
+		return 0, 0, fmt.Errorf("没有可回写的 task_patches")
+	}
+
+	pv, err := g.DB().Model("mvp_plan_version").Ctx(ctx).
+		Where("project_id", projectID).
+		WhereIn("status", g.Slice{consts.PlanVersionStatusDraft, consts.PlanVersionStatusActive}).
+		WhereNull("deleted_at").
+		OrderDesc("version_no").
+		One()
+	if err != nil {
+		return 0, 0, fmt.Errorf("查询当前方案版本失败: %w", err)
+	}
+	if pv.IsEmpty() {
+		return 0, 0, fmt.Errorf("项目 %d 没有可修订的方案版本", projectID)
+	}
+
+	pvID := pv["id"].Int64()
+	now := time.Now()
+	patchedCount := 0
+
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		blueprints, bpErr := tx.Model("mvp_task_blueprint").Ctx(ctx).
+			Where("plan_version_id", pvID).
+			WhereIn("blueprint_status", g.Slice{consts.BlueprintStatusDraft, consts.BlueprintStatusConfirmed}).
+			WhereNull("deleted_at").
+			OrderAsc("sort").
+			All()
+		if bpErr != nil {
+			return fmt.Errorf("查询蓝图失败: %w", bpErr)
+		}
+		if len(blueprints) == 0 {
+			return fmt.Errorf("方案版本 %d 没有可修订的蓝图", pvID)
+		}
+
+		byID := make(map[int64]gdb.Record, len(blueprints))
+		byName := make(map[string]gdb.Record, len(blueprints))
+		for _, bp := range blueprints {
+			byID[bp["id"].Int64()] = bp
+			name := strings.TrimSpace(bp["name"].String())
+			if name != "" {
+				byName[name] = bp
+			}
+		}
+
+		for _, patch := range patches {
+			target, targetErr := matchBlueprintForPatch(byID, byName, &patch)
+			if targetErr != nil {
+				return targetErr
+			}
+
+			updateData, updateErr := buildBlueprintPatchUpdateData(byName, &patch)
+			if updateErr != nil {
+				return updateErr
+			}
+			if len(updateData) == 0 {
+				continue
+			}
+			updateData["updated_at"] = now
+
+			if _, upErr := tx.Model("mvp_task_blueprint").Ctx(ctx).
+				Where("id", target["id"].Int64()).
+				Update(updateData); upErr != nil {
+				return fmt.Errorf("更新蓝图 %d 失败: %w", target["id"].Int64(), upErr)
+			}
+			patchedCount++
+		}
+
+		if patchedCount == 0 {
+			return fmt.Errorf("task_patches 未产生实际变更")
+		}
+
+		if _, upErr := tx.Model("mvp_plan_version").Ctx(ctx).
+			Where("id", pvID).
+			Update(g.Map{
+				"workflow_run_id":        workflowRunID,
+				"source_conversation_id": conversationID,
+				"source_message_id":      messageID,
+				"updated_at":             now,
+			}); upErr != nil {
+			return fmt.Errorf("更新方案版本来源失败: %w", upErr)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+
+	g.Log().Infof(ctx, "[PlanVersionService] 应用 task_patches: project=%d planVersion=%d patched=%d", projectID, pvID, patchedCount)
+	return pvID, patchedCount, nil
+}
+
+func matchBlueprintForPatch(byID map[int64]gdb.Record, byName map[string]gdb.Record, patch *engine.ArchitectTaskPatch) (gdb.Record, error) {
+	if patch == nil {
+		return nil, fmt.Errorf("patch 不能为空")
+	}
+	if patch.BlueprintID > 0 {
+		if bp, ok := byID[patch.BlueprintID]; ok {
+			return bp, nil
+		}
+		return nil, fmt.Errorf("未找到 blueprint_id=%d 对应的蓝图", patch.BlueprintID)
+	}
+
+	taskName := strings.TrimSpace(patch.TaskName)
+	if taskName == "" {
+		return nil, fmt.Errorf("task_patch 缺少 task_name")
+	}
+	if bp, ok := byName[taskName]; ok {
+		return bp, nil
+	}
+	return nil, fmt.Errorf("未找到任务名为 %q 的蓝图", taskName)
+}
+
+func buildBlueprintPatchUpdateData(byName map[string]gdb.Record, patch *engine.ArchitectTaskPatch) (g.Map, error) {
+	updateData := g.Map{}
+	if patch == nil {
+		return updateData, nil
+	}
+	if desc := strings.TrimSpace(patch.Description); desc != "" {
+		updateData["description"] = desc
+	}
+	if roleType := strings.TrimSpace(patch.RoleType); roleType != "" {
+		updateData["role_type"] = roleType
+	}
+	if roleLevel := strings.TrimSpace(patch.RoleLevel); roleLevel != "" {
+		updateData["role_level"] = roleLevel
+	}
+	if patch.BatchNo != nil && *patch.BatchNo > 0 {
+		updateData["batch_no"] = *patch.BatchNo
+	}
+	if patch.Sort != nil && *patch.Sort > 0 {
+		updateData["sort"] = *patch.Sort
+	}
+	if patch.AffectedResources != nil {
+		affectedJSON, err := json.Marshal(patch.AffectedResources)
+		if err != nil {
+			return nil, fmt.Errorf("序列化 affected_resources 失败: %w", err)
+		}
+		updateData["affected_resources"] = string(affectedJSON)
+	}
+	if patch.DependsOn != nil {
+		depIDs := make([]int64, 0, len(patch.DependsOn))
+		for _, depName := range patch.DependsOn {
+			depName = strings.TrimSpace(depName)
+			if depName == "" {
+				continue
+			}
+			target, ok := byName[depName]
+			if !ok {
+				return nil, fmt.Errorf("未找到依赖蓝图 %q", depName)
+			}
+			depIDs = append(depIDs, target["id"].Int64())
+		}
+		depJSON, err := json.Marshal(depIDs)
+		if err != nil {
+			return nil, fmt.Errorf("序列化 depends_on_blueprint_ids 失败: %w", err)
+		}
+		updateData["depends_on_blueprint_ids"] = string(depJSON)
+	}
+	return updateData, nil
 }
 
 // supersedePreviousVersionsInTx 事务内版本：将项目之前的活跃/草稿版本标记为 superseded。

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, h } from 'vue';
+import { ref, watch, h } from 'vue';
 import { useRoute } from 'vue-router';
 import { message } from 'ant-design-vue';
 
@@ -36,7 +36,7 @@ const loading = ref(false);
 const saving = ref(false);
 const isEdit = ref(false);
 
-const form = ref<Partial<ObjectiveData>>({
+const defaultForm: Partial<ObjectiveData> = {
   deliveryGoal: '',
   qualityFloor: 0.8,
   tokenBudget: 0,
@@ -49,7 +49,9 @@ const form = ref<Partial<ObjectiveData>>({
   maxStallMinutes: 30,
   autonomyLevel: 'supervised',
   maxSideEffectLevel: 'reversible',
-});
+};
+
+const form = ref<Partial<ObjectiveData>>({ ...defaultForm });
 
 const riskOptions = [
   { label: '低（保守）', value: 'low' },
@@ -74,6 +76,7 @@ async function loadObjective() {
   loading.value = true;
   try {
     const res = await getObjective(projectId.value);
+    form.value = { ...defaultForm };
     if (res.objective) {
       form.value = { ...form.value, ...res.objective };
     }
@@ -99,10 +102,16 @@ async function handleSave() {
   }
 }
 
-onMounted(async () => {
-  projectId.value = (route.query.projectId as string) ?? '';
-  await loadObjective();
-});
+watch(
+  () => route.query.projectId,
+  async (value) => {
+    projectId.value = (value as string) ?? '';
+    form.value = { ...defaultForm };
+    if (!projectId.value) return;
+    await loadObjective();
+  },
+  { immediate: true },
+);
 </script>
 
 <template>

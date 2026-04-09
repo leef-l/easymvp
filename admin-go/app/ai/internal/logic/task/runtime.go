@@ -20,6 +20,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"easymvp/utility/commandresource"
 	providerutil "easymvp/utility/provider"
 	"easymvp/utility/snowflake"
 	"easymvp/utility/worktreeguard"
@@ -550,6 +551,7 @@ func (s *sTask) executeWithCommandTemplate(ctx context.Context, taskInfo *runtim
 	cmd := buildShellCommand(ctx, command)
 	cmd.Dir = taskInfo.WorktreePath
 	cmd.Env = append(os.Environ(), buildCommandTemplateEnv(taskInfo, engineCfg, modelInfo)...)
+	runtimeApplyCommandPolicy(ctx, cmd)
 
 	var (
 		stdout = newActivityBufferWriter(taskInfo.ID)
@@ -765,6 +767,7 @@ func (s *sTask) buildAiderCommand(ctx context.Context, cfg *aiderExecutionConfig
 		cmd := exec.CommandContext(ctx, "aider", args...)
 		cmd.Dir = cfg.WorkDir
 		cmd.Env = append(os.Environ(), buildAiderEnv(cfg.Model)...)
+		runtimeApplyCommandPolicy(ctx, cmd)
 		return cmd, nil, nil
 	}
 
@@ -774,6 +777,7 @@ func (s *sTask) buildAiderCommand(ctx context.Context, cfg *aiderExecutionConfig
 		cmd := exec.CommandContext(ctx, "uv", uvArgs...)
 		cmd.Dir = cfg.WorkDir
 		cmd.Env = append(os.Environ(), buildAiderEnv(cfg.Model)...)
+		runtimeApplyCommandPolicy(ctx, cmd)
 		return cmd, nil, nil
 	}
 
@@ -822,6 +826,7 @@ func (s *sTask) buildAiderCommand(ctx context.Context, cfg *aiderExecutionConfig
 
 	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
 	cmd.Dir = workDir
+	runtimeApplyCommandPolicy(ctx, cmd)
 	return cmd, nil, nil
 }
 
@@ -917,7 +922,7 @@ func normalizeRuntimeBaseURL(model *runtimeModelInfo) string {
 	if model == nil {
 		return ""
 	}
-	return providerutil.ResolveBaseURLForProtocol(providerutil.Config{
+	return providerutil.ResolveCLIBaseURLForProtocol(providerutil.Config{
 		ProviderType:       model.ProviderType,
 		SupportedProtocols: model.SupportedProtocols,
 		BaseURL:            model.BaseURL,
@@ -1055,6 +1060,7 @@ func buildOpenHandsCLICommand(ctx context.Context, taskInfo *runtimeTask, modelI
 		cmd := exec.CommandContext(ctx, "openhands", args...)
 		cmd.Dir = taskInfo.WorktreePath
 		cmd.Env = append(os.Environ(), buildOpenHandsCLIEnv(taskInfo, modelInfo)...)
+		runtimeApplyCommandPolicy(ctx, cmd)
 		return cmd, nil
 	}
 	if _, err := exec.LookPath("uv"); err == nil {
@@ -1063,6 +1069,7 @@ func buildOpenHandsCLICommand(ctx context.Context, taskInfo *runtimeTask, modelI
 		cmd := exec.CommandContext(ctx, "uv", uvArgs...)
 		cmd.Dir = taskInfo.WorktreePath
 		cmd.Env = append(os.Environ(), buildOpenHandsCLIEnv(taskInfo, modelInfo)...)
+		runtimeApplyCommandPolicy(ctx, cmd)
 		return cmd, nil
 	}
 	return nil, fmt.Errorf("未找到 OpenHands CLI，且 uv 不可用")
@@ -1078,6 +1085,14 @@ func buildOpenHandsCLIEnv(taskInfo *runtimeTask, modelInfo *runtimeModelInfo) []
 		"UV_LOCK_TIMEOUT=600",
 	}
 	return env
+}
+
+func runtimeCommandEnv(base []string) []string {
+	return commandresource.Get(context.Background()).EnvSlice(base)
+}
+
+func runtimeApplyCommandPolicy(ctx context.Context, cmd *exec.Cmd) {
+	commandresource.Get(ctx).Apply(cmd)
 }
 
 func formatOpenHandsModel(model *runtimeModelInfo) string {

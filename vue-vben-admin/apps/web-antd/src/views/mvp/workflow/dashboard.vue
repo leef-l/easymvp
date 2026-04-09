@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, defineAsyncComponent } from 'vue';
+import { ref, computed, watch, defineAsyncComponent } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
@@ -21,7 +21,6 @@ import {
   Divider,
   message,
   Modal,
-  Input,
   Tabs,
   TabPane,
 } from 'ant-design-vue';
@@ -66,14 +65,17 @@ const failedTasks = ref<DomainTaskItem[]>([]);
 
 // Load failed tasks when in execute/rework/paused state
 async function loadFailedTasks() {
-  if (!projectId.value) return;
+  if (!projectId.value) {
+    failedTasks.value = [];
+    return;
+  }
   try {
     const res = await getExecutionStatus(projectId.value);
     failedTasks.value = (res.tasks || []).filter(
       (t: DomainTaskItem) => t.status === 'failed' || t.status === 'escalated'
     );
   } catch {
-    // ignore
+    failedTasks.value = [];
   }
 }
 
@@ -292,14 +294,18 @@ function stageStepStatus(stage: string): 'error' | 'finish' | 'process' | 'wait'
   return 'wait';
 }
 
-onMounted(async () => {
-  projectId.value = (route.query.projectId as string) ?? '';
-  if (projectId.value) {
-    await loadAll();
-  }
-});
+function resetDashboardState() {
+  statusData.value = null;
+  stages.value = [];
+  summary.value = null;
+  failedTasks.value = [];
+}
 
 async function loadAll() {
+  if (!projectId.value) {
+    resetDashboardState();
+    return;
+  }
   loading.value = true;
   try {
     const [statusRes, stageRes] = await Promise.all([
@@ -312,6 +318,8 @@ async function loadAll() {
     // Load failed tasks if in relevant state
     if (['executing', 'reworking', 'paused'].includes(statusRes.workflowStatus || statusRes.status || '')) {
       await loadFailedTasks();
+    } else {
+      failedTasks.value = [];
     }
 
     // 已完成时加载总结
@@ -321,27 +329,23 @@ async function loadAll() {
       } catch {
         // 总结可能尚未生成
       }
+    } else {
+      summary.value = null;
     }
   } finally {
     loading.value = false;
   }
 }
 
-function goToReview() {
-  router.push({ path: '/mvp/workflow/review', query: { projectId: projectId.value } });
-}
-function goToExecution() {
-  router.push({ path: '/mvp/workflow/execution', query: { projectId: projectId.value } });
-}
-function goToRework() {
-  router.push({ path: '/mvp/workflow/rework', query: { projectId: projectId.value } });
-}
-function goToAccept() {
-  router.push({ path: '/mvp/workflow/accept', query: { projectId: projectId.value } });
-}
-function goToAutonomy() {
-  router.push({ path: '/mvp/workflow/autonomy', query: { projectId: projectId.value } });
-}
+watch(
+  () => route.query.projectId,
+  async (value) => {
+    projectId.value = (value as string) ?? '';
+    await loadAll();
+  },
+  { immediate: true },
+);
+
 function goToTimeline() {
   router.push({ path: '/mvp/workflow/timeline', query: { projectId: projectId.value } });
 }
@@ -362,8 +366,10 @@ const ExecutionPanel = defineAsyncComponent(() => import('./execution.vue'));
 const ReviewPanel = defineAsyncComponent(() => import('./review.vue'));
 const ReworkPanel = defineAsyncComponent(() => import('./rework.vue'));
 const AcceptPanel = defineAsyncComponent(() => import('./accept.vue'));
+const VerificationPanel = defineAsyncComponent(() => import('./verification.vue'));
 const AutonomyPanel = defineAsyncComponent(() => import('./autonomy.vue'));
 const TimelinePanel = defineAsyncComponent(() => import('./timeline.vue'));
+const RegressionPanel = defineAsyncComponent(() => import('./regression.vue'));
 
 // Auto-select tab based on workflow status
 watch(currentStatus, (status) => {
@@ -372,6 +378,7 @@ watch(currentStatus, (status) => {
     executing: 'execution',
     reworking: 'rework',
     accepting: 'accept',
+    completed: 'verification',
   };
   if (tabMap[status]) {
     activeTab.value = tabMap[status];
@@ -427,21 +434,21 @@ watch(currentStatus, (status) => {
                   <Statistic
                     title="已完成"
                     :value="statusData.statusCounts?.['domain_completed'] ?? statusData.statusCounts?.['completed'] ?? 0"
-                    value-style="color: #3f8600"
+                    :value-style="{ color: '#3f8600' }"
                   />
                 </Col>
                 <Col :span="6">
                   <Statistic
                     title="运行中"
                     :value="statusData.statusCounts?.['domain_running'] ?? statusData.activeRunningTasks ?? 0"
-                    value-style="color: #1890ff"
+                    :value-style="{ color: '#1890ff' }"
                   />
                 </Col>
                 <Col :span="6">
                   <Statistic
                     title="失败"
                     :value="statusData.statusCounts?.['domain_failed'] ?? statusData.statusCounts?.['failed'] ?? 0"
-                    value-style="color: #cf1322"
+                    :value-style="{ color: '#cf1322' }"
                   />
                 </Col>
               </Row>
@@ -600,11 +607,17 @@ watch(currentStatus, (status) => {
           <TabPane key="accept" tab="验收控制台">
             <AcceptPanel :project-id="projectId" />
           </TabPane>
+          <TabPane key="verification" tab="验证控制台">
+            <VerificationPanel :project-id="projectId" />
+          </TabPane>
           <TabPane key="autonomy" tab="自治控制台">
             <AutonomyPanel :project-id="projectId" />
           </TabPane>
           <TabPane key="timeline" tab="事件时间线">
             <TimelinePanel :project-id="projectId" />
+          </TabPane>
+          <TabPane key="regression" tab="评测样例">
+            <RegressionPanel />
           </TabPane>
         </Tabs>
 
@@ -615,10 +628,10 @@ watch(currentStatus, (status) => {
               <Statistic title="总任务" :value="summary.totalTasks" />
             </Col>
             <Col :span="4">
-              <Statistic title="成功" :value="summary.completedTasks" value-style="color: #3f8600" />
+              <Statistic title="成功" :value="summary.completedTasks" :value-style="{ color: '#3f8600' }" />
             </Col>
             <Col :span="4">
-              <Statistic title="失败" :value="summary.failedTasks" value-style="color: #cf1322" />
+              <Statistic title="失败" :value="summary.failedTasks" :value-style="{ color: '#cf1322' }" />
             </Col>
             <Col :span="4">
               <Statistic title="跳过" :value="summary.skippedTasks" />

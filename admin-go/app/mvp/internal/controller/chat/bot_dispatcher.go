@@ -142,6 +142,12 @@ func dispatchIntent(
 		handleBotApproveAccept(ctx, intent.ProjectName, systemUserID, reply)
 	case "reject_accept":
 		handleBotRejectAccept(ctx, intent.ProjectName, systemUserID, reply)
+	case "verification_start":
+		handleBotVerificationStart(ctx, intent.ProjectName, systemUserID, reply)
+	case "verification_status":
+		handleBotVerificationStatus(ctx, intent.ProjectName, systemUserID, reply)
+	case "verification_repair":
+		handleBotVerificationRepair(ctx, intent.ProjectName, intent.IssueID, systemUserID, reply)
 
 	// ── 自治管理 ──
 	case "autonomy_status":
@@ -189,11 +195,11 @@ func dispatchIntent(
 func looksLikeCommand(lower string) bool {
 	keywords := []string{
 		"项目", "任务", "创建", "新建", "暂停", "恢复", "继续", "取消", "终止", "重试", "跳过", "修改", "调整", "更新",
-		"强制", "回到设计", "重开审核", "重开执行", "验收", "返工",
+		"强制", "回到设计", "重开审核", "重开执行", "验收", "返工", "验证", "修复",
 		"状态", "进度", "完成", "失败", "审核", "验收", "通过", "驳回", "拒绝",
 		"批准", "确认", "方案", "自治", "检查点",
 		"create", "project", "task", "pause", "resume", "cancel", "retry", "skip", "force", "reset",
-		"status", "review", "accept", "approve", "reject", "confirm",
+		"status", "review", "accept", "approve", "reject", "confirm", "verify", "verification", "repair",
 	}
 	for _, kw := range keywords {
 		if strings.Contains(lower, kw) {
@@ -215,6 +221,7 @@ func botHelpText() string {
 📋 查看任务 / 重试失败 / 跳过阻塞 / 直接改任务
 🔍 查看审核结果 / 人工审核通过或驳回
 🎯 查看验收状态 / 验收通过或打回
+🧪 启动 Docker 验证 / 查看验证状态 / 基于验证问题返工
 🤖 查看自治检查点 / 批准或拒绝
 
 示例：
@@ -223,6 +230,9 @@ func botHelpText() string {
   "把电商后台回到设计阶段"
   "强制把电商后台重开到执行阶段"
   "把电商后台的任务123改成 codex_cli 并重新开始"
+  "启动验证 电商后台"
+  "电商后台最近验证结果"
+  "根据验证问题把电商后台返工"
   "有失败任务帮我重试一下"
   "审核通过了吗，没问题就批了"
   "自治那边有啥需要我确认的吗"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import {
   Card,
@@ -72,6 +72,16 @@ const modeLoading = ref(false);
 const rejectReason = ref('');
 const rejectModalVisible = ref(false);
 const rejectTarget = ref<AutonomyCheckpointItem | null>(null);
+
+function resetAutonomyState() {
+  checkpoints.value = [];
+  pendingActions.value = [];
+  allActions.value = [];
+  gateRules.value = [];
+  policyRules.value = [];
+  reports.value = [];
+  selectedReport.value = null;
+}
 
 /** actionID → action 的快查表 */
 const actionMap = computed(() => {
@@ -388,10 +398,23 @@ function onTabChange(key: string) {
   }
 }
 
-onMounted(() => {
-  loadData();
-  loadMode();
-});
+watch(
+  projectID,
+  (value) => {
+    resetAutonomyState();
+    if (!value) return;
+    loadData();
+    if (activeTab.value === 'history') {
+      loadHistory();
+    }
+    if (activeTab.value === 'gates') {
+      loadRules();
+    }
+  },
+  { immediate: true },
+);
+
+void loadMode();
 </script>
 
 <template>
