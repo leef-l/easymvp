@@ -49,6 +49,27 @@ func Capture(ctx context.Context, workDir string) (*Snapshot, error) {
 	}, nil
 }
 
+var autoAllowFiles = map[string]bool{
+	".gitignore":      true,
+	".gitattributes":  true,
+	".editorconfig":   true,
+	".gitkeep":        true,
+	"README.md":       true,
+	"README.txt":      true,
+	"LICENSE":         true,
+	"LICENSE.md":      true,
+	"LICENSE.txt":     true,
+	".dockerignore":   true,
+	"Dockerfile":      true,
+	"docker-compose.yml": true,
+	"docker-compose.yaml": true,
+	".env.example":    true,
+	".env.sample":     true,
+	"Makefile":        true,
+	".gitmodules":     true,
+	".git-blame-ignore-revs": true,
+}
+
 func (s *Snapshot) Validate(ctx context.Context, workDir string, allowPaths []string) (*ValidationResult, error) {
 	result := &ValidationResult{
 		Enabled: s != nil && s.enabled,
@@ -72,12 +93,26 @@ func (s *Snapshot) Validate(ctx context.Context, workDir string, allowPaths []st
 			result.Suspicious = append(result.Suspicious, currentPath)
 			continue
 		}
+		if isAutoAllowed(currentPath) {
+			continue
+		}
 		if len(allowList) == 0 || !isAllowedPath(currentPath, allowList) {
 			result.Invalid = append(result.Invalid, currentPath)
 		}
 	}
 
 	return result, nil
+}
+
+func isAutoAllowed(path string) bool {
+	if autoAllowFiles[path] {
+		return true
+	}
+	baseName := path
+	if idx := strings.LastIndex(path, "/"); idx >= 0 {
+		baseName = path[idx+1:]
+	}
+	return autoAllowFiles[baseName]
 }
 
 func (r *ValidationResult) HasIssues() bool {
@@ -177,6 +212,42 @@ func looksLikePath(value string) bool {
 	if strings.Contains(value, "/") {
 		return true
 	}
+	
+	// 排除包含空格的非路径内容（通常是命令输出或描述文本）
+	if strings.Contains(value, " ") {
+		lower := strings.ToLower(value)
+		// 排除命令相关
+		if strings.Contains(lower, "curl") ||
+			strings.Contains(lower, "npm") ||
+			strings.Contains(lower, "yarn") ||
+			strings.Contains(lower, "pip") ||
+			strings.Contains(lower, "python") ||
+			strings.Contains(lower, "node") ||
+			strings.Contains(lower, "go run") ||
+			strings.Contains(lower, "pytest") ||
+			strings.Contains(lower, "make") ||
+			strings.Contains(lower, "bash") ||
+			strings.Contains(lower, "hello") ||
+			strings.Contains(lower, "world") ||
+			strings.Contains(lower, "usage:") ||
+			strings.Contains(lower, "example") ||
+			strings.Contains(lower, "note:") ||
+			strings.Contains(lower, "warning:") ||
+			strings.Contains(lower, "error:") ||
+			strings.Contains(lower, "success") {
+			return false
+		}
+	}
+	
+	// 排除包含 HTTP/Host 等协议关键词的内容
+	if strings.Contains(value, "http://") ||
+		strings.Contains(value, "https://") ||
+		strings.Contains(value, "Host:") ||
+		strings.HasPrefix(value, "curl ") ||
+		strings.HasPrefix(value, "npm ") {
+		return false
+	}
+	
 	return simpleNamePattern.MatchString(value)
 }
 

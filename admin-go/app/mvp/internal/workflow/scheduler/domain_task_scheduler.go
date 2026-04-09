@@ -312,7 +312,9 @@ func (s *DomainTaskScheduler) getActiveBatch(ctx context.Context, workflowRunID 
 
 	batchNo := int(val)
 
-	// 检查该批次之前是否有未完成的任务（非 completed/skipped）
+	// 检查该批次之前是否有未完成的任务
+	// failed/escalated 状态的任务也视为"阻塞"，需要人工处理
+	// 但 skipped 状态不阻塞
 	prevUnfinished, puErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("workflow_run_id", workflowRunID).
 		Where("batch_no > 0").
@@ -325,12 +327,29 @@ func (s *DomainTaskScheduler) getActiveBatch(ctx context.Context, workflowRunID 
 		return 0
 	}
 	if prevUnfinished > 0 {
-		// 之前批次还有未完成的，不推进
+		// 之前批次还有未完成的，检查是否全部失败/升级（可推进到下一批次）
+		allFailedOrEscalated, checkErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
+			Where("workflow_run_id", workflowRunID).
+			Where("batch_no > 0").
+			Where("batch_no < ?", batchNo).
+			WhereNotIn("status", g.Slice{domainTask.StatusCompleted, "skipped", domainTask.StatusFailed, domainTask.StatusEscalated}).
+			WhereNull("deleted_at").
+			Count()
+		if checkErr != nil {
+			g.Log().Warningf(ctx, "[DomainTaskScheduler] 检查失败状态失败: wfRunID=%d err=%v", workflowRunID, checkErr)
+			return 0
+		}
+		// 如果全部是 failed/escalated，允许推进到下一批次
+		if allFailedOrEscalated == 0 {
+			g.Log().Infof(ctx, "[DomainTaskScheduler] 前序批次全部失败/升级，推进到批次 %d: wfRunID=%d", batchNo, workflowRunID)
+			return batchNo
+		}
+		// 否则返回前序批次号，继续等待
 		prevBatch, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).
 			Where("workflow_run_id", workflowRunID).
 			Where("batch_no > 0").
 			Where("batch_no < ?", batchNo).
-			WhereNotIn("status", g.Slice{domainTask.StatusCompleted, "skipped"}).
+			WhereNotIn("status", g.Slice{domainTask.StatusCompleted, "skipped", domainTask.StatusFailed, domainTask.StatusEscalated}).
 			WhereNull("deleted_at").
 			Min("batch_no")
 		return int(prevBatch)

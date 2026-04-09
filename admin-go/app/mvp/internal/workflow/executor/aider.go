@@ -127,18 +127,40 @@ func (e *ChatExecutor) NeedsWorkspace() bool { return false }
 
 // Execute 执行 Chat 任务。
 func (e *ChatExecutor) Execute(ctx context.Context, req *Request) *Result {
-	// 创建或获取任务对话
 	convID, err := engine.EnsureDomainTaskConversation(ctx, req.ProjectID, req.TaskID,
 		req.TaskRecord["role_type"].String(), req.TaskRecord["name"].String())
 	if err != nil {
 		return &Result{Success: false, Error: err}
 	}
 
-	// 发送任务描述到对话
-	_, _, err = engine.GetEngine().SendMessage(ctx, convID, req.TaskRecord["description"].String(), 0, 0)
+	_, replyID, err := engine.GetEngine().SendMessage(ctx, convID, req.TaskRecord["description"].String(), 0, 0)
 	if err != nil {
 		return &Result{Success: false, Error: fmt.Errorf("chat 执行失败: %w", err)}
 	}
 
-	return &Result{Success: true, Output: "chat execution completed"}
+	const maxWait = 5 * time.Minute
+	const pollInterval = 2 * time.Second
+	deadline := time.Now().Add(maxWait)
+
+	for time.Now().Before(deadline) {
+		msg, dbErr := g.DB().Model("mvp_message").Ctx(ctx).
+			Where("id", replyID).
+			Fields("status, content").
+			One()
+		if dbErr != nil {
+			return &Result{Success: false, Error: fmt.Errorf("查询消息失败: %w", dbErr)}
+		}
+
+		status := msg["status"].String()
+		if status == "completed" {
+			return &Result{Success: true, Output: msg["content"].String()}
+		}
+		if status == "failed" {
+			return &Result{Success: false, Error: fmt.Errorf("AI 回复失败")}
+		}
+
+		time.Sleep(pollInterval)
+	}
+
+	return &Result{Success: false, Error: fmt.Errorf("等待 AI 回复超时")}
 }

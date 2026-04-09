@@ -585,7 +585,7 @@ func updateDomainTaskInternal(ctx context.Context, projectID int64, opts domainT
 		updateData["sort"] = *opts.Sort
 		changed = true
 	}
-	if opts.ReplaceAffectedResources {
+	if opts.ReplaceAffectedResources || len(opts.AffectedResources) > 0 {
 		resJSON, jsonErr := json.Marshal(opts.AffectedResources)
 		if jsonErr != nil {
 			return nil, fmt.Errorf("序列化 affectedResources 失败: %w", jsonErr)
@@ -1429,7 +1429,7 @@ func (c *cWorkflow) SkipTask(ctx context.Context, req *v1.WorkflowSkipTaskReq) (
 		WhereIn("status", g.Slice{"pending", "failed", "escalated"}).
 		Update(g.Map{
 			"status":       "completed",
-			"result":       "skipped",
+			"result":       "[用户跳过] " + req.Reason,
 			"completed_at": gdb.Raw("NOW()"),
 			"updated_at":   gdb.Raw("NOW()"),
 		})
@@ -1440,6 +1440,39 @@ func (c *cWorkflow) SkipTask(ctx context.Context, req *v1.WorkflowSkipTaskReq) (
 	if rows == 0 {
 		return nil, fmt.Errorf("任务不在可跳过的状态")
 	}
+
+	// 检查是否有正在运行的 rework 阶段，如果有则取消它
+	task, _ := g.DB().Model("mvp_domain_task").Ctx(ctx).Where("id", taskID).Fields("workflow_run_id").One()
+	if !task.IsEmpty() {
+		wfRunID := task["workflow_run_id"].Int64()
+		reworkStage, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).
+			Where("workflow_run_id", wfRunID).
+			Where("stage_type", "rework").
+			Where("status", "running").
+			OrderDesc("id").
+			One()
+		if !reworkStage.IsEmpty() {
+			// 取消 rework 阶段
+			g.Log().Infof(ctx, "[SkipTask] 取消正在运行的 rework 阶段: stageRunID=%d", reworkStage["id"].Int64())
+			_, _ = g.DB().Model("mvp_stage_run").Ctx(ctx).
+				Where("id", reworkStage["id"].Int64()).
+				Update(g.Map{
+					"status":       "failed",
+					"error_message": "用户跳过失败任务，取消返工阶段",
+					"finished_at":  gdb.Raw("NOW()"),
+					"updated_at":   gdb.Raw("NOW()"),
+				})
+			// 将工作流状态恢复到 execute 并推进到 accept
+			_, _ = g.DB().Model("mvp_workflow_run").Ctx(ctx).
+				Where("id", wfRunID).
+				Update(g.Map{
+					"status":       "executing",
+					"current_stage": "execute",
+					"updated_at":   gdb.Raw("NOW()"),
+				})
+		}
+	}
+
 	if completeErr := orchestrator.GetTaskScheduler().OnTaskCompleted(ctx, taskID); completeErr != nil {
 		g.Log().Warningf(ctx, "[SkipTask] 通知调度器任务完成失败: task=%d err=%v", taskID, completeErr)
 	}

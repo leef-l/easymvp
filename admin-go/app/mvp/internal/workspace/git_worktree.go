@@ -30,12 +30,15 @@ func (m *GitWorktreeManager) Prepare(ctx context.Context, req PrepareRequest) (*
 	workDir := filepath.Clean(req.WorkDir)
 	if !isGitRepo(workDir) {
 		// 目录不存在或不是 git 仓库，自动初始化
-		if err := os.MkdirAll(workDir, 0755); err != nil {
+		if err := os.MkdirAll(workDir, 0755); err != nil && !os.IsExist(err) {
 			return nil, fmt.Errorf("创建工作目录失败: %s: %w", workDir, err)
 		}
-		initCmd := exec.Command("git", "init", workDir)
-		if output, err := initCmd.CombinedOutput(); err != nil {
-			return nil, fmt.Errorf("git init 失败: %s: %s", workDir, string(output))
+		// 再次检查是否已经是 git 仓库（防止并发创建）
+		if !isGitRepo(workDir) {
+			initCmd := exec.Command("git", "init", workDir)
+			if output, err := initCmd.CombinedOutput(); err != nil {
+				return nil, fmt.Errorf("git init 失败: %s: %s", workDir, string(output))
+			}
 		}
 		// 配置本地 git user（容器内可能没有全局配置）
 		_ = exec.Command("git", "-C", workDir, "config", "user.name", "EasyMVP").Run()
@@ -84,6 +87,14 @@ func (m *GitWorktreeManager) Prepare(ctx context.Context, req PrepareRequest) (*
 			_ = gitDeleteBranch(req.WorkDir, branchName)
 			_ = os.RemoveAll(worktreePath)
 			_ = m.repo.softDelete(ctx, existing.ID)
+		}
+	} else {
+		// 无数据库记录但目录存在时，清理残留
+		if _, statErr := os.Stat(worktreePath); statErr == nil {
+			g.Log().Warningf(ctx, "[Workspace] 清理残留目录: path=%s", worktreePath)
+			_ = gitWorktreeRemove(req.WorkDir, worktreePath)
+			_ = gitDeleteBranch(req.WorkDir, branchName)
+			_ = os.RemoveAll(worktreePath)
 		}
 	}
 

@@ -30,6 +30,9 @@ func (p *TaskParser) normalizeTasks(ctx context.Context, tasks []ArchitectTask, 
 			continue
 		}
 
+		// affected_resources 格式验证
+		task.AffectedResources = validateAffectedResources(ctx, task.Name, task.AffectedResources)
+
 		// 分类感知校验
 		switch family {
 		case CategoryFamilyCoding:
@@ -71,6 +74,52 @@ func (p *TaskParser) normalizeTasks(ctx context.Context, tasks []ArchitectTask, 
 	}
 
 	return normalized
+}
+
+// validateAffectedResources 验证并过滤无效的 affected_resources
+func validateAffectedResources(ctx context.Context, taskName string, resources []string) []string {
+	if len(resources) == 0 {
+		return resources
+	}
+
+	valid := make([]string, 0, len(resources))
+	for _, r := range resources {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+
+		// 禁止根路径
+		if r == "/" || r == "\\" {
+			g.Log().Warningf(ctx, "[TaskParser] 任务 [%s] affected_resources 包含根路径，已跳过: %s", taskName, r)
+			continue
+		}
+
+		// 禁止通配符
+		if strings.Contains(r, "*") {
+			g.Log().Warningf(ctx, "[TaskParser] 任务 [%s] affected_resources 包含通配符，已跳过: %s", taskName, r)
+			continue
+		}
+
+		// 禁止目录路径（以 / 结尾）
+		if strings.HasSuffix(r, "/") || strings.HasSuffix(r, "\\") {
+			g.Log().Warningf(ctx, "[TaskParser] 任务 [%s] affected_resources 是目录路径，已跳过: %s", taskName, r)
+			continue
+		}
+
+		// 禁止绝对路径（以 / 或 \ 或盘符开头）
+		if strings.HasPrefix(r, "/") && !strings.Contains(r[1:], "/") {
+			// 单独的 /path 形式，可能是根路径的变体
+			if !strings.Contains(r[1:], ".") && !strings.Contains(r[1:], "/") {
+				g.Log().Warningf(ctx, "[TaskParser] 任务 [%s] affected_resources 疑似根路径，已跳过: %s", taskName, r)
+				continue
+			}
+		}
+
+		valid = append(valid, r)
+	}
+
+	return valid
 }
 
 func isExplorationPlaceholderTask(task ArchitectTask) bool {

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -87,12 +88,12 @@ func checkPathBlacklist(path string) error {
 	return nil
 }
 
-// GenerateWorkDir 为非编码类项目自动生成工作目录
-// 编码类项目由用户手动指定，非编码类项目自动生成到 /www/wwwroot/project/easymvp/workspace/
+// GenerateWorkDir 为项目自动生成工作目录
+// 路径格式：{workspace_base_path}/{family}/{projectID}
+// workspace_base_path 从配置读取（DB mvp_config → config.yaml → 默认 workspace）
 func GenerateWorkDir(projectCategory string, projectID int64) string {
+	ctx := context.Background()
+	basePath := GetWorkspaceBasePath(ctx)
 	family := GetCategoryFamily(projectCategory)
-	if family == CategoryFamilyCoding {
-		return "" // 编码类不自动生成，由用户指定
-	}
-	return fmt.Sprintf("/www/wwwroot/project/easymvp/workspace/%s/%d", string(family), projectID)
+	return filepath.Join(basePath, string(family), fmt.Sprintf("%d", projectID))
 }

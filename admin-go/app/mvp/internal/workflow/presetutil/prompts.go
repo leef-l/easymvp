@@ -456,16 +456,37 @@ func architectJSONFormatSuffix(projectCategory string) string {
 
 	return fmt.Sprintf(`
 
-===== 输出格式要求（必须遵守）=====
+===== 输出格式要求（必须遵守）===== 
 
 当你准备好输出任务清单时，请使用以下 JSON 格式，每个模块一个独立代码块：
 {"tasks": [{"name": "任务名", "description": "详细描述", "role_level": "pro", "batch_no": 1, "affected_resources": ["path/file"], "depends_on": ["依赖的任务名"]}]}
 %s
 - 每个 JSON 块必须是完整的 {"tasks": [...]} 格式
 - 任务名称全局唯一，跨模块依赖用完整任务名引用
-- 禁止输出 <minimax:tool_call>、<invoke>、函数调用、命令执行、XML/HTML 标签或“我先查看目录”这类过程描述
-- 不要把“查看环境 / 读取目录 / 确认文件结构”当成独立任务；如果目录为空，直接按从零创建拆分可交付任务
-- 如果输出被截断，系统会自动请求继续`, newProjectNote)
+- 禁止输出 <minimax:tool_call>、<invoke>、函数调用、命令执行、XML/HTML 标签或"我先查看目录"这类过程描述
+- 不要把"查看环境 / 读取目录 / 确认文件结构"当成独立任务；如果目录为空，直接按从零创建拆分可交付任务
+- 如果输出被截断，系统会自动请求继续
+
+===== affected_resources 格式要求（强制）=====
+
+affected_resources 必须是具体的文件路径列表，格式规则：
+1. 必须是相对路径，如 ["src/main.go", "config/app.yaml"]
+2. 禁止使用根路径 "/" 或空字符串
+3. 禁止使用通配符如 "*" 或 "**/*.go"
+4. 禁止使用目录路径如 "src/" （必须明确到文件）
+5. 每个任务至少要有一个具体的 affected_resources 文件路径
+6. 如果任务会创建新文件，直接写目标文件路径
+
+错误示例（禁止）：
+- affected_resources: ["/"]           ← 禁止根路径
+- affected_resources: [""]            ← 禁止空字符串
+- affected_resources: ["*"]           ← 禁止通配符
+- affected_resources: ["src/"]        ← 禁止目录路径
+
+正确示例：
+- affected_resources: ["go.mod"]
+- affected_resources: ["main.go", "config.yaml"]
+- affected_resources: ["src/api/user.go", "src/model/user.go"]`, newProjectNote)
 }
 
 func buildCodingArchitectPrompt(projectName, projectDesc string) string {
@@ -488,6 +509,17 @@ func buildCodingArchitectPrompt(projectName, projectDesc string) string {
 - 后续批次的任务依赖前面批次创建的文件，必须在 depends_on 中明确声明
 - 任务描述中要说明需要创建哪些新文件，以及依赖哪些前置任务创建的文件
 - 每个任务的 affected_resources 要列出该任务会创建或修改的文件路径
+
+## 必须包含的任务（软件项目强制要求）
+
+每个软件项目必须包含以下基础任务：
+1. **README.md 创建任务** - 在最后批次创建项目说明文档，包含项目简介、安装步骤、使用方法
+2. 项目初始化任务（go.mod / package.json / requirements.txt 等）
+3. 核心代码实现任务
+4. 测试任务（如适用）
+
+示例：
+{"tasks": [{"name": "Create README.md", "description": "Create project README with installation and usage instructions", "role_level": "lite", "batch_no": 99, "affected_resources": ["README.md"], "depends_on": ["所有核心功能任务"]}]}}
 
 ## 分段输出规则（必须严格遵守）
 

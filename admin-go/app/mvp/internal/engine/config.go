@@ -200,6 +200,32 @@ func GetSchedulerMaxConcurrency(ctx context.Context) int {
 	return maxConcurrency
 }
 
+// GetWorkspaceBasePath 获取工作空间根目录
+// 三级 fallback: DB mvp_config → config.yaml → 默认值（当前目录下的 workspace）
+func GetWorkspaceBasePath(ctx context.Context) string {
+	// 1. 尝试从数据库读取
+	row, err := g.DB().Model("mvp_config").Ctx(ctx).
+		Where("config_key", "workspace.base_path").
+		WhereNull("deleted_at").
+		Fields("config_value").
+		One()
+	if err == nil && !row.IsEmpty() {
+		val := row["config_value"].String()
+		if val != "" {
+			return val
+		}
+	}
+
+	// 2. 尝试从 config.yaml 读取
+	cfgVal := g.Cfg().MustGet(ctx, "workspace.basePath")
+	if cfgVal != nil && !cfgVal.IsEmpty() {
+		return cfgVal.String()
+	}
+
+	// 3. 默认值：当前工作目录下的 workspace
+	return "workspace"
+}
+
 // IsFeatureEnabledForProjectType 判断某功能是否对指定项目类型启用。
 // configKey 指向一个 JSON 数组配置（如 accept.llm_judge_project_types），值为 ["software_dev","game_dev"]。
 // 空字符串、"*"、"[]" 均视为"对所有项目类型启用"。

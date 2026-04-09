@@ -435,6 +435,9 @@ func (c *cWorkflow) DeleteChatMenu(ctx context.Context, req *v1.WorkflowDeleteCh
 }
 
 func saveMvpConfig(ctx context.Context, key, value, configType, category, description string) error {
+	if value == "" {
+		return nil
+	}
 	now := gtime.Now()
 	userID := middleware.GetUserID(ctx)
 	deptID := middleware.GetDeptID(ctx)
