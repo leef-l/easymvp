@@ -46,6 +46,7 @@ func (e *AiderExecutor) Execute(ctx context.Context, req *Request) *Result {
 	if len(targets.Rejected) > 0 {
 		g.Log().Warningf(ctx, "[AiderExecutor] 丢弃可疑 affected_resources: task=%d rejected=%v", req.TaskID, targets.Rejected)
 	}
+	promptAllowPaths := promptAllowedPathsForExecution(workDir, targets)
 	workDir, targets = applyExecutionSubdir(workDir, targets)
 	if len(targets.DirectoryPaths) > 0 {
 		if err := ensureDirectoryTargets(workDir, targets.DirectoryPaths); err != nil {
@@ -78,7 +79,7 @@ func (e *AiderExecutor) Execute(ctx context.Context, req *Request) *Result {
 
 	runner := engine.GetAiderRunner()
 	aiderResult := runner.RunTask(execCtx, req.ProjectID, req.TaskID, req.ModelInfo,
-		buildStrictAiderTaskPrompt(req.TaskRecord["description"].String(), targets.AllowedPaths), workDir, targets.FilePaths, targets.AllowedPaths, nil)
+		buildStrictAiderTaskPrompt(req.TaskRecord["description"].String(), promptAllowPaths), workDir, targets.FilePaths, targets.AllowedPaths, nil)
 
 	if aiderResult.Error != nil {
 		// workspace finalize: 标记失败

@@ -275,10 +275,30 @@ func looksLikeEmbeddedDuplicatePrefix(prefix, allowPath string) bool {
 	if root != "" && strings.HasSuffix(prefix, "/"+root) {
 		return true
 	}
-	if allowDir != "." && allowDir != "" && strings.HasSuffix(prefix, "/"+allowDir) {
-		return true
+	for _, candidate := range leadingDirectoryPrefixes(allowDir) {
+		if prefix == candidate || strings.HasSuffix(prefix, "/"+candidate) {
+			return true
+		}
 	}
 	return false
+}
+
+func leadingDirectoryPrefixes(value string) []string {
+	value = strings.Trim(path.Clean(value), "/")
+	if value == "" || value == "." {
+		return nil
+	}
+
+	parts := strings.Split(value, "/")
+	prefixes := make([]string, 0, len(parts))
+	for i := range parts {
+		prefix := strings.Join(parts[:i+1], "/")
+		if prefix == "" || prefix == "." {
+			continue
+		}
+		prefixes = append(prefixes, prefix)
+	}
+	return prefixes
 }
 
 func firstSegment(value string) string {

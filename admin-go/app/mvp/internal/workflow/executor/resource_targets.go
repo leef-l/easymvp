@@ -104,6 +104,14 @@ func applyExecutionSubdir(baseDir string, targets resourceTargets) (string, reso
 	return filepath.Join(baseDir, filepath.FromSlash(commonDir)), rebased
 }
 
+func promptAllowedPathsForExecution(baseDir string, targets resourceTargets) []string {
+	commonDir := detectCommonExecutionDir(targets)
+	if commonDir == "" || !canUseExecutionSubdir(baseDir, commonDir) {
+		return append([]string(nil), targets.AllowedPaths...)
+	}
+	return trimResourcePrefix(targets.AllowedPaths, commonDir)
+}
+
 func canUseExecutionSubdir(baseDir, commonDir string) bool {
 	info, err := os.Stat(filepath.Join(baseDir, filepath.FromSlash(commonDir)))
 	if err != nil {

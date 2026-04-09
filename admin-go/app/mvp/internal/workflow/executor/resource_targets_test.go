@@ -126,6 +126,35 @@ func TestApplyExecutionSubdirRebasesFrontendCommonPrefix(t *testing.T) {
 	}
 }
 
+func TestPromptAllowedPathsForExecutionRebasesDeepSubdir(t *testing.T) {
+	baseDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(baseDir, "frontend", "src", "components"), 0755); err != nil {
+		t.Fatalf("mkdir frontend src components: %v", err)
+	}
+	targets := resourceTargets{
+		AllowedPaths: []string{
+			"frontend/src/components/ScoreBoard/ScoreBoard.tsx",
+			"frontend/src/components/GameOverModal/GameOverModal.tsx",
+			"frontend/src/components/ControlPanel/ControlPanel.tsx",
+		},
+		FilePaths: []string{
+			"frontend/src/components/ScoreBoard/ScoreBoard.tsx",
+			"frontend/src/components/GameOverModal/GameOverModal.tsx",
+			"frontend/src/components/ControlPanel/ControlPanel.tsx",
+		},
+	}
+
+	got := promptAllowedPathsForExecution(baseDir, targets)
+	want := []string{
+		"ScoreBoard/ScoreBoard.tsx",
+		"GameOverModal/GameOverModal.tsx",
+		"ControlPanel/ControlPanel.tsx",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("promptAllowedPathsForExecution() = %#v, want %#v", got, want)
+	}
+}
+
 func TestApplyExecutionSubdirDoesNotRebaseMultiRootTargets(t *testing.T) {
 	baseDir := t.TempDir()
 	targets := resourceTargets{

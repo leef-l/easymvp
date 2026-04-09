@@ -136,6 +136,32 @@ func TestPruneEmbeddedAllowedDuplicatesKeepsPathWhenAllowedTargetMissing(t *test
 	}
 }
 
+func TestPruneEmbeddedAllowedDuplicatesRemovesRepeatedAncestorPath(t *testing.T) {
+	t.Parallel()
+
+	repoDir := initGitRepo(t)
+	workDir := filepath.Join(repoDir, "frontend", "src", "components")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir frontend src components: %v", err)
+	}
+	writeFile(t, repoDir, "frontend/src/components/ControlPanel/ControlPanel.tsx", "export const ControlPanel = () => null\n")
+	writeFile(t, repoDir, "frontend/src/components/frontend/src/components/ControlPanel/ControlPanel.tsx", "export const ControlPanel = () => null\n")
+
+	pruned, err := PruneEmbeddedAllowedDuplicates(context.Background(), workDir, []string{"frontend/src/components/ControlPanel/ControlPanel.tsx"})
+	if err != nil {
+		t.Fatalf("PruneEmbeddedAllowedDuplicates() error = %v", err)
+	}
+	if len(pruned) != 1 || pruned[0] != "frontend/src/components/frontend/src/components/ControlPanel/ControlPanel.tsx" {
+		t.Fatalf("unexpected pruned paths: %#v", pruned)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "frontend/src/components/frontend/src/components/ControlPanel/ControlPanel.tsx")); !os.IsNotExist(err) {
+		t.Fatalf("expected duplicate nested path to be removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "frontend/src/components/ControlPanel/ControlPanel.tsx")); err != nil {
+		t.Fatalf("expected allowed path to remain, stat err=%v", err)
+	}
+}
+
 func initGitRepo(t *testing.T) string {
 	t.Helper()
 
