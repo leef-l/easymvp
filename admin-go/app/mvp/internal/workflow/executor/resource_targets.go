@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -83,4 +84,143 @@ func ensureDirectoryTargets(baseDir string, directories []string) error {
 		}
 	}
 	return nil
+}
+
+func applyExecutionSubdir(baseDir string, targets resourceTargets) (string, resourceTargets) {
+	commonDir := detectCommonExecutionDir(targets)
+	if commonDir == "" {
+		return baseDir, targets
+	}
+	if !canUseExecutionSubdir(baseDir, commonDir) {
+		return baseDir, targets
+	}
+
+	rebased := resourceTargets{
+		AllowedPaths:   append([]string(nil), targets.AllowedPaths...),
+		FilePaths:      trimResourcePrefix(targets.FilePaths, commonDir),
+		DirectoryPaths: trimResourcePrefix(targets.DirectoryPaths, commonDir),
+		Rejected:       append([]string(nil), targets.Rejected...),
+	}
+	return filepath.Join(baseDir, filepath.FromSlash(commonDir)), rebased
+}
+
+func canUseExecutionSubdir(baseDir, commonDir string) bool {
+	info, err := os.Stat(filepath.Join(baseDir, filepath.FromSlash(commonDir)))
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
+}
+
+func detectCommonExecutionDir(targets resourceTargets) string {
+	if len(targets.AllowedPaths) == 0 {
+		return ""
+	}
+
+	var common []string
+	seeded := false
+
+	for _, directory := range targets.DirectoryPaths {
+		segments := splitPathSegments(directory)
+		if len(segments) == 0 {
+			return ""
+		}
+		if !seeded {
+			common = segments
+			seeded = true
+			continue
+		}
+		common = sharedLeadingSegments(common, segments)
+		if len(common) == 0 {
+			return ""
+		}
+	}
+
+	for _, file := range targets.FilePaths {
+		dir := path.Dir(file)
+		if dir == "." || dir == "" {
+			return ""
+		}
+		segments := splitPathSegments(dir)
+		if len(segments) == 0 {
+			return ""
+		}
+		if !seeded {
+			common = segments
+			seeded = true
+			continue
+		}
+		common = sharedLeadingSegments(common, segments)
+		if len(common) == 0 {
+			return ""
+		}
+	}
+
+	if !seeded || len(common) == 0 {
+		return ""
+	}
+
+	return strings.Join(common, "/")
+}
+
+func trimResourcePrefix(values []string, prefix string) []string {
+	if prefix == "" {
+		return append([]string(nil), values...)
+	}
+
+	normalizedPrefix := strings.Trim(strings.TrimSpace(prefix), "/")
+	if normalizedPrefix == "" {
+		return append([]string(nil), values...)
+	}
+
+	trimmed := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.Trim(strings.TrimSpace(value), "/")
+		if value == "" {
+			continue
+		}
+		if value == normalizedPrefix {
+			continue
+		}
+		if strings.HasPrefix(value, normalizedPrefix+"/") {
+			value = strings.TrimPrefix(value, normalizedPrefix+"/")
+		}
+		if value == "" {
+			continue
+		}
+		trimmed = append(trimmed, value)
+	}
+	return trimmed
+}
+
+func splitPathSegments(value string) []string {
+	value = strings.Trim(strings.TrimSpace(value), "/")
+	if value == "" || value == "." {
+		return nil
+	}
+	parts := strings.Split(value, "/")
+	segments := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "." {
+			continue
+		}
+		segments = append(segments, part)
+	}
+	return segments
+}
+
+func sharedLeadingSegments(a, b []string) []string {
+	limit := len(a)
+	if len(b) < limit {
+		limit = len(b)
+	}
+	out := make([]string, 0, limit)
+	for i := 0; i < limit; i++ {
+		if a[i] != b[i] {
+			break
+		}
+		out = append(out, a[i])
+	}
+	return out
 }

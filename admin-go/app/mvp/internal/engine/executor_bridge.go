@@ -66,7 +66,14 @@ func EnsureDomainTaskConversation(ctx context.Context, projectID, taskID int64, 
 		return 0, err
 	}
 	if !conv.IsEmpty() {
-		return conv["id"].Int64(), nil
+		convID := conv["id"].Int64()
+		if convID > 0 {
+			_, _ = g.DB().Model("mvp_domain_task").Ctx(ctx).
+				Where("id", taskID).
+				WhereNull("deleted_at").
+				Update(g.Map{"conversation_id": convID, "updated_at": gtime.Now()})
+		}
+		return convID, nil
 	}
 
 	// 查项目所有者
@@ -95,6 +102,10 @@ func EnsureDomainTaskConversation(ctx context.Context, projectID, taskID int64, 
 	if err != nil {
 		return 0, err
 	}
+	_, _ = g.DB().Model("mvp_domain_task").Ctx(ctx).
+		Where("id", taskID).
+		WhereNull("deleted_at").
+		Update(g.Map{"conversation_id": convID, "updated_at": gtime.Now()})
 	return convID, nil
 }
 

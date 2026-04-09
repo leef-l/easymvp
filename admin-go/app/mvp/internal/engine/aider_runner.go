@@ -229,6 +229,7 @@ func (r *AiderRunner) buildArgs(cfg *AiderConfig, metadataFile string, messageFi
 		"--model", r.formatModel(cfg),
 		"--encoding", "utf-8",
 		"--no-auto-commits",
+		"--no-gitignore",
 		"--no-show-model-warnings",
 		"--no-pretty",
 		"--no-stream",
@@ -456,6 +457,11 @@ func (r *AiderRunner) RunTask(ctx context.Context, projectID int64, taskID int64
 	if cleanupErr := cleanupAiderArtifacts(workDir, cfg.AllowPaths); cleanupErr != nil {
 		g.Log().Warningf(ctx, "[AiderRunner] 清理 Aider 临时文件失败: %v", cleanupErr)
 	}
+	if pruned, pruneErr := worktreeguard.PruneEmbeddedAllowedDuplicates(ctx, workDir, cfg.AllowPaths); pruneErr != nil {
+		g.Log().Warningf(ctx, "[AiderRunner] 清理重复嵌入路径失败: %v", pruneErr)
+	} else if len(pruned) > 0 {
+		g.Log().Infof(ctx, "[AiderRunner] 已清理重复嵌入路径: %v", pruned)
+	}
 	if result.Error != nil || snapshot == nil {
 		return result
 	}
@@ -478,6 +484,7 @@ func (r *AiderRunner) RunTask(ctx context.Context, projectID int64, taskID int64
 }
 
 func cleanupAiderArtifacts(workDir string, allowPaths []string) error {
+	workDir = worktreeguard.ResolveRepoRoot(workDir)
 	normalizedAllowPaths, _ := worktreeguard.NormalizeRelativePaths(allowPaths)
 	allowSet := make(map[string]struct{}, len(normalizedAllowPaths))
 	for _, allowPath := range normalizedAllowPaths {

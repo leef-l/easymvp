@@ -61,6 +61,8 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 		nameToID[task.Name] = bpID
 	}
 
+	resolvedRoleLevels := make(map[string]string, len(tasks))
+
 	now := time.Now()
 	var versionNo int
 
@@ -102,6 +104,8 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 
 		// 4. 创建蓝图
 		for i, task := range tasks {
+			roleType := defaultRoleType(task.RoleType)
+			roleLevel := resolveBlueprintRoleLevel(ctx, projectID, roleType, defaultRoleLevel(task.RoleLevel), resolvedRoleLevels)
 			affectedJSON, jsonErr := json.Marshal(task.AffectedResources)
 			if jsonErr != nil {
 				return fmt.Errorf("序列化 affected_resources 失败: task=%s err=%w", task.Name, jsonErr)
@@ -111,8 +115,8 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 				"plan_version_id":    pvID,
 				"name":               task.Name,
 				"description":        task.Description,
-				"role_type":          defaultRoleType(task.RoleType),
-				"role_level":         defaultRoleLevel(task.RoleLevel),
+				"role_type":          roleType,
+				"role_level":         roleLevel,
 				"batch_no":           task.BatchNo,
 				"sort":               i + 1,
 				"affected_resources": string(affectedJSON),
@@ -204,6 +208,7 @@ func (s *PlanVersionService) ApplyTaskPatchesFromArchitectReply(
 	pvID := pv["id"].Int64()
 	now := time.Now()
 	patchedCount := 0
+	resolvedRoleLevels := make(map[string]string, len(patches))
 
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		blueprints, bpErr := tx.Model("mvp_task_blueprint").Ctx(ctx).
@@ -241,6 +246,17 @@ func (s *PlanVersionService) ApplyTaskPatchesFromArchitectReply(
 			}
 			if len(updateData) == 0 {
 				continue
+			}
+			roleType := strings.TrimSpace(target["role_type"].String())
+			if value, ok := updateData["role_type"]; ok {
+				roleType = strings.TrimSpace(fmt.Sprint(value))
+			}
+			if roleType != "" {
+				roleLevel := strings.TrimSpace(target["role_level"].String())
+				if value, ok := updateData["role_level"]; ok {
+					roleLevel = strings.TrimSpace(fmt.Sprint(value))
+				}
+				updateData["role_level"] = resolveBlueprintRoleLevel(ctx, projectID, roleType, roleLevel, resolvedRoleLevels)
 			}
 			updateData["updated_at"] = now
 
@@ -345,6 +361,33 @@ func buildBlueprintPatchUpdateData(byName map[string]gdb.Record, patch *engine.A
 		updateData["depends_on_blueprint_ids"] = string(depJSON)
 	}
 	return updateData, nil
+}
+
+func resolveBlueprintRoleLevel(ctx context.Context, projectID int64, roleType string, requestedLevel string, cache map[string]string) string {
+	roleType = defaultRoleType(roleType)
+	requestedLevel = defaultRoleLevel(requestedLevel)
+	cacheKey := roleType + "/" + requestedLevel
+	if cache != nil {
+		if level, ok := cache[cacheKey]; ok && strings.TrimSpace(level) != "" {
+			return level
+		}
+	}
+
+	roleRecord, err := repo.GetProjectRoleByLevel(ctx, projectID, roleType, requestedLevel)
+	if err != nil || roleRecord == nil {
+		if cache != nil {
+			cache[cacheKey] = requestedLevel
+		}
+		return requestedLevel
+	}
+	resolvedLevel := strings.TrimSpace(roleRecord["role_level"].String())
+	if resolvedLevel == "" {
+		resolvedLevel = requestedLevel
+	}
+	if cache != nil {
+		cache[cacheKey] = resolvedLevel
+	}
+	return resolvedLevel
 }
 
 // supersedePreviousVersionsInTx 事务内版本：将项目之前的活跃/草稿版本标记为 superseded。

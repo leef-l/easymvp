@@ -152,12 +152,7 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 		nameToBatch[bp["name"].String()] = bp["batch_no"].Int()
 	}
 
-	// 预加载角色配置（缺失的自动从默认预设补齐）
-	availableRoles := make(map[string]bool)
-	roleMap, _ := repo.GetProjectRolesMap(ctx, projectID)
-	for key := range roleMap {
-		availableRoles[key] = true
-	}
+	resolvedRoleLevels := make(map[string]string)
 
 	batchResources := make(map[int]map[string]string)
 
@@ -191,14 +186,9 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 			}
 		}
 
-		// 编码类检查文件存在性
-		if family == engine.CategoryFamilyCoding && workDir != "" {
-			for _, res := range resources {
-				engine.CheckResourceExists(workDir, res, func(severity, msg string) {
-					s.createIssue(ctx, workflowRunID, stageRunID, planVersionID, bpID, severity, "resource_missing", "precheck", name, msg)
-				})
-			}
-		}
+		// 编码类项目允许创建新文件；这里只做路径格式校验，不再把“不存在”当成阻塞问题。
+		_ = family
+		_ = workDir
 
 		// depends_on 有效性（蓝图的依赖是 blueprintID 数组，需要转换）
 		var depIDs []int64
@@ -221,12 +211,35 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 			batchResources[batchNo][res] = name
 		}
 
-		// 角色配置检查
+		// 角色配置检查：找不到 lite 时自动升档到 pro，再找不到就升到 max。
 		roleType := bp["role_type"].String()
 		roleLevel := bp["role_level"].String()
-		if roleType != "" && roleLevel != "" && !availableRoles[roleType+"/"+roleLevel] {
-			s.createIssue(ctx, workflowRunID, stageRunID, planVersionID, bpID, "warning", "missing_role", "precheck", name,
-				fmt.Sprintf("项目未配置 %s/%s 角色，蓝图可能无法执行", roleType, roleLevel))
+		if roleType != "" && roleLevel != "" {
+			roleKey := roleType + "/" + roleLevel
+			resolvedLevel, checked := resolvedRoleLevels[roleKey]
+			if !checked {
+				roleRecord, roleErr := repo.GetProjectRoleByLevel(ctx, projectID, roleType, roleLevel)
+				if roleErr != nil || roleRecord == nil {
+					resolvedRoleLevels[roleKey] = ""
+				} else {
+					resolvedRoleLevels[roleKey] = roleRecord["role_level"].String()
+				}
+				resolvedLevel = resolvedRoleLevels[roleKey]
+			}
+			if resolvedLevel == "" {
+				s.createIssue(ctx, workflowRunID, stageRunID, planVersionID, bpID, "warning", "missing_role", "precheck", name,
+					fmt.Sprintf("项目未配置 %s/%s 角色，蓝图可能无法执行", roleType, roleLevel))
+			} else if resolvedLevel != roleLevel {
+				if _, upErr := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
+					Where("id", bpID).
+					Update(g.Map{"role_level": resolvedLevel, "updated_at": gtime.Now()}); upErr != nil {
+					g.Log().Warningf(ctx, "[ReviewStage] 自动升档 role_level 失败: bp=%d %s/%s->%s err=%v",
+						bpID, roleType, roleLevel, resolvedLevel, upErr)
+				} else {
+					g.Log().Infof(ctx, "[ReviewStage] 自动升档 role_level: bp=%d %s/%s->%s",
+						bpID, roleType, roleLevel, resolvedLevel)
+				}
+			}
 		}
 	}
 

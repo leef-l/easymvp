@@ -200,7 +200,7 @@ func BuildRoleSystemPrompt(projectCategory, roleType, roleLevel, presetPrompt, m
 	if basePrompt == "" {
 		basePrompt = BuildDefaultRolePrompt(projectCategory, roleType, roleLevel)
 	}
-	return MergeSystemPrompt(basePrompt, modelPrompt)
+	return appendRoleRuntimeRules(projectCategory, roleType, MergeSystemPrompt(basePrompt, modelPrompt))
 }
 
 func BuildDefaultRolePrompt(projectCategory, roleType, roleLevel string) string {
@@ -238,6 +238,19 @@ func BuildArchitectSystemPrompt(projectName, projectDesc, projectCategory, roleP
 	default:
 		return buildCodingArchitectPrompt(projectName, projectDesc)
 	}
+}
+
+func appendRoleRuntimeRules(projectCategory, roleType, prompt string) string {
+	spec := resolveCategorySpec(projectCategory)
+	if spec.Family == familyCoding && roleType == "implementer" {
+		return prompt + `
+
+## 编码执行补充要求
+- 如果任务描述已经明确技术栈、官方 CLI、模板仓库、生成器、文档工具或现成骨架，优先使用这些方式快速初始化，不要从零手写整套样板代码
+- 如果任务只是要求搭建骨架，优先在对应子目录内完成初始化；前端、后端、基础设施等独立根目录不要混成一次无边界改动
+- 只有在官方脚手架、模板仓库或文档工具明显不适用时，才允许手写骨架，并在结果中说明原因`
+	}
+	return prompt
 }
 
 func resolveCategorySpec(projectCategory string) categorySpec {
@@ -450,8 +463,12 @@ func architectJSONFormatSuffix(projectCategory string) string {
 		newProjectNote = `
 - 这是一个全新项目，所有代码文件需要从零创建
 - 批次 1 必须包含项目初始化任务（目录结构、配置文件、基础框架）
+- 如果用户已经明确技术栈、官方 CLI、模板仓库、文档工具或现成仓库，批次 1 必须优先规划“脚手架 / 模板 / 官方工具初始化”任务，并在 description 中写明优先使用哪类来源
+- 当前后端、前后端、多服务或基础设施目录彼此独立时，要拆成多个初始化任务并尽量并行，不要用一个根任务同时覆盖 frontend、backend、docs、scripts 等多个独立子树
 - 后续任务要在 depends_on 中声明对前置任务的依赖
-- affected_resources 列出该任务会创建或修改的代码文件路径`
+- affected_resources 列出该任务会创建或修改的代码文件路径
+- affected_resources 只能写目录或文件相对路径，禁止混入命令、说明文字、树形结构字符或注释
+- 如果没有合适脚手架，必须在 description 中明确说明需要手写骨架及原因`
 	}
 
 	return fmt.Sprintf(`
@@ -485,9 +502,13 @@ func buildCodingArchitectPrompt(projectName, projectDesc string) string {
 
 - 项目目录下目前没有任何代码文件，所有文件都需要从零创建
 - 批次 1 必须包含项目初始化任务（目录结构、配置文件、基础框架搭建）
+- 如果用户已明确 React CLI、Vite、GoFrame CLI、Next.js、模板仓库、现成仓库或官方文档工具，批次 1 必须优先安排脚手架 / 模板 / 官方工具初始化任务，并在任务描述里写明优先来源
+- 前端、后端、基础设施等互不冲突的根目录应拆成独立初始化任务并尽量放在同一批次并行执行，不要把多个独立子系统塞进一个“项目基础设施初始化”大任务
 - 后续批次的任务依赖前面批次创建的文件，必须在 depends_on 中明确声明
 - 任务描述中要说明需要创建哪些新文件，以及依赖哪些前置任务创建的文件
 - 每个任务的 affected_resources 要列出该任务会创建或修改的文件路径
+- affected_resources 只能写相对路径，不能写命令、注释、树形结构或说明文字
+- 只有在脚手架、模板仓库或文档工具明显不适用时，才允许手写骨架，并在 description 中说明原因
 
 ## 分段输出规则（必须严格遵守）
 

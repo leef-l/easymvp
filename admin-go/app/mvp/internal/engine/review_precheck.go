@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -136,12 +134,7 @@ func systemPrecheck(ctx context.Context, projectID int64, tasks gdb.Result, work
 		nameToBatch[t["name"].String()] = t["batch_no"].Int()
 	}
 
-	// 预加载项目角色配置（消除 N+1）
-	roleConfigs, _ := ResolveProjectRolesMap(ctx, projectID)
-	availableRoles := make(map[string]bool, len(roleConfigs))
-	for key := range roleConfigs {
-		availableRoles[key] = true
-	}
+	resolvedRoleLevels := make(map[string]string)
 
 	// 收集需要自动修正 batch_no 的任务（批量更新，避免逐条落库）
 	type batchFix struct {
@@ -196,21 +189,9 @@ func systemPrecheck(ctx context.Context, projectID int64, tasks gdb.Result, work
 			}
 		}
 
-		// 4. 编码类项目：检查文件/目录是否存在
-		if family == CategoryFamilyCoding && workDir != "" {
-			for _, res := range resources {
-				absPath := res
-				if !filepath.IsAbs(res) {
-					absPath = filepath.Join(workDir, res)
-				}
-				if _, err := os.Stat(absPath); os.IsNotExist(err) {
-					result.Warnings = append(result.Warnings, ReviewIssue{
-						TaskName: name, Severity: "warning",
-						Message: fmt.Sprintf("文件/目录不存在: %s（可能是新建文件，请确认）", res),
-					})
-				}
-			}
-		}
+		// 4. 编码类项目允许创建新文件；不存在不再作为审核阻塞项。
+		_ = family
+		_ = workDir
 
 		// 5. depends_on 有效性
 		var dependsOn []string
@@ -271,11 +252,22 @@ func systemPrecheck(ctx context.Context, projectID int64, tasks gdb.Result, work
 			batchResources[batchNo][res] = name
 		}
 
-		// 8. role_level 覆盖检查（使用预加载数据，无 DB 查询）
+		// 8. role_level 覆盖检查：lite 不可用时自动升档到 pro，再没有就升到 max。
 		roleType := t["role_type"].String()
 		roleLevel := t["role_level"].String()
 		if roleType != "" && roleLevel != "" {
-			if !availableRoles[roleType+"/"+roleLevel] {
+			roleKey := roleType + "/" + roleLevel
+			resolvedLevel, checked := resolvedRoleLevels[roleKey]
+			if !checked {
+				roleRecord, roleErr := ResolveProjectRoleByLevel(ctx, projectID, roleType, roleLevel)
+				if roleErr != nil || roleRecord == nil {
+					resolvedRoleLevels[roleKey] = ""
+				} else {
+					resolvedRoleLevels[roleKey] = roleRecord["role_level"].String()
+				}
+				resolvedLevel = resolvedRoleLevels[roleKey]
+			}
+			if resolvedLevel == "" {
 				result.Warnings = append(result.Warnings, ReviewIssue{
 					TaskName: name, Severity: "warning",
 					Message: fmt.Sprintf("项目未配置 %s/%s 角色，任务可能无法执行", roleType, roleLevel),

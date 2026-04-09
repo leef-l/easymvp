@@ -94,6 +94,10 @@ func (s *TaskService) InstantiateFromBlueprint(ctx context.Context, planVersionI
 				g.Log().Warningf(ctx, "[TaskService] 解析角色回退配置失败: projectID=%d role=%s/%s err=%v",
 					projectID.Int64(), roleType, roleLevel, roleErr)
 			} else if roleRecord != nil {
+				if resolvedLevel := roleRecord["role_level"].String(); resolvedLevel != "" {
+					roleLevel = resolvedLevel
+					roleKey = roleType + "/" + roleLevel
+				}
 				if !resolvedExactRole {
 					if em := roleRecord["execution_mode"].String(); em != "" {
 						executionMode = em

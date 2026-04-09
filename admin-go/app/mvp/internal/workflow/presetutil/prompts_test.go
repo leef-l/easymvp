@@ -50,3 +50,27 @@ func TestBuildArchitectSystemPromptAppendsProjectContextAndFormat(t *testing.T) 
 		t.Fatalf("missing tool-call guard: %s", prompt)
 	}
 }
+
+func TestBuildArchitectSystemPromptAddsCodingBootstrapRules(t *testing.T) {
+	base := BuildRoleSystemPrompt("software_dev", "architect", "max", "", "")
+	prompt := BuildArchitectSystemPrompt("贪吃蛇", "贪吃蛇小游戏 react cli + goframe v2", "software_dev", base)
+	if !strings.Contains(prompt, "脚手架 / 模板 / 官方工具初始化") {
+		t.Fatalf("missing scaffold-first guidance: %s", prompt)
+	}
+	if !strings.Contains(prompt, "尽量并行") {
+		t.Fatalf("missing parallel bootstrap guidance: %s", prompt)
+	}
+	if !strings.Contains(prompt, "affected_resources 只能写目录或文件相对路径") {
+		t.Fatalf("missing affected_resources guard: %s", prompt)
+	}
+}
+
+func TestBuildRoleSystemPromptAddsCodingImplementerRuntimeRules(t *testing.T) {
+	prompt := BuildRoleSystemPrompt("software_dev", "implementer", "pro", "", "")
+	if !strings.Contains(prompt, "优先使用这些方式快速初始化") {
+		t.Fatalf("missing scaffold execution guidance: %s", prompt)
+	}
+	if !strings.Contains(prompt, "前端、后端、基础设施等独立根目录不要混成一次无边界改动") {
+		t.Fatalf("missing scoped bootstrap guidance: %s", prompt)
+	}
+}

@@ -5,10 +5,12 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -93,8 +95,32 @@ func CheckResourceExists(workDir, res string, callback func(severity, msg string
 // 字段映射：name→name, description→description, role_type→role_type, role_level→role_level,
 // batch_no→batch_no, affected_resources→affected_resources, depends_on_blueprint_ids→depends_on
 func blueprintsToTaskRecords(blueprints gdb.Result) gdb.Result {
+	idToName := make(map[int64]string, len(blueprints))
+	for _, bp := range blueprints {
+		idToName[bp["id"].Int64()] = bp["name"].String()
+	}
+
 	result := make(gdb.Result, 0, len(blueprints))
 	for _, bp := range blueprints {
+		dependsOn := "[]"
+		var depIDs []int64
+		depJSON := bp["depends_on_blueprint_ids"].String()
+		if depJSON != "" && depJSON != "[]" && depJSON != "null" {
+			if err := json.Unmarshal([]byte(depJSON), &depIDs); err == nil && len(depIDs) > 0 {
+				depNames := make([]string, 0, len(depIDs))
+				for _, depID := range depIDs {
+					if depName := idToName[depID]; depName != "" {
+						depNames = append(depNames, depName)
+					}
+				}
+				if len(depNames) > 0 {
+					if nameJSON, err := json.Marshal(depNames); err == nil {
+						dependsOn = string(nameJSON)
+					}
+				}
+			}
+		}
+
 		record := gdb.Record{
 			"name":               bp["name"],
 			"description":        bp["description"],
@@ -102,7 +128,7 @@ func blueprintsToTaskRecords(blueprints gdb.Result) gdb.Result {
 			"role_level":         bp["role_level"],
 			"batch_no":           bp["batch_no"],
 			"affected_resources": bp["affected_resources"],
-			"depends_on":         bp["depends_on_blueprint_ids"],
+			"depends_on":         gvar.New(dependsOn),
 			"id":                 bp["id"],
 		}
 		result = append(result, record)

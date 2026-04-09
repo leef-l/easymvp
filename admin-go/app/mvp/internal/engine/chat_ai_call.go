@@ -231,6 +231,13 @@ func (e *ChatEngine) tryParseArchitectTasks(conversationID, messageID int64, aiR
 	if conv["role_type"].String() != "architect" || conv["task_id"].Int64() != 0 {
 		return
 	}
+	userContents, userErr := loadRecentArchitectUserMessages(ctx, conversationID, 12)
+	if userErr != nil {
+		g.Log().Warningf(ctx, "[ChatEngine] 查询架构师最近用户消息失败: conversationID=%d err=%v", conversationID, userErr)
+	} else if !shouldParseArchitectReply(userContents) {
+		g.Log().Infof(ctx, "[ChatEngine] 跳过解析架构师回复: conversationID=%d messageID=%d 原因=最近触发消息属于系统状态通知", conversationID, messageID)
+		return
+	}
 
 	projectID := conv["project_id"].Int64()
 	replyForParse := aiReply
@@ -310,6 +317,7 @@ func (e *ChatEngine) tryParseArchitectBlueprints(ctx context.Context, projectID,
 			return
 		}
 		g.Log().Infof(ctx, "[ChatEngine] V2 架构师回复解析出 %d 个蓝图, planVersion=%d, 项目 %d", bpCount, pvID, projectID)
+		e.autoResubmitArchitectReviewIfNeeded(ctx, projectID, conversationID, pvID)
 		return
 	}
 
@@ -327,6 +335,7 @@ func (e *ChatEngine) tryParseArchitectBlueprints(ctx context.Context, projectID,
 			return
 		}
 		g.Log().Infof(ctx, "[ChatEngine] V2 架构师局部修订已应用 %d 个蓝图, planVersion=%d, 项目 %d", patchedCount, pvID, projectID)
+		e.autoResubmitArchitectReviewIfNeeded(ctx, projectID, conversationID, pvID)
 		return
 	}
 
@@ -341,4 +350,19 @@ func (e *ChatEngine) tryParseArchitectBlueprints(ctx context.Context, projectID,
 		return
 	}
 	g.Log().Infof(ctx, "[ChatEngine] V2 架构师回复解析出 %d 个蓝图, planVersion=%d, 项目 %d", bpCount, pvID, projectID)
+	e.autoResubmitArchitectReviewIfNeeded(ctx, projectID, conversationID, pvID)
+}
+
+func (e *ChatEngine) autoResubmitArchitectReviewIfNeeded(ctx context.Context, projectID, conversationID, planVersionID int64) {
+	if architectReviewResubmitterFn == nil {
+		return
+	}
+	if !e.shouldAutoResubmitArchitectReview(ctx, conversationID) {
+		return
+	}
+	if err := architectReviewResubmitterFn(ctx, projectID); err != nil {
+		g.Log().Warningf(ctx, "[ChatEngine] 架构师修订后自动重提审核失败: project=%d planVersion=%d err=%v", projectID, planVersionID, err)
+		return
+	}
+	g.Log().Infof(ctx, "[ChatEngine] 架构师修订后已自动重提审核: project=%d planVersion=%d", projectID, planVersionID)
 }

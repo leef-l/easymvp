@@ -470,9 +470,16 @@ func (m *GitWorktreeManager) Cleanup(ctx context.Context, taskID int64) error {
 
 // isGitRepo 检查目录是否是 Git 仓库。
 func isGitRepo(dir string) bool {
-	cmd := exec.Command("git", "-C", dir, "rev-parse", "--is-inside-work-tree")
+	dir = filepath.Clean(dir)
+
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel")
 	output, err := cmd.Output()
-	return err == nil && strings.TrimSpace(string(output)) == "true"
+	if err != nil {
+		return false
+	}
+
+	root := filepath.Clean(strings.TrimSpace(string(output)))
+	return root == dir
 }
 
 // gitHeadRef 获取当前 HEAD 的 commit hash。

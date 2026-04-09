@@ -30,10 +30,18 @@ type BlueprintPatchApplier func(ctx context.Context, projectID, workflowRunID, c
 
 var blueprintPatchApplierFn BlueprintPatchApplier
 
+type ArchitectReviewResubmitter func(ctx context.Context, projectID int64) error
+
+var architectReviewResubmitterFn ArchitectReviewResubmitter
+
 const architectAutoContinueToken = "[AUTO_CONTINUE_NEXT]"
 
 func RegisterBlueprintPatchApplier(fn BlueprintPatchApplier) {
 	blueprintPatchApplierFn = fn
+}
+
+func RegisterArchitectReviewResubmitter(fn ArchitectReviewResubmitter) {
+	architectReviewResubmitterFn = fn
 }
 
 func architectReplyRequestsContinuation(content string) bool {
@@ -47,6 +55,9 @@ func architectReplyRequestsContinuation(content string) bool {
 func isArchitectFollowUpMessage(content string) bool {
 	content = strings.TrimSpace(strings.ToLower(content))
 	if content == "" {
+		return false
+	}
+	if isReviewRemediationPrompt(content) {
 		return false
 	}
 	for _, kw := range []string{
@@ -70,8 +81,82 @@ func isReviewRemediationPrompt(content string) bool {
 		strings.Contains(content, "task_patches")
 }
 
+func isWorkflowApprovalPrompt(content string) bool {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return false
+	}
+	return strings.Contains(content, "方案审核通过") ||
+		strings.Contains(content, "项目已进入执行阶段") ||
+		strings.Contains(content, "执行阶段启动失败")
+}
+
+func shouldParseArchitectReply(userContents []string) bool {
+	followUpCount := 0
+	for _, content := range userContents {
+		if isArchitectFollowUpMessage(content) {
+			followUpCount++
+			continue
+		}
+		if followUpCount >= 6 {
+			return false
+		}
+		return !isWorkflowApprovalPrompt(content)
+	}
+	return true
+}
+
 func reviewPromptAllowsAutoContinue(content string) bool {
 	return strings.Contains(content, architectAutoContinueToken)
+}
+
+type architectReplyPolicy struct {
+	allowAutoContinue bool
+	allowAutoResubmit bool
+}
+
+func resolveArchitectReplyPolicy(userContents []string) architectReplyPolicy {
+	followUpCount := 0
+	for _, content := range userContents {
+		if isArchitectFollowUpMessage(content) {
+			followUpCount++
+			continue
+		}
+		if followUpCount >= 6 {
+			return architectReplyPolicy{}
+		}
+		if !isReviewRemediationPrompt(content) {
+			return architectReplyPolicy{}
+		}
+		return architectReplyPolicy{
+			allowAutoContinue: reviewPromptAllowsAutoContinue(content),
+			allowAutoResubmit: true,
+		}
+	}
+	return architectReplyPolicy{}
+}
+
+func loadRecentArchitectUserMessages(ctx context.Context, conversationID int64, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 12
+	}
+	userMsgs, err := g.DB().Model("mvp_message").Ctx(ctx).
+		Where("conversation_id", conversationID).
+		Where("role", "user").
+		Where("status", "completed").
+		WhereNull("deleted_at").
+		OrderDesc("created_at").
+		Limit(limit).
+		All()
+	if err != nil {
+		return nil, err
+	}
+
+	contents := make([]string, 0, len(userMsgs))
+	for _, msg := range userMsgs {
+		contents = append(contents, msg["content"].String())
+	}
+	return contents, nil
 }
 
 func collectArchitectReplyWindow(ctx context.Context, conversationID int64) (string, error) {
@@ -124,31 +209,19 @@ func collectArchitectReplyWindow(ctx context.Context, conversationID int64) (str
 }
 
 func (e *ChatEngine) shouldAutoContinueArchitectReply(ctx context.Context, conversationID int64) bool {
-	userMsgs, err := g.DB().Model("mvp_message").Ctx(ctx).
-		Where("conversation_id", conversationID).
-		Where("role", "user").
-		Where("status", "completed").
-		WhereNull("deleted_at").
-		OrderDesc("created_at").
-		Limit(12).
-		All()
-	if err != nil || len(userMsgs) == 0 {
+	userContents, err := loadRecentArchitectUserMessages(ctx, conversationID, 12)
+	if err != nil || len(userContents) == 0 {
 		return false
 	}
+	return resolveArchitectReplyPolicy(userContents).allowAutoContinue
+}
 
-	followUpCount := 0
-	for _, msg := range userMsgs {
-		content := msg["content"].String()
-		if isArchitectFollowUpMessage(content) {
-			followUpCount++
-			continue
-		}
-		if followUpCount >= 6 {
-			return false
-		}
-		return isReviewRemediationPrompt(content) && reviewPromptAllowsAutoContinue(content)
+func (e *ChatEngine) shouldAutoResubmitArchitectReview(ctx context.Context, conversationID int64) bool {
+	userContents, err := loadRecentArchitectUserMessages(ctx, conversationID, 12)
+	if err != nil || len(userContents) == 0 {
+		return false
 	}
-	return false
+	return resolveArchitectReplyPolicy(userContents).allowAutoResubmit
 }
 
 func (e *ChatEngine) autoContinueArchitectReply(ctx context.Context, conversationID int64) {

@@ -23,6 +23,10 @@ type TaskExecutor interface {
 // CompletionCallback 所有任务完成时的回调。
 type CompletionCallback func(ctx context.Context, workflowRunID int64)
 
+// FailureCallback 任务失败后的即时处理回调。
+// 返回 true 表示已接管后续处理，调度器不再执行默认兜底逻辑。
+type FailureCallback func(ctx context.Context, workflowRunID, taskID int64, errMsg string) bool
+
 // DomainTaskScheduler 领域任务调度器。
 // 核心策略与旧 engine.Scheduler 一致：批次门控 + 依赖检查 + 资源冲突 + 并发控制。
 type DomainTaskScheduler struct {
@@ -33,6 +37,7 @@ type DomainTaskScheduler struct {
 	lockMgr        *ResourceLockManager
 	executor       TaskExecutor
 	onAllDone      CompletionCallback
+	onTaskFailed   FailureCallback
 	cancelFns      map[int64]context.CancelFunc // workflowRunID → cancel
 	workflowCtxs   map[int64]context.Context    // workflowRunID → scheduler ctx
 }
@@ -56,6 +61,9 @@ func (s *DomainTaskScheduler) SetExecutor(e TaskExecutor) { s.executor = e }
 
 // SetCompletionCallback 注册所有任务完成回调。
 func (s *DomainTaskScheduler) SetCompletionCallback(fn CompletionCallback) { s.onAllDone = fn }
+
+// SetFailureCallback 注册任务失败后的即时处理回调。
+func (s *DomainTaskScheduler) SetFailureCallback(fn FailureCallback) { s.onTaskFailed = fn }
 
 // Start 启动调度循环。
 func (s *DomainTaskScheduler) Start(ctx context.Context, workflowRunID int64) error {
@@ -138,6 +146,9 @@ func (s *DomainTaskScheduler) OnTaskFailed(ctx context.Context, taskID int64, er
 				g.Log().Errorf(context.Background(), "[DomainTaskScheduler] OnTaskFailed panic: task=%d err=%v", taskID, r)
 			}
 		}()
+		if s.onTaskFailed != nil && s.onTaskFailed(context.Background(), wfRunID.Int64(), taskID, errMsg) {
+			return
+		}
 		s.scheduleOnce(context.Background(), wfRunID.Int64())
 	}()
 }

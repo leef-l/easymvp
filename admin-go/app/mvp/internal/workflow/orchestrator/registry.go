@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -117,6 +118,9 @@ func Init() {
 		})
 		engine.RegisterBlueprintPatchApplier(func(ctx context.Context, projectID, workflowRunID, conversationID, messageID int64, patches []engine.ArchitectTaskPatch) (int64, int, error) {
 			return planVersionSvc.ApplyTaskPatchesFromArchitectReply(ctx, projectID, workflowRunID, conversationID, messageID, patches)
+		})
+		engine.RegisterArchitectReviewResubmitter(func(ctx context.Context, projectID int64) error {
+			return planVersionSvc.SubmitForReviewAsync(ctx, projectID)
 		})
 
 		// 完成阶段服务
@@ -319,6 +323,94 @@ func Init() {
 		workflowSvc.SetWorkflowCanceledCallback(func(ctx context.Context, workflowRunID int64) {
 			g.Log().Infof(ctx, "[Registry] 工作流取消，停止调度器: workflowRunID=%d", workflowRunID)
 			taskScheduler.Pause(ctx, workflowRunID)
+		})
+
+		taskScheduler.SetFailureCallback(func(ctx context.Context, workflowRunID, taskID int64, errMsg string) bool {
+			taskRecord, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
+				Where("id", taskID).
+				WhereNull("deleted_at").
+				Fields("status, retry_count").
+				One()
+			if err != nil {
+				g.Log().Warningf(ctx, "[Registry] 查询失败任务失败: task=%d err=%v", taskID, err)
+				return false
+			}
+			if taskRecord.IsEmpty() || taskRecord["status"].String() != domainTask.StatusFailed {
+				return true
+			}
+
+			normalizedErr := strings.TrimSpace(errMsg)
+			immediateEscalate := strings.Contains(normalizedErr, "检测到可疑文件") ||
+				strings.Contains(normalizedErr, "检测到越界修改") ||
+				strings.Contains(normalizedErr, "affected_resources 存在歧义")
+
+			maxRetries := engine.GetConfigInt(ctx, "watchdog.max_retries", "engine.watchdog.maxRetries", 3)
+			nextRetry := taskRecord["retry_count"].Int() + 1
+			if !immediateEscalate && nextRetry < maxRetries {
+				now := gtime.Now()
+				result, upErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
+					Where("id", taskID).
+					Where("status", domainTask.StatusFailed).
+					Update(g.Map{
+						"status":           domainTask.StatusPending,
+						"retry_count":      nextRetry,
+						"result":           nil,
+						"error_message":    nil,
+						"started_at":       nil,
+						"completed_at":     nil,
+						"heartbeat_at":     nil,
+						"locked_resources": nil,
+						"updated_at":       now,
+					})
+				if upErr != nil {
+					g.Log().Errorf(ctx, "[Registry] 即时重试更新失败: task=%d err=%v", taskID, upErr)
+					return false
+				}
+				rows, _ := result.RowsAffected()
+				if rows == 0 {
+					return true
+				}
+				g.Log().Infof(ctx, "[Registry] 任务失败后即时重试: task=%d retry=%d/%d", taskID, nextRetry, maxRetries)
+				taskScheduler.Wakeup(ctx, workflowRunID)
+				return true
+			}
+
+			result, upErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
+				Where("id", taskID).
+				Where("status", domainTask.StatusFailed).
+				Update(g.Map{
+					"status":     domainTask.StatusEscalated,
+					"updated_at": gtime.Now(),
+				})
+			if upErr != nil {
+				g.Log().Errorf(ctx, "[Registry] 即时升级失败任务状态失败: task=%d err=%v", taskID, upErr)
+				return false
+			}
+			rows, _ := result.RowsAffected()
+			if rows == 0 {
+				return true
+			}
+
+			if decisionCenter.IsEnabled(ctx) {
+				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id") //nolint: errcheck
+				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
+					WorkflowRunID:  workflowRunID,
+					ProjectID:      projectID.Int64(),
+					DomainTaskID:   taskID,
+					TriggerSource:  consts.TriggerTaskRetryExhausted,
+					TriggerContext: map[string]interface{}{"task_id": taskID, "reason": normalizedErr},
+				})
+				if resp.Handled {
+					return true
+				}
+			}
+
+			if err := triggerReworkStage(ctx, workflowRunID, taskID); err != nil {
+				g.Log().Errorf(ctx, "[Registry] 即时触发 rework 失败: task=%d err=%v", taskID, err)
+				return false
+			}
+			g.Log().Infof(ctx, "[Registry] 任务失败后已即时触发 rework: workflowRunID=%d task=%d", workflowRunID, taskID)
+			return true
 		})
 
 		// Watchdog V2: 监控 domain_task 心跳

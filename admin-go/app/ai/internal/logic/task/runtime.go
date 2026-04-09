@@ -1187,6 +1187,12 @@ func (s *sTask) validateTaskWorkspaceChanges(ctx context.Context, snapshot *work
 		return nil
 	}
 
+	if pruned, pruneErr := worktreeguard.PruneEmbeddedAllowedDuplicates(ctx, taskInfo.WorktreePath, allowPaths); pruneErr != nil {
+		g.Log().Warningf(ctx, "[ai-task] 清理重复嵌入路径失败: taskID=%d err=%v", taskInfo.ID, pruneErr)
+	} else if len(pruned) > 0 {
+		g.Log().Infof(ctx, "[ai-task] 已清理重复嵌入路径: taskID=%d paths=%v", taskInfo.ID, pruned)
+	}
+
 	validation, err := snapshot.Validate(ctx, taskInfo.WorktreePath, allowPaths)
 	if err != nil {
 		g.Log().Warningf(ctx, "[ai-task] 校验 git 变更失败: taskID=%d err=%v", taskInfo.ID, err)

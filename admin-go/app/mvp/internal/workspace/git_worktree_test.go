@@ -243,6 +243,29 @@ func TestResolveMainWorkDir(t *testing.T) {
 	}
 }
 
+func TestIsGitRepoRejectsParentRepoSubdirectory(t *testing.T) {
+	mainDir := t.TempDir()
+	runGit(t, mainDir, "init")
+
+	projectDir := filepath.Join(mainDir, "nested", "project")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatalf("mkdir project dir: %v", err)
+	}
+
+	if isGitRepo(projectDir) {
+		t.Fatalf("expected nested subdirectory inside parent repo to be treated as non-repo")
+	}
+}
+
+func TestIsGitRepoAcceptsRepositoryRoot(t *testing.T) {
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init")
+
+	if !isGitRepo(repoDir) {
+		t.Fatalf("expected repo root to be treated as git repo")
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)

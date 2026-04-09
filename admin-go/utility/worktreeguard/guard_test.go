@@ -88,6 +88,54 @@ func TestReadGitStatusTrimsQuotedUTF8Paths(t *testing.T) {
 	}
 }
 
+func TestPruneEmbeddedAllowedDuplicatesRemovesRepeatedRootPath(t *testing.T) {
+	t.Parallel()
+
+	repoDir := initGitRepo(t)
+	workDir := filepath.Join(repoDir, "frontend")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir frontend: %v", err)
+	}
+	writeFile(t, repoDir, "backend/internal/cmd/cmd.go", "package cmd\n")
+	writeFile(t, repoDir, "backend/backend/internal/cmd/cmd.go", "package cmd\n")
+
+	pruned, err := PruneEmbeddedAllowedDuplicates(context.Background(), workDir, []string{"backend/internal/cmd/cmd.go"})
+	if err != nil {
+		t.Fatalf("PruneEmbeddedAllowedDuplicates() error = %v", err)
+	}
+	if len(pruned) != 1 || pruned[0] != "backend/backend/internal/cmd/cmd.go" {
+		t.Fatalf("unexpected pruned paths: %#v", pruned)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "backend/backend/internal/cmd/cmd.go")); !os.IsNotExist(err) {
+		t.Fatalf("expected duplicate path to be removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "backend/internal/cmd/cmd.go")); err != nil {
+		t.Fatalf("expected allowed path to remain, stat err=%v", err)
+	}
+}
+
+func TestPruneEmbeddedAllowedDuplicatesKeepsPathWhenAllowedTargetMissing(t *testing.T) {
+	t.Parallel()
+
+	repoDir := initGitRepo(t)
+	workDir := filepath.Join(repoDir, "frontend")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir frontend: %v", err)
+	}
+	writeFile(t, repoDir, "backend/backend/internal/cmd/cmd.go", "package cmd\n")
+
+	pruned, err := PruneEmbeddedAllowedDuplicates(context.Background(), workDir, []string{"backend/internal/cmd/cmd.go"})
+	if err != nil {
+		t.Fatalf("PruneEmbeddedAllowedDuplicates() error = %v", err)
+	}
+	if len(pruned) != 0 {
+		t.Fatalf("expected nothing pruned when allowed target missing, got %#v", pruned)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "backend/backend/internal/cmd/cmd.go")); err != nil {
+		t.Fatalf("expected duplicate path to remain, stat err=%v", err)
+	}
+}
+
 func initGitRepo(t *testing.T) string {
 	t.Helper()
 

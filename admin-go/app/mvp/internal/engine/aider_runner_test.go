@@ -57,3 +57,22 @@ func TestIsAiderArtifactGitignore(t *testing.T) {
 		t.Fatalf("expected mixed gitignore rules to be preserved")
 	}
 }
+
+func TestAiderBuildArgsDisablesGitignoreMutation(t *testing.T) {
+	runner := &AiderRunner{}
+	args := runner.buildArgs(&AiderConfig{
+		ModelCode: "tc-code-latest",
+		Message:   "初始化骨架",
+	}, "", "")
+
+	found := false
+	for _, arg := range args {
+		if arg == "--no-gitignore" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected --no-gitignore in aider args, got %v", args)
+	}
+}

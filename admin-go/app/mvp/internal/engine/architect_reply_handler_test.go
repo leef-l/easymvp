@@ -60,3 +60,111 @@ func TestExtractArchitectTaskPatchesSupportsSinglePatchObject(t *testing.T) {
 		t.Fatalf("unexpected patch: %+v", patches[0])
 	}
 }
+
+func TestResolveArchitectReplyPolicy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		userContents []string
+		wantContinue bool
+		wantResubmit bool
+	}{
+		{
+			name: "review remediation prompt enables continue and resubmit",
+			userContents: []string{
+				"## 方案审核未通过\n警告（当前会阻塞执行，必须修复）\n如果只是修正个别任务，请输出局部修订 JSON：{\"task_patches\": []}\n若你还有后续分段，请在当前消息最后单独追加一行 [AUTO_CONTINUE_NEXT]",
+			},
+			wantContinue: true,
+			wantResubmit: true,
+		},
+		{
+			name: "follow up continue keeps remediation context",
+			userContents: []string{
+				"继续",
+				"## 方案审核未通过\n警告（当前会阻塞执行，必须修复）\n如果只是修正个别任务，请输出局部修订 JSON：{\"task_patches\": []}\n若你还有后续分段，请在当前消息最后单独追加一行 [AUTO_CONTINUE_NEXT]",
+			},
+			wantContinue: true,
+			wantResubmit: true,
+		},
+		{
+			name: "plain manual design request does not auto resubmit",
+			userContents: []string{
+				"请把任务拆细一点",
+			},
+			wantContinue: false,
+			wantResubmit: false,
+		},
+		{
+			name: "too many chained follow ups disable automation",
+			userContents: []string{
+				"继续", "继续", "继续", "继续", "继续", "继续",
+				"## 方案审核未通过\n警告（当前会阻塞执行，必须修复）\n如果只是修正个别任务，请输出局部修订 JSON：{\"task_patches\": []}\n若你还有后续分段，请在当前消息最后单独追加一行 [AUTO_CONTINUE_NEXT]",
+			},
+			wantContinue: false,
+			wantResubmit: false,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := resolveArchitectReplyPolicy(tc.userContents)
+			if got.allowAutoContinue != tc.wantContinue || got.allowAutoResubmit != tc.wantResubmit {
+				t.Fatalf("resolveArchitectReplyPolicy() = %+v, want continue=%v resubmit=%v", got, tc.wantContinue, tc.wantResubmit)
+			}
+		})
+	}
+}
+
+func TestShouldParseArchitectReply(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		userContents []string
+		want         bool
+	}{
+		{
+			name: "normal architect request should parse",
+			userContents: []string{
+				"贪吃蛇小游戏 react cli + goframe v2",
+			},
+			want: true,
+		},
+		{
+			name: "review remediation prompt should still parse",
+			userContents: []string{
+				"## 方案审核未通过\n警告（当前会阻塞执行，必须修复）\n请重新给出完整修订方案",
+			},
+			want: true,
+		},
+		{
+			name: "workflow approval notice should not parse",
+			userContents: []string{
+				"## 方案审核通过\n\n错误: 0，警告: 0\n\n项目已进入执行阶段。",
+			},
+			want: false,
+		},
+		{
+			name: "follow up after approval notice should still not parse",
+			userContents: []string{
+				"继续",
+				"## 方案审核通过\n\n错误: 0，警告: 0\n\n项目已进入执行阶段。",
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := shouldParseArchitectReply(tc.userContents); got != tc.want {
+				t.Fatalf("shouldParseArchitectReply() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

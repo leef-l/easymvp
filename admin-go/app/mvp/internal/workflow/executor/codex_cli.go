@@ -69,6 +69,7 @@ func (e *CodexCLIExecutor) Execute(ctx context.Context, req *Request) *Result {
 	if len(targets.Rejected) > 0 {
 		g.Log().Warningf(ctx, "[CodexCLIExecutor] 丢弃可疑 affected_resources: task=%d rejected=%v", req.TaskID, targets.Rejected)
 	}
+	workDir, targets = applyExecutionSubdir(workDir, targets)
 	if len(targets.DirectoryPaths) > 0 {
 		if err := ensureDirectoryTargets(workDir, targets.DirectoryPaths); err != nil {
 			if req.Workspace != nil && e.wsMgr != nil {

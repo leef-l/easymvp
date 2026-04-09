@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -90,6 +92,7 @@ func (e *Executor) executeWithAider(ctx context.Context, projectID int64, taskID
 		return
 	}
 	resources := resourceResult.Resources
+	workDir, resources = applyLegacyExecutionSubdir(workDir, resources)
 
 	// 3. 构建更紧凑的 Aider prompt，避免一次性塞入过多上下文
 	taskPrompt := e.buildAiderTaskPrompt(task, resources)
@@ -275,6 +278,95 @@ func captureFileSnapshots(workDir string, resources []string) []fileSnapshot {
 		}
 	}
 	return snaps
+}
+
+func applyLegacyExecutionSubdir(baseDir string, resources []string) (string, []string) {
+	commonDir := detectLegacyCommonExecutionDir(resources)
+	if commonDir == "" {
+		return baseDir, resources
+	}
+	info, err := os.Stat(filepath.Join(baseDir, filepath.FromSlash(commonDir)))
+	if err != nil || !info.IsDir() {
+		return baseDir, resources
+	}
+
+	trimmed := make([]string, 0, len(resources))
+	for _, resource := range resources {
+		resource = strings.Trim(strings.TrimSpace(resource), "/")
+		if resource == "" {
+			continue
+		}
+		if resource == commonDir {
+			continue
+		}
+		if strings.HasPrefix(resource, commonDir+"/") {
+			resource = strings.TrimPrefix(resource, commonDir+"/")
+		}
+		if resource == "" {
+			continue
+		}
+		trimmed = append(trimmed, resource)
+	}
+
+	return filepath.Join(baseDir, filepath.FromSlash(commonDir)), trimmed
+}
+
+func detectLegacyCommonExecutionDir(resources []string) string {
+	var common []string
+	for _, resource := range resources {
+		dir := path.Dir(strings.TrimSpace(resource))
+		if dir == "." || dir == "" {
+			return ""
+		}
+		segments := splitLegacyPathSegments(dir)
+		if len(segments) == 0 {
+			return ""
+		}
+		if len(common) == 0 {
+			common = segments
+			continue
+		}
+		common = sharedLegacyLeadingSegments(common, segments)
+		if len(common) == 0 {
+			return ""
+		}
+	}
+	if len(common) == 0 {
+		return ""
+	}
+	return strings.Join(common, "/")
+}
+
+func splitLegacyPathSegments(value string) []string {
+	value = strings.Trim(strings.TrimSpace(value), "/")
+	if value == "" || value == "." {
+		return nil
+	}
+	parts := strings.Split(value, "/")
+	segments := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "." {
+			continue
+		}
+		segments = append(segments, part)
+	}
+	return segments
+}
+
+func sharedLegacyLeadingSegments(a, b []string) []string {
+	limit := len(a)
+	if len(b) < limit {
+		limit = len(b)
+	}
+	out := make([]string, 0, limit)
+	for i := 0; i < limit; i++ {
+		if a[i] != b[i] {
+			break
+		}
+		out = append(out, a[i])
+	}
+	return out
 }
 
 // diffSnapshots 对比前后快照，返回有变化的文件数

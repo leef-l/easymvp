@@ -3,9 +3,12 @@ package worktreeguard
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -102,6 +105,39 @@ func (r *ValidationResult) Summary() string {
 	return strings.Join(issues, "；")
 }
 
+// PruneEmbeddedAllowedDuplicates 清理明显的“允许路径被重复嵌入”的垃圾路径，
+// 例如 backend/backend/internal/cmd/cmd.go 对应允许路径 backend/internal/cmd/cmd.go。
+// 仅当目标允许路径已经存在时才会清理，避免误删真正的错误输出。
+func PruneEmbeddedAllowedDuplicates(ctx context.Context, workDir string, allowPaths []string) ([]string, error) {
+	allowList, _ := NormalizeRelativePaths(allowPaths)
+	if len(allowList) == 0 {
+		return nil, nil
+	}
+	baseDir := ResolveRepoRoot(workDir)
+
+	currentPaths, err := readGitStatus(ctx, workDir)
+	if err != nil {
+		return nil, err
+	}
+
+	var pruned []string
+	for currentPath := range currentPaths {
+		if IsSuspiciousPath(currentPath) || isAllowedPath(currentPath, allowList) {
+			continue
+		}
+		if !isEmbeddedAllowedDuplicate(baseDir, currentPath, allowList) {
+			continue
+		}
+		absPath := filepath.Join(baseDir, filepath.FromSlash(currentPath))
+		if err := os.RemoveAll(absPath); err != nil && !os.IsNotExist(err) {
+			return pruned, err
+		}
+		pruned = append(pruned, currentPath)
+	}
+	sort.Strings(pruned)
+	return pruned, nil
+}
+
 func NormalizeRelativePaths(values []string) ([]string, []string) {
 	var (
 		normalized []string
@@ -187,6 +223,73 @@ func isAllowedPath(value string, allowPaths []string) bool {
 		}
 	}
 	return false
+}
+
+func ResolveRepoRoot(workDir string) string {
+	if _, err := exec.LookPath("git"); err != nil {
+		return filepath.Clean(workDir)
+	}
+	cmd := exec.Command("git", "-C", workDir, "rev-parse", "--show-toplevel")
+	output, err := cmd.Output()
+	if err != nil {
+		return filepath.Clean(workDir)
+	}
+	root := strings.TrimSpace(string(output))
+	if root == "" {
+		return filepath.Clean(workDir)
+	}
+	return filepath.Clean(root)
+}
+
+func isEmbeddedAllowedDuplicate(workDir, currentPath string, allowPaths []string) bool {
+	for _, allowPath := range allowPaths {
+		if !strings.HasSuffix(currentPath, "/"+allowPath) {
+			continue
+		}
+
+		prefix := strings.Trim(strings.TrimSuffix(currentPath, "/"+allowPath), "/")
+		if prefix == "" || !looksLikeEmbeddedDuplicatePrefix(prefix, allowPath) {
+			continue
+		}
+
+		allowedAbsPath := filepath.Join(workDir, filepath.FromSlash(allowPath))
+		if _, err := os.Stat(allowedAbsPath); err != nil {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func looksLikeEmbeddedDuplicatePrefix(prefix, allowPath string) bool {
+	allowPath = path.Clean(allowPath)
+	root := firstSegment(allowPath)
+	allowDir := path.Dir(allowPath)
+
+	if prefix == root {
+		return true
+	}
+	if allowDir != "." && allowDir != "" && prefix == allowDir {
+		return true
+	}
+	if root != "" && strings.HasSuffix(prefix, "/"+root) {
+		return true
+	}
+	if allowDir != "." && allowDir != "" && strings.HasSuffix(prefix, "/"+allowDir) {
+		return true
+	}
+	return false
+}
+
+func firstSegment(value string) string {
+	value = strings.Trim(value, "/")
+	if value == "" {
+		return ""
+	}
+	if idx := strings.Index(value, "/"); idx >= 0 {
+		return value[:idx]
+	}
+	return value
 }
 
 func readGitStatus(ctx context.Context, workDir string) (map[string]string, error) {

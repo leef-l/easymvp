@@ -3,7 +3,6 @@ package executor
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -87,16 +86,13 @@ func (e *OpenHandsExecutor) Execute(ctx context.Context, req *Request) *Result {
 		envVars["AI_MODEL_BASE_URL"] = resolveProtocolBaseURL(req.ModelInfo, engineCfg["base_url"].String(), "")
 	}
 
-	// 解析 affected_resources 附加到指令
-	var files []string
-	resJSON := req.TaskRecord["affected_resources"].String()
-	if resJSON != "" && resJSON != "[]" && resJSON != "null" {
-		if err := json.Unmarshal([]byte(resJSON), &files); err != nil {
-			g.Log().Warningf(ctx, "[OpenHandsExecutor] affected_resources JSON 解析失败: %v", err)
-		}
+	targets := parseResourceTargets(req.TaskRecord["affected_resources"].String())
+	if len(targets.Rejected) > 0 {
+		g.Log().Warningf(ctx, "[OpenHandsExecutor] 丢弃可疑 affected_resources: task=%d rejected=%v", req.TaskID, targets.Rejected)
 	}
-	if len(files) > 0 {
-		envVars["AI_TASK_FILES"] = strings.Join(files, ",")
+	workDir, targets = applyExecutionSubdir(workDir, targets)
+	if len(targets.FilePaths) > 0 {
+		envVars["AI_TASK_FILES"] = strings.Join(targets.FilePaths, ",")
 	}
 
 	// 4. 渲染 command_template

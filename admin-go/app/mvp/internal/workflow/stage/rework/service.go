@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
@@ -107,13 +108,20 @@ func (s *Service) HandleReworkWithSource(ctx context.Context, stageRunID int64, 
 		"task_kind":       "failure_analysis",
 		"name":            fmt.Sprintf("失败分析: %s", failedTask["name"].String()),
 		"description": fmt.Sprintf(
-			"请分析任务失败原因，并给出可直接回写到原任务的修复方案。\n\n"+
+			"请分析任务失败的具体原因，并给出可直接回写到原任务的修复方案。\n"+
+				"必须明确指出失败是由哪条命令、哪条路径、哪个资源冲突、哪次越界修改或哪个依赖缺失引起；不要只给泛泛结论。\n\n"+
 				"关联任务ID：%d\n角色：%s\n错误信息：\n%s\n\n"+
 				"原任务名称：%s\n原任务描述：\n%s\n\n"+
-				"请严格输出 JSON：\n{\"description\":\"修订后的任务描述\",\"affected_resources\":[\"路径\"],\"reason\":\"修订原因\"}",
+				"修复方案必须严格围绕当前任务，不能改变原任务目标、不能脱离原有任务设定、不能把范围扩展到无关任务。\n"+
+				"推荐输出任务级修复 JSON：\n"+
+				"{\"task_repair\":{\"task_name\":%q,\"description\":\"修订后的任务描述\",\"affected_resources\":[\"路径\"],\"reason\":\"修订原因，必须写清具体失败原因\"}}\n\n"+
+				"兼容旧格式：也可以直接输出\n"+
+				"{\"description\":\"修订后的任务描述\",\"affected_resources\":[\"路径\"],\"reason\":\"修订原因，必须写清具体失败原因\"}\n"+
+				"或输出只包含当前任务 %q 的 {\"task_patches\":[...]}。\n"+
+				"无论使用哪种格式，都只能修当前任务，不得偏离项目既定方案。",
 			failedTaskID, failedTask["role_type"].String(),
 			failedTask["result"].String(),
-			failedTask["name"].String(), failedTask["description"].String(),
+			failedTask["name"].String(), failedTask["description"].String(), failedTask["name"].String(), failedTask["name"].String(),
 		),
 		"role_type":       "architect",
 		"role_level":      "max",
@@ -173,8 +181,17 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 		return fmt.Errorf("分析任务没有关联的来源任务")
 	}
 
+	failedTask, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		Where("id", failedTaskID).
+		WhereNull("deleted_at").
+		Fields("id, name").
+		One()
+	if err != nil || failedTask.IsEmpty() {
+		return fmt.Errorf("原失败任务(%d) 不存在", failedTaskID)
+	}
+
 	// 3. 解析架构师修复方案
-	patch, err := parseTaskPatch(analysisTask["result"].String())
+	patch, patchContent, err := s.resolveAnalysisPatch(ctx, analysisTask, failedTask)
 	if err != nil {
 		g.Log().Warningf(ctx, "[ReworkStage] 解析修复方案失败: task=%d err=%v", analysisTaskID, err)
 		// 解析失败也要完成 rework stage
@@ -230,7 +247,7 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 		"to_task_id":      failedTaskID,
 		"handoff_type":    "rework",
 		"reason":          patch.Reason,
-		"payload":         analysisTask["result"].String(),
+		"payload":         patchContent,
 		"created_at":      gtime.Now(),
 	}); insErr != nil {
 		g.Log().Errorf(ctx, "[ReworkStage] 写入 handoff_record(rework) 失败: analysis=%d target=%d err=%v", analysisTaskID, failedTaskID, insErr)
@@ -284,6 +301,74 @@ func (s *Service) resolveSourceStage(ctx context.Context, workflowRunID, failedT
 	return "execute"
 }
 
+func (s *Service) resolveAnalysisPatch(ctx context.Context, analysisTask gdb.Record, failedTask gdb.Record) (*taskPatch, string, error) {
+	taskName := failedTask["name"].String()
+	candidates := make([]string, 0, 2)
+
+	if raw := strings.TrimSpace(analysisTask["result"].String()); raw != "" {
+		candidates = append(candidates, raw)
+	}
+
+	if latestReply := strings.TrimSpace(s.loadLatestAnalysisReply(ctx, analysisTask)); latestReply != "" {
+		duplicate := false
+		for _, candidate := range candidates {
+			if candidate == latestReply {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			candidates = append([]string{latestReply}, candidates...)
+		}
+	}
+
+	var lastErr error
+	for _, candidate := range candidates {
+		patch, err := parseTaskPatch(candidate, taskName)
+		if err == nil {
+			return patch, candidate, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("未找到可解析的修复方案")
+	}
+	return nil, "", lastErr
+}
+
+func (s *Service) loadLatestAnalysisReply(ctx context.Context, analysisTask gdb.Record) string {
+	conversationID := analysisTask["conversation_id"].Int64()
+	if conversationID == 0 {
+		conv, err := g.DB().Model("mvp_conversation").Ctx(ctx).
+			Where("task_id", analysisTask["id"].Int64()).
+			WhereNull("deleted_at").
+			OrderDesc("created_at").
+			Fields("id").
+			One()
+		if err != nil || conv.IsEmpty() {
+			return ""
+		}
+		conversationID = conv["id"].Int64()
+	}
+	if conversationID == 0 {
+		return ""
+	}
+
+	reply, err := g.DB().Model("mvp_message").Ctx(ctx).
+		Where("conversation_id", conversationID).
+		Where("role", "assistant").
+		Where("status", "completed").
+		WhereNull("deleted_at").
+		OrderDesc("created_at").
+		OrderDesc("id").
+		Fields("content").
+		One()
+	if err != nil || reply.IsEmpty() {
+		return ""
+	}
+	return strings.TrimSpace(reply["content"].String())
+}
+
 // taskPatch 架构师修复方案。
 type taskPatch struct {
 	Description       string   `json:"description"`
@@ -291,24 +376,107 @@ type taskPatch struct {
 	Reason            string   `json:"reason"`
 }
 
+type taskPatchEnvelope struct {
+	TaskPatches []engine.ArchitectTaskPatch `json:"task_patches"`
+}
+
+type taskRepairEnvelope struct {
+	TaskRepair engine.ArchitectTaskPatch `json:"task_repair"`
+}
+
 // parseTaskPatch 解析架构师输出的 JSON patch。
-func parseTaskPatch(content string) (*taskPatch, error) {
+func parseTaskPatch(content string, taskName string) (*taskPatch, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return nil, fmt.Errorf("架构师输出为空")
 	}
 
-	var patch taskPatch
-	if err := json.Unmarshal([]byte(content), &patch); err == nil {
-		return &patch, nil
+	if patch, err := parseTaskPatchPayload(content, taskName); err == nil {
+		return patch, nil
 	}
 
 	re := reworkJsonBlockRe
 	match := re.FindStringSubmatch(content)
 	if len(match) == 2 {
-		if err := json.Unmarshal([]byte(match[1]), &patch); err == nil {
-			return &patch, nil
+		if patch, err := parseTaskPatchPayload(match[1], taskName); err == nil {
+			return patch, nil
 		}
 	}
 	return nil, fmt.Errorf("未解析到有效 JSON patch")
+}
+
+func parseTaskPatchPayload(content string, taskName string) (*taskPatch, error) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil, fmt.Errorf("patch 内容为空")
+	}
+
+	var patch taskPatch
+	if err := json.Unmarshal([]byte(content), &patch); err == nil && taskPatchHasContent(&patch) {
+		return &patch, nil
+	}
+
+	var repair taskRepairEnvelope
+	if err := json.Unmarshal([]byte(content), &repair); err == nil && architectTaskPatchMatchesTask(repair.TaskRepair, taskName) {
+		return &taskPatch{
+			Description:       repair.TaskRepair.Description,
+			AffectedResources: repair.TaskRepair.AffectedResources,
+			Reason:            repair.TaskRepair.Reason,
+		}, nil
+	}
+
+	var envelope taskPatchEnvelope
+	if err := json.Unmarshal([]byte(content), &envelope); err == nil && len(envelope.TaskPatches) > 0 {
+		selected, ok := selectTaskPatch(envelope.TaskPatches, taskName)
+		if !ok {
+			return nil, fmt.Errorf("task_patches 中未找到任务 %q 的修订项", taskName)
+		}
+		return &taskPatch{
+			Description:       selected.Description,
+			AffectedResources: selected.AffectedResources,
+			Reason:            selected.Reason,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("未解析到有效 JSON patch")
+}
+
+func taskPatchHasContent(patch *taskPatch) bool {
+	return patch != nil && (strings.TrimSpace(patch.Description) != "" || len(patch.AffectedResources) > 0 || strings.TrimSpace(patch.Reason) != "")
+}
+
+func architectTaskPatchMatchesTask(patch engine.ArchitectTaskPatch, taskName string) bool {
+	name := strings.TrimSpace(patch.TaskName)
+	taskName = strings.TrimSpace(taskName)
+	if name == "" || taskName == "" {
+		return taskPatchHasContent(&taskPatch{
+			Description:       patch.Description,
+			AffectedResources: patch.AffectedResources,
+			Reason:            patch.Reason,
+		})
+	}
+	return name == taskName && taskPatchHasContent(&taskPatch{
+		Description:       patch.Description,
+		AffectedResources: patch.AffectedResources,
+		Reason:            patch.Reason,
+	})
+}
+
+func selectTaskPatch(patches []engine.ArchitectTaskPatch, taskName string) (engine.ArchitectTaskPatch, bool) {
+	taskName = strings.TrimSpace(taskName)
+	if len(patches) == 0 {
+		return engine.ArchitectTaskPatch{}, false
+	}
+	if len(patches) == 1 {
+		if !architectTaskPatchMatchesTask(patches[0], taskName) {
+			return engine.ArchitectTaskPatch{}, false
+		}
+		return patches[0], true
+	}
+	for _, patch := range patches {
+		if strings.TrimSpace(patch.TaskName) == taskName {
+			return patch, true
+		}
+	}
+	return engine.ArchitectTaskPatch{}, false
 }
