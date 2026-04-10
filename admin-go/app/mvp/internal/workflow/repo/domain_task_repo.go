@@ -4,7 +4,9 @@ import (
 	"context"
 	"strings"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	"easymvp/app/mvp/internal/model/entity"
 	"easymvp/utility/snowflake"
@@ -48,6 +50,23 @@ func (r *DomainTaskRepo) GetByWorkflowAndID(ctx context.Context, workflowRunID, 
 	return record.Map(), nil
 }
 
+// GetByProjectAndID 查询指定项目下的任务记录。
+func (r *DomainTaskRepo) GetByProjectAndID(ctx context.Context, projectID, taskID int64, fields ...string) (g.Map, error) {
+	model := g.DB().Model(r.table()+" t").Ctx(ctx).
+		InnerJoin("mvp_workflow_run wf", "wf.id = t.workflow_run_id").
+		Where("t.id", taskID).
+		Where("wf.project_id", projectID).
+		WhereNull("t.deleted_at")
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	record, err := model.One()
+	if err != nil || record.IsEmpty() {
+		return nil, err
+	}
+	return record.Map(), nil
+}
+
 // ListByWorkflowAndBatch 按工作流和批次查询。
 func (r *DomainTaskRepo) ListByWorkflowAndBatch(ctx context.Context, workflowRunID int64, batchNo int) ([]entity.MvpDomainTask, error) {
 	var list []entity.MvpDomainTask
@@ -77,6 +96,16 @@ func (r *DomainTaskRepo) UpdateStatus(ctx context.Context, id int64, from, to st
 	}
 	rows, _ := result.RowsAffected()
 	return rows, nil
+}
+
+// UpdateFields 按 ID 更新任务字段。
+func (r *DomainTaskRepo) UpdateFields(ctx context.Context, taskID int64, data g.Map) error {
+	_, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("id", taskID).
+		WhereNull("deleted_at").
+		Data(data).
+		Update()
+	return err
 }
 
 // FindLatestByWorkflowAndAffectedResourceLike 查询最新命中 resourceRef 的领域任务。
@@ -147,6 +176,64 @@ func (r *DomainTaskRepo) ListByIDs(ctx context.Context, taskIDs []int64, fields 
 		return nil, err
 	}
 	return records.List(), nil
+}
+
+// ResetForRetry 将失败任务重置为 pending 并增加重试次数。
+func (r *DomainTaskRepo) ResetForRetry(ctx context.Context, taskID int64) (int64, error) {
+	result, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("id", taskID).
+		WhereIn("status", g.Slice{"failed", "escalated"}).
+		WhereNull("deleted_at").
+		Data(g.Map{
+			"status":           "pending",
+			"retry_count":      gdb.Raw("retry_count + 1"),
+			"result":           nil,
+			"error_message":    nil,
+			"started_at":       nil,
+			"completed_at":     nil,
+			"heartbeat_at":     nil,
+			"locked_resources": nil,
+			"updated_at":       gtime.Now(),
+		}).
+		Update()
+	if err != nil {
+		return 0, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows, nil
+}
+
+// CompleteAsSkipped 将任务标记为 completed/skipped。
+func (r *DomainTaskRepo) CompleteAsSkipped(ctx context.Context, taskID int64, completedAt *gtime.Time) (int64, error) {
+	result, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("id", taskID).
+		WhereIn("status", g.Slice{"pending", "failed", "escalated"}).
+		WhereNull("deleted_at").
+		Data(g.Map{
+			"status":       "completed",
+			"result":       "skipped",
+			"completed_at": completedAt,
+			"updated_at":   completedAt,
+		}).
+		Update()
+	if err != nil {
+		return 0, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows, nil
+}
+
+// SoftDeleteByWorkflow 软删除工作流下的领域任务。
+func (r *DomainTaskRepo) SoftDeleteByWorkflow(ctx context.Context, workflowRunID int64, deletedAt *gtime.Time) error {
+	_, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at").
+		Data(g.Map{
+			"deleted_at": deletedAt,
+			"updated_at": deletedAt,
+		}).
+		Update()
+	return err
 }
 
 // MarkFailedForRework 将任务重置为 failed，供返工阶段消费。

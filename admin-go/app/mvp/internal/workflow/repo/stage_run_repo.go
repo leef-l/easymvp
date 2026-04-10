@@ -6,6 +6,7 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	"easymvp/app/mvp/internal/model/entity"
 	"easymvp/utility/snowflake"
@@ -105,4 +106,48 @@ func (r *StageRunRepo) GetLatestByWorkflowAndType(ctx context.Context, workflowR
 		return nil, err
 	}
 	return record, nil
+}
+
+// GetLatestByWorkflowTypeStatuses 查询工作流下最新命中状态集合的指定类型阶段。
+func (r *StageRunRepo) GetLatestByWorkflowTypeStatuses(ctx context.Context, workflowRunID int64, stageType string, statuses []string, fields ...string) (gdb.Record, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		Where("stage_type", stageType).
+		WhereNull("deleted_at")
+	if len(statuses) > 0 {
+		model = model.WhereIn("status", statuses)
+	}
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	record, err := model.OrderDesc("stage_no").One()
+	if err != nil || record.IsEmpty() {
+		return nil, err
+	}
+	return record, nil
+}
+
+// GetMaxStageNoByWorkflow 查询工作流当前最大 stage_no。
+func (r *StageRunRepo) GetMaxStageNoByWorkflow(ctx context.Context, workflowRunID int64) (int, error) {
+	val, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at").
+		Max("stage_no")
+	if err != nil {
+		return 0, err
+	}
+	return int(val), nil
+}
+
+// SoftDeleteByWorkflow 软删除工作流下所有阶段实例。
+func (r *StageRunRepo) SoftDeleteByWorkflow(ctx context.Context, workflowRunID int64, deletedAt *gtime.Time) error {
+	_, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at").
+		Data(g.Map{
+			"deleted_at": deletedAt,
+			"updated_at": deletedAt,
+		}).
+		Update()
+	return err
 }

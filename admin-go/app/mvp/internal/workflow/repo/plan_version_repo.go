@@ -34,6 +34,25 @@ func (r *PlanVersionRepo) GetByID(ctx context.Context, id int64) (*entity.MvpPla
 	return &ent, err
 }
 
+// GetByProjectAndIDStatuses 查询指定项目下的方案版本，并限制状态集合。
+func (r *PlanVersionRepo) GetByProjectAndIDStatuses(ctx context.Context, projectID, planVersionID int64, statuses []string, fields ...string) (g.Map, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("id", planVersionID).
+		Where("project_id", projectID).
+		WhereNull("deleted_at")
+	if len(statuses) > 0 {
+		model = model.WhereIn("status", statuses)
+	}
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	record, err := model.One()
+	if err != nil || record.IsEmpty() {
+		return nil, err
+	}
+	return record.Map(), nil
+}
+
 // NextVersionNo 获取项目下一个版本号。
 func (r *PlanVersionRepo) NextVersionNo(ctx context.Context, projectID int64) (int, error) {
 	val, err := g.DB().Model(r.table()).Ctx(ctx).
@@ -71,6 +90,24 @@ func (r *PlanVersionRepo) ListByProjectStatuses(ctx context.Context, projectID i
 	return model.OrderDesc("version_no").All()
 }
 
+// GetLatestByProjectStatuses 查询项目下最新命中的计划版本。
+func (r *PlanVersionRepo) GetLatestByProjectStatuses(ctx context.Context, projectID int64, statuses []string, fields ...string) (g.Map, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at")
+	if len(statuses) > 0 {
+		model = model.WhereIn("status", statuses)
+	}
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	record, err := model.OrderDesc("version_no").One()
+	if err != nil || record.IsEmpty() {
+		return nil, err
+	}
+	return record.Map(), nil
+}
+
 // GetLatestByProjectStatusAndReviewStatus 查询项目下最新命中的计划版本。
 func (r *PlanVersionRepo) GetLatestByProjectStatusAndReviewStatus(ctx context.Context, projectID int64, status, reviewStatus string, fields ...string) (gdb.Record, error) {
 	model := g.DB().Model(r.table()).Ctx(ctx).
@@ -86,6 +123,19 @@ func (r *PlanVersionRepo) GetLatestByProjectStatusAndReviewStatus(ctx context.Co
 		return nil, err
 	}
 	return record, nil
+}
+
+// UpdateByIDs 批量更新给定方案版本。
+func (r *PlanVersionRepo) UpdateByIDs(ctx context.Context, ids []int64, data g.Map) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := g.DB().Model(r.table()).Ctx(ctx).
+		WhereIn("id", ids).
+		WhereNull("deleted_at").
+		Data(data).
+		Update()
+	return err
 }
 
 // RestoreRejectedForManualApprove 恢复被驳回的方案版本并确认草稿蓝图。

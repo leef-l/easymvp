@@ -113,3 +113,16 @@ func (r *AcceptRunRepo) UpdateRulesSnapshot(ctx context.Context, id int64, rules
 		Update()
 	return err
 }
+
+// SoftDeleteByWorkflow 软删除工作流下的验收运行。
+func (r *AcceptRunRepo) SoftDeleteByWorkflow(ctx context.Context, workflowRunID int64, deletedAt *gtime.Time) error {
+	_, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at").
+		Data(g.Map{
+			"deleted_at": deletedAt,
+			"updated_at": deletedAt,
+		}).
+		Update()
+	return err
+}

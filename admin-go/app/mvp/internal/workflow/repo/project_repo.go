@@ -29,6 +29,16 @@ func (r *ProjectRepo) GetByID(ctx context.Context, projectID int64, fields ...st
 	return record.Map(), nil
 }
 
+// UpdateFields 按 ID 更新项目字段。
+func (r *ProjectRepo) UpdateFields(ctx context.Context, projectID int64, data g.Map) error {
+	_, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("id", projectID).
+		WhereNull("deleted_at").
+		Data(data).
+		Update()
+	return err
+}
+
 // BackfillCategoryCodeIfEmpty 在 category_code 为空时回填稳定分类编码。
 func (r *ProjectRepo) BackfillCategoryCodeIfEmpty(ctx context.Context, projectID int64, categoryCode string) error {
 	categoryCode = strings.TrimSpace(categoryCode)

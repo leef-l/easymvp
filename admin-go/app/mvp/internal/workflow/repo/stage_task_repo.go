@@ -5,6 +5,7 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 )
 
 // StageTaskRepo 阶段任务仓储。
@@ -21,4 +22,20 @@ func (r *StageTaskRepo) ListByStageRun(ctx context.Context, stageRunID int64) (g
 		WhereNull("deleted_at").
 		OrderAsc("created_at").
 		All()
+}
+
+// SoftDeleteByStageRuns 软删除给定阶段实例下的阶段任务。
+func (r *StageTaskRepo) SoftDeleteByStageRuns(ctx context.Context, stageRunIDs []int64, deletedAt *gtime.Time) error {
+	if len(stageRunIDs) == 0 {
+		return nil
+	}
+	_, err := g.DB().Model(r.table()).Ctx(ctx).
+		WhereIn("stage_run_id", stageRunIDs).
+		WhereNull("deleted_at").
+		Data(g.Map{
+			"deleted_at": deletedAt,
+			"updated_at": deletedAt,
+		}).
+		Update()
+	return err
 }

@@ -46,6 +46,21 @@ func (r *WorkflowRunRepo) GetByID(ctx context.Context, id int64) (*entity.MvpWor
 	return &ent, err
 }
 
+// GetByIDMap 按 ID 查询工作流运行；可选字段列表用于减少读取范围。
+func (r *WorkflowRunRepo) GetByIDMap(ctx context.Context, id int64, fields ...string) (g.Map, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("id", id).
+		WhereNull("deleted_at")
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	record, err := model.One()
+	if err != nil || record.IsEmpty() {
+		return nil, err
+	}
+	return record.Map(), nil
+}
+
 // GetLatestByProject 查询项目下最近一次工作流运行记录。
 func (r *WorkflowRunRepo) GetLatestByProject(ctx context.Context, projectID int64) (gdb.Record, error) {
 	record, err := g.DB().Model(r.table()).Ctx(ctx).
@@ -58,6 +73,16 @@ func (r *WorkflowRunRepo) GetLatestByProject(ctx context.Context, projectID int6
 		return nil, err
 	}
 	return record, nil
+}
+
+// UpdateFields 按 ID 更新字段。
+func (r *WorkflowRunRepo) UpdateFields(ctx context.Context, id int64, data g.Map) error {
+	_, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("id", id).
+		WhereNull("deleted_at").
+		Data(data).
+		Update()
+	return err
 }
 
 // GetLatestByProjectExcludingStatuses 查询项目下最近一条不在给定状态集合内的工作流。
