@@ -33,17 +33,37 @@ type PauseCallback func(ctx context.Context, workflowRunID int64, reason string)
 // ReplanCallback 熔断后自动评估重规划的回调。
 type ReplanCallback func(ctx context.Context, workflowRunID, projectID int64, breakReason string)
 
+// RuntimeSnapshot 提供 watchdog 当前配置与运行态快照，供观测与系统检查使用。
+type RuntimeSnapshot struct {
+	CheckIntervalSeconds    int       `json:"check_interval_seconds"`
+	HeartbeatTimeoutSeconds int       `json:"heartbeat_timeout_seconds"`
+	MaxStaleCountCompat     int       `json:"max_stale_count_compat"`
+	MaxRetries              int       `json:"max_retries"`
+	LastRunningCheckAt      time.Time `json:"last_running_check_at"`
+	LastRunningTaskCount    int       `json:"last_running_task_count"`
+	LastFailedCheckAt       time.Time `json:"last_failed_check_at"`
+	LastFailedTaskCount     int       `json:"last_failed_task_count"`
+	LeaseTimeoutDetections  int64     `json:"lease_timeout_detections"`
+	AutoRetrySuccesses      int64     `json:"auto_retry_successes"`
+	AutoEscalations         int64     `json:"auto_escalations"`
+	RunningQueryErrors      int64     `json:"running_query_errors"`
+	FailedQueryErrors       int64     `json:"failed_query_errors"`
+	InvalidRefSkips         int64     `json:"invalid_ref_skips"`
+}
+
 // DomainTaskWatchdog V2 链路任务看门狗。
 type DomainTaskWatchdog struct {
-	checkInterval time.Duration
-	maxStaleCount int
-	maxRetries    int
+	checkInterval    time.Duration
+	heartbeatTimeout time.Duration
+	maxStaleCount    int
+	maxRetries       int
 
 	mu         sync.Mutex
-	staleCount map[int64]int // taskID → 连续无心跳次数
+	staleCount map[int64]int // taskID → lease 超时兼容计数（仅观测）
 	retryCount map[int64]int // taskID → 已重试次数
 	lastRef    map[int64]string
 	cancel     context.CancelFunc
+	stats      RuntimeSnapshot
 
 	scheduler      SchedulerCallback
 	retryFn        RetryCallback
@@ -57,16 +77,33 @@ type DomainTaskWatchdog struct {
 func New() *DomainTaskWatchdog {
 	ctx := context.Background()
 	checkInterval := engine.GetConfigInt(ctx, "watchdog.check_interval", "engine.watchdog.checkInterval", 120)
+	heartbeatTimeoutSeconds := engine.GetWatchdogHeartbeatTimeoutSeconds(ctx)
 	maxStaleCount := engine.GetConfigInt(ctx, "watchdog.max_stale_count", "engine.watchdog.maxStaleCount", 3)
 	maxRetries := engine.GetConfigInt(ctx, "watchdog.max_retries", "engine.watchdog.maxRetries", 3)
+	if checkInterval < 1 {
+		checkInterval = 1
+	}
+	if heartbeatTimeoutSeconds < 1 {
+		heartbeatTimeoutSeconds = checkInterval
+	}
+	if maxStaleCount < 1 {
+		maxStaleCount = 1
+	}
 
 	return &DomainTaskWatchdog{
-		checkInterval: time.Duration(checkInterval) * time.Second,
-		maxStaleCount: maxStaleCount,
-		maxRetries:    maxRetries,
-		staleCount:    make(map[int64]int),
-		retryCount:    make(map[int64]int),
-		lastRef:       make(map[int64]string),
+		checkInterval:    time.Duration(checkInterval) * time.Second,
+		heartbeatTimeout: time.Duration(heartbeatTimeoutSeconds) * time.Second,
+		maxStaleCount:    maxStaleCount,
+		maxRetries:       maxRetries,
+		staleCount:       make(map[int64]int),
+		retryCount:       make(map[int64]int),
+		lastRef:          make(map[int64]string),
+		stats: RuntimeSnapshot{
+			CheckIntervalSeconds:    checkInterval,
+			HeartbeatTimeoutSeconds: heartbeatTimeoutSeconds,
+			MaxStaleCountCompat:     maxStaleCount,
+			MaxRetries:              maxRetries,
+		},
 	}
 }
 
@@ -104,8 +141,8 @@ func (w *DomainTaskWatchdog) Start(ctx context.Context) {
 	go w.heartbeatLoop(childCtx)
 	go w.autoRetryLoop(childCtx)
 
-	g.Log().Infof(ctx, "[WatchdogV2] 启动: interval=%v maxStale=%d maxRetries=%d",
-		w.checkInterval, w.maxStaleCount, w.maxRetries)
+	g.Log().Infof(ctx, "[WatchdogV2] 启动: interval=%v leaseTimeout=%v maxStaleCompat=%d maxRetries=%d",
+		w.checkInterval, w.heartbeatTimeout, w.maxStaleCount, w.maxRetries)
 }
 
 // Stop 停止看门狗。
@@ -125,6 +162,13 @@ func (w *DomainTaskWatchdog) ResetRetryCount(taskID int64) {
 	delete(w.retryCount, taskID)
 	delete(w.staleCount, taskID)
 	delete(w.lastRef, taskID)
+}
+
+// Snapshot 返回 watchdog 配置和运行态快照。
+func (w *DomainTaskWatchdog) Snapshot() RuntimeSnapshot {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.stats
 }
 
 // heartbeatLoop 心跳检测循环。
@@ -150,11 +194,16 @@ func (w *DomainTaskWatchdog) checkRunningTasks(ctx context.Context) {
 		Fields("id, workflow_run_id, heartbeat_at, started_at").
 		All()
 	if err != nil {
+		w.mu.Lock()
+		w.stats.LastRunningCheckAt = time.Now().UTC()
+		w.stats.RunningQueryErrors++
+		w.mu.Unlock()
 		g.Log().Errorf(ctx, "[WatchdogV2] 查询 running 任务失败: %v", err)
 		return
 	}
 
-	heartbeatTimeout := w.checkInterval * time.Duration(w.maxStaleCount)
+	now := time.Now().UTC()
+	heartbeatTimeout := w.heartbeatTimeout
 
 	type staleTask struct {
 		taskID int64
@@ -163,11 +212,13 @@ func (w *DomainTaskWatchdog) checkRunningTasks(ctx context.Context) {
 	var staleTasks []staleTask
 
 	w.mu.Lock()
+	w.stats.LastRunningCheckAt = now
+	w.stats.LastRunningTaskCount = len(tasks)
 	for _, task := range tasks {
 		taskID := task["id"].Int64()
 		refRaw, refTime, ok := resolveRefTime(task["heartbeat_at"].String(), task["started_at"].String())
 		if !ok {
-			// 无参考时间，跳过本轮
+			w.stats.InvalidRefSkips++
 			continue
 		}
 
@@ -176,21 +227,25 @@ func (w *DomainTaskWatchdog) checkRunningTasks(ctx context.Context) {
 			w.staleCount[taskID] = 0
 		}
 
-		elapsed := time.Since(refTime)
-		if elapsed > heartbeatTimeout {
-			w.staleCount[taskID]++
-			if w.staleCount[taskID] >= w.maxStaleCount {
-				// 连续无心跳次数达到阈值
-				staleTasks = append(staleTasks, staleTask{
-					taskID: taskID,
-					reason: fmt.Sprintf("心跳超时：最后活跃 %s, 连续无心跳 %d 次", refRaw, w.staleCount[taskID]),
-				})
-				delete(w.staleCount, taskID)
-				delete(w.lastRef, taskID)
-			}
-		} else {
+		// Phase 1 收紧：lease 超时作为主判死依据。
+		if !isLeaseExpired(refTime, now, heartbeatTimeout) {
 			w.staleCount[taskID] = 0
+			continue
 		}
+
+		w.staleCount[taskID]++
+		staleTasks = append(staleTasks, staleTask{
+			taskID: taskID,
+			reason: fmt.Sprintf(
+				"lease 超时：最后活跃 %s，阈值 %s（兼容计数 max_stale=%d，当前=%d）",
+				refRaw,
+				heartbeatTimeout.Round(time.Second),
+				w.maxStaleCount,
+				w.staleCount[taskID],
+			),
+		})
+		delete(w.staleCount, taskID)
+		delete(w.lastRef, taskID)
 	}
 
 	// 清理不再 running 的跟踪记录
@@ -231,6 +286,10 @@ func (w *DomainTaskWatchdog) checkRunningTasks(ctx context.Context) {
 			continue // 任务已不是 running
 		}
 
+		w.mu.Lock()
+		w.stats.LeaseTimeoutDetections++
+		w.mu.Unlock()
+
 		g.Log().Warningf(ctx, "[WatchdogV2] 任务 %d 判定卡死: %s", st.taskID, st.reason)
 
 		if w.scheduler != nil {
@@ -262,9 +321,17 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 		Fields("id, workflow_run_id, retry_count").
 		All()
 	if err != nil {
+		w.mu.Lock()
+		w.stats.LastFailedCheckAt = time.Now().UTC()
+		w.stats.FailedQueryErrors++
+		w.mu.Unlock()
 		g.Log().Errorf(ctx, "[WatchdogV2] 查询 failed 任务失败: %v", err)
 		return
 	}
+	w.mu.Lock()
+	w.stats.LastFailedCheckAt = time.Now().UTC()
+	w.stats.LastFailedTaskCount = len(tasks)
+	w.mu.Unlock()
 
 	// 过滤：只处理所属 workflow_run 仍在活跃状态的任务
 	type candidate struct {
@@ -364,6 +431,7 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 		// DB 更新成功后才递增内存计数
 		w.mu.Lock()
 		w.retryCount[item.taskID]++
+		w.stats.AutoRetrySuccesses++
 		w.mu.Unlock()
 
 		if w.retryFn != nil {
@@ -391,6 +459,9 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 		if rows == 0 {
 			continue
 		}
+		w.mu.Lock()
+		w.stats.AutoEscalations++
+		w.mu.Unlock()
 
 		// 触发 rework stage
 		if w.escalateFn != nil {
@@ -421,6 +492,13 @@ func resolveRefTime(heartbeatRaw, startedAtRaw string) (string, time.Time, bool)
 		}
 	}
 	return "", time.Time{}, false
+}
+
+func isLeaseExpired(refTime, now time.Time, timeout time.Duration) bool {
+	if timeout <= 0 {
+		return false
+	}
+	return now.Sub(refTime) > timeout
 }
 
 func normalizeDBTime(raw string) string {

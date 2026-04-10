@@ -39,9 +39,10 @@ engine:
     taskTimeoutSeconds: 600  # MVP 项目任务执行超时（秒）
     maxSteps: 2              # 最大内部执行步数；当前 Aider 最多使用到精简重试
   watchdog:
-    checkInterval: 120    # 心跳检测间隔（秒）
-    maxStaleCount: 3      # 连续无进展次数阈值
-    maxRetries: 3         # 最大自动重试次数
+    checkInterval: 20              # 心跳检测间隔（秒）
+    heartbeatTimeoutSeconds: 60    # lease / heartbeat 超时阈值（秒）
+    maxStaleCount: 3               # 兼容旧语义，仅用于观测日志
+    maxRetries: 3                  # 最大自动重试次数
   scheduler:
     maxConcurrent: 3      # 调度并发上限
     pollInterval: 2       # 调度轮询间隔（秒）
@@ -69,3 +70,14 @@ engine:
       mediumRiskSyncStrategy: "manual"
       highRiskMode: "manual"              # 高风险先进入人工交付路径
       highRiskSyncStrategy: "manual"
+
+workflow:
+  event_stream:
+    enabled: false
+    stream_name: "easymvp:workflow:task-events"
+    consumer_group: "easymvp-workflow"
+    consumer_name: "${HOSTNAME}"
+    block_ms: 5000
+    reclaim_idle_seconds: 60
+    redis_required: false
+    consumer_enabled: false

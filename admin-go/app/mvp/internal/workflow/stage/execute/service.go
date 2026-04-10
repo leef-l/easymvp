@@ -134,15 +134,96 @@ func (s *Service) newCompletionCallback(stageRunID int64) scheduler.CompletionCa
 
 		// 完成 execute stage 并推进工作流到下一阶段（complete）
 		if s.stageCompleter != nil {
-			if err := s.stageCompleter.CompleteStage(ctx, finalStageRunID); err != nil {
-				g.Log().Errorf(ctx, "[ExecuteStage] CompleteStage 失败: stageRunID=%d err=%v", finalStageRunID, err)
-				return
-			}
-			if err := s.stageCompleter.TransitionNext(ctx, wfRunID); err != nil {
-				g.Log().Errorf(ctx, "[ExecuteStage] TransitionNext 失败: workflowRunID=%d err=%v", wfRunID, err)
+			if err := s.reconcileCompletionTransition(ctx, wfRunID, finalStageRunID); err != nil {
+				g.Log().Errorf(ctx, "[ExecuteStage] reconcile completion failed: workflowRunID=%d stageRunID=%d err=%v",
+					wfRunID, finalStageRunID, err)
 			}
 		}
 	}
+}
+
+type completionTransitionPlan struct {
+	completeStage bool
+	transition    bool
+}
+
+func buildCompletionTransitionPlan(stageStatus, workflowStatus, workflowStage string, workflowStageRunID, stageRunID int64) completionTransitionPlan {
+	if stageRunID == 0 || workflowStageRunID != stageRunID {
+		return completionTransitionPlan{}
+	}
+	if workflowStatus != "executing" || workflowStage != "execute" {
+		return completionTransitionPlan{}
+	}
+
+	switch stageStatus {
+	case "running":
+		return completionTransitionPlan{completeStage: true, transition: true}
+	case "completed":
+		return completionTransitionPlan{transition: true}
+	default:
+		return completionTransitionPlan{}
+	}
+}
+
+func (s *Service) reconcileCompletionTransition(ctx context.Context, workflowRunID, stageRunID int64) error {
+	if stageRunID == 0 || workflowRunID == 0 {
+		return fmt.Errorf("workflowRunID/stageRunID 不能为空")
+	}
+
+	stageRun, err := g.DB().Model("mvp_stage_run").Ctx(ctx).
+		Where("id", stageRunID).
+		WhereNull("deleted_at").
+		Fields("status").
+		One()
+	if err != nil {
+		return fmt.Errorf("查询 execute stage_run 失败: %w", err)
+	}
+	if stageRun.IsEmpty() {
+		return fmt.Errorf("execute stage_run(%d) 不存在", stageRunID)
+	}
+
+	workflowRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("id", workflowRunID).
+		WhereNull("deleted_at").
+		Fields("status, current_stage, current_stage_run_id").
+		One()
+	if err != nil {
+		return fmt.Errorf("查询 workflow_run 失败: %w", err)
+	}
+	if workflowRun.IsEmpty() {
+		return fmt.Errorf("workflow_run(%d) 不存在", workflowRunID)
+	}
+
+	plan := buildCompletionTransitionPlan(
+		stageRun["status"].String(),
+		workflowRun["status"].String(),
+		workflowRun["current_stage"].String(),
+		workflowRun["current_stage_run_id"].Int64(),
+		stageRunID,
+	)
+	if !plan.completeStage && !plan.transition {
+		g.Log().Infof(ctx, "[ExecuteStage] completion reconcile skipped: workflowRunID=%d stageRunID=%d stage=%s workflow=%s/%s currentStageRunID=%d",
+			workflowRunID,
+			stageRunID,
+			stageRun["status"].String(),
+			workflowRun["status"].String(),
+			workflowRun["current_stage"].String(),
+			workflowRun["current_stage_run_id"].Int64(),
+		)
+		return nil
+	}
+
+	if plan.completeStage {
+		if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
+			return fmt.Errorf("CompleteStage 失败: %w", err)
+		}
+	}
+	if plan.transition {
+		if err := s.stageCompleter.TransitionNext(ctx, workflowRunID); err != nil {
+			return fmt.Errorf("TransitionNext 失败: %w", err)
+		}
+	}
+	return nil
 }
 
 // ExecuteDomainTask 执行单个领域任务。

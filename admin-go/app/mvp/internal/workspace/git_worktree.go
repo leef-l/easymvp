@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -22,6 +23,11 @@ import (
 
 const worktreeDir = ".mvp-worktrees"
 const worktreeArtifactDir = "artifacts"
+
+const (
+	workspaceFinalizeTimeout = 45 * time.Second
+	workspaceCleanupTimeout  = 90 * time.Second
+)
 
 // GitWorktreeManager 基于 git worktree 的工作空间管理器。
 type GitWorktreeManager struct {
@@ -160,7 +166,10 @@ func (m *GitWorktreeManager) Get(ctx context.Context, taskID int64) (*TaskWorksp
 
 // Finalize 任务结束后收尾。
 func (m *GitWorktreeManager) Finalize(ctx context.Context, taskID int64, req FinalizeRequest) error {
-	ws, err := m.repo.getByTaskID(ctx, taskID)
+	finalizeCtx, cancel := context.WithTimeout(context.Background(), workspaceFinalizeTimeout)
+	defer cancel()
+
+	ws, err := m.repo.getByTaskID(finalizeCtx, taskID)
 	if err != nil {
 		return fmt.Errorf("查询工作空间失败: %w", err)
 	}
@@ -169,7 +178,7 @@ func (m *GitWorktreeManager) Finalize(ctx context.Context, taskID int64, req Fin
 	}
 
 	extra := g.Map{}
-	policy := resolveDeliveryPolicy(ctx, taskID, req)
+	policy := resolveDeliveryPolicy(finalizeCtx, taskID, req)
 	extra["delivery_mode"] = policy.DeliveryMode
 	extra["delivery_status"] = DeliveryStatusPending
 	extra["sync_strategy"] = policy.SyncStrategy
@@ -183,19 +192,19 @@ func (m *GitWorktreeManager) Finalize(ctx context.Context, taskID int64, req Fin
 	if req.Success {
 		diffSummary, diffErr := gitDiffStat(ws.WorkspacePath)
 		if diffErr != nil {
-			g.Log().Warningf(ctx, "[Workspace] 收集 diff 失败: taskID=%d err=%v", taskID, diffErr)
+			g.Log().Warningf(finalizeCtx, "[Workspace] 收集 diff 失败: taskID=%d err=%v", taskID, diffErr)
 		} else {
 			extra["diff_summary"] = diffSummary
 		}
 
 		patchContent, hasPatch, patchErr := gitDiffPatch(ws.WorkspacePath)
 		if patchErr != nil {
-			g.Log().Warningf(ctx, "[Workspace] 生成 patch 失败: taskID=%d err=%v", taskID, patchErr)
+			g.Log().Warningf(finalizeCtx, "[Workspace] 生成 patch 失败: taskID=%d err=%v", taskID, patchErr)
 			extra["delivery_status"] = DeliveryStatusFailed
 		} else if hasPatch {
 			patchRef, writeErr := writePatchArtifact(resolveMainWorkDir(ws.WorkspacePath), taskID, patchContent)
 			if writeErr != nil {
-				g.Log().Warningf(ctx, "[Workspace] 写入 patch 失败: taskID=%d err=%v", taskID, writeErr)
+				g.Log().Warningf(finalizeCtx, "[Workspace] 写入 patch 失败: taskID=%d err=%v", taskID, writeErr)
 				extra["delivery_status"] = DeliveryStatusFailed
 			} else {
 				extra["patch_ref"] = patchRef
@@ -204,7 +213,7 @@ func (m *GitWorktreeManager) Finalize(ctx context.Context, taskID int64, req Fin
 
 			if policy.DeliveryMode == DeliveryModePR && g.NewVar(extra["patch_ref"]).String() != "" {
 				deliveryTitle, deliveryRef, artifactErr := writePRArtifact(
-					ctx,
+					finalizeCtx,
 					ws,
 					taskID,
 					policy.RiskLevel,
@@ -212,7 +221,7 @@ func (m *GitWorktreeManager) Finalize(ctx context.Context, taskID int64, req Fin
 					g.NewVar(extra["diff_summary"]).String(),
 				)
 				if artifactErr != nil {
-					g.Log().Warningf(ctx, "[Workspace] 写入 PR 草稿失败: taskID=%d err=%v", taskID, artifactErr)
+					g.Log().Warningf(finalizeCtx, "[Workspace] 写入 PR 草稿失败: taskID=%d err=%v", taskID, artifactErr)
 					extra["delivery_status"] = DeliveryStatusFailed
 				} else {
 					extra["delivery_title"] = deliveryTitle
@@ -221,10 +230,11 @@ func (m *GitWorktreeManager) Finalize(ctx context.Context, taskID int64, req Fin
 			}
 
 			if policy.SyncStrategy == SyncStrategyAutoApply {
-				if syncErr := syncWorktreeCommit(ctx, resolveMainWorkDir(ws.WorkspacePath), ws.WorkspacePath, taskID); syncErr != nil {
+				if syncErr := syncWorktreeCommit(finalizeCtx, resolveMainWorkDir(ws.WorkspacePath), ws.WorkspacePath, taskID); syncErr != nil {
 					extra["sync_status"] = SyncStatusFailed
 					extra["error_message"] = syncErr.Error()
-					_ = m.repo.updateStatus(ctx, ws.ID, StatusFailed, extra)
+					_ = m.repo.updateStatus(finalizeCtx, ws.ID, StatusFailed, extra)
+					repairWorkspaceTerminalState(ws.ID, taskID, StatusFailed)
 					return fmt.Errorf("同步 worktree 变更失败: %w", syncErr)
 				}
 				extra["sync_status"] = SyncStatusApplied
@@ -234,14 +244,14 @@ func (m *GitWorktreeManager) Finalize(ctx context.Context, taskID int64, req Fin
 
 			if g.NewVar(extra["delivery_status"]).String() == DeliveryStatusReady {
 				payload := buildDeliveryEventPayload(ws, taskID, policy, extra)
-				recordWorkspaceEvent(ctx, ws, taskID, event.EventTaskDeliveryPrepared, payload)
+				recordWorkspaceEvent(finalizeCtx, ws, taskID, event.EventTaskDeliveryPrepared, payload)
 				if g.NewVar(extra["sync_status"]).String() == SyncStatusApplied {
-					recordWorkspaceEvent(ctx, ws, taskID, event.EventTaskSyncApplied, payload)
+					recordWorkspaceEvent(finalizeCtx, ws, taskID, event.EventTaskSyncApplied, payload)
 				}
 				if shouldOpenDeliveryReviewGate(policy, g.NewVar(extra["delivery_status"]).String(), g.NewVar(extra["sync_status"]).String()) {
 					reviewPayload := buildDeliveryEventPayload(ws, taskID, policy, extra)
 					reviewPayload["reason"] = buildDeliveryReviewReason(policy, reviewPayload)
-					recordWorkspaceEvent(ctx, ws, taskID, event.EventTaskReviewRequired, reviewPayload)
+					recordWorkspaceEvent(finalizeCtx, ws, taskID, event.EventTaskReviewRequired, reviewPayload)
 				}
 			}
 		} else {
@@ -266,11 +276,12 @@ func (m *GitWorktreeManager) Finalize(ctx context.Context, taskID int64, req Fin
 	}
 	// 失败任务保持 cleanup_status=pending，由 RunCleanup 按 72h 策略自动清理
 
-	if err := m.repo.updateStatus(ctx, ws.ID, newStatus, extra); err != nil {
+	if err := m.repo.updateStatus(finalizeCtx, ws.ID, newStatus, extra); err != nil {
+		repairWorkspaceTerminalState(ws.ID, taskID, newStatus)
 		return fmt.Errorf("更新工作空间最终状态失败: %w", err)
 	}
 
-	g.Log().Infof(ctx, "[Workspace] Finalize: taskID=%d success=%v status=%s", taskID, req.Success, newStatus)
+	g.Log().Infof(finalizeCtx, "[Workspace] Finalize: taskID=%d success=%v status=%s", taskID, req.Success, newStatus)
 	return nil
 }
 
@@ -432,7 +443,10 @@ func writePRArtifact(ctx context.Context, ws *TaskWorkspace, taskID int64, riskL
 
 // Cleanup 清理工作空间目录。
 func (m *GitWorktreeManager) Cleanup(ctx context.Context, taskID int64) error {
-	ws, err := m.repo.getByTaskID(ctx, taskID)
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), workspaceCleanupTimeout)
+	defer cancel()
+
+	ws, err := m.repo.getByTaskID(cleanupCtx, taskID)
 	if err != nil {
 		return fmt.Errorf("查询工作空间失败: %w", err)
 	}
@@ -452,21 +466,59 @@ func (m *GitWorktreeManager) Cleanup(ctx context.Context, taskID int64) error {
 
 	// 移除 git worktree
 	if err := gitWorktreeRemove(mainWorkDir, ws.WorkspacePath); err != nil {
-		_ = m.repo.updateCleanupStatus(ctx, ws.ID, CleanupFailed)
-		return fmt.Errorf("移除 git worktree 失败: %w", err)
+		if !isBenignWorktreeRemoveErr(err) {
+			_ = m.repo.updateCleanupStatus(cleanupCtx, ws.ID, CleanupFailed)
+			return fmt.Errorf("移除 git worktree 失败: %w", err)
+		}
+		g.Log().Warningf(cleanupCtx, "[Workspace] worktree 路径已失效，按已清理处理: taskID=%d path=%s err=%v", taskID, ws.WorkspacePath, err)
 	}
 
 	// 删除临时分支
 	branchName := fmt.Sprintf("mvp-task-%d", taskID)
 	_ = gitDeleteBranch(mainWorkDir, branchName) // 忽略错误，分支可能不存在
 
+	_ = os.RemoveAll(ws.WorkspacePath)
+
 	// 更新清理状态
-	if err := m.repo.updateCleanupStatus(ctx, ws.ID, CleanupDone); err != nil {
+	if err := m.repo.updateCleanupStatus(cleanupCtx, ws.ID, CleanupDone); err != nil {
 		return fmt.Errorf("更新清理状态失败: %w", err)
 	}
 
-	g.Log().Infof(ctx, "[Workspace] Cleanup: taskID=%d path=%s", taskID, ws.WorkspacePath)
+	g.Log().Infof(cleanupCtx, "[Workspace] Cleanup: taskID=%d path=%s", taskID, ws.WorkspacePath)
 	return nil
+}
+
+func repairWorkspaceTerminalState(workspaceID, taskID int64, workspaceStatus string) {
+	now := gtime.Now()
+	_, _ = g.DB().Model("mvp_task_workspace").Ctx(context.Background()).
+		Where("id", workspaceID).
+		Data(g.Map{
+			"status":     workspaceStatus,
+			"updated_at": now,
+		}).
+		Update()
+
+	if workspaceStatus == StatusFailed {
+		_, _ = g.DB().Model("mvp_domain_task").Ctx(context.Background()).
+			Where("id", taskID).
+			Where("status", "running").
+			Data(g.Map{
+				"status":     "failed",
+				"result":     "workspace finalize 修复链触发：任务状态从 running 修正为 failed",
+				"updated_at": now,
+			}).
+			Update()
+	}
+}
+
+func isBenignWorktreeRemoveErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(text, "is not a working tree") ||
+		strings.Contains(text, "no such file or directory") ||
+		strings.Contains(text, "does not exist")
 }
 
 // ApplyDelivery 人工确认并将 pending 交付回写到主工作区。
@@ -698,14 +750,17 @@ func syncWorktreeCommit(ctx context.Context, mainWorkDir, worktreePath string, t
 		return err
 	}
 
-	if err := gitAddAll(worktreePath); err != nil {
-		return fmt.Errorf("暂存 worktree 变更失败: %w", err)
-	}
-	hasChanges, err := gitHasStagedChanges(worktreePath)
+	allowPaths, err := loadTaskAllowedPaths(ctx, taskID)
 	if err != nil {
-		return fmt.Errorf("检查 worktree 变更失败: %w", err)
+		g.Log().Warningf(ctx, "[Workspace] 读取任务允许路径失败，退化为仅校验可疑文件: taskID=%d err=%v", taskID, err)
+		allowPaths = nil
 	}
-	if !hasChanges {
+
+	changedFiles, err := stageSyncBackCandidates(ctx, worktreePath, allowPaths, taskID)
+	if err != nil {
+		return err
+	}
+	if len(changedFiles) == 0 {
 		return nil
 	}
 
@@ -719,16 +774,11 @@ func syncWorktreeCommit(ctx context.Context, mainWorkDir, worktreePath string, t
 		return fmt.Errorf("读取 worktree 提交失败: %w", err)
 	}
 
-	changedFiles, err := gitChangedFiles(worktreePath, commitHash)
+	committedFiles, err := gitChangedFiles(worktreePath, commitHash)
 	if err != nil {
 		return fmt.Errorf("读取 worktree 变更文件失败: %w", err)
 	}
-	allowPaths, err := loadTaskAllowedPaths(ctx, taskID)
-	if err != nil {
-		g.Log().Warningf(ctx, "[Workspace] 读取任务允许路径失败，退化为仅校验可疑文件: taskID=%d err=%v", taskID, err)
-		allowPaths = nil
-	}
-	if err := validateSyncBackPaths(changedFiles, allowPaths); err != nil {
+	if err := validateSyncBackPaths(committedFiles, allowPaths); err != nil {
 		return err
 	}
 
@@ -745,7 +795,7 @@ func syncWorktreeCommit(ctx context.Context, mainWorkDir, worktreePath string, t
 		}
 	}
 
-	if err := syncChangedFilesToMain(mainWorkDir, worktreePath, changedFiles, dirtyFiles); err != nil {
+	if err := syncChangedFilesToMain(mainWorkDir, worktreePath, committedFiles, dirtyFiles, allowPaths); err != nil {
 		return err
 	}
 
@@ -757,6 +807,60 @@ func syncWorktreeCommit(ctx context.Context, mainWorkDir, worktreePath string, t
 
 	g.Log().Infof(ctx, "[Workspace] SyncBack: taskID=%d commit=%s mode=copy", taskID, commitHash)
 	return nil
+}
+
+func stageSyncBackCandidates(ctx context.Context, worktreePath string, allowPaths []string, taskID int64) ([]gitChangedFile, error) {
+	if err := gitAddAll(worktreePath); err != nil {
+		return nil, fmt.Errorf("暂存 worktree 变更失败: %w", err)
+	}
+	hasChanges, err := gitHasStagedChanges(worktreePath)
+	if err != nil {
+		return nil, fmt.Errorf("检查 worktree 变更失败: %w", err)
+	}
+	if !hasChanges {
+		return nil, nil
+	}
+
+	if pruned, pruneErr := worktreeguard.PruneEmbeddedAllowedDuplicates(ctx, worktreePath, allowPaths); pruneErr != nil {
+		g.Log().Warningf(ctx, "[Workspace] syncBack 前清理重复嵌入路径失败: taskID=%d err=%v", taskID, pruneErr)
+	} else if len(pruned) > 0 {
+		g.Log().Infof(ctx, "[Workspace] syncBack 前已清理重复嵌入路径: taskID=%d paths=%v", taskID, pruned)
+		if err := gitAddAll(worktreePath); err != nil {
+			return nil, fmt.Errorf("重复路径清理后重新暂存失败: %w", err)
+		}
+	}
+
+	changedFiles, err := gitStagedChangedFiles(worktreePath)
+	if err != nil {
+		return nil, fmt.Errorf("读取 staged 变更文件失败: %w", err)
+	}
+	suspicious, _ := collectSyncBackPathIssues(changedFiles, allowPaths)
+	if len(suspicious) > 0 {
+		if pruned, pruneErr := worktreeguard.PruneSuspiciousDeltaPaths(worktreePath, suspicious); pruneErr != nil {
+			g.Log().Warningf(ctx, "[Workspace] syncBack 前清理可疑标题文件失败: taskID=%d err=%v", taskID, pruneErr)
+		} else if len(pruned) > 0 {
+			g.Log().Infof(ctx, "[Workspace] syncBack 前已清理可疑标题文件: taskID=%d paths=%v", taskID, pruned)
+			if err := gitAddAll(worktreePath); err != nil {
+				return nil, fmt.Errorf("可疑文件清理后重新暂存失败: %w", err)
+			}
+			changedFiles, err = gitStagedChangedFiles(worktreePath)
+			if err != nil {
+				return nil, fmt.Errorf("清理后读取 staged 变更文件失败: %w", err)
+			}
+		}
+	}
+
+	hasChanges, err = gitHasStagedChanges(worktreePath)
+	if err != nil {
+		return nil, fmt.Errorf("清理后检查 worktree 变更失败: %w", err)
+	}
+	if !hasChanges {
+		return nil, nil
+	}
+	if err := validateSyncBackPaths(changedFiles, allowPaths); err != nil {
+		return nil, err
+	}
+	return changedFiles, nil
 }
 
 func ensureGitIdentity(dir string) error {
@@ -878,8 +982,22 @@ func gitChangedFiles(dir, commitHash string) ([]gitChangedFile, error) {
 		return nil, err
 	}
 
+	return parseGitChangedFiles(string(output)), nil
+}
+
+func gitStagedChangedFiles(dir string) ([]gitChangedFile, error) {
+	cmd := exec.Command("git", "-C", dir, "diff", "--cached", "--name-status", "-M")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	return parseGitChangedFiles(string(output)), nil
+}
+
+func parseGitChangedFiles(output string) []gitChangedFile {
 	var result []gitChangedFile
-	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -899,10 +1017,13 @@ func gitChangedFiles(dir, commitHash string) ([]gitChangedFile, error) {
 		}
 		result = append(result, item)
 	}
-	return result, nil
+	return result
 }
 
-func syncChangedFilesToMain(mainWorkDir, worktreePath string, changedFiles []gitChangedFile, dirtyFiles map[string]struct{}) error {
+func syncChangedFilesToMain(mainWorkDir, worktreePath string, changedFiles []gitChangedFile, dirtyFiles map[string]struct{}, allowPaths []string) error {
+	if err := validateSyncBackPaths(changedFiles, allowPaths); err != nil {
+		return err
+	}
 	for _, file := range changedFiles {
 		targets := []string{}
 		if file.OldPath != "" {
@@ -994,15 +1115,35 @@ func loadTaskAllowedPaths(ctx context.Context, taskID int64) (_ []string, err er
 }
 
 func validateSyncBackPaths(changedFiles []gitChangedFile, allowPaths []string) error {
-	allowSet := make(map[string]struct{}, len(allowPaths))
+	suspicious, invalid := collectSyncBackPathIssues(changedFiles, allowPaths)
+	if len(suspicious) == 0 && len(invalid) == 0 {
+		return nil
+	}
+
+	sort.Strings(suspicious)
+	sort.Strings(invalid)
+
+	var issues []string
+	if len(suspicious) > 0 {
+		issues = append(issues, "检测到可疑文件: "+strings.Join(suspicious, ", "))
+	}
+	if len(invalid) > 0 {
+		issues = append(issues, "检测到越界修改: "+strings.Join(invalid, ", "))
+	}
+	return fmt.Errorf("syncBack 校验失败: %s", strings.Join(issues, "；"))
+}
+
+func collectSyncBackPathIssues(changedFiles []gitChangedFile, allowPaths []string) ([]string, []string) {
+	var (
+		invalid        []string
+		suspicious     []string
+		seenInvalid    = map[string]struct{}{}
+		seenSuspicious = map[string]struct{}{}
+		allowSet       = make(map[string]struct{}, len(allowPaths))
+	)
 	for _, allowPath := range allowPaths {
 		allowSet[allowPath] = struct{}{}
 	}
-
-	var invalid []string
-	var suspicious []string
-	seenInvalid := map[string]struct{}{}
-	seenSuspicious := map[string]struct{}{}
 
 	for _, item := range changedFiles {
 		for _, filePath := range changedFileTargets(item) {
@@ -1025,22 +1166,7 @@ func validateSyncBackPaths(changedFiles []gitChangedFile, allowPaths []string) e
 			}
 		}
 	}
-
-	if len(suspicious) == 0 && len(invalid) == 0 {
-		return nil
-	}
-
-	sort.Strings(suspicious)
-	sort.Strings(invalid)
-
-	var issues []string
-	if len(suspicious) > 0 {
-		issues = append(issues, "检测到可疑文件: "+strings.Join(suspicious, ", "))
-	}
-	if len(invalid) > 0 {
-		issues = append(issues, "检测到越界修改: "+strings.Join(invalid, ", "))
-	}
-	return fmt.Errorf("syncBack 校验失败: %s", strings.Join(issues, "；"))
+	return suspicious, invalid
 }
 
 func changedFileTargets(item gitChangedFile) []string {

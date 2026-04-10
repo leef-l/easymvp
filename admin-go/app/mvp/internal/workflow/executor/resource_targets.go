@@ -62,6 +62,9 @@ func parseResourceTargets(jsonStr string) resourceTargets {
 		}
 	}
 
+	result.AllowedPaths = normalizePathSlice(result.AllowedPaths)
+	result.FilePaths = normalizePathSlice(result.FilePaths)
+	result.DirectoryPaths = normalizePathSlice(result.DirectoryPaths)
 	return result
 }
 
@@ -96,9 +99,9 @@ func applyExecutionSubdir(baseDir string, targets resourceTargets) (string, reso
 	}
 
 	rebased := resourceTargets{
-		AllowedPaths:   append([]string(nil), targets.AllowedPaths...),
-		FilePaths:      trimResourcePrefix(targets.FilePaths, commonDir),
-		DirectoryPaths: trimResourcePrefix(targets.DirectoryPaths, commonDir),
+		AllowedPaths:   normalizePathSlice(targets.AllowedPaths),
+		FilePaths:      normalizePathSlice(trimResourcePrefix(targets.FilePaths, commonDir)),
+		DirectoryPaths: normalizePathSlice(trimResourcePrefix(targets.DirectoryPaths, commonDir)),
 		Rejected:       append([]string(nil), targets.Rejected...),
 	}
 	return filepath.Join(baseDir, filepath.FromSlash(commonDir)), rebased
@@ -107,9 +110,9 @@ func applyExecutionSubdir(baseDir string, targets resourceTargets) (string, reso
 func promptAllowedPathsForExecution(baseDir string, targets resourceTargets) []string {
 	commonDir := detectCommonExecutionDir(targets)
 	if commonDir == "" || !canUseExecutionSubdir(baseDir, commonDir) {
-		return append([]string(nil), targets.AllowedPaths...)
+		return normalizePathSlice(targets.AllowedPaths)
 	}
-	return trimResourcePrefix(targets.AllowedPaths, commonDir)
+	return normalizePathSlice(trimResourcePrefix(targets.AllowedPaths, commonDir))
 }
 
 func canUseExecutionSubdir(baseDir, commonDir string) bool {
@@ -199,6 +202,27 @@ func trimResourcePrefix(values []string, prefix string) []string {
 		trimmed = append(trimmed, value)
 	}
 	return trimmed
+}
+
+func normalizePathSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	normalized := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		normalizedValue, ok := worktreeguard.NormalizeRelativePath(value)
+		if !ok {
+			continue
+		}
+		if _, exists := seen[normalizedValue]; exists {
+			continue
+		}
+		seen[normalizedValue] = struct{}{}
+		normalized = append(normalized, normalizedValue)
+	}
+	return normalized
 }
 
 func splitPathSegments(value string) []string {

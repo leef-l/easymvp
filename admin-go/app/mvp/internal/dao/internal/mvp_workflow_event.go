@@ -21,26 +21,32 @@ type MvpWorkflowEventDao struct {
 
 // MvpWorkflowEventColumns defines and stores column names for the table mvp_workflow_event.
 type MvpWorkflowEventColumns struct {
-	Id            string // 雪花ID
-	WorkflowRunId string // 所属工作流运行ID
-	StageRunId    string // 关联阶段运行ID
-	EntityType    string // 实体类型: workflow_run/stage_run/plan_version/domain_task/review_issue
-	EntityId      string // 实体ID
-	EventType     string // 事件类型: workflow.created/stage.started/task.completed等
-	Payload       string // 事件载荷(JSON)
-	CreatedAt     string // 创建时间
+	Id             string // 雪花ID
+	EventId        string // 事件元ID
+	WorkflowRunId  string // 所属工作流运行ID
+	StageRunId     string // 关联阶段运行ID
+	EntityType     string // 实体类型: workflow_run/stage_run/plan_version/domain_task/review_issue
+	EntityId       string // 实体ID
+	EventType      string // 事件类型: workflow.created/stage.started/task.completed等
+	Attempt        string // 事件尝试次数
+	IdempotencyKey string // 幂等键
+	Payload        string // 事件载荷(JSON)
+	CreatedAt      string // 创建时间
 }
 
 // mvpWorkflowEventColumns holds the columns for the table mvp_workflow_event.
 var mvpWorkflowEventColumns = MvpWorkflowEventColumns{
-	Id:            "id",
-	WorkflowRunId: "workflow_run_id",
-	StageRunId:    "stage_run_id",
-	EntityType:    "entity_type",
-	EntityId:      "entity_id",
-	EventType:     "event_type",
-	Payload:       "payload",
-	CreatedAt:     "created_at",
+	Id:             "id",
+	EventId:        "event_id",
+	WorkflowRunId:  "workflow_run_id",
+	StageRunId:     "stage_run_id",
+	EntityType:     "entity_type",
+	EntityId:       "entity_id",
+	EventType:      "event_type",
+	Attempt:        "attempt",
+	IdempotencyKey: "idempotency_key",
+	Payload:        "payload",
+	CreatedAt:      "created_at",
 }
 
 // NewMvpWorkflowEventDao creates and returns a new DAO object for table data access.

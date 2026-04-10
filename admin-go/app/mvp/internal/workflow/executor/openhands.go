@@ -142,10 +142,7 @@ func (e *OpenHandsExecutor) Execute(ctx context.Context, req *Request) *Result {
 
 		// workspace finalize: 标记失败
 		if req.Workspace != nil && e.wsMgr != nil {
-			_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{
-				Success: false,
-				Error:   errMsg,
-			})
+			finalizeWorkspaceFailure(ctx, e.wsMgr, req.TaskID, "OpenHandsExecutor", errMsg, false)
 		}
 		return &Result{Success: false, Error: fmt.Errorf("%s", errMsg)}
 	}
@@ -155,7 +152,6 @@ func (e *OpenHandsExecutor) Execute(ctx context.Context, req *Request) *Result {
 	// workspace finalize: 标记成功
 	if req.Workspace != nil && e.wsMgr != nil {
 		if err := finalizeWorkspaceSuccess(ctx, e.wsMgr, req.TaskID, "OpenHandsExecutor"); err != nil {
-			_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: false, Error: err.Error(), Retain: true})
 			return &Result{Success: false, Error: err}
 		}
 	}

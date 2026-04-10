@@ -83,7 +83,7 @@ func (e *ClaudeCodeExecutor) Execute(ctx context.Context, req *Request) *Result 
 	if len(targets.DirectoryPaths) > 0 {
 		if err := ensureDirectoryTargets(workDir, targets.DirectoryPaths); err != nil {
 			if req.Workspace != nil && e.wsMgr != nil {
-				_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: false, Error: err.Error()})
+				finalizeWorkspaceFailure(ctx, e.wsMgr, req.TaskID, "ClaudeCodeExecutor", err.Error(), false)
 			}
 			return &Result{Success: false, Error: err}
 		}
@@ -92,7 +92,6 @@ func (e *ClaudeCodeExecutor) Execute(ctx context.Context, req *Request) *Result 
 		output := fmt.Sprintf("已准备目录资源: %s", strings.Join(targets.DirectoryPaths, ", "))
 		if req.Workspace != nil && e.wsMgr != nil {
 			if err := finalizeWorkspaceSuccess(ctx, e.wsMgr, req.TaskID, "ClaudeCodeExecutor"); err != nil {
-				_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: false, Error: err.Error(), Retain: true})
 				return &Result{Success: false, Error: err}
 			}
 		}
@@ -151,7 +150,7 @@ func (e *ClaudeCodeExecutor) Execute(ctx context.Context, req *Request) *Result 
 			errMsg = errMsg + "\n" + truncateOutput(output, 2000)
 		}
 		if req.Workspace != nil && e.wsMgr != nil {
-			_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: false, Error: errMsg})
+			finalizeWorkspaceFailure(ctx, e.wsMgr, req.TaskID, "ClaudeCodeExecutor", errMsg, false)
 		}
 		return &Result{Success: false, Error: fmt.Errorf("%s", errMsg)}
 	}
@@ -161,14 +160,13 @@ func (e *ClaudeCodeExecutor) Execute(ctx context.Context, req *Request) *Result 
 			errMsg = errMsg + "\n" + truncateOutput(output, 2000)
 		}
 		if req.Workspace != nil && e.wsMgr != nil {
-			_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: false, Error: errMsg})
+			finalizeWorkspaceFailure(ctx, e.wsMgr, req.TaskID, "ClaudeCodeExecutor", errMsg, false)
 		}
 		return &Result{Success: false, Error: fmt.Errorf("%s", errMsg)}
 	}
 
 	if req.Workspace != nil && e.wsMgr != nil {
 		if err := finalizeWorkspaceSuccess(ctx, e.wsMgr, req.TaskID, "ClaudeCodeExecutor"); err != nil {
-			_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: false, Error: err.Error(), Retain: true})
 			return &Result{Success: false, Error: err}
 		}
 	}

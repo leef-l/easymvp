@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,8 +12,10 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"easymvp/app/mvp/internal/consts"
 	"easymvp/app/mvp/internal/engine"
 	domainTask "easymvp/app/mvp/internal/workflow/domain/task"
+	"easymvp/app/mvp/internal/workflow/event"
 )
 
 // TaskExecutor 任务执行回调接口。
@@ -38,6 +41,7 @@ type DomainTaskScheduler struct {
 	executor       TaskExecutor
 	onAllDone      CompletionCallback
 	onTaskFailed   FailureCallback
+	publisher      *event.Publisher
 	cancelFns      map[int64]context.CancelFunc // workflowRunID → cancel
 	workflowCtxs   map[int64]context.Context    // workflowRunID → scheduler ctx
 }
@@ -64,6 +68,9 @@ func (s *DomainTaskScheduler) SetCompletionCallback(fn CompletionCallback) { s.o
 
 // SetFailureCallback 注册任务失败后的即时处理回调。
 func (s *DomainTaskScheduler) SetFailureCallback(fn FailureCallback) { s.onTaskFailed = fn }
+
+// SetEventPublisher 注册统一事件发布器。
+func (s *DomainTaskScheduler) SetEventPublisher(p *event.Publisher) { s.publisher = p }
 
 // Start 启动调度循环。
 func (s *DomainTaskScheduler) Start(ctx context.Context, workflowRunID int64) error {
@@ -118,16 +125,18 @@ func (s *DomainTaskScheduler) OnTaskCompleted(ctx context.Context, taskID int64)
 		g.Log().Errorf(ctx, "[Scheduler] OnTaskCompleted 查询 workflow_run_id 失败: task=%d err=%v", taskID, err)
 		return fmt.Errorf("查询任务 %d 的 workflow_run_id 失败: %w", taskID, err)
 	}
+	s.publishTaskEvent(ctx, wfRunID.Int64(), taskID, event.EventTaskCompleted, nil)
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				g.Log().Errorf(context.Background(), "[DomainTaskScheduler] OnTaskCompleted panic: task=%d err=%v", taskID, r)
-			}
+	if s.publisher == nil {
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					g.Log().Errorf(context.Background(), "[DomainTaskScheduler] OnTaskCompleted fallback reconcile panic: task=%d err=%v", taskID, r)
+				}
+			}()
+			s.ReconcileWorkflowProgress(context.Background(), wfRunID.Int64())
 		}()
-		s.scheduleOnce(context.Background(), wfRunID.Int64())
-		s.checkAllDone(context.Background(), wfRunID.Int64())
-	}()
+	}
 	return nil
 }
 
@@ -140,6 +149,11 @@ func (s *DomainTaskScheduler) OnTaskFailed(ctx context.Context, taskID int64, er
 		g.Log().Errorf(ctx, "[Scheduler] OnTaskFailed 查询 workflow_run_id 失败: task=%d err=%v", taskID, err)
 		return
 	}
+	payload := map[string]interface{}{
+		"task_id": taskID,
+		"error":   strings.TrimSpace(errMsg),
+	}
+	s.publishTaskEvent(ctx, wfRunID.Int64(), taskID, event.EventTaskFailed, payload)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -288,6 +302,9 @@ func (s *DomainTaskScheduler) scheduleOnce(ctx context.Context, workflowRunID in
 		}
 
 		// 执行
+		s.publishTaskEvent(ctx, workflowRunID, taskID, event.EventTaskStarted, map[string]interface{}{
+			"task_id": taskID,
+		})
 		if s.executor != nil {
 			execCtx := s.workflowCtxs[workflowRunID]
 			if execCtx == nil {
@@ -430,8 +447,85 @@ func (s *DomainTaskScheduler) Wakeup(ctx context.Context, workflowRunID int64) {
 				g.Log().Errorf(context.Background(), "[DomainTaskScheduler] Wakeup panic: %v", r)
 			}
 		}()
-		s.scheduleOnce(ctx, workflowRunID)
+		s.ReconcileWorkflowProgress(ctx, workflowRunID)
 	}()
+}
+
+// ReconcileWorkflowProgress 先补跑一次调度扫描，再检查是否已经全部完成。
+// 返回 true 表示仍然存在未完成任务，调用方应继续保持调度循环。
+func (s *DomainTaskScheduler) ReconcileWorkflowProgress(ctx context.Context, workflowRunID int64) bool {
+	if workflowRunID == 0 {
+		return false
+	}
+	if !s.shouldReconcileWorkflow(ctx, workflowRunID) {
+		return false
+	}
+	return reconcileWorkflowProgress(ctx, workflowRunID, s.scheduleOnce, s.checkAllDone, s.HasUnfinished)
+}
+
+func (s *DomainTaskScheduler) shouldReconcileWorkflow(ctx context.Context, workflowRunID int64) bool {
+	record, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+		Where("id", workflowRunID).
+		WhereNull("deleted_at").
+		Fields("status, current_stage").
+		One()
+	if err != nil {
+		g.Log().Warningf(ctx, "[DomainTaskScheduler] shouldReconcileWorkflow 查询失败: workflowRunID=%d err=%v", workflowRunID, err)
+		return true
+	}
+	if record.IsEmpty() {
+		return false
+	}
+
+	status := record["status"].String()
+	stage := record["current_stage"].String()
+	return status == consts.WorkflowRunStatusExecuting ||
+		status == consts.WorkflowRunStatusReworking ||
+		stage == consts.StageTypeExecute ||
+		stage == consts.StageTypeRework
+}
+
+func reconcileWorkflowProgress(
+	ctx context.Context,
+	workflowRunID int64,
+	scheduleOnce func(context.Context, int64),
+	checkAllDone func(context.Context, int64),
+	hasUnfinished func(context.Context, int64) bool,
+) bool {
+	if scheduleOnce != nil {
+		scheduleOnce(ctx, workflowRunID)
+	}
+	if checkAllDone != nil {
+		checkAllDone(ctx, workflowRunID)
+	}
+	if hasUnfinished == nil {
+		return true
+	}
+	return hasUnfinished(ctx, workflowRunID)
+}
+
+func (s *DomainTaskScheduler) publishTaskEvent(ctx context.Context, workflowRunID, taskID int64, eventType string, payload map[string]interface{}) {
+	if s.publisher == nil || workflowRunID == 0 || taskID == 0 {
+		return
+	}
+
+	taskIDCopy := taskID
+	if payload == nil {
+		payload = map[string]interface{}{}
+	}
+	if _, ok := payload["task_id"]; !ok {
+		payload["task_id"] = taskID
+	}
+
+	if err := s.publisher.Emit(ctx, event.Event{
+		WorkflowRunID: workflowRunID,
+		EntityType:    event.EntityDomainTask,
+		EntityID:      &taskIDCopy,
+		EventType:     eventType,
+		Payload:       payload,
+	}); err != nil {
+		g.Log().Warningf(ctx, "[DomainTaskScheduler] publish task event failed: task=%d event=%s err=%v", taskID, eventType, err)
+	}
 }
 
 // HasUnfinished 检查是否还有未完成任务（供外部查询）。

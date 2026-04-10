@@ -435,9 +435,9 @@ func (r *AiderRunner) BuildConfigFromModel(ctx context.Context, modelInfo *Model
 func (r *AiderRunner) RunTask(ctx context.Context, projectID int64, taskID int64, modelInfo *ModelInfo, taskPrompt string, workDir string, files []string, allowPaths []string, readFiles []string) *AiderResult {
 	cfg := r.BuildConfigFromModel(ctx, modelInfo, workDir)
 	cfg.Message = taskPrompt
-	cfg.Files = files
-	cfg.AllowPaths = allowPaths
-	cfg.ReadFiles = readFiles
+	cfg.Files = normalizeExecutionRelativePaths(files)
+	cfg.AllowPaths, _ = worktreeguard.NormalizeRelativePaths(allowPaths)
+	cfg.ReadFiles = normalizeExecutionRelativePaths(readFiles)
 	cfg.OnActivity = func() {
 		activity.TouchTaskActivity(context.Background(), taskID)
 		TouchHeartbeat(context.Background(), taskID)
@@ -452,15 +452,30 @@ func (r *AiderRunner) RunTask(ctx context.Context, projectID int64, taskID int64
 	if err != nil {
 		g.Log().Warningf(ctx, "[AiderRunner] 捕获 git 基线失败: %v", err)
 	}
+	if pruneReport, pruneErr := worktreeguard.PruneGuardNoise(ctx, workDir, cfg.AllowPaths); pruneErr != nil {
+		g.Log().Warningf(ctx, "[AiderRunner] 预清理 guard 噪音失败: %v", pruneErr)
+	} else if pruneReport != nil {
+		if len(pruneReport.DuplicatePaths) > 0 {
+			g.Log().Infof(ctx, "[AiderRunner] 已预清理重复嵌入路径: %v", pruneReport.DuplicatePaths)
+		}
+		if len(pruneReport.SuspiciousPaths) > 0 {
+			g.Log().Infof(ctx, "[AiderRunner] 已预清理可疑标题文件: %v", pruneReport.SuspiciousPaths)
+		}
+	}
 
 	result := r.Run(ctx, cfg)
 	if cleanupErr := cleanupAiderArtifacts(workDir, cfg.AllowPaths); cleanupErr != nil {
 		g.Log().Warningf(ctx, "[AiderRunner] 清理 Aider 临时文件失败: %v", cleanupErr)
 	}
-	if pruned, pruneErr := worktreeguard.PruneEmbeddedAllowedDuplicates(ctx, workDir, cfg.AllowPaths); pruneErr != nil {
-		g.Log().Warningf(ctx, "[AiderRunner] 清理重复嵌入路径失败: %v", pruneErr)
-	} else if len(pruned) > 0 {
-		g.Log().Infof(ctx, "[AiderRunner] 已清理重复嵌入路径: %v", pruned)
+	if pruneReport, pruneErr := worktreeguard.PruneGuardNoise(ctx, workDir, cfg.AllowPaths); pruneErr != nil {
+		g.Log().Warningf(ctx, "[AiderRunner] 执行后清理 guard 噪音失败: %v", pruneErr)
+	} else if pruneReport != nil {
+		if len(pruneReport.DuplicatePaths) > 0 {
+			g.Log().Infof(ctx, "[AiderRunner] 已清理重复嵌入路径: %v", pruneReport.DuplicatePaths)
+		}
+		if len(pruneReport.SuspiciousPaths) > 0 {
+			g.Log().Infof(ctx, "[AiderRunner] 已清理可疑标题文件: %v", pruneReport.SuspiciousPaths)
+		}
 	}
 	if result.Error != nil || snapshot == nil {
 		return result
@@ -470,18 +485,6 @@ func (r *AiderRunner) RunTask(ctx context.Context, projectID int64, taskID int64
 	if err != nil {
 		g.Log().Warningf(ctx, "[AiderRunner] 校验 git 变更失败: %v", err)
 		return result
-	}
-	if len(validation.Suspicious) > 0 {
-		if pruned, pruneErr := worktreeguard.PruneSuspiciousDeltaPaths(workDir, validation.Suspicious); pruneErr != nil {
-			g.Log().Warningf(ctx, "[AiderRunner] 清理可疑标题文件失败: %v", pruneErr)
-		} else if len(pruned) > 0 {
-			g.Log().Infof(ctx, "[AiderRunner] 已清理可疑标题文件: %v", pruned)
-			validation, err = snapshot.Validate(ctx, workDir, cfg.AllowPaths)
-			if err != nil {
-				g.Log().Warningf(ctx, "[AiderRunner] 清理后重新校验 git 变更失败: %v", err)
-				return result
-			}
-		}
 	}
 	if validation.HasIssues() {
 		summary := validation.Summary()
@@ -532,6 +535,27 @@ func cleanupAiderArtifacts(workDir string, allowPaths []string) error {
 		return err
 	}
 	return nil
+}
+
+func normalizeExecutionRelativePaths(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+
+	normalized := make([]string, 0, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for _, currentPath := range paths {
+		value, ok := worktreeguard.NormalizeRelativePath(currentPath)
+		if !ok || worktreeguard.IsSuspiciousPath(value) {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	return normalized
 }
 
 func isAiderArtifactGitignore(content string) bool {

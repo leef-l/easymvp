@@ -1,6 +1,7 @@
 package watchdog
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -65,5 +66,54 @@ func TestResetRetryCountAlsoClearsStaleTracking(t *testing.T) {
 	}
 	if _, ok := w.lastRef[1]; ok {
 		t.Fatal("last ref should be cleared")
+	}
+}
+
+func TestIsLeaseExpired(t *testing.T) {
+	now := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
+	ref := now.Add(-61 * time.Second)
+	if !isLeaseExpired(ref, now, 60*time.Second) {
+		t.Fatal("expected lease to be expired")
+	}
+	if isLeaseExpired(now.Add(-60*time.Second), now, 60*time.Second) {
+		t.Fatal("exact threshold should not be treated as expired")
+	}
+	if isLeaseExpired(ref, now, 0) {
+		t.Fatal("non-positive timeout should never expire")
+	}
+}
+
+func TestSnapshot(t *testing.T) {
+	lastRunning := time.Date(2026, 4, 10, 11, 0, 0, 0, time.UTC)
+	lastFailed := time.Date(2026, 4, 10, 11, 1, 0, 0, time.UTC)
+	w := &DomainTaskWatchdog{
+		mu: sync.Mutex{},
+		stats: RuntimeSnapshot{
+			CheckIntervalSeconds:    20,
+			HeartbeatTimeoutSeconds: 60,
+			MaxStaleCountCompat:     3,
+			MaxRetries:              3,
+			LastRunningCheckAt:      lastRunning,
+			LastRunningTaskCount:    5,
+			LastFailedCheckAt:       lastFailed,
+			LastFailedTaskCount:     2,
+			LeaseTimeoutDetections:  4,
+			AutoRetrySuccesses:      3,
+			AutoEscalations:         1,
+			RunningQueryErrors:      2,
+			FailedQueryErrors:       1,
+			InvalidRefSkips:         6,
+		},
+	}
+
+	got := w.Snapshot()
+	if got.HeartbeatTimeoutSeconds != 60 || got.MaxStaleCountCompat != 3 {
+		t.Fatalf("unexpected snapshot config: %#v", got)
+	}
+	if got.LastRunningCheckAt != lastRunning || got.LastFailedCheckAt != lastFailed {
+		t.Fatalf("unexpected snapshot check time: %#v", got)
+	}
+	if got.LeaseTimeoutDetections != 4 || got.InvalidRefSkips != 6 {
+		t.Fatalf("unexpected snapshot counters: %#v", got)
 	}
 }
