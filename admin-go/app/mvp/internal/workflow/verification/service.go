@@ -16,8 +16,9 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"easymvp/app/mvp/internal/engine"
+	"easymvp/app/mvp/internal/workflow/event"
+	"easymvp/app/mvp/internal/workflow/qualitygate"
 	"easymvp/app/mvp/internal/workflow/repo"
-	"easymvp/utility/snowflake"
 )
 
 const (
@@ -50,9 +51,12 @@ type StartRequest struct {
 
 // Service 项目验证服务。
 type Service struct {
-	runRepo      *repo.VerificationRunRepo
-	issueRepo    *repo.VerificationIssueRepo
-	evidenceRepo *repo.VerificationEvidenceRepo
+	runRepo        *repo.VerificationRunRepo
+	issueRepo      *repo.VerificationIssueRepo
+	evidenceRepo   *repo.VerificationEvidenceRepo
+	projectRepo    *repo.ProjectRepo
+	projectCatRepo *repo.ProjectCategoryRepo
+	domainTaskRepo *repo.DomainTaskRepo
 }
 
 // NewService 创建验证服务。
@@ -71,9 +75,12 @@ func NewService(
 		evidenceRepo = repo.NewVerificationEvidenceRepo()
 	}
 	return &Service{
-		runRepo:      runRepo,
-		issueRepo:    issueRepo,
-		evidenceRepo: evidenceRepo,
+		runRepo:        runRepo,
+		issueRepo:      issueRepo,
+		evidenceRepo:   evidenceRepo,
+		projectRepo:    repo.NewProjectRepo(),
+		projectCatRepo: repo.NewProjectCategoryRepo(),
+		domainTaskRepo: repo.NewDomainTaskRepo(),
 	}
 }
 
@@ -388,25 +395,22 @@ func (s *Service) loadRunMeta(ctx context.Context, runID int64) (*runMeta, error
 		return nil, fmt.Errorf("verification_run(%d) 不存在", runID)
 	}
 
-	project, err := g.DB().Model("mvp_project").Ctx(ctx).
-		Where("id", g.NewVar(run["project_id"]).Int64()).
-		WhereNull("deleted_at").
-		Fields("id, name, work_dir, category_code, project_category, created_by, dept_id").
-		One()
-	if err != nil || project.IsEmpty() {
+	project, err := s.projectRepo.GetByID(ctx, g.NewVar(run["project_id"]).Int64(),
+		"id", "name", "work_dir", "category_code", "project_category", "created_by", "dept_id")
+	if err != nil || len(project) == 0 {
 		return nil, fmt.Errorf("project(%d) 不存在", g.NewVar(run["project_id"]).Int64())
 	}
 
 	return &runMeta{
 		RunID:           runID,
 		WorkflowRunID:   g.NewVar(run["workflow_run_id"]).Int64(),
-		ProjectID:       project["id"].Int64(),
-		ProjectName:     project["name"].String(),
-		WorkDir:         strings.TrimSpace(project["work_dir"].String()),
-		CategoryCode:    strings.TrimSpace(project["category_code"].String()),
-		ProjectCategory: strings.TrimSpace(project["project_category"].String()),
-		CreatedBy:       g.NewVar(run["created_by"]).Int64(),
-		DeptID:          g.NewVar(run["dept_id"]).Int64(),
+		ProjectID:       g.NewVar(project["id"]).Int64(),
+		ProjectName:     g.NewVar(project["name"]).String(),
+		WorkDir:         strings.TrimSpace(g.NewVar(project["work_dir"]).String()),
+		CategoryCode:    strings.TrimSpace(g.NewVar(project["category_code"]).String()),
+		ProjectCategory: strings.TrimSpace(g.NewVar(project["project_category"]).String()),
+		CreatedBy:       g.NewVar(project["created_by"]).Int64(),
+		DeptID:          g.NewVar(project["dept_id"]).Int64(),
 	}, nil
 }
 
@@ -482,6 +486,7 @@ func (s *Service) buildExecutionPlan(ctx context.Context, meta *runMeta) (*execu
 
 	composeFile, _ := findComposeFile(meta.WorkDir)
 	dockerfile, _ := findDockerfile(meta.WorkDir)
+	autoSetupSteps := s.discoverLocalSetupSteps(ctx, meta, meta.WorkDir)
 	autoSteps := s.discoverLocalSteps(ctx, meta, meta.WorkDir)
 
 	mode := modeAuto
@@ -539,6 +544,29 @@ func (s *Service) buildExecutionPlan(ctx context.Context, meta *runMeta) (*execu
 	}
 	if categoryConfig != nil && categoryConfig.GateRaw != "" {
 		detection["gate"] = json.RawMessage(categoryConfig.GateRaw)
+	}
+	signals := qualitygate.DetectProjectSignals(
+		meta.WorkDir,
+		string(engine.GetCategoryFamily(valueOrDefault(meta.CategoryCode, meta.ProjectCategory))),
+		valueOrDefault(meta.CategoryCode, meta.ProjectCategory),
+	)
+	standard := qualitygate.ResolveVerificationStandard(signals)
+	detection["verificationStandard"] = map[string]interface{}{
+		"code":                 standard.Code,
+		"displayName":          standard.DisplayName,
+		"requiredCheckKinds":   standard.RequiredCheckKinds,
+		"requiredProjectRoles": standard.RequiredProjectRoles,
+		"signals": map[string]interface{}{
+			"familyCode":           signals.FamilyCode,
+			"projectTypeCode":      signals.ProjectTypeCode,
+			"hasGoModules":         signals.HasGoModules,
+			"hasNodePackage":       signals.HasNodePackage,
+			"hasFrontendApp":       signals.HasFrontendApp,
+			"hasBrowserAutomation": signals.HasBrowserAutomation,
+			"hasAndroidApp":        signals.HasAndroidApp,
+			"hasIOSApp":            signals.HasIOSApp,
+			"reasons":              signals.Reasons,
+		},
 	}
 
 	switch mode {
@@ -713,9 +741,12 @@ func (s *Service) buildExecutionPlan(ctx context.Context, meta *runMeta) (*execu
 	if len(customSteps) > 0 {
 		plan.VerifySteps = append(plan.VerifySteps, customSteps...)
 	} else {
+		plan.SetupSteps = append(plan.SetupSteps, autoSetupSteps...)
 		plan.VerifySteps = append(plan.VerifySteps, autoSteps...)
 	}
 	plan.TeardownSteps = append(plan.TeardownSteps, customTeardown...)
+	plan.Gate = mergeVerificationStandardIntoGate(plan.Gate, standard)
+	plan.GateSource = mergeGateSource(plan.GateSource, standard.Code)
 
 	if len(plan.VerifySteps) == 0 {
 		issues = append(issues, issueDraft{
@@ -750,6 +781,44 @@ func (s *Service) buildExecutionPlan(ctx context.Context, meta *runMeta) (*execu
 		Summary:      plan.DetectionSummary,
 	})
 	return plan, issues, evidence, nil
+}
+
+func (s *Service) discoverLocalSetupSteps(ctx context.Context, meta *runMeta, root string) []verificationStep {
+	steps := make([]verificationStep, 0, 4)
+	seen := make(map[string]struct{})
+
+	for _, dir := range findProjectSubdirs(root, "package.json") {
+		scripts, err := readPackageScripts(dir)
+		if err != nil || !hasAutoDiscoverablePackageScripts(scripts) {
+			continue
+		}
+		if info, err := os.Stat(filepath.Join(dir, "node_modules")); err == nil && info.IsDir() {
+			continue
+		}
+
+		rel := relativePath(root, dir)
+		key := "install:" + rel
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		pm := detectPackageManager(dir)
+		command := buildPackageInstallCommand(dir, pm)
+		resourceRef := strings.TrimSpace(rel)
+		steps = append(steps, verificationStep{
+			Name:           displayStepName(rel, describePackageInstallCommand(command)),
+			Runner:         runnerLocal,
+			WorkDir:        rel,
+			Command:        command,
+			TimeoutSeconds: 900,
+			ResourceRef:    resourceRef,
+			DomainTaskID:   s.findRelatedDomainTaskID(ctx, meta.WorkflowRunID, resourceRef),
+			Expected:       "项目依赖安装完成",
+		})
+	}
+
+	return steps
 }
 
 func (s *Service) discoverLocalSteps(ctx context.Context, meta *runMeta, root string) []verificationStep {
@@ -802,7 +871,7 @@ func (s *Service) discoverLocalSteps(ctx context.Context, meta *runMeta, root st
 				})
 			}
 		}
-		if script, ok := scripts["test"]; ok {
+		if script, ok := scripts["test"]; ok && !qualitygate.IsBrowserScript("test", script) {
 			key := "test:" + rel
 			if _, seenTest := seen[key]; !seenTest {
 				seen[key] = struct{}{}
@@ -819,6 +888,24 @@ func (s *Service) discoverLocalSteps(ctx context.Context, meta *runMeta, root st
 				}
 				steps = append(steps, step)
 			}
+		}
+		for _, scriptName := range discoverBrowserScriptNames(scripts) {
+			key := "browser:" + rel + ":" + scriptName
+			if _, seenBrowser := seen[key]; seenBrowser {
+				continue
+			}
+			seen[key] = struct{}{}
+			steps = append(steps, verificationStep{
+				Name:           displayStepName(rel, "browser "+scriptName),
+				Runner:         runnerLocal,
+				WorkDir:        rel,
+				Command:        buildPackageScriptCommand(pm, scriptName),
+				TimeoutSeconds: 900,
+				ResourceRef:    resourceRef,
+				DomainTaskID:   taskID,
+				Expected:       "浏览器级关键交互验证通过",
+				Env:            map[string]string{"CI": "true"},
+			})
 		}
 		if _, ok := scripts["build"]; ok {
 			key := "build:" + rel
@@ -1020,25 +1107,13 @@ func (s *Service) failRun(ctx context.Context, runID int64, reason string) {
 }
 
 func (s *Service) insertWorkflowEvent(ctx context.Context, workflowRunID int64, entityType, eventType string, entityID *int64, payload map[string]interface{}) {
-	var payloadJSON string
-	if len(payload) > 0 {
-		if data, err := json.Marshal(payload); err == nil {
-			payloadJSON = string(data)
-		}
-	}
-
-	data := g.Map{
-		"id":              int64(snowflake.Generate()),
-		"workflow_run_id": workflowRunID,
-		"entity_type":     entityType,
-		"event_type":      eventType,
-		"payload":         payloadJSON,
-		"created_at":      gtime.Now(),
-	}
-	if entityID != nil {
-		data["entity_id"] = *entityID
-	}
-	if _, err := g.DB().Model("mvp_workflow_event").Ctx(ctx).Insert(data); err != nil {
+	if err := event.PersistRecord(ctx, event.Event{
+		WorkflowRunID: workflowRunID,
+		EntityType:    entityType,
+		EntityID:      entityID,
+		EventType:     eventType,
+		Payload:       payload,
+	}); err != nil {
 		g.Log().Warningf(ctx, "[Verification] 写入事件失败: event=%s workflowRunID=%d err=%v", eventType, workflowRunID, err)
 	}
 }
@@ -1048,18 +1123,11 @@ func (s *Service) findRelatedDomainTaskID(ctx context.Context, workflowRunID int
 	if workflowRunID == 0 || resourceRef == "" || resourceRef == "." {
 		return 0
 	}
-	patternA := fmt.Sprintf("%%%s%%", resourceRef)
-	record, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Where("affected_resources LIKE ?", patternA).
-		WhereNull("deleted_at").
-		OrderDesc("updated_at").
-		Fields("id").
-		One()
-	if err != nil || record.IsEmpty() {
+	record, err := s.domainTaskRepo.FindLatestByWorkflowAndAffectedResourceLike(ctx, workflowRunID, resourceRef)
+	if err != nil || len(record) == 0 {
 		return 0
 	}
-	return record["id"].Int64()
+	return g.NewVar(record["id"]).Int64()
 }
 
 func (s *Service) loadCategoryVerificationConfig(ctx context.Context, meta *runMeta) (*categoryVerificationConfig, []issueDraft, error) {
@@ -1127,30 +1195,22 @@ func (s *Service) loadCategoryVerificationConfig(ctx context.Context, meta *runM
 }
 
 func (s *Service) findProjectCategoryRecord(ctx context.Context, meta *runMeta) (g.Map, error) {
-	model := g.DB().Model("mvp_project_category").Ctx(ctx).
-		Where("status", 1).
-		WhereNull("deleted_at")
-
 	if meta.CategoryCode != "" {
-		record, err := model.Clone().Where("category_code", meta.CategoryCode).
-			Fields("category_code, display_name, verification_profile_json, verification_gate_json").
-			One()
+		record, err := s.projectCatRepo.GetByCode(ctx, meta.CategoryCode)
 		if err != nil {
 			return nil, err
 		}
-		if !record.IsEmpty() {
-			return record.Map(), nil
+		if len(record) != 0 {
+			return record, nil
 		}
 	}
 	if meta.ProjectCategory != "" {
-		record, err := model.Clone().Where("display_name", meta.ProjectCategory).
-			Fields("category_code, display_name, verification_profile_json, verification_gate_json").
-			One()
+		record, err := s.projectCatRepo.GetByDisplayName(ctx, meta.ProjectCategory)
 		if err != nil {
 			return nil, err
 		}
-		if !record.IsEmpty() {
-			return record.Map(), nil
+		if len(record) != 0 {
+			return record, nil
 		}
 	}
 	return nil, nil
@@ -1271,6 +1331,8 @@ func normalizeCheckKind(value string) string {
 		return "build"
 	case "runtime":
 		return "runtime"
+	case "browser", "e2e":
+		return qualitygate.CheckKindBrowser
 	default:
 		return ""
 	}
@@ -1383,19 +1445,50 @@ func collectExecutedCheckKinds(stepExecutions []stepExecution) map[string]struct
 }
 
 func inferCheckKind(step verificationStep) string {
-	text := strings.ToLower(step.Name + " " + strings.Join(step.Command, " "))
-	switch {
-	case strings.Contains(text, "lint"):
-		return "lint"
-	case strings.Contains(text, "go test"), strings.Contains(text, " test"), strings.Contains(text, "vitest"), strings.Contains(text, "jest"), strings.Contains(text, "pytest"):
-		return "test"
-	case strings.Contains(text, "build"):
-		return "build"
-	case strings.Contains(text, "compose up"), strings.Contains(text, "compose ps"), strings.Contains(text, " start"), strings.Contains(text, " serve"), step.Runner == runnerDockerExec:
-		return "runtime"
-	default:
-		return ""
+	return qualitygate.InferCheckKind(step.Name, step.Command, step.Runner)
+}
+
+func discoverBrowserScriptNames(scripts map[string]string) []string {
+	names := make([]string, 0, len(scripts))
+	for name, script := range scripts {
+		if qualitygate.IsBrowserScript(name, script) {
+			names = append(names, name)
+		}
 	}
+	sort.Strings(names)
+	return names
+}
+
+func mergeVerificationStandardIntoGate(gate *verificationGate, standard qualitygate.VerificationStandard) *verificationGate {
+	if len(standard.RequiredCheckKinds) == 0 {
+		return gate
+	}
+	if gate == nil {
+		gate = &verificationGate{}
+	}
+	for _, kind := range standard.RequiredCheckKinds {
+		if containsString(gate.RequiredCheckKinds, kind) {
+			continue
+		}
+		gate.RequiredCheckKinds = append(gate.RequiredCheckKinds, kind)
+	}
+	sort.Strings(gate.RequiredCheckKinds)
+	return gate
+}
+
+func mergeGateSource(current string, standardCode string) string {
+	standardCode = strings.TrimSpace(standardCode)
+	if standardCode == "" {
+		return current
+	}
+	extra := "standard:" + standardCode
+	if current == "" {
+		return extra
+	}
+	if strings.Contains(current, extra) {
+		return current
+	}
+	return current + "+" + extra
 }
 
 func containsString(items []string, target string) bool {
@@ -1516,6 +1609,40 @@ func detectPackageManager(dir string) string {
 	}
 }
 
+func hasAutoDiscoverablePackageScripts(scripts map[string]string) bool {
+	if len(scripts) == 0 {
+		return false
+	}
+	for _, name := range []string{"lint", "test", "build"} {
+		if _, ok := scripts[name]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func buildPackageInstallCommand(dir, pm string) []string {
+	switch pm {
+	case "pnpm":
+		command := []string{"pnpm", "install"}
+		if fileExists(filepath.Join(dir, "pnpm-lock.yaml")) {
+			command = append(command, "--frozen-lockfile")
+		}
+		return command
+	case "yarn":
+		command := []string{"yarn", "install"}
+		if fileExists(filepath.Join(dir, "yarn.lock")) {
+			command = append(command, "--frozen-lockfile")
+		}
+		return command
+	default:
+		if fileExists(filepath.Join(dir, "package-lock.json")) || fileExists(filepath.Join(dir, "npm-shrinkwrap.json")) {
+			return []string{"npm", "ci"}
+		}
+		return []string{"npm", "install"}
+	}
+}
+
 func buildPackageScriptCommand(pm, script string) []string {
 	switch pm {
 	case "yarn":
@@ -1545,6 +1672,13 @@ func buildTestScriptCommand(pm, scriptBody string) []string {
 		}
 		return []string{pm, "run", "test"}
 	}
+}
+
+func describePackageInstallCommand(command []string) string {
+	if len(command) == 0 {
+		return "install dependencies"
+	}
+	return strings.Join(command, " ")
 }
 
 func displayStepName(rel, label string) string {

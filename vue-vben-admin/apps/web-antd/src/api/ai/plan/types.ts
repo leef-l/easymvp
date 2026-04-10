@@ -29,9 +29,9 @@ export interface PlanListParams {
 
 /** AI套餐表创建参数 */
 export interface PlanCreateParams {
-  providerID: string;
-  name: string;
-  code: string;
+  providerID?: string;
+  name?: string;
+  code?: string;
   apiKey?: string;
   apiSecret?: string;
   status?: number;
@@ -41,9 +41,9 @@ export interface PlanCreateParams {
 /** AI套餐表更新参数 */
 export interface PlanUpdateParams {
   id: string;
-  providerID: string;
-  name: string;
-  code: string;
+  providerID?: string;
+  name?: string;
+  code?: string;
   apiKey?: string;
   apiSecret?: string;
   status?: number;

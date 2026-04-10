@@ -1,25 +1,25 @@
 <script setup lang="ts">
-import { h, ref, computed, watch } from 'vue';
+import { computed, h, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
+
+import { ReloadOutlined } from '@ant-design/icons-vue';
 import {
-  Card,
-  Row,
-  Col,
-  Statistic,
-  Progress,
-  Tag,
   Alert,
-  Spin,
-  Empty,
   Button,
-  Space,
+  Card,
+  Col,
   Divider,
+  Empty,
+  Progress,
+  Row,
+  Space,
+  Spin,
+  Statistic,
   Table,
   Tooltip,
 } from 'ant-design-vue';
-import { ReloadOutlined } from '@ant-design/icons-vue';
 
 import {
   getSituation,
@@ -35,7 +35,7 @@ const histLoading = ref(false);
 const workflowRunId = ref<string>('');
 const projectId = ref<string>('');
 
-const situation = ref<SituationData | null>(null);
+const situation = ref<null | SituationData>(null);
 const history = ref<SituationSnapshot[]>([]);
 
 // ========== 衍生计算 ==========
@@ -75,12 +75,6 @@ function trendColor(trend: string, inverse = false) {
   return '#888';
 }
 
-function severityColor(sev: string) {
-  if (sev === 'critical') return 'red';
-  if (sev === 'warning') return 'orange';
-  return 'blue';
-}
-
 const historyColumns = [
   { title: '快照时间', dataIndex: 'snapshotAt', key: 'snapshotAt', width: 180 },
   {
@@ -112,8 +106,8 @@ async function loadSituation() {
   try {
     const res = await getSituation(workflowRunId.value);
     situation.value = res.situation ?? null;
-  } catch (e) {
-    console.warn('[situation] loadSituation 失败:', e);
+  } catch (error) {
+    console.warn('[situation] loadSituation 失败:', error);
   } finally {
     loading.value = false;
   }
@@ -125,8 +119,8 @@ async function loadHistory() {
   try {
     const res = await getSituationHistory({ projectID: projectId.value, workflowRunID: workflowRunId.value || undefined, limit: 20 });
     history.value = res.snapshots ?? [];
-  } catch (e) {
-    console.warn('[situation] loadHistory 失败:', e);
+  } catch (error) {
+    console.warn('[situation] loadHistory 失败:', error);
   } finally {
     histLoading.value = false;
   }
@@ -141,8 +135,8 @@ watch(
       situation.value = null;
       history.value = [];
       await Promise.all([loadSituation(), loadHistory()]);
-    } catch (e) {
-      console.warn('[situation] route 变更加载失败:', e);
+    } catch (error) {
+      console.warn('[situation] route 变更加载失败:', error);
     }
   },
   { immediate: true },
@@ -202,7 +196,7 @@ watch(
         </Row>
 
         <!-- 异常信号 -->
-        <template v-if="anomalies.length">
+        <template v-if="anomalies.length > 0">
           <Alert
             v-for="(sig, i) in anomalies"
             :key="i"

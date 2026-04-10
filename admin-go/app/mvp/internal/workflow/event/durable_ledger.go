@@ -155,7 +155,8 @@ func isDuplicateKeyErr(err error) bool {
 		return false
 	}
 	lowerErr := strings.ToLower(err.Error())
-	return strings.Contains(lowerErr, "duplicate") && strings.Contains(lowerErr, "key")
+	return (strings.Contains(lowerErr, "duplicate") && strings.Contains(lowerErr, "key")) ||
+		strings.Contains(lowerErr, "violates unique constraint")
 }
 
 // IsMissingDurableEventLedgerErr 判断 durable ledger migration 是否尚未执行。

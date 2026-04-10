@@ -56,6 +56,7 @@ func TestDiscoverLocalStepsFindsGoAndNodeCommands(t *testing.T) {
   "scripts": {
     "lint": "eslint .",
     "test": "vitest",
+    "test:e2e": "playwright test",
     "build": "vite build"
   }
 }`
@@ -68,16 +69,52 @@ func TestDiscoverLocalStepsFindsGoAndNodeCommands(t *testing.T) {
 
 	svc := NewService(nil, nil, nil)
 	meta := &runMeta{WorkflowRunID: 0}
+	setupSteps := svc.discoverLocalSetupSteps(context.Background(), meta, root)
 	steps := svc.discoverLocalSteps(context.Background(), meta, root)
 
-	if len(steps) < 4 {
-		t.Fatalf("discoverLocalSteps() got %d steps, want at least 4", len(steps))
+	if len(steps) < 5 {
+		t.Fatalf("discoverLocalSteps() got %d steps, want at least 5", len(steps))
+	}
+	if len(setupSteps) != 1 {
+		t.Fatalf("discoverLocalSetupSteps() got %d steps, want 1", len(setupSteps))
 	}
 
+	assertHasStep(t, setupSteps, "frontend pnpm install --frozen-lockfile", []string{"pnpm", "install", "--frozen-lockfile"})
 	assertHasStep(t, steps, "go test ./...", []string{"go", "test", "./..."})
 	assertHasStep(t, steps, "frontend lint", []string{"pnpm", "run", "lint"})
 	assertHasStep(t, steps, "frontend test", []string{"pnpm", "run", "test", "--", "--run"})
+	assertHasStep(t, steps, "frontend browser test:e2e", []string{"pnpm", "run", "test:e2e"})
 	assertHasStep(t, steps, "frontend build", []string{"pnpm", "run", "build"})
+}
+
+func TestDiscoverLocalSetupStepsSkipsInstallWhenNodeModulesExists(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	frontendDir := filepath.Join(root, "frontend")
+	if err := os.MkdirAll(filepath.Join(frontendDir, "node_modules"), 0o755); err != nil {
+		t.Fatalf("mkdir node_modules: %v", err)
+	}
+	packageJSON := `{
+  "name": "demo-frontend",
+  "scripts": {
+    "build": "vite build"
+  }
+}`
+	if err := os.WriteFile(filepath.Join(frontendDir, "package.json"), []byte(packageJSON), 0o644); err != nil {
+		t.Fatalf("write package.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(frontendDir, "package-lock.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write package-lock: %v", err)
+	}
+
+	svc := NewService(nil, nil, nil)
+	meta := &runMeta{WorkflowRunID: 0}
+	setupSteps := svc.discoverLocalSetupSteps(context.Background(), meta, root)
+
+	if len(setupSteps) != 0 {
+		t.Fatalf("discoverLocalSetupSteps() got %d steps, want 0", len(setupSteps))
+	}
 }
 
 func TestBuildTestScriptCommand(t *testing.T) {
@@ -98,7 +135,7 @@ func TestNormalizeVerificationGate(t *testing.T) {
 	gate, err := normalizeVerificationGate(verificationGate{
 		AllowedDecisions:   []string{"Passed", "passed", "manual_review"},
 		MinExecutedSteps:   -2,
-		RequiredCheckKinds: []string{"Test", "build"},
+		RequiredCheckKinds: []string{"Test", "build", "browser"},
 		AllowedRunnerTypes: []string{"Compose", "dockerfile"},
 	})
 	if err != nil {
@@ -106,7 +143,7 @@ func TestNormalizeVerificationGate(t *testing.T) {
 	}
 
 	assertCommandEqual(t, gate.AllowedDecisions, []string{"passed", "manual_review"})
-	assertCommandEqual(t, gate.RequiredCheckKinds, []string{"test", "build"})
+	assertCommandEqual(t, gate.RequiredCheckKinds, []string{"test", "build", "browser"})
 	assertCommandEqual(t, gate.AllowedRunnerTypes, []string{"docker_compose", "dockerfile"})
 	if gate.MinExecutedSteps != 0 {
 		t.Fatalf("MinExecutedSteps = %d, want 0", gate.MinExecutedSteps)
@@ -121,7 +158,7 @@ func TestEvaluateVerificationGateFindsMissingRequiredKinds(t *testing.T) {
 		Gate: &verificationGate{
 			AllowedDecisions:   []string{decisionPassed},
 			MinExecutedSteps:   2,
-			RequiredCheckKinds: []string{"test", "build"},
+			RequiredCheckKinds: []string{"test", "build", "browser"},
 		},
 		GateSource: "category:game_dev",
 		VerifySteps: []verificationStep{
@@ -139,8 +176,38 @@ func TestEvaluateVerificationGateFindsMissingRequiredKinds(t *testing.T) {
 	}
 
 	issues := evaluateVerificationGate(plan, 1, stepExecutions, nil)
-	if len(issues) != 2 {
-		t.Fatalf("evaluateVerificationGate() issues = %d, want 2; got=%+v", len(issues), issues)
+	if len(issues) != 3 {
+		t.Fatalf("evaluateVerificationGate() issues = %d, want 3; got=%+v", len(issues), issues)
+	}
+}
+
+func TestDiscoverLocalStepsTreatsBrowserTestScriptAsBrowserCheck(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	frontendDir := filepath.Join(root, "frontend")
+	if err := os.MkdirAll(frontendDir, 0o755); err != nil {
+		t.Fatalf("mkdir frontend: %v", err)
+	}
+	packageJSON := `{
+  "name": "demo-frontend",
+  "scripts": {
+    "test": "playwright test",
+    "build": "vite build"
+  }
+}`
+	if err := os.WriteFile(filepath.Join(frontendDir, "package.json"), []byte(packageJSON), 0o644); err != nil {
+		t.Fatalf("write package.json: %v", err)
+	}
+
+	svc := NewService(nil, nil, nil)
+	steps := svc.discoverLocalSteps(context.Background(), &runMeta{}, root)
+
+	assertHasStep(t, steps, "frontend browser test", []string{"npm", "run", "test"})
+	for _, step := range steps {
+		if step.Name == "frontend browser test" && inferCheckKind(step) != "browser" {
+			t.Fatalf("frontend browser test should be classified as browser check, got %s", inferCheckKind(step))
+		}
 	}
 }
 

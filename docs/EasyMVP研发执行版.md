@@ -187,6 +187,28 @@
 目标：
 
 - 把验收从“评分”升级成“证据 + 决策 + 回修”中心
+- 把验收标准从“单一通用规则”升级成“标准注册层 + 项目信号解析”
+- 让不同项目类型走不同标准，但在 `review / verification / accept` 三处保持统一口径
+
+当前标准化方向：
+
+- 先按 `family_code` 做一级分层，例如 `coding / analysis / creative`
+- 再按项目信号做二级分层，例如：
+  - `coding.backend`
+  - `coding.interactive_delivery`
+  - 后续预留 `android.native_app`、`ios.native_app`、`game.client_runtime`
+- 每个标准统一声明：
+  - 必需检查类型
+  - 是否必须存在通过的标准化验证
+  - 是否必须在 review 阶段规划交互级验证任务
+  - 是否必须在 accept 阶段拿到浏览器/真机/端到端证据
+
+补充铁律：
+
+- 所有新增数据读写链路禁止在控制器、阶段服务、验收服务里直接碰 DB
+- 必须走 `service / repo interface / repo implementation` 的标准分层
+- 项目级角色定义统一收口到 `workflow.role_definitions`
+- 详细约束见 [EasyMVP工程铁律](./EasyMVP工程铁律.md)
 
 涉及模块：
 

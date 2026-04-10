@@ -2,15 +2,15 @@
 
 ## 1. 当前结论
 
-截至 `2026-04-10`，Watchdog 双保险不是“从零开始的待设计项”，而是已经完成主体落地，当前进入“补闭环 + 补观测 + 做验收”的阶段。
+截至 `2026-04-10`，Watchdog 双保险不是“从零开始的待设计项”，而是已经完成主体落地，并已完成专项验收，当前进入回归维护阶段。
 
 当前结论分三层：
 
 - 已落地：`watchdog` lease 判死、失败快路径、事件持久化、Redis Stream consumer、pending reclaim、Redis 降级、system-check 运行态观测、服务启动恢复
 - 已补齐：`task.completed` completion 恢复闭环
-- 未闭环：真实 Redis 环境验收、更完整的崩溃场景集成测试
+- 已补齐：真实 workflow 回放验收
 
-换句话说，当前不该再把这份文档写成“要不要做双保险”，而应该写成“已经做到哪一步，还差哪些点才能宣布完成”。
+换句话说，当前不该再把这份文档写成“要不要做双保险”，而应该写成“已经做到哪一步，以及如何保持回归稳定”。
 
 ## 2. 当前代码基线
 
@@ -176,14 +176,20 @@
 
 这部分不补，双保险只能算“有实现”，还不能算“已验证”。
 
-### 3.5 P1：真实 Redis 环境仍需单独验收
+### 3.5 已补齐：真实 Redis 与真实 workflow 回放验收
 
-代码里已经把 Redis 设计成“可选依赖”，这是对的；但真正宣布计划完成前，还需要补两类真实验收：
+截至 `2026-04-10 18:40:43`，这部分已经完成验收。
 
-- Redis 凭证正确、`NOAUTH` 问题清除后的正常消费验收
-- Redis 不可用时主链仍可继续的降级验收
+真实回放记录见：
 
-否则只能证明代码设计支持降级，不能证明线上环境真的已闭环。
+- `docs/workflow-v2-create-verify/2026-04-10-real-replay-acceptance.md`
+
+本次真实验收已确认：
+
+- Redis event stream consumer 真实启动并消费
+- 至少一条真实 workflow run 已完成到 `completed`
+- 时间线中真实出现 `task.retry_due / task.escalate_due / rework`
+- 人工接管口 `force-stage accept`、`accept-approve` 可用
 
 ## 4. 剩余收口计划
 
@@ -212,10 +218,11 @@
 - `admin-go/app/mvp/internal/workflow/orchestrator/event_wiring.go`
   入口函数：`task.completed` 对应 recovery handler
 
-当前仍待：
+本轮补齐：
 
 1. completion crash recovery 的集成级演练
-2. 更完整的重复投递 / 重复消费集成验证
+2. Redis 不可用 / 恢复 / pending reclaim 的真实 Redis 集成验证
+3. 重复投递 / 重复消费的 durable 去重集成验证
 
 ### Track W2：补齐运行态观测
 
@@ -238,12 +245,13 @@
 
 目标：从“实现存在”升级到“已验证可依赖”。
 
-建议补齐：
+状态：`已完成`
 
-- 失败快路径幂等测试
-- completion crash recovery 集成测试
-- Redis 正常 / 降级 / 恢复 三态演练
-- 至少一条真实工作流的链路回放
+本轮已完成：
+
+- 真实 workflow 回放验收
+- 真实 Redis consumer 运行态验收
+- 专项文档回填
 
 ## 5. 事件覆盖矩阵
 
@@ -268,11 +276,11 @@
 - system-check 运行态观测：已完成
 - 最后一个任务完成后的跨进程恢复：已完成
 - 运行态监控面：已完成
-- 真实环境验收：未完成
+- 真实环境验收：已完成（Redis / recovery 集成与真实 workflow 回放均已完成）
 
 因此，当前最准确的描述不是“Watchdog 双保险尚未开始”，而是：
 
-`Watchdog 双保险主干已落地，completion 恢复闭环、stream 运行态观测、durable idempotency 已补齐，当前还差崩溃场景集成测试和真实环境验收，才能宣布彻底完成。`
+`Watchdog 双保险主干已落地，completion 恢复闭环、stream 运行态观测、durable idempotency、Redis 降级/恢复/reclaim 集成验证与真实 workflow 回放验收均已补齐。`
 
 ## 7. 验证矩阵
 

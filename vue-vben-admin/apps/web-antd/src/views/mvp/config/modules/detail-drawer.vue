@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { useVbenModal } from '@vben/common-ui';
-import { Descriptions, DescriptionsItem, Tag } from 'ant-design-vue';
-import { getConfigDetail } from '#/api/mvp/config';
 import type { ConfigItem } from '#/api/mvp/config/types';
+
+import { ref } from 'vue';
+
+import { useVbenModal } from '@vben/common-ui';
+
+import { Descriptions, DescriptionsItem } from 'ant-design-vue';
+
+import { getConfigDetail } from '#/api/mvp/config';
 
 const detail = ref<ConfigItem | null>(null);
 

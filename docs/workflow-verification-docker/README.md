@@ -57,6 +57,15 @@
 
 这些限制可通过 `mvp_config` 或 `admin-go/app/mvp/manifest/config/config.yaml` 下的 `engine.commandResource.*` 覆盖。
 
+本轮实测补充一个资源侧结论：
+
+- `web-antd` 这类体量的前端应用，完整 `vue-tsc --noEmit` 在 `768MiB` 内存上限下仍可能 OOM
+- 在当前这台 `3.6Gi RAM / 2 vCPU` 服务器上，`1024MB` 和 `1280MB` 堆上限也已实测 OOM
+- 同一台服务器在低优先级模式下，`1536MB` 堆上限可以跑完整个 `vue-tsc`，并返回真实类型错误列表
+- 因此低负载宿主机上的默认静态验证应优先跑定向 `eslint` / 关键路径检查
+- 若必须在当前宿主机执行全量类型检查，应通过受控脚本串行执行，例如 [scripts/web-antd-typecheck-safe.sh](../../scripts/web-antd-typecheck-safe.sh)
+- 更高内存的验证 worker 或独立 CI 机仍然更适合作为默认生产级验证位，而不是把这类重检查长期压在生产宿主机上
+
 如果项目提供 `.easymvp/verification.json`，可以显式指定：
 
 - Docker compose 文件
@@ -77,6 +86,49 @@
 - `coding` 家族默认要求 `passed`，且至少执行 1 个 `test`
 - `game_dev` 单独提高到至少执行 2 步，并覆盖 `test + build`
 - `analysis / creative` 家族默认允许 `passed / manual_review`
+
+本轮开始，系统不再只按“分类名”粗放验收，而是先解析一层标准化核验标准：
+
+- `family_code`：能力家族，例如 `coding / analysis / creative`
+- `project signals`：项目能力信号，例如 `Go 后端 / 前端交互应用 / 浏览器自动化能力`
+- `verification standard`：标准化核验档位，例如
+  - `coding.backend`
+  - `coding.interactive_delivery`
+  - `coding.game_client_runtime`
+  - `coding.android_native_app`
+  - `coding.ios_native_app`
+
+这层标准会被 `review / verification / accept` 三个阶段复用，避免把规则散落在多个阶段各自硬编码。
+
+当前已落地的标准化约束：
+
+- `coding.backend`
+  - 默认要求有通过的标准化验证
+  - 默认要求覆盖 `test`
+- `coding.interactive_delivery`
+  - 默认要求有通过的标准化验证
+  - 默认要求覆盖 `build + browser`
+  - `review` 阶段必须出现浏览器级/端到端验证任务
+  - `accept` 阶段必须拿到最新通过的浏览器级验证证据
+  - `accept` 阶段必须能解析项目级 `experience_reviewer` 角色，用于体验评审
+  - `experience_reviewer` 的展示名、提示词和是否可作裁决角色统一来自 `workflow.role_definitions`
+- `coding.game_client_runtime / coding.android_native_app / coding.ios_native_app`
+  - 标准层会统一挂载项目级 `experience_reviewer` 角色能力
+  - 通过 `reviewProfile` 区分 Web 交互、游戏玩法、Android 原生、iOS 原生体验口径
+  - 当前原生端先保留“角色能力口子 + 标准编码”，后续再逐步接入真机/模拟器自动化证据
+
+同时新增一条工程铁律：验证、验收、阶段推进这类业务编排层不得直接访问 DB，新增数据能力必须先抽象 `service / repo interface`，再接入上层流程，避免规则链继续散落到控制器与阶段逻辑里。
+
+本轮已完成的主链收口：
+
+- `CategoryResolver` 改为通过 `ProjectRepo + ProjectCategoryRepo` 解析与回填分类
+- `verification.Service` 改为通过 `ProjectRepo / ProjectCategoryRepo / DomainTaskRepo / Verification*Repo` 取项目、分类和验证证据
+- `acceptance.RuleEngine` 改为通过 `TaskWorkspaceRepo / DomainTaskRepo / StageRunRepo / Verification*Repo` 执行规则评估
+- `stage.accept.Service` 改为通过 `WorkflowRunRepo / ProjectRepo / StageRunRepo / AcceptRunRepo` 驱动验收编排
+
+这样至少 `review / verification / accept` 的标准主链里，新增规则和验证能力时不需要再把 SQL 散落回编排层。
+
+`accept` 阶段现在会按标准自动拉起一轮验证并等待结果，而不是只在界面里暴露一个手动入口。这样编码类项目进入验收时，会先完成标准化验证，再做最终裁决；缺少验证、验证未通过、缺少交互级证据、缺少标准要求的项目级体验评审角色，都会被标准规则直接拦住。
 
 当前系统也已内置首批分类 profile 模板：
 

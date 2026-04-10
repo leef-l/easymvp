@@ -26,8 +26,8 @@ export interface TaskLogListParams {
 
 /** 任务日志表创建参数 */
 export interface TaskLogCreateParams {
-  taskID: string;
-  action: string;
+  taskID?: string;
+  action?: string;
   fromStatus?: string;
   toStatus?: string;
   message?: string;
@@ -37,8 +37,8 @@ export interface TaskLogCreateParams {
 /** 任务日志表更新参数 */
 export interface TaskLogUpdateParams {
   id: string;
-  taskID: string;
-  action: string;
+  taskID?: string;
+  action?: string;
   fromStatus?: string;
   toStatus?: string;
   message?: string;

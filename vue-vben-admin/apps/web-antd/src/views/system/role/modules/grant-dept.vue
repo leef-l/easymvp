@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import type { DeptItem } from '#/api/system/dept/types';
+
+import { computed, ref } from 'vue';
+
 import { message, Modal, Select, Tree } from 'ant-design-vue';
+
 import { getDeptTree } from '#/api/system/dept';
 import { getRoleDeptIds, grantRoleDept } from '#/api/system/role';
-import type { DeptItem } from '#/api/system/dept/types';
+
+import { withTreeKeys } from '../../tree-utils';
 
 const emit = defineEmits<{ success: [] }>();
 
@@ -14,6 +19,7 @@ const dataScope = ref(1);
 const checkedDeptKeys = ref<string[]>([]);
 const treeData = ref<DeptItem[]>([]);
 const expandedKeys = ref<string[]>([]);
+const treeDataSource = computed(() => withTreeKeys(treeData.value));
 
 const dataScopeOptions = [
   { label: '全部数据', value: 1 },
@@ -97,9 +103,9 @@ defineExpose({ open });
       </div>
       <div v-if="dataScope === 5" class="max-h-[350px] overflow-auto">
         <Tree
-          v-model:checkedKeys="checkedDeptKeys"
-          v-model:expandedKeys="expandedKeys"
-          :tree-data="treeData"
+          v-model:checked-keys="checkedDeptKeys"
+          v-model:expanded-keys="expandedKeys"
+          :tree-data="treeDataSource"
           :field-names="{ title: 'title', key: 'id', children: 'children' }"
           checkable
         />

@@ -28,9 +28,9 @@ export interface ProjectCategoryListParams {
 
 /** 项目分类配置表创建参数 */
 export interface ProjectCategoryCreateParams {
-  categoryCode: string;
-  displayName: string;
-  familyCode: string;
+  categoryCode?: string;
+  displayName?: string;
+  familyCode?: string;
   description?: string;
   verificationProfileJson?: string;
   verificationGateJson?: string;
@@ -41,9 +41,9 @@ export interface ProjectCategoryCreateParams {
 /** 项目分类配置表更新参数 */
 export interface ProjectCategoryUpdateParams {
   id: string;
-  categoryCode: string;
-  displayName: string;
-  familyCode: string;
+  categoryCode?: string;
+  displayName?: string;
+  familyCode?: string;
   description?: string;
   verificationProfileJson?: string;
   verificationGateJson?: string;

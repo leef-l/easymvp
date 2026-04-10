@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -14,7 +16,9 @@ import (
 	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/workflow"
 	"easymvp/app/mvp/internal/workflow/acceptance"
+	"easymvp/app/mvp/internal/workflow/qualitygate"
 	"easymvp/app/mvp/internal/workflow/repo"
+	verificationsvc "easymvp/app/mvp/internal/workflow/verification"
 )
 
 // ErrManualReviewRequired reworkTrigger 无法自动返工时返回此错误，
@@ -53,6 +57,9 @@ type CompleteTriggerFn func(ctx context.Context, workflowRunID int64) error
 // Service 验收阶段服务。
 type Service struct {
 	acceptRunRepo   *repo.AcceptRunRepo
+	workflowRunRepo *repo.WorkflowRunRepo
+	projectRepo     *repo.ProjectRepo
+	stageRunRepo    *repo.StageRunRepo
 	collector       *acceptance.EvidenceCollector
 	ruleEngine      *acceptance.RuleEngine
 	reducer         *acceptance.DecisionReducer
@@ -68,11 +75,17 @@ func NewService(
 	ruleEngine *acceptance.RuleEngine,
 	reducer *acceptance.DecisionReducer,
 ) *Service {
+	if acceptRunRepo == nil {
+		acceptRunRepo = repo.NewAcceptRunRepo()
+	}
 	return &Service{
-		acceptRunRepo: acceptRunRepo,
-		collector:     collector,
-		ruleEngine:    ruleEngine,
-		reducer:       reducer,
+		acceptRunRepo:   acceptRunRepo,
+		workflowRunRepo: repo.NewWorkflowRunRepo(),
+		projectRepo:     repo.NewProjectRepo(),
+		stageRunRepo:    repo.NewStageRunRepo(),
+		collector:       collector,
+		ruleEngine:      ruleEngine,
+		reducer:         reducer,
 	}
 }
 
@@ -91,21 +104,19 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 	now := gtime.Now()
 
 	// 1. 查项目信息
-	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("id", workflowRunID).WhereNull("deleted_at").One()
-	if err != nil || wfRun.IsEmpty() {
+	wfRun, err := s.workflowRunRepo.GetByID(ctx, workflowRunID)
+	if err != nil || wfRun == nil || wfRun.Id == 0 {
 		return fmt.Errorf("workflow_run(%d) 不存在", workflowRunID)
 	}
-	projectID := wfRun["project_id"].Int64()
+	projectID := int64(wfRun.ProjectId)
 
-	project, err := g.DB().Model("mvp_project").Ctx(ctx).
-		Where("id", projectID).One()
-	if err != nil || project.IsEmpty() {
+	project, err := s.projectRepo.GetByID(ctx, projectID, "id", "work_dir", "created_by", "dept_id")
+	if err != nil || len(project) == 0 {
 		return fmt.Errorf("project(%d) 不存在", projectID)
 	}
-	workDir := project["work_dir"].String()
-	createdBy := project["created_by"].Int64()
-	deptID := project["dept_id"].Int64()
+	workDir := gconv.String(project["work_dir"])
+	createdBy := gconv.Int64(project["created_by"])
+	deptID := gconv.Int64(project["dept_id"])
 
 	// 解析分类：优先 category_code，兼容 project_category
 	resolver := workflow.NewCategoryResolver()
@@ -129,11 +140,7 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 	}
 
 	// 2. 幂等检查：同一 stageRun 不重复创建 accept_run
-	existing, exErr := g.DB().Model("mvp_accept_run").Ctx(ctx).
-		Where("stage_run_id", stageRunID).
-		WhereIn("status", g.Slice{"running"}).
-		WhereNull("deleted_at").
-		Count()
+	existing, exErr := s.acceptRunRepo.CountRunningByStageRun(ctx, stageRunID)
 	if exErr != nil {
 		return fmt.Errorf("检查运行中 accept_run 失败: %w", exErr)
 	}
@@ -181,6 +188,10 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 	g.Log().Infof(ctx, "[AcceptStage] 开始验收: workflowRunID=%d stageRunID=%d acceptRunID=%d round=%d projectType=%s",
 		workflowRunID, stageRunID, acceptRunID, round, projectType)
 
+	if err := s.ensureVerificationReady(ctx, acceptCtx); err != nil {
+		g.Log().Warningf(ctx, "[AcceptStage] 标准化验证未就绪，继续进入规则评估并由规则决定是否阻塞: %v", err)
+	}
+
 	// 4. 收集证据
 	evidence, evidenceErr := s.collector.Collect(ctx, acceptCtx)
 	if evidenceErr != nil {
@@ -199,10 +210,7 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 	}
 
 	// 写入规则快照
-	if _, snapErr := g.DB().Model("mvp_accept_run").Ctx(ctx).
-		Where("id", acceptRunID).
-		Data(g.Map{"rules_snapshot_ref": rulesSnapshot, "updated_at": gtime.Now()}).
-		Update(); snapErr != nil {
+	if snapErr := s.acceptRunRepo.UpdateRulesSnapshot(ctx, acceptRunID, rulesSnapshot); snapErr != nil {
 		g.Log().Errorf(ctx, "[AcceptService] 写入规则快照失败: acceptRun=%d err=%v", acceptRunID, snapErr)
 	}
 
@@ -228,9 +236,7 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 	switch decision.Decision {
 	case acceptance.DecisionPassed:
 		// 标记 accept_run completed → 完成 accept stage → 推进到 complete
-		if _, upErr := s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "running", "completed", g.Map{}); upErr != nil {
-			g.Log().Warningf(ctx, "[AcceptStage] 更新 accept_run 状态失败: %v", upErr)
-		}
+		s.completeAcceptRun(ctx, acceptRunID)
 		if s.stageCompleter != nil {
 			if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
 				g.Log().Errorf(ctx, "[AcceptStage] CompleteStage 失败: %v", err)
@@ -263,9 +269,7 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 			}
 		}
 		// rework 已成功触发 → 标记 accept_run completed + 完成 accept stage
-		if _, upErr := s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "running", "completed", g.Map{}); upErr != nil {
-			g.Log().Warningf(ctx, "[AcceptStage] 更新 accept_run 状态失败: %v", upErr)
-		}
+		s.completeAcceptRun(ctx, acceptRunID)
 		if s.stageCompleter != nil {
 			if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
 				g.Log().Errorf(ctx, "[AcceptStage] CompleteStage 失败: %v", err)
@@ -274,11 +278,87 @@ func (s *Service) Run(ctx context.Context, workflowRunID, stageRunID int64) erro
 		}
 
 	case acceptance.DecisionManualReview:
-		// 保持 accept stage running，等待人工介入（accept_run 保持 running）
+		// 验收裁决已生成，accept_run 必须收口为 completed，避免 finished_at 已写入但状态仍为 running。
+		// accept stage / workflow 仍保持 accepting，直到人工或自动化显式放行/返工。
+		s.completeAcceptRun(ctx, acceptRunID)
 		g.Log().Infof(ctx, "[AcceptStage] 需要人工审核: acceptRunID=%d", acceptRunID)
 	}
 
 	return nil
+}
+
+func (s *Service) ensureVerificationReady(ctx context.Context, acceptCtx *acceptance.AcceptContext) error {
+	signals := qualitygate.DetectProjectSignals(acceptCtx.WorkDir, acceptCtx.FamilyCode, acceptCtx.ProjectType)
+	standard := qualitygate.ResolveVerificationStandard(signals)
+	if !standard.RequirePassedVerification {
+		return nil
+	}
+
+	runRepo := repo.NewVerificationRunRepo()
+	runID, err := verificationsvc.NewService(nil, nil, nil).Start(ctx, verificationsvc.StartRequest{
+		ProjectID:     acceptCtx.ProjectID,
+		WorkflowRunID: acceptCtx.WorkflowRunID,
+		CreatedBy:     acceptCtx.CreatedBy,
+		DeptID:        acceptCtx.DeptID,
+		TriggerSource: "accept_stage",
+		Reason:        "验收阶段按标准自动触发验证",
+	})
+	if err != nil {
+		if !strings.Contains(err.Error(), "当前已有运行中的验证") {
+			return err
+		}
+		record, latestErr := runRepo.GetLatestByWorkflow(ctx, acceptCtx.WorkflowRunID)
+		if latestErr != nil || len(record) == 0 {
+			return err
+		}
+		runID = gconv.Int64(record["id"])
+	}
+	return waitVerificationRun(ctx, runRepo, runID, standard)
+}
+
+func waitVerificationRun(ctx context.Context, runRepo *repo.VerificationRunRepo, runID int64, standard qualitygate.VerificationStandard) error {
+	if runID == 0 {
+		return fmt.Errorf("标准化验证未返回有效 runID")
+	}
+
+	deadline := time.NewTimer(20 * time.Minute)
+	defer deadline.Stop()
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		record, err := runRepo.GetByID(ctx, runID)
+		if err != nil {
+			return err
+		}
+		if len(record) > 0 {
+			status := gconv.String(record["status"])
+			decision := gconv.String(record["decision"])
+			switch status {
+			case "completed":
+				if decision == acceptance.DecisionPassed {
+					return nil
+				}
+				return fmt.Errorf("标准化验证未通过: standard=%s decision=%s summary=%s", standard.Code, decision, gconv.String(record["summary"]))
+			case "failed":
+				return fmt.Errorf("标准化验证执行失败: standard=%s summary=%s", standard.Code, gconv.String(record["summary"]))
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("等待标准化验证超时: standard=%s runID=%d", standard.Code, runID)
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *Service) completeAcceptRun(ctx context.Context, acceptRunID int64) {
+	if _, upErr := s.acceptRunRepo.UpdateStatus(ctx, acceptRunID, "running", "completed", g.Map{}); upErr != nil {
+		g.Log().Warningf(ctx, "[AcceptStage] 更新 accept_run 状态失败: %v", upErr)
+	}
 }
 
 // failAcceptRun 标记 accept_run 为失败。
@@ -297,20 +377,26 @@ func (s *Service) GetLatestIssues(ctx context.Context, acceptRunID int64) ([]acc
 	if err != nil {
 		return nil, err
 	}
+	return acceptIssueRecordsToRuleHits(records), nil
+}
 
-	var hits []acceptance.RuleHit
+func acceptIssueRecordsToRuleHits(records []g.Map) []acceptance.RuleHit {
+	hits := make([]acceptance.RuleHit, 0, len(records))
 	for _, r := range records {
 		hits = append(hits, acceptance.RuleHit{
 			RuleCode:        fmt.Sprintf("%v", r["rule_code"]),
+			RuleType:        fmt.Sprintf("%v", r["issue_type"]),
 			Severity:        fmt.Sprintf("%v", r["severity"]),
 			Title:           fmt.Sprintf("%v", r["title"]),
 			Detail:          fmt.Sprintf("%v", r["detail"]),
 			ExpectedValue:   fmt.Sprintf("%v", r["expected_value"]),
 			ActualValue:     fmt.Sprintf("%v", r["actual_value"]),
 			SuggestedAction: fmt.Sprintf("%v", r["suggested_action"]),
+			DomainTaskID:    gconv.Int64(r["domain_task_id"]),
+			ResourceRef:     fmt.Sprintf("%v", r["resource_ref"]),
 		})
 	}
-	return hits, nil
+	return hits
 }
 
 // BuildReworkInput 构建返工输入包 JSON。
@@ -357,22 +443,8 @@ func (s *Service) ManualApprove(ctx context.Context, projectID int64, reason str
 
 	// 完成 accept stage → 推进到 complete
 	if s.stageCompleter != nil {
-		stageStatus, statusErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
-			Where("id", stageRunID).
-			WhereNull("deleted_at").
-			Value("status")
-		if statusErr != nil {
-			return fmt.Errorf("查询 accept stage 状态失败: %w", statusErr)
-		}
-		switch stageStatus.String() {
-		case "running":
-			if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
-				return fmt.Errorf("CompleteStage 失败: %w", err)
-			}
-		case "completed":
-			// 允许补偿式重入：此前 accept stage 已完成，但 workflow_run 可能尚未收口。
-		default:
-			return fmt.Errorf("accept stage_run(%d) 状态为 %s，不允许人工放行完成", stageRunID, stageStatus.String())
+		if err := s.ensureAcceptStageCompleted(ctx, stageRunID, "人工放行完成"); err != nil {
+			return err
 		}
 	}
 	if s.completeTrigger != nil {
@@ -429,8 +501,8 @@ func (s *Service) ManualRework(ctx context.Context, projectID int64, reason stri
 
 	// 完成 accept stage → 触发返工
 	if s.stageCompleter != nil {
-		if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
-			return fmt.Errorf("CompleteStage 失败: %w", err)
+		if err := s.ensureAcceptStageCompleted(ctx, stageRunID, "人工驳回返工"); err != nil {
+			return err
 		}
 	}
 	if s.reworkTrigger != nil {
@@ -443,17 +515,12 @@ func (s *Service) ManualRework(ctx context.Context, projectID int64, reason stri
 // findActiveAcceptRun 查找项目当前活跃的验收运行。
 func (s *Service) findActiveAcceptRun(ctx context.Context, projectID int64) (wfRun, acceptRun map[string]interface{}, stageRunID int64, err error) {
 	// 查活跃 workflow_run
-	wfRunRecord, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereIn("status", g.Slice{"accepting", "running", "paused"}).
-		WhereNull("deleted_at").
-		OrderDesc("created_at").
-		One()
-	if err != nil || wfRunRecord.IsEmpty() {
+	wfRunRecord, err := s.workflowRunRepo.GetLatestByProjectStatuses(ctx, projectID, []string{"accepting", "running", "paused"}, "id", "status", "project_id", "created_at")
+	if err != nil || len(wfRunRecord) == 0 {
 		return nil, nil, 0, fmt.Errorf("项目 %d 无活跃的工作流运行", projectID)
 	}
 
-	workflowRunID := wfRunRecord["id"].Int64()
+	workflowRunID := gconv.Int64(wfRunRecord["id"])
 
 	// 查最新 accept_run
 	acceptRunRecord, err := s.acceptRunRepo.GetLatestByWorkflow(ctx, workflowRunID)
@@ -462,5 +529,24 @@ func (s *Service) findActiveAcceptRun(ctx context.Context, projectID int64) (wfR
 	}
 
 	stageRunID = gconv.Int64(acceptRunRecord["stage_run_id"])
-	return wfRunRecord.Map(), acceptRunRecord, stageRunID, nil
+	return wfRunRecord, acceptRunRecord, stageRunID, nil
+}
+
+func (s *Service) ensureAcceptStageCompleted(ctx context.Context, stageRunID int64, action string) error {
+	stageStatus, statusErr := s.stageRunRepo.GetStatusByID(ctx, stageRunID)
+	if statusErr != nil {
+		return fmt.Errorf("查询 accept stage 状态失败: %w", statusErr)
+	}
+
+	switch stageStatus {
+	case "running":
+		if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
+			return fmt.Errorf("CompleteStage 失败: %w", err)
+		}
+	case "completed":
+		// 允许补偿式重入：此前 accept stage 已完成，但 workflow_run 可能尚未收口。
+	default:
+		return fmt.Errorf("accept stage_run(%d) 状态为 %s，不允许%s", stageRunID, stageStatus, action)
+	}
+	return nil
 }

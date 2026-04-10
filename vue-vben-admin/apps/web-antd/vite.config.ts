@@ -2,11 +2,11 @@ import { defineConfig } from '@vben/vite-config';
 
 export default defineConfig(async () => {
   const systemProxyTarget =
-    process.env.VITE_PROXY_SYSTEM_TARGET ?? 'http://localhost:9000';
+    process.env.VITE_PROXY_SYSTEM_TARGET ?? 'http://localhost:41002';
   const aiProxyTarget =
-    process.env.VITE_PROXY_AI_TARGET ?? 'http://localhost:9001';
+    process.env.VITE_PROXY_AI_TARGET ?? 'http://localhost:41003';
   const mvpProxyTarget =
-    process.env.VITE_PROXY_MVP_TARGET ?? 'http://localhost:9002';
+    process.env.VITE_PROXY_MVP_TARGET ?? 'http://localhost:41004';
 
   return {
     application: {},

@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import type { VbenFormProps } from '#/adapter/form';
 import type { VxeGridProps } from '#/adapter/vxe-table';
+import type { DeptItem } from '#/api/system/dept/types';
 
 import { Page, useVbenModal } from '@vben/common-ui';
+
 import { Button, message, Modal, Tag } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getDeptTree, deleteDept } from '#/api/system/dept';
-import type { DeptItem } from '#/api/system/dept/types';
+import { deleteDept, getDeptTree } from '#/api/system/dept';
+
 import FormModal from './modules/form.vue';
 
 /** 标签颜色池 */
@@ -26,9 +28,9 @@ const statusMap: Record<number, string> = {
 };
 
 /** 状态颜色 */
-function getStatusColor(val: number): string {
+function getStatusColor(val?: number): string {
   const keys = [0, 1];
-  const idx = keys.indexOf(val);
+  const idx = val === undefined ? -1 : keys.indexOf(val);
   return TAG_COLORS[idx >= 0 ? idx % TAG_COLORS.length : 0] ?? 'default';
 }
 
@@ -130,7 +132,7 @@ function handleDelete(row: DeptItem) {
       </template>
       <template #status_cell="{ row }">
         <Tag :color="getStatusColor(row.status)">
-          {{ statusMap[row.status] || row.status }}
+          {{ row.status === undefined ? '-' : (statusMap[row.status] || row.status) }}
         </Tag>
       </template>
       <template #action="{ row }">

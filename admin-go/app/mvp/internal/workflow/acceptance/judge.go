@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	"easymvp/app/mvp/internal/engine"
+	"easymvp/app/mvp/internal/workflow/qualitygate"
 	"easymvp/utility/provider"
 )
 
@@ -30,7 +31,7 @@ func NewJudge() *Judge {
 }
 
 // Evaluate 调用 LLM 评审验收结果。
-// 复用项目 architect 角色的 AI 模型配置。
+// 优先复用标准要求的项目级评审角色；无特殊要求时回退 architect。
 // 容错：LLM 调用失败时返回 uncertain（降级为人工审核）。
 func (j *Judge) Evaluate(ctx context.Context, in *AcceptContext, evidence []EvidenceItem, hits []RuleHit) (*JudgeResult, error) {
 	// 0. 按项目类型灰度：该项目类型未启用 LLM Judge 则跳过
@@ -39,8 +40,8 @@ func (j *Judge) Evaluate(ctx context.Context, in *AcceptContext, evidence []Evid
 		return &JudgeResult{Conclusion: "uncertain", Summary: "该项目类型未启用 LLM 评审"}, nil
 	}
 
-	// 1. 获取项目 architect 角色的模型配置
-	modelInfo, err := resolveProjectModel(ctx, in.ProjectID, "architect")
+	// 1. 获取当前标准对应的评审角色模型配置
+	modelInfo, standard, roleRequirement, err := resolveJudgeModelInfo(ctx, in)
 	if err != nil {
 		g.Log().Warningf(ctx, "[Judge] 获取模型配置失败(降级): %v", err)
 		return &JudgeResult{Conclusion: "uncertain", Summary: "无法获取 AI 模型配置"}, nil
@@ -60,8 +61,8 @@ func (j *Judge) Evaluate(ctx context.Context, in *AcceptContext, evidence []Evid
 	}
 
 	// 3. 构建 prompt
-	systemPrompt := buildJudgeSystemPrompt()
-	userPrompt := buildJudgeUserPrompt(in, evidence, hits)
+	systemPrompt := buildJudgeSystemPrompt(modelInfo.SystemPrompt, standard, roleRequirement)
+	userPrompt := buildJudgeUserPrompt(in, standard, roleRequirement, evidence, hits)
 
 	// 4. 非流式调用 LLM（60s 超时保护）
 	llmCtx, llmCancel := context.WithTimeout(ctx, 60*time.Second)
@@ -90,50 +91,42 @@ func (j *Judge) Evaluate(ctx context.Context, in *AcceptContext, evidence []Evid
 	return result, nil
 }
 
-// judgeModelInfo 内部模型信息结构。
-type judgeModelInfo struct {
-	ModelCode          string
-	ProviderType       string
-	SupportedProtocols []string
-	BaseURL            string
-	APIKey             string
-	APISecret          string
+func resolveJudgeModelInfo(ctx context.Context, in *AcceptContext) (*engine.ModelInfo, qualitygate.VerificationStandard, *qualitygate.ProjectRoleRequirement, error) {
+	signals := qualitygate.DetectProjectSignals(in.WorkDir, in.FamilyCode, in.ProjectType)
+	standard := qualitygate.ResolveVerificationStandard(signals)
+
+	roleType := "architect"
+	roleLevel := ""
+	var requirement *qualitygate.ProjectRoleRequirement
+	if judgeRole, ok := standard.JudgeRoleRequirement(); ok {
+		roleType = judgeRole.RoleType
+		roleLevel = judgeRole.RoleLevel
+		requirement = &judgeRole
+	}
+
+	modelInfo, err := engine.ResolveProjectModelInfo(ctx, in.ProjectID, roleType, roleLevel, 0)
+	if err != nil {
+		return nil, standard, requirement, err
+	}
+	return modelInfo, standard, requirement, nil
 }
 
-// resolveProjectModel 获取项目指定角色的模型配置，缺失时自动从默认预设创建。
-func resolveProjectModel(ctx context.Context, projectID int64, roleType string) (*judgeModelInfo, error) {
-	role, err := engine.ResolveProjectRole(ctx, projectID, roleType)
-	if err != nil {
-		return nil, err
+func buildJudgeSystemPrompt(basePrompt string, standard qualitygate.VerificationStandard, requirement *qualitygate.ProjectRoleRequirement) string {
+	parts := make([]string, 0, 4)
+	if strings.TrimSpace(basePrompt) != "" {
+		parts = append(parts, strings.TrimSpace(basePrompt))
 	}
-
-	modelID := role["model_id"].Int64()
-	model, err := g.DB().Model("ai_model m").Ctx(ctx).
-		LeftJoin("ai_plan p", "p.id = m.plan_id").
-		LeftJoin("ai_provider pv", "pv.id = m.provider_id").
-		Fields("m.model_code, pv.provider_type, pv.supported_protocols, pv.base_url, p.api_key, p.api_secret").
-		Where("m.id", modelID).
-		Where("m.deleted_at IS NULL").
-		One()
-	if err != nil {
-		return nil, fmt.Errorf("查询模型信息失败: %w", err)
+	if requirement != nil {
+		line := fmt.Sprintf("当前验收角色：%s。", requirement.Label())
+		if profileLabel := qualitygate.ExperienceReviewProfileLabel(requirement.ReviewProfile); profileLabel != "" {
+			line += " 重点体验维度：" + profileLabel + "。"
+		}
+		parts = append(parts, line)
 	}
-	if model.IsEmpty() {
-		return nil, fmt.Errorf("AI 模型 %d 不存在", modelID)
+	if standard.Code != "" {
+		parts = append(parts, fmt.Sprintf("当前项目命中的验收标准：%s（%s）。", standard.DisplayName, standard.Code))
 	}
-
-	return &judgeModelInfo{
-		ModelCode:          model["model_code"].String(),
-		ProviderType:       model["provider_type"].String(),
-		SupportedProtocols: provider.DecodeSupportedProtocols(model["supported_protocols"].String(), model["provider_type"].String()),
-		BaseURL:            model["base_url"].String(),
-		APIKey:             model["api_key"].String(),
-		APISecret:          model["api_secret"].String(),
-	}, nil
-}
-
-func buildJudgeSystemPrompt() string {
-	return `你是软件项目质量评审专家。根据提供的验收证据和规则检查结果，综合评估项目质量。
+	parts = append(parts, `你是软件项目质量评审专家。根据提供的验收证据和规则检查结果，综合评估项目质量。
 
 你必须严格输出以下 JSON 格式，不要输出其他内容：
 {"quality_score": 0-100, "conclusion": "passed|failed|uncertain", "summary": "一句话质量评语", "suggestions": ["改进建议1", "改进建议2"]}
@@ -147,12 +140,23 @@ func buildJudgeSystemPrompt() string {
 conclusion 判断标准：
 - passed：评分 >= 70 且无关键问题
 - failed：评分 < 60 或存在关键未解决问题
-- uncertain：信息不足以判断，建议人工审核`
+- uncertain：信息不足以判断，建议人工审核`)
+	return strings.Join(parts, "\n\n")
 }
 
-func buildJudgeUserPrompt(in *AcceptContext, evidence []EvidenceItem, hits []RuleHit) string {
+func buildJudgeUserPrompt(in *AcceptContext, standard qualitygate.VerificationStandard, requirement *qualitygate.ProjectRoleRequirement, evidence []EvidenceItem, hits []RuleHit) string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("## 项目信息\n- 项目类型：%s\n- 工作目录：%s\n\n", in.ProjectType, in.WorkDir))
+	if standard.Code != "" {
+		b.WriteString(fmt.Sprintf("## 标准上下文\n- 标准：%s (%s)\n", standard.DisplayName, standard.Code))
+		if requirement != nil {
+			b.WriteString(fmt.Sprintf("- 验收角色：%s\n", requirement.ExpectedRoleRef()))
+			if profileLabel := qualitygate.ExperienceReviewProfileLabel(requirement.ReviewProfile); profileLabel != "" {
+				b.WriteString(fmt.Sprintf("- 体验维度：%s\n", profileLabel))
+			}
+		}
+		b.WriteString("\n")
+	}
 
 	// 规则检查结果
 	b.WriteString("## 规则检查结果\n")

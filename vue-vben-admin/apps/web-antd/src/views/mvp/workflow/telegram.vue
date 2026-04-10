@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from 'vue';
 
 import { Page } from '@vben/common-ui';
+
 import {
   Alert,
   Button,
@@ -9,26 +10,26 @@ import {
   Form,
   FormItem,
   Input,
+  message,
   Modal,
   Space,
   Switch,
   Table,
   Tabs,
   Tag,
-  message,
 } from 'ant-design-vue';
 
 import {
   bindTelegramUser,
+  type FeishuBindingItem,
   getTelegramBindings,
   getTelegramConfig,
   saveTelegramConfig,
   setTelegramCommands,
-  testTelegramMessage,
-  unbindTelegramUser,
-  type FeishuBindingItem,
   type TelegramCommandItem,
   type TelegramConfigItem,
+  testTelegramMessage,
+  unbindTelegramUser,
 } from '#/api/mvp/workflow';
 
 defineOptions({ name: 'MvpWorkflowTelegram' });
@@ -139,8 +140,8 @@ async function sendTest(row: FeishuBindingItem) {
       content: `EasyMVP Telegram 联通测试成功 🎉 系统用户 ${row.userId} 绑定有效。`,
     });
     message.success('测试消息已发送，请在 Telegram 查收');
-  } catch (e: any) {
-    message.error(e?.message || '发送失败');
+  } catch (error: any) {
+    message.error(error?.message || '发送失败');
   } finally {
     testing.value = false;
   }
@@ -154,8 +155,8 @@ async function deployCommands(useDefault = false) {
     );
     message.success(res.message || '命令菜单已更新');
     commands.value = res.commands ?? defaultCommands;
-  } catch (e: any) {
-    message.error(e?.message || '设置失败');
+  } catch (error: any) {
+    message.error(error?.message || '设置失败');
   } finally {
     commandSaving.value = false;
   }
@@ -169,11 +170,15 @@ function removeCommand(idx: number) {
   commands.value.splice(idx, 1);
 }
 
-function onTabChange(key: string) {
-  if (key === 'commands' && !commandTabLoaded.value) {
+function onTabChange(key: number | string) {
+  if (String(key) === 'commands' && !commandTabLoaded.value) {
     commandTabLoaded.value = true;
     commands.value = [...defaultCommands];
   }
+}
+
+function handleEnabledChange(checked: boolean | number | string) {
+  config.enabled = checked === true || checked === 1 || checked === '1' ? 1 : 0;
 }
 
 onMounted(async () => {
@@ -208,7 +213,7 @@ const columns = [
             <FormItem label="启用 Telegram Bot">
               <Switch
                 :checked="config.enabled === 1"
-                @change="(v: boolean) => (config.enabled = v ? 1 : 0)"
+                @change="handleEnabledChange"
               />
               <Tag v-if="config.botRunning" color="green" class="ml-3">Polling 运行中</Tag>
               <Tag v-else color="default" class="ml-3">未运行</Tag>

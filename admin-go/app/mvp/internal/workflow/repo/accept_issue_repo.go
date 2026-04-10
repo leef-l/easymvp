@@ -40,6 +40,22 @@ func (r *AcceptIssueRepo) ListByAcceptRun(ctx context.Context, acceptRunID int64
 	return records.List(), nil
 }
 
+// ListOpenByAcceptRunAndIDs 查询某次验收下指定的 open 问题。
+func (r *AcceptIssueRepo) ListOpenByAcceptRunAndIDs(ctx context.Context, acceptRunID int64, issueIDs []int64) ([]g.Map, error) {
+	records, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("accept_run_id", acceptRunID).
+		WhereIn("id", issueIDs).
+		Where("status", "open").
+		WhereNull("deleted_at").
+		OrderDesc("severity").
+		OrderDesc("created_at").
+		All()
+	if err != nil {
+		return nil, err
+	}
+	return records.List(), nil
+}
+
 // ListByWorkflow 按工作流查询问题列表。
 func (r *AcceptIssueRepo) ListByWorkflow(ctx context.Context, workflowRunID int64) ([]g.Map, error) {
 	records, err := g.DB().Model(r.table()).Ctx(ctx).

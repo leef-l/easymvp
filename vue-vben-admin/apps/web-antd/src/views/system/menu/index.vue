@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import type { VbenFormProps } from '#/adapter/form';
 import type { VxeGridProps } from '#/adapter/vxe-table';
+import type { MenuItem } from '#/api/system/menu/types';
 
 import { Page, useVbenModal } from '@vben/common-ui';
+
 import { Button, message, Modal, Tag } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getMenuTree, deleteMenu } from '#/api/system/menu';
-import type { MenuItem } from '#/api/system/menu/types';
+import { deleteMenu, getMenuTree } from '#/api/system/menu';
+
 import FormModal from './modules/form.vue';
 
 /** 标签颜色池 */
@@ -32,9 +34,9 @@ const typeMap: Record<number, string> = {
 };
 
 /** 类型颜色 */
-function getTypeColor(val: number): string {
+function getTypeColor(val?: number): string {
   const keys = [1, 2, 3, 4, 5];
-  const idx = keys.indexOf(val);
+  const idx = val === undefined ? -1 : keys.indexOf(val);
   return TAG_COLORS[idx >= 0 ? idx % TAG_COLORS.length : 0] ?? 'default';
 }
 
@@ -51,9 +53,9 @@ const isShowMap: Record<number, string> = {
 };
 
 /** 是否显示颜色 */
-function getIsShowColor(val: number): string {
+function getIsShowColor(val?: number): string {
   const keys = [0, 1];
-  const idx = keys.indexOf(val);
+  const idx = val === undefined ? -1 : keys.indexOf(val);
   return TAG_COLORS[idx >= 0 ? idx % TAG_COLORS.length : 0] ?? 'default';
 }
 
@@ -70,9 +72,9 @@ const isCacheMap: Record<number, string> = {
 };
 
 /** 是否缓存颜色 */
-function getIsCacheColor(val: number): string {
+function getIsCacheColor(val?: number): string {
   const keys = [0, 1];
-  const idx = keys.indexOf(val);
+  const idx = val === undefined ? -1 : keys.indexOf(val);
   return TAG_COLORS[idx >= 0 ? idx % TAG_COLORS.length : 0] ?? 'default';
 }
 
@@ -89,9 +91,9 @@ const statusMap: Record<number, string> = {
 };
 
 /** 状态颜色 */
-function getStatusColor(val: number): string {
+function getStatusColor(val?: number): string {
   const keys = [0, 1];
-  const idx = keys.indexOf(val);
+  const idx = val === undefined ? -1 : keys.indexOf(val);
   return TAG_COLORS[idx >= 0 ? idx % TAG_COLORS.length : 0] ?? 'default';
 }
 
@@ -232,22 +234,22 @@ function handleDelete(row: MenuItem) {
       </template>
       <template #type_cell="{ row }">
         <Tag :color="getTypeColor(row.type)">
-          {{ typeMap[row.type] || row.type }}
+          {{ row.type === undefined ? '-' : (typeMap[row.type] || row.type) }}
         </Tag>
       </template>
       <template #isShow_cell="{ row }">
         <Tag :color="getIsShowColor(row.isShow)">
-          {{ isShowMap[row.isShow] || row.isShow }}
+          {{ row.isShow === undefined ? '-' : (isShowMap[row.isShow] || row.isShow) }}
         </Tag>
       </template>
       <template #isCache_cell="{ row }">
         <Tag :color="getIsCacheColor(row.isCache)">
-          {{ isCacheMap[row.isCache] || row.isCache }}
+          {{ row.isCache === undefined ? '-' : (isCacheMap[row.isCache] || row.isCache) }}
         </Tag>
       </template>
       <template #status_cell="{ row }">
         <Tag :color="getStatusColor(row.status)">
-          {{ statusMap[row.status] || row.status }}
+          {{ row.status === undefined ? '-' : (statusMap[row.status] || row.status) }}
         </Tag>
       </template>
       <template #action="{ row }">

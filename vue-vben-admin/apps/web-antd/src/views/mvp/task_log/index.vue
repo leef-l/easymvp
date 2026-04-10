@@ -1,19 +1,17 @@
 <script setup lang="ts">
 import type { VbenFormProps } from '#/adapter/form';
 import type { VxeGridProps } from '#/adapter/vxe-table';
+import type { TaskLogItem } from '#/api/mvp/task_log/types';
 
 import { Page, useVbenModal } from '@vben/common-ui';
-import { Button, message, Modal, Tag } from 'ant-design-vue';
+
+import { Button, message, Modal } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getTaskLogList, deleteTaskLog, batchDeleteTaskLog, exportTaskLog, importTaskLog, downloadImportTemplateTaskLog } from '#/api/mvp/task_log';
-import type { TaskLogItem } from '#/api/mvp/task_log/types';
-import FormModal from './modules/form.vue';
+import { batchDeleteTaskLog, deleteTaskLog, downloadImportTemplateTaskLog, exportTaskLog, getTaskLogList, importTaskLog } from '#/api/mvp/task_log';
+
 import DetailDrawer from './modules/detail-drawer.vue';
-
-/** 标签颜色池 */
-const TAG_COLORS = ['green', 'red', 'blue', 'orange', 'cyan', 'purple', 'geekblue', 'magenta'];
-
+import FormModal from './modules/form.vue';
 
 /** 表单弹窗 */
 const [FormModalComp, formModalApi] = useVbenModal({
@@ -180,7 +178,7 @@ async function handleImport() {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = '.csv,.xlsx,.xls';
-  input.onchange = async () => {
+  input.addEventListener('change', async () => {
     const file = input.files?.[0];
     if (!file) { input.remove(); return; }
     const formData = new FormData();
@@ -194,8 +192,8 @@ async function handleImport() {
     } finally {
       input.remove();
     }
-  };
-  document.body.appendChild(input);
+  });
+  document.body.append(input);
   input.click();
 }
 

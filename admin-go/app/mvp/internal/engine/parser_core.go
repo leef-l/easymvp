@@ -33,7 +33,8 @@ func GetParser() *TaskParser {
 
 // ArchitectTaskPlan 架构师输出的任务规划结构
 type ArchitectTaskPlan struct {
-	Tasks []ArchitectTask `json:"tasks"`
+	PlanMeta *ArchitectPlanMeta `json:"plan_meta,omitempty"`
+	Tasks    []ArchitectTask    `json:"tasks"`
 }
 
 // ArchitectTask 架构师规划的单个任务
@@ -52,12 +53,6 @@ type ArchitectTask struct {
 // ParseAndCreateTasks 从架构师回复中解析任务清单并写入数据库
 // 返回创建的任务数量
 func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, aiReply string) (int, error) {
-	// 1. 从 AI 回复中提取 JSON
-	plan, err := p.extractTaskPlan(aiReply)
-	if err != nil {
-		return 0, err
-	}
-
 	// 获取项目分类用于分类感知校验
 	projectCategory := ""
 	project, projErr := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).WhereNull("deleted_at").Fields("project_category").One()
@@ -68,7 +63,13 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 		projectCategory = project["project_category"].String()
 	}
 
-	tasks := p.normalizeTasks(ctx, plan.Tasks, projectCategory)
+	tasks, report, err := p.FastExtractWithReport(ctx, aiReply, projectCategory)
+	if err != nil {
+		return 0, err
+	}
+	if report != nil && report.HasBlockingIssue() {
+		return 0, fmt.Errorf("任务清单存在阻断问题: %s", report.Summary())
+	}
 	if len(tasks) == 0 {
 		return 0, nil // 回复中没有任务清单，正常情况（还在讨论需求）
 	}
@@ -256,24 +257,8 @@ func (p *TaskParser) ParseAndCreateTasks(ctx context.Context, projectID int64, a
 // 供 V2 蓝图写入复用已有的解析和校验逻辑。
 // 当正则提取失败时，使用 AI 做二次提取（适用于非标准 JSON 格式，如小说章节等）。
 func (p *TaskParser) ExtractAndNormalize(ctx context.Context, aiReply, projectCategory string) ([]ArchitectTask, error) {
-	plan, err := p.extractTaskPlan(aiReply)
-	if err == nil && len(plan.Tasks) > 0 {
-		return p.normalizeTasks(ctx, plan.Tasks, projectCategory), nil
-	}
-
-	// 正则提取失败，尝试 AI 二次提取（适用于跨消息 JSON 碎片、非标准格式等）
-	if len(aiReply) > 100 {
-		aiTasks, aiErr := p.aiExtractTasks(ctx, aiReply, projectCategory)
-		if aiErr == nil && len(aiTasks) > 0 {
-			g.Log().Infof(ctx, "[TaskParser] 正则提取失败，AI 二次提取成功: %d 个任务", len(aiTasks))
-			return p.normalizeTasks(ctx, aiTasks, projectCategory), nil
-		}
-		if aiErr != nil {
-			g.Log().Warningf(ctx, "[TaskParser] AI 二次提取也失败: %v", aiErr)
-		}
-	}
-
-	return nil, nil
+	tasks, _, err := p.ExtractAndNormalizeWithReport(ctx, aiReply, projectCategory)
+	return tasks, err
 }
 
 // FastExtract 快速正则提取（不走 AI），返回 nil 表示提取失败。
@@ -281,14 +266,77 @@ func (p *TaskParser) FastExtract(aiReply string) (*ArchitectTaskPlan, error) {
 	return p.extractTaskPlan(aiReply)
 }
 
+// FastExtractWithReport 快速正则提取并返回标准化报告。
+func (p *TaskParser) FastExtractWithReport(ctx context.Context, aiReply, projectCategory string) ([]ArchitectTask, *ArchitectPlanParseReport, error) {
+	plan, report, err := p.extractTaskPlanWithReport(aiReply)
+	if report == nil {
+		report = &ArchitectPlanParseReport{}
+	}
+	if err != nil {
+		report.finalize()
+		return nil, report, err
+	}
+	if plan == nil || len(plan.Tasks) == 0 {
+		report.finalize()
+		return nil, report, nil
+	}
+
+	normalized, normReport := p.normalizeTasksWithReport(ctx, plan.Tasks, projectCategory)
+	report.applyNormalization(normReport, len(normalized))
+	report.finalize()
+	return normalized, report, nil
+}
+
 // NormalizeTasks 导出的标准化方法。
 func (p *TaskParser) NormalizeTasks(ctx context.Context, tasks []ArchitectTask, projectCategory string) []ArchitectTask {
 	return p.normalizeTasks(ctx, tasks, projectCategory)
 }
 
+// NormalizeTasksWithReport 导出的标准化方法，附带差异报告。
+func (p *TaskParser) NormalizeTasksWithReport(ctx context.Context, tasks []ArchitectTask, projectCategory string) ([]ArchitectTask, *TaskNormalizationReport) {
+	return p.normalizeTasksWithReport(ctx, tasks, projectCategory)
+}
+
 // AIExtractTasks 导出的 AI 二次提取方法。
 func (p *TaskParser) AIExtractTasks(ctx context.Context, aiReply, projectCategory string) ([]ArchitectTask, error) {
 	return p.aiExtractTasks(ctx, aiReply, projectCategory)
+}
+
+// ExtractAndNormalizeWithReport 解析 AI 回复并返回标准化任务列表与差异报告。
+func (p *TaskParser) ExtractAndNormalizeWithReport(ctx context.Context, aiReply, projectCategory string) ([]ArchitectTask, *ArchitectPlanParseReport, error) {
+	tasks, report, err := p.FastExtractWithReport(ctx, aiReply, projectCategory)
+	if report == nil {
+		report = &ArchitectPlanParseReport{}
+	}
+	if err != nil {
+		return nil, report, err
+	}
+	if len(tasks) > 0 || report.HasBlockingIssue() {
+		return tasks, report, nil
+	}
+
+	// 正则提取失败，尝试 AI 二次提取（适用于跨消息 JSON 碎片、非标准格式等）
+	if len(aiReply) > 100 {
+		aiTasks, aiErr := p.aiExtractTasks(ctx, aiReply, projectCategory)
+		if aiErr == nil && len(aiTasks) > 0 {
+			g.Log().Infof(ctx, "[TaskParser] 正则提取失败，AI 二次提取成功: %d 个任务", len(aiTasks))
+			normalized, normReport := p.normalizeTasksWithReport(ctx, aiTasks, projectCategory)
+			report = &ArchitectPlanParseReport{
+				RawTaskCount:   len(aiTasks),
+				UsedAIRecovery: true,
+			}
+			report.applyNormalization(normReport, len(normalized))
+			report.finalize()
+			return normalized, report, nil
+		}
+		if aiErr != nil {
+			g.Log().Warningf(ctx, "[TaskParser] AI 二次提取也失败: %v", aiErr)
+			return nil, report, aiErr
+		}
+	}
+
+	report.finalize()
+	return nil, report, nil
 }
 
 // DryParseTaskCount 仅解析AI回复，返回任务数量（不写入数据库）。
@@ -304,7 +352,12 @@ func (p *TaskParser) DryParseTaskCount(aiReply string) int {
 		g.Log().Infof(ctx, "[DryParseTaskCount] extractTaskPlan 成功: raw=%d normalized=%d", len(plan.Tasks), len(normalized))
 		return len(normalized)
 	}
-	g.Log().Infof(ctx, "[DryParseTaskCount] extractTaskPlan 失败: err=%v tasks=%d", err, func() int { if plan != nil { return len(plan.Tasks) }; return 0 }())
+	g.Log().Infof(ctx, "[DryParseTaskCount] extractTaskPlan 失败: err=%v tasks=%d", err, func() int {
+		if plan != nil {
+			return len(plan.Tasks)
+		}
+		return 0
+	}())
 
 	// 正则失败，检测是否有 JSON 代码块（意味着实际创建时 AI 二次提取大概率能成功）
 	if matches := dryParseCodeBlockRe.FindAllString(aiReply, -1); len(matches) > 0 {

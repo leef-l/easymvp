@@ -372,7 +372,7 @@ func normalizeCommandName(name string) string {
 
 func skipPrlimitCommand(commandName string) bool {
 	switch normalizeCommandName(commandName) {
-	case "npm", "npx", "pnpm", "pnpx", "node", "vite", "vitest", "tsc", "tsx", "eslint", "next", "nuxt", "react-scripts", "turbo":
+	case "go", "npm", "npx", "pnpm", "pnpx", "node", "vite", "vitest", "tsc", "tsx", "eslint", "next", "nuxt", "react-scripts", "turbo":
 		return true
 	default:
 		return false

@@ -3,6 +3,8 @@ package acceptance
 import (
 	"strings"
 	"testing"
+
+	"easymvp/app/mvp/internal/workflow/qualitygate"
 )
 
 func TestBuildJudgeUserPromptFallbacks(t *testing.T) {
@@ -11,7 +13,7 @@ func TestBuildJudgeUserPromptFallbacks(t *testing.T) {
 	prompt := buildJudgeUserPrompt(&AcceptContext{
 		ProjectType: "software_dev",
 		WorkDir:     "/tmp/project",
-	}, nil, nil)
+	}, qualitygate.VerificationStandard{}, nil, nil, nil)
 
 	if !strings.Contains(prompt, "项目类型：software_dev") {
 		t.Fatalf("prompt missing project type: %s", prompt)
@@ -38,7 +40,7 @@ func TestNewJudge(t *testing.T) {
 func TestBuildJudgeSystemPrompt(t *testing.T) {
 	t.Parallel()
 
-	prompt := buildJudgeSystemPrompt()
+	prompt := buildJudgeSystemPrompt("", qualitygate.VerificationStandard{}, nil)
 	for _, fragment := range []string{
 		`"quality_score": 0-100`,
 		`"conclusion": "passed|failed|uncertain"`,
@@ -58,7 +60,10 @@ func TestBuildJudgeUserPromptFormatsHitsAndTruncatesEvidence(t *testing.T) {
 	prompt := buildJudgeUserPrompt(&AcceptContext{
 		ProjectType: "mini_app",
 		WorkDir:     "/workspace/demo",
-	}, []EvidenceItem{
+	}, qualitygate.VerificationStandard{
+		Code:        "coding.interactive_delivery",
+		DisplayName: "Coding Interactive Delivery Standard",
+	}, nil, []EvidenceItem{
 		{
 			EvidenceType: "workspace_file",
 			SourceType:   "workspace",

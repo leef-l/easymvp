@@ -32,59 +32,101 @@ func (evt Event) EnsureMetadata() Event {
 
 func buildIdempotencyKey(evt Event) string {
 	var (
-		entityID int64
-		taskID   int64
+		entityID   int64
+		taskID     int64
+		stageRunID int64
 	)
-	if evt.EntityID != nil {
-		entityID = *evt.EntityID
-	}
+	entityID = resolveEntityID(evt)
 	taskID = resolveTaskID(evt)
+	stageRunID = resolveStageRunID(evt)
 	return fmt.Sprintf(
-		"wf:%d:task:%d:entity:%d:type:%s:attempt:%d",
+		"wf:%d:task:%d:entity:%d:stage:%d:type:%s:attempt:%d",
 		evt.WorkflowRunID,
 		taskID,
 		entityID,
+		stageRunID,
 		strings.TrimSpace(evt.EventType),
 		evt.Attempt,
 	)
+}
+
+func resolveEntityID(evt Event) int64 {
+	if evt.EntityID != nil {
+		return *evt.EntityID
+	}
+	return resolveInt64FromPayload(evt.Payload, "entity_id", "entityId")
 }
 
 func resolveTaskID(evt Event) int64 {
 	if evt.EntityType == EntityDomainTask && evt.EntityID != nil {
 		return *evt.EntityID
 	}
-	if evt.Payload == nil {
+	return resolveInt64FromPayload(evt.Payload,
+		"task_id", "taskId",
+		"failed_task_id", "failedTaskId",
+		"domain_task_id", "domainTaskId",
+		"source_task_id", "sourceTaskId",
+	)
+}
+
+func resolveStageRunID(evt Event) int64 {
+	if evt.StageRunID != nil {
+		return *evt.StageRunID
+	}
+	return resolveInt64FromPayload(evt.Payload, "stage_run_id", "stageRunId")
+}
+
+func resolveInt64FromPayload(payload interface{}, keys ...string) int64 {
+	if payload == nil || len(keys) == 0 {
 		return 0
 	}
-	switch payload := evt.Payload.(type) {
+	switch v := payload.(type) {
 	case map[string]interface{}:
-		return parseTaskIDFromMap(payload)
+		return parseInt64FromInterfaceMap(v, keys...)
 	case map[string]string:
-		if raw, ok := payload["task_id"]; ok {
-			if id, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); err == nil {
-				return id
-			}
-		}
+		return parseInt64FromStringMap(v, keys...)
 	case string:
 		var mapPayload map[string]interface{}
-		if err := json.Unmarshal([]byte(payload), &mapPayload); err == nil {
-			return parseTaskIDFromMap(mapPayload)
+		if err := json.Unmarshal([]byte(v), &mapPayload); err == nil {
+			return parseInt64FromInterfaceMap(mapPayload, keys...)
 		}
 	}
 	return 0
 }
 
-func parseTaskIDFromMap(payload map[string]interface{}) int64 {
+func parseInt64FromInterfaceMap(payload map[string]interface{}, keys ...string) int64 {
 	if payload == nil {
 		return 0
 	}
-	raw, ok := payload["task_id"]
-	if !ok {
-		raw, ok = payload["taskId"]
+	for _, key := range keys {
+		raw, ok := payload[key]
 		if !ok {
-			return 0
+			continue
+		}
+		if val := parseInt64Value(raw); val > 0 {
+			return val
 		}
 	}
+	return 0
+}
+
+func parseInt64FromStringMap(payload map[string]string, keys ...string) int64 {
+	if payload == nil {
+		return 0
+	}
+	for _, key := range keys {
+		raw, ok := payload[key]
+		if !ok {
+			continue
+		}
+		if val, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); err == nil && val > 0 {
+			return val
+		}
+	}
+	return 0
+}
+
+func parseInt64Value(raw interface{}) int64 {
 	switch v := raw.(type) {
 	case int:
 		return int64(v)

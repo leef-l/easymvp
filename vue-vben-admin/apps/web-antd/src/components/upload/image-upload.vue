@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import type { FileManagerItem } from '#/components/file-manager/index.vue';
+
+import { computed, ref } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
+
 import { PlusOutlined } from '@ant-design/icons-vue';
 import { Image } from 'ant-design-vue';
 
 import FileManagerModal from '#/components/file-manager/modal.vue';
-import type { FileManagerItem } from '#/components/file-manager/index.vue';
 
 interface Props {
   value?: string;

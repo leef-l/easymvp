@@ -11,13 +11,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"easymvp/app/mvp/internal/workflow/event"
-	"easymvp/utility/snowflake"
 	"easymvp/utility/worktreeguard"
 )
 
@@ -28,6 +28,8 @@ const (
 	workspaceFinalizeTimeout = 45 * time.Second
 	workspaceCleanupTimeout  = 90 * time.Second
 )
+
+var repoBaselineLocks sync.Map
 
 // GitWorktreeManager 基于 git worktree 的工作空间管理器。
 type GitWorktreeManager struct {
@@ -337,26 +339,14 @@ func buildDeliveryReviewReason(policy deliveryPolicy, payload map[string]interfa
 }
 
 func recordWorkspaceEvent(ctx context.Context, ws *TaskWorkspace, taskID int64, eventType string, payload map[string]interface{}) {
-	var payloadJSON string
-	if len(payload) > 0 {
-		if content, err := json.Marshal(payload); err == nil {
-			payloadJSON = string(content)
-		}
-	}
-
-	data := g.Map{
-		"id":              int64(snowflake.Generate()),
-		"workflow_run_id": ws.WorkflowRunID,
-		"entity_type":     event.EntityDomainTask,
-		"entity_id":       taskID,
-		"event_type":      eventType,
-		"created_at":      gtime.Now(),
-	}
-	if payloadJSON != "" {
-		data["payload"] = payloadJSON
-	}
-
-	if _, err := g.DB().Model("mvp_workflow_event").Ctx(ctx).Insert(data); err != nil {
+	entityID := taskID
+	if err := event.PersistRecord(ctx, event.Event{
+		WorkflowRunID: ws.WorkflowRunID,
+		EntityType:    event.EntityDomainTask,
+		EntityID:      &entityID,
+		EventType:     eventType,
+		Payload:       payload,
+	}); err != nil {
 		g.Log().Warningf(ctx, "[Workspace] 写入交付事件失败: taskID=%d event=%s err=%v", taskID, eventType, err)
 	}
 }
@@ -610,6 +600,9 @@ func gitHeadRef(dir string) (string, error) {
 }
 
 func ensureRepositoryBaseline(ctx context.Context, dir string) (string, error) {
+	unlock := lockRepoBaseline(dir)
+	defer unlock()
+
 	hasHead, err := gitHasHead(dir)
 	if err != nil {
 		return "", err
@@ -634,6 +627,14 @@ func ensureRepositoryBaseline(ctx context.Context, dir string) (string, error) {
 	}
 	g.Log().Infof(ctx, "[Workspace] 空仓库自动补初始提交: %s baseRef=%s", dir, baseRef)
 	return baseRef, nil
+}
+
+func lockRepoBaseline(dir string) func() {
+	key := filepath.Clean(dir)
+	actual, _ := repoBaselineLocks.LoadOrStore(key, &sync.Mutex{})
+	mu := actual.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }
 
 func gitHasHead(dir string) (bool, error) {
@@ -802,7 +803,7 @@ func syncWorktreeCommit(ctx context.Context, mainWorkDir, worktreePath string, t
 	}
 
 	if len(dirtyFiles) == 0 {
-		if err := commitSyncedFilesToMain(mainWorkDir, taskID); err != nil {
+		if err := commitSyncedFilesToMain(mainWorkDir, taskID, committedFiles); err != nil {
 			return err
 		}
 	}
@@ -836,7 +837,7 @@ func stageSyncBackCandidates(ctx context.Context, worktreePath string, allowPath
 	if err != nil {
 		return nil, fmt.Errorf("读取 staged 变更文件失败: %w", err)
 	}
-	suspicious, _ := collectSyncBackPathIssues(changedFiles, allowPaths)
+	_, suspicious, _ := collectSyncBackPathIssues(changedFiles, allowPaths)
 	if len(suspicious) > 0 {
 		if pruned, pruneErr := worktreeguard.PruneSuspiciousDeltaPaths(worktreePath, suspicious); pruneErr != nil {
 			g.Log().Warningf(ctx, "[Workspace] syncBack 前清理可疑标题文件失败: taskID=%d err=%v", taskID, pruneErr)
@@ -928,6 +929,18 @@ func listDirtyMainWorktreeFiles(mainWorkDir string) (map[string]struct{}, error)
 
 func gitAddAll(dir string) error {
 	cmd := exec.Command("git", "-C", dir, "add", "-A")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: %s", err, string(output))
+	}
+	return nil
+}
+
+func gitAddPaths(dir string, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	args := append([]string{"-C", dir, "add", "-A", "--"}, paths...)
+	cmd := exec.Command("git", args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%s: %s", err, string(output))
 	}
@@ -1102,7 +1115,7 @@ func applyPatchArtifactToMain(ctx context.Context, mainWorkDir, patchRef string,
 	if err := gitApplyPatch(mainWorkDir, patchRef); err != nil {
 		cleanupErr := cleanupFailedPatchApply(mainWorkDir, changedFiles)
 		if snapshotErr := applyAddedFileSnapshots(mainWorkDir, patchRef, changedFiles); snapshotErr == nil {
-			if err := commitSyncedFilesToMain(mainWorkDir, taskID); err != nil {
+			if err := commitSyncedFilesToMain(mainWorkDir, taskID, changedFiles); err != nil {
 				return err
 			}
 			g.Log().Infof(ctx, "[Workspace] SyncBack: taskID=%d mode=patch-snapshot artifact=%s", taskID, patchRef)
@@ -1113,7 +1126,7 @@ func applyPatchArtifactToMain(ctx context.Context, mainWorkDir, patchRef string,
 		}
 		return fmt.Errorf("应用 patch 到主工作区失败: %w", err)
 	}
-	if err := commitSyncedFilesToMain(mainWorkDir, taskID); err != nil {
+	if err := commitSyncedFilesToMain(mainWorkDir, taskID, changedFiles); err != nil {
 		return err
 	}
 
@@ -1121,8 +1134,12 @@ func applyPatchArtifactToMain(ctx context.Context, mainWorkDir, patchRef string,
 	return nil
 }
 
-func commitSyncedFilesToMain(mainWorkDir string, taskID int64) error {
-	if err := gitAddAll(mainWorkDir); err != nil {
+func commitSyncedFilesToMain(mainWorkDir string, taskID int64, changedFiles []gitChangedFile) error {
+	paths := syncBackCommitPaths(changedFiles)
+	if len(paths) == 0 {
+		return nil
+	}
+	if err := gitAddPaths(mainWorkDir, paths); err != nil {
 		return fmt.Errorf("暂存主工作区同步结果失败: %w", err)
 	}
 	hasChanges, err := gitHasStagedChanges(mainWorkDir)
@@ -1138,6 +1155,25 @@ func commitSyncedFilesToMain(mainWorkDir string, taskID int64) error {
 		return fmt.Errorf("提交主工作区同步结果失败: %w", err)
 	}
 	return nil
+}
+
+func syncBackCommitPaths(changedFiles []gitChangedFile) []string {
+	pathSet := make(map[string]struct{})
+	for _, file := range changedFiles {
+		for _, target := range changedFileTargets(file) {
+			target = path.Clean(strings.ReplaceAll(strings.TrimSpace(target), "\\", "/"))
+			if target == "" || target == "." || isInternalWorkspacePath(target) {
+				continue
+			}
+			pathSet[target] = struct{}{}
+		}
+	}
+	return mapKeysSorted(pathSet)
+}
+
+func isInternalWorkspacePath(filePath string) bool {
+	filePath = path.Clean(strings.ReplaceAll(strings.TrimSpace(filePath), "\\", "/"))
+	return filePath == worktreeDir || strings.HasPrefix(filePath, worktreeDir+"/")
 }
 
 func gitApplyPatch(dir, patchRef string) error {
@@ -1420,15 +1456,19 @@ func loadTaskAllowedPaths(ctx context.Context, taskID int64) (_ []string, err er
 }
 
 func validateSyncBackPaths(changedFiles []gitChangedFile, allowPaths []string) error {
-	suspicious, invalid := collectSyncBackPathIssues(changedFiles, allowPaths)
-	if len(suspicious) == 0 && len(invalid) == 0 {
+	internal, suspicious, invalid := collectSyncBackPathIssues(changedFiles, allowPaths)
+	if len(internal) == 0 && len(suspicious) == 0 && len(invalid) == 0 {
 		return nil
 	}
 
+	sort.Strings(internal)
 	sort.Strings(suspicious)
 	sort.Strings(invalid)
 
 	var issues []string
+	if len(internal) > 0 {
+		issues = append(issues, "检测到内部工作区元数据: "+strings.Join(internal, ", "))
+	}
 	if len(suspicious) > 0 {
 		issues = append(issues, "检测到可疑文件: "+strings.Join(suspicious, ", "))
 	}
@@ -1438,28 +1478,50 @@ func validateSyncBackPaths(changedFiles []gitChangedFile, allowPaths []string) e
 	return fmt.Errorf("syncBack 校验失败: %s", strings.Join(issues, "；"))
 }
 
-func collectSyncBackPathIssues(changedFiles []gitChangedFile, allowPaths []string) ([]string, []string) {
+func collectSyncBackPathIssues(changedFiles []gitChangedFile, allowPaths []string) ([]string, []string, []string) {
 	var (
+		internal       []string
 		invalid        []string
 		suspicious     []string
+		seenInternal   = map[string]struct{}{}
 		seenInvalid    = map[string]struct{}{}
 		seenSuspicious = map[string]struct{}{}
-		allowSet       = make(map[string]struct{}, len(allowPaths))
+		normalized     []string
 	)
-	for _, allowPath := range allowPaths {
+
+	normalized, _ = worktreeguard.NormalizeRelativePaths(allowPaths)
+	allowSet := make(map[string]struct{}, len(normalized))
+	for _, allowPath := range normalized {
 		allowSet[allowPath] = struct{}{}
 	}
 
 	for _, item := range changedFiles {
-		for _, filePath := range changedFileTargets(item) {
-			filePath = path.Clean(strings.ReplaceAll(strings.TrimSpace(filePath), "\\", "/"))
+		for _, rawPath := range changedFileTargets(item) {
+			rawPath = strings.TrimSpace(rawPath)
+			if rawPath == "" {
+				continue
+			}
+
+			filePath := path.Clean(strings.ReplaceAll(rawPath, "\\", "/"))
+			if normalizedPath, ok := worktreeguard.NormalizeRelativePath(rawPath); ok {
+				filePath = normalizedPath
+			}
 			if filePath == "" || filePath == "." {
 				continue
 			}
-			if worktreeguard.IsSuspiciousPath(filePath) {
-				if _, exists := seenSuspicious[filePath]; !exists {
-					seenSuspicious[filePath] = struct{}{}
-					suspicious = append(suspicious, filePath)
+			if isInternalWorkspacePath(filePath) {
+				if _, exists := seenInternal[filePath]; !exists {
+					seenInternal[filePath] = struct{}{}
+					internal = append(internal, filePath)
+				}
+				continue
+			}
+
+			suspiciousPath := filePath
+			if worktreeguard.IsSuspiciousPath(rawPath) || worktreeguard.IsSuspiciousPath(filePath) {
+				if _, exists := seenSuspicious[suspiciousPath]; !exists {
+					seenSuspicious[suspiciousPath] = struct{}{}
+					suspicious = append(suspicious, suspiciousPath)
 				}
 				continue
 			}
@@ -1471,7 +1533,7 @@ func collectSyncBackPathIssues(changedFiles []gitChangedFile, allowPaths []strin
 			}
 		}
 	}
-	return suspicious, invalid
+	return internal, suspicious, invalid
 }
 
 func changedFileTargets(item gitChangedFile) []string {

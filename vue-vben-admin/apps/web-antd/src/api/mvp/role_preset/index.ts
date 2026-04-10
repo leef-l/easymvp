@@ -69,6 +69,6 @@ export function downloadImportTemplateRolePreset() {
 }
 
 /** 批量编辑角色预设模板 */
-export function batchUpdateRolePreset(data: { ids: string[]; status?: number }) {
+export function batchUpdateRolePreset(data: { ids: string[]; status?: number | string }) {
   return requestClient.put(`${PREFIX}/batch-update`, data);
 }

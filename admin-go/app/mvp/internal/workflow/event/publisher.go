@@ -48,6 +48,13 @@ var persistWorkflowEventFn = func(ctx context.Context, evt Event, recordID int64
 	return legacyErr
 }
 
+// PersistRecord 持久化单条事件记录，但不广播到内存 bus/stream。
+// 供工作流外围的审计/验证/交付路径复用统一的事件元数据写入逻辑。
+func PersistRecord(ctx context.Context, evt Event) error {
+	evt = evt.EnsureMetadata()
+	return persistWorkflowEventFn(ctx, evt, int64(snowflake.Generate()), time.Now())
+}
+
 func isMissingWorkflowEventMetadataErr(err error) bool {
 	if err == nil {
 		return false

@@ -328,9 +328,7 @@ func safeGetRedis(ctx context.Context) (r *gredis.Redis) {
 			return r
 		} else {
 			g.Log().Warningf(ctx, "[DeleteWorker] 默认 Redis 客户端不可用，回退直连: %v", err)
-			// GoFrame 配置缺少密码时会稳定 NOAUTH，这里回退到带密码的直连客户端。
-			if !strings.Contains(strings.ToLower(err.Error()), "noauth") &&
-				!strings.Contains(strings.ToLower(err.Error()), "authentication") {
+			if !shouldFallbackToDirectRedisErr(err) {
 				return r
 			}
 		}
@@ -340,7 +338,7 @@ func safeGetRedis(ctx context.Context) (r *gredis.Redis) {
 	if addr == "" {
 		addr = "127.0.0.1:6379"
 	}
-	pass := os.Getenv("REDIS_PASS")
+	pass := resolveRedisPass()
 	client, err := gredis.New(&gredis.Config{
 		Address: addr,
 		Pass:    pass,
@@ -355,6 +353,24 @@ func safeGetRedis(ctx context.Context) (r *gredis.Redis) {
 		return nil
 	}
 	return client
+}
+
+func shouldFallbackToDirectRedisErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	lowerErr := strings.ToLower(err.Error())
+	return strings.Contains(lowerErr, "noauth") ||
+		strings.Contains(lowerErr, "authentication") ||
+		strings.Contains(lowerErr, "redis object is nil") ||
+		strings.Contains(lowerErr, "redis client unavailable")
+}
+
+func resolveRedisPass() string {
+	if pass := strings.TrimSpace(os.Getenv("REDIS_PASS")); pass != "" {
+		return pass
+	}
+	return strings.TrimSpace(os.Getenv("REDIS_PASSWORD"))
 }
 
 // ─── mvp_task 级联删除 ────────────────────────────────────────────────────────

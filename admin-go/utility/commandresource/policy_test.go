@@ -3,8 +3,6 @@ package commandresource
 import (
 	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strings"
 	"testing"
 )
 
@@ -150,15 +148,8 @@ func TestPolicyApplyKeepsNPMCommandUnwrappedAndInjectsNPMEnv(t *testing.T) {
 	}
 }
 
-func TestPolicyApplyWrapsGoCommandWithPrlimit(t *testing.T) {
+func TestPolicyApplyKeepsGoCommandUnwrappedAndInjectsGoEnv(t *testing.T) {
 	t.Parallel()
-
-	if runtime.GOOS != "linux" {
-		t.Skip("prlimit is only used on linux")
-	}
-	if _, err := exec.LookPath("prlimit"); err != nil {
-		t.Skip("prlimit not installed")
-	}
 
 	policy := Policy{
 		Enabled:                  true,
@@ -179,11 +170,15 @@ func TestPolicyApplyWrapsGoCommandWithPrlimit(t *testing.T) {
 	cmd := exec.Command("go", "test", "./...")
 	policy.Apply(cmd)
 
-	if base := filepath.Base(cmd.Path); base != "prlimit" {
-		t.Fatalf("cmd.Path = %q, want prlimit", cmd.Path)
+	if base := filepath.Base(cmd.Path); base == "prlimit" {
+		t.Fatalf("go command should not be wrapped with prlimit")
 	}
-	if got := strings.Join(cmd.Args, " "); !strings.Contains(got, "--as=1610612736") {
-		t.Fatalf("cmd.Args = %q", got)
+	env := envSliceToMap(cmd.Env)
+	if got := env["GOMAXPROCS"]; got != "1" {
+		t.Fatalf("GOMAXPROCS = %q", got)
+	}
+	if got := env["GOMEMLIMIT"]; got != "768MiB" {
+		t.Fatalf("GOMEMLIMIT = %q", got)
 	}
 }
 

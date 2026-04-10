@@ -10,7 +10,7 @@ export interface RolePresetItem {
   modelName?: string;
   systemPrompt?: string;
   executionMode?: string;
-  status?: number;
+  status?: number | string;
   sort?: number;
   createdAt?: string;
   updatedAt?: string;
@@ -29,13 +29,13 @@ export interface RolePresetListParams {
 
 /** 角色预设模板创建参数 */
 export interface RolePresetCreateParams {
-  projectCategory: string;
-  roleType: string;
+  projectCategory?: string;
+  roleType?: string;
   roleLevel?: string;
-  modelID: string;
+  modelID?: string;
   systemPrompt?: string;
   executionMode?: string;
-  status?: number;
+  status?: number | string;
   sort?: number;
 }
 
@@ -43,11 +43,11 @@ export interface RolePresetCreateParams {
 export interface RolePresetUpdateParams {
   id: string;
   projectCategory?: string;
-  roleType: string;
+  roleType?: string;
   roleLevel?: string;
-  modelID: string;
+  modelID?: string;
   systemPrompt?: string;
   executionMode?: string;
-  status?: number;
+  status?: number | string;
   sort?: number;
 }

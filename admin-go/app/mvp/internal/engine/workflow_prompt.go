@@ -61,13 +61,17 @@ func architectJSONFormatSuffix(projectCategory string) string {
 
 ===== 输出格式要求（必须遵守）=====
 
-当你准备好输出任务清单时，请使用以下 JSON 格式，每个模块一个独立代码块：
-{"tasks": [{"name": "任务名", "description": "详细描述", "role_level": "pro", "batch_no": 1, "affected_resources": ["path/file"], "depends_on": ["依赖的任务名"]}]}
-%s
-- 每个 JSON 块必须是完整的 {"tasks": [...]} 格式
-- 任务名称全局唯一，跨模块依赖用完整任务名引用
-- 禁止输出 <minimax:tool_call>、<invoke>、函数调用、命令执行、XML/HTML 标签或“我先查看目录”这类过程描述
-- 不要把“查看环境 / 读取目录 / 确认文件结构”当成独立任务；如果目录为空，直接按从零创建拆分可交付任务
+	当你准备好输出任务清单时，请使用以下 JSON 格式，每个模块一个独立代码块：
+	{"plan_meta":{"plan_id":"同一轮保持一致","declared_total":12,"chunk_index":1,"chunk_total":3,"is_final":false},"tasks": [{"name": "任务名", "description": "详细描述", "role_level": "pro", "batch_no": 1, "affected_resources": ["path/file"], "depends_on": ["依赖的任务名"]}]}
+	%s
+	- 每个 JSON 块必须是完整的 {"plan_meta": {...}, "tasks": [...]} 格式
+	- 同一轮输出中，plan_id 必须一致；declared_total 必须等于最终可执行任务总数
+	- 如果只有 1 个 JSON 块，也必须带 chunk_index=1、chunk_total=1、is_final=true
+	- 如果分多块输出，每个 JSON 块都要重复携带 plan_meta，并保证 chunk_index 从 1 开始递增
+	- 如果需要修正已输出的某一块，请重发相同 chunk_index 的完整 JSON 块；系统会以后发块覆盖前发块
+	- 任务名称全局唯一，跨模块依赖用完整任务名引用
+	- 禁止输出 <minimax:tool_call>、<invoke>、函数调用、命令执行、XML/HTML 标签或“我先查看目录”这类过程描述
+	- 不要把“查看环境 / 读取目录 / 确认文件结构”当成独立任务；如果目录为空，直接按从零创建拆分可交付任务
 - 如果输出被截断，系统会自动请求继续`, newProjectNote)
 }
 func buildCodingArchitectPrompt(projectName, projectDesc string) string {

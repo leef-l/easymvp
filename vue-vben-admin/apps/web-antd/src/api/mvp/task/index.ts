@@ -61,6 +61,6 @@ export async function getTaskTree(params?: TaskTreeParams) {
 }
 
 /** 批量编辑MVP任务表 */
-export function batchUpdateTask(data: { ids: string[]; status?: number }) {
+export function batchUpdateTask(data: { ids: string[]; status?: number | string }) {
   return requestClient.put(`${PREFIX}/batch-update`, data);
 }

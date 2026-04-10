@@ -20,6 +20,7 @@ const emit = defineEmits<{
 }>();
 
 const jsonValue = ref<any>(undefined);
+const editorMode = 'tree' as any;
 
 /** Parse JSON string to object, fallback to undefined */
 function parseJson(str: string): any {
@@ -59,7 +60,7 @@ function handleChange(val: any) {
   <JsonEditorVue
     :model-value="jsonValue"
     :main-menu-bar="true"
-    :mode="'tree'"
+    :mode="editorMode"
     :navigation-bar="false"
     :read-only="disabled"
     :style="{ height: `${height}px`, width: '100%' }"

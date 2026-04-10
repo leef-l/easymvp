@@ -69,6 +69,6 @@ export function downloadImportTemplateMessage() {
 }
 
 /** 批量编辑MVP消息表 */
-export function batchUpdateMessage(data: { ids: string[]; status?: number }) {
+export function batchUpdateMessage(data: { ids: string[]; status?: number | string }) {
   return requestClient.put(`${PREFIX}/batch-update`, data);
 }

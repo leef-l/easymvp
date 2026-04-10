@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { useVbenModal } from '@vben/common-ui';
-import { Descriptions, DescriptionsItem, Tag } from 'ant-design-vue';
-import { getTaskLogDetail } from '#/api/mvp/task_log';
 import type { TaskLogItem } from '#/api/mvp/task_log/types';
 
-const detail = ref<TaskLogItem | null>(null);
+import { ref } from 'vue';
+
+import { useVbenModal } from '@vben/common-ui';
+
+import { Descriptions, DescriptionsItem } from 'ant-design-vue';
+
+import { getTaskLogDetail } from '#/api/mvp/task_log';
+
+const detail = ref<null | TaskLogItem>(null);
 
 const [Modal, modalApi] = useVbenModal({
   fullscreenButton: false,

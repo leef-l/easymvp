@@ -1,27 +1,30 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
-import {
-  Card, Row, Col, Statistic, Table, Tag, Button, Space, Tabs, Progress,
-  Descriptions, Popconfirm, message, Empty, Spin, Alert, Select,
-} from 'ant-design-vue';
-import { useRoute, useRouter } from 'vue-router';
-import { getProjectList } from '#/api/mvp/project';
 import type { ProjectItem } from '#/api/mvp/project/types';
+
+import { computed, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+
 import {
-  getMetaObservationStats,
-  getMetaObservations,
+  Alert, Button, Card, Col, Descriptions, Empty, message, Popconfirm, Progress, Row,
+  Select, Space, Spin, Statistic, Table, Tabs, Tag,
+} from 'ant-design-vue';
+
+import { getProjectList } from '#/api/mvp/project';
+import {
+  applyMetaRecommendation,
+  type AssessmentData,
   getMetaAssessment,
   getMetaAssessmentHistory,
-  runMetaAssessment,
-  getMetaRecommendations,
-  applyMetaRecommendation,
-  rejectMetaRecommendation,
   getMetaLearning,
-  type ObservationStats,
-  type ObservationRecord,
-  type AssessmentData,
-  type TuneRecommendationItem,
+  getMetaObservations,
+  getMetaObservationStats,
+  getMetaRecommendations,
   type LearningRecordItem,
+  type ObservationRecord,
+  type ObservationStats,
+  rejectMetaRecommendation,
+  runMetaAssessment,
+  type TuneRecommendationItem,
 } from '#/api/mvp/workflow';
 
 const route = useRoute();
@@ -48,17 +51,18 @@ async function loadProjects() {
   }
 }
 
-function onSelectProject(val: string) {
-  selectedProjectID.value = val;
+function onSelectProject(val: unknown) {
+  const projectValue = val ? String(val) : '';
+  selectedProjectID.value = projectValue;
   // 同步到 URL，方便分享和刷新
-  router.replace({ query: { ...route.query, projectID: val } });
+  router.replace({ query: { ...route.query, projectID: projectValue } });
 }
 
 const loading = ref(false);
 const activeTab = ref('overview');
 
 // ==================== 数据 ====================
-const stats = ref<ObservationStats | null>(null);
+const stats = ref<null | ObservationStats>(null);
 const observations = ref<ObservationRecord[]>([]);
 const assessment = ref<AssessmentData | null>(null);
 const assessmentHistory = ref<AssessmentData[]>([]);
@@ -129,8 +133,8 @@ async function handleRunAssessment() {
     assessment.value = res.assessment;
     message.success('评估完成');
     loadAll();
-  } catch (e: any) {
-    message.error(e.message || '评估失败');
+  } catch (error: any) {
+    message.error(error.message || '评估失败');
   } finally {
     assessmentRunning.value = false;
   }
@@ -141,8 +145,8 @@ async function handleApply(id: string) {
     await applyMetaRecommendation(id);
     message.success('已应用');
     loadAll();
-  } catch (e: any) {
-    message.error(e.message || '应用失败');
+  } catch (error: any) {
+    message.error(error.message || '应用失败');
   }
 }
 
@@ -151,8 +155,8 @@ async function handleReject(id: string) {
     await rejectMetaRecommendation(id);
     message.success('已驳回');
     loadAll();
-  } catch (e: any) {
-    message.error(e.message || '驳回失败');
+  } catch (error: any) {
+    message.error(error.message || '驳回失败');
   }
 }
 
@@ -213,7 +217,7 @@ function statusColor(status: string) {
 }
 
 function pct(v: number | undefined) {
-  return v !== undefined ? `${(v * 100).toFixed(1)}%` : '-';
+  return v === undefined ? '-' : `${(v * 100).toFixed(1)}%`;
 }
 </script>
 
@@ -247,7 +251,7 @@ function pct(v: number | undefined) {
     </div>
 
     <Spin :spinning="loading">
-      <Tabs v-model:activeKey="activeTab">
+      <Tabs v-model:active-key="activeTab">
         <!-- ==================== 总览 ==================== -->
         <Tabs.TabPane key="overview" tab="总览">
           <Row :gutter="16" style="margin-bottom: 16px">
@@ -315,7 +319,7 @@ function pct(v: number | undefined) {
                 <Descriptions.Item label="人工干预率">{{ pct(assessment.humanOverrideRate) }}</Descriptions.Item>
                 <Descriptions.Item label="摘要" :span="3">{{ assessment.summary }}</Descriptions.Item>
               </Descriptions>
-              <div v-if="assessment.drifts && assessment.drifts.length" style="margin-top: 12px">
+              <div v-if="assessment.drifts && assessment.drifts.length > 0" style="margin-top: 12px">
                 <strong>参数偏差：</strong>
                 <Tag v-for="d in assessment.drifts" :key="d.parameter" color="orange" style="margin: 4px">
                   {{ d.parameter }}：{{ d.currentValue.toFixed(3) }} → {{ d.optimalValue.toFixed(3) }}
@@ -434,7 +438,7 @@ function pct(v: number | undefined) {
             </Descriptions>
             <div style="margin-top: 4px; color: #888; font-size: 12px">{{ item.summary }}</div>
           </Card>
-          <Empty v-if="!assessmentHistory.length" description="暂无评估历史" />
+          <Empty v-if="assessmentHistory.length === 0" description="暂无评估历史" />
         </Tabs.TabPane>
       </Tabs>
     </Spin>

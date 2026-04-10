@@ -9,9 +9,10 @@ export interface ProjectRoleItem {
   roleType: string;
   roleLevel?: string;
   modelID: string;
+  modelName?: string;
   systemPrompt?: string;
   executionMode?: string;
-  status?: number;
+  status?: number | string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -29,25 +30,25 @@ export interface ProjectRoleListParams {
 
 /** 项目角色配置表创建参数 */
 export interface ProjectRoleCreateParams {
-  projectID: string;
-  projectCategory: string;
-  roleType: string;
+  projectID?: string;
+  projectCategory?: string;
+  roleType?: string;
   roleLevel?: string;
-  modelID: string;
+  modelID?: string;
   systemPrompt?: string;
   executionMode?: string;
-  status?: number;
+  status?: number | string;
 }
 
 /** 项目角色配置表更新参数 */
 export interface ProjectRoleUpdateParams {
   id: string;
-  projectID: string;
+  projectID?: string;
   projectCategory?: string;
-  roleType: string;
+  roleType?: string;
   roleLevel?: string;
-  modelID: string;
+  modelID?: string;
   systemPrompt?: string;
   executionMode?: string;
-  status?: number;
+  status?: number | string;
 }

@@ -28,10 +28,10 @@ export interface MessageListParams {
 
 /** MVP消息表创建参数 */
 export interface MessageCreateParams {
-  conversationID: string;
-  role: string;
+  conversationID?: string;
+  role?: string;
   messageType?: string;
-  content: string;
+  content?: string;
   modelID?: string;
   tokenUsage?: string;
   status?: string;
@@ -40,10 +40,10 @@ export interface MessageCreateParams {
 /** MVP消息表更新参数 */
 export interface MessageUpdateParams {
   id: string;
-  conversationID: string;
-  role: string;
+  conversationID?: string;
+  role?: string;
   messageType?: string;
-  content: string;
+  content?: string;
   modelID?: string;
   tokenUsage?: string;
   status?: string;

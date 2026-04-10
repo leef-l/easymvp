@@ -228,6 +228,40 @@ type WorkflowRolePresetsRes struct {
 	List   []RolePresetItem `json:"list"`
 }
 
+// WorkflowRoleDefinitionsReq 获取角色定义列表请求
+type WorkflowRoleDefinitionsReq struct {
+	g.Meta `path:"/workflow/role-definitions" method:"get" tags:"项目流程" summary:"获取角色定义列表"`
+}
+
+// WorkflowSaveRoleDefinitionsReq 保存角色定义配置请求
+type WorkflowSaveRoleDefinitionsReq struct {
+	g.Meta `path:"/workflow/save-role-definitions" method:"post" tags:"项目流程" summary:"保存角色定义配置"`
+	List   []RoleDefinitionItem `json:"list" v:"required#角色定义不能为空"`
+}
+
+// WorkflowResetRoleDefinitionsReq 重置角色定义配置请求
+type WorkflowResetRoleDefinitionsReq struct {
+	g.Meta `path:"/workflow/reset-role-definitions" method:"post" tags:"项目流程" summary:"重置角色定义配置"`
+}
+
+// WorkflowRoleDefinitionsRes 获取角色定义列表响应
+type WorkflowRoleDefinitionsRes struct {
+	g.Meta `mime:"application/json"`
+	List   []RoleDefinitionItem `json:"list"`
+}
+
+// WorkflowSaveRoleDefinitionsRes 保存角色定义配置响应
+type WorkflowSaveRoleDefinitionsRes struct {
+	g.Meta  `mime:"application/json"`
+	Message string `json:"message"`
+}
+
+// WorkflowResetRoleDefinitionsRes 重置角色定义配置响应
+type WorkflowResetRoleDefinitionsRes struct {
+	g.Meta  `mime:"application/json"`
+	Message string `json:"message"`
+}
+
 // RolePresetItem 角色预设项
 type RolePresetItem struct {
 	ID            snowflake.JsonInt64 `json:"id"`
@@ -238,6 +272,18 @@ type RolePresetItem struct {
 	ExecutionMode string              `json:"executionMode"`
 	SystemPrompt  string              `json:"systemPrompt"`
 	IsDefault     bool                `json:"isDefault"`
+}
+
+// RoleDefinitionItem 角色定义项
+type RoleDefinitionItem struct {
+	RoleType            string   `json:"roleType"`
+	DisplayName         string   `json:"displayName"`
+	Color               string   `json:"color"`
+	Description         string   `json:"description"`
+	PreferredLevels     []string `json:"preferredLevels"`
+	DefaultSystemPrompt string   `json:"defaultSystemPrompt"`
+	AcceptanceJudge     bool     `json:"acceptanceJudge"`
+	Sort                int      `json:"sort"`
 }
 
 // SystemCheckReq 系统配置检测请求

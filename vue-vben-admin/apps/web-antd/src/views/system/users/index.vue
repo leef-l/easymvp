@@ -1,17 +1,20 @@
 <script setup lang="ts">
 import type { VbenFormProps } from '#/adapter/form';
 import type { VxeGridProps } from '#/adapter/vxe-table';
+import type { DeptItem } from '#/api/system/dept/types';
+import type { UsersItem } from '#/api/system/users/types';
 
-import { h, onMounted, ref } from 'vue';
+import { computed, h, onMounted, ref } from 'vue';
 
 import { Page, useVbenModal } from '@vben/common-ui';
+
 import { Button, Card, Input, message, Modal, Tag, Tree } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { getDeptTree } from '#/api/system/dept';
-import type { DeptItem } from '#/api/system/dept/types';
-import { getUsersList, deleteUsers, resetUsersPassword } from '#/api/system/users';
-import type { UsersItem } from '#/api/system/users/types';
+import { deleteUsers, getUsersList, resetUsersPassword } from '#/api/system/users';
+
+import { withTreeKeys } from '../tree-utils';
 import FormModal from './modules/form.vue';
 
 /** 标签颜色池 */
@@ -30,9 +33,9 @@ const statusMap: Record<number, string> = {
 };
 
 /** 状态颜色 */
-function getStatusColor(val: number): string {
+function getStatusColor(val?: number): string {
   const keys = [0, 1];
-  const idx = keys.indexOf(val);
+  const idx = val === undefined ? -1 : keys.indexOf(val);
   return TAG_COLORS[idx >= 0 ? idx % TAG_COLORS.length : 0] ?? 'default';
 }
 
@@ -41,6 +44,7 @@ const deptTree = ref<DeptItem[]>([]);
 const searchValue = ref('');
 const selectedDeptId = ref<string>('');
 const deptExpandedKeys = ref<string[]>([]);
+const deptTreeData = computed(() => withTreeKeys(deptTree.value));
 
 /** 递归收集所有节点 key */
 function collectDeptKeys(nodes: DeptItem[]): string[] {
@@ -72,8 +76,8 @@ function filterTreeNode(node: any): boolean {
 }
 
 /** 选择部门节点 */
-function handleDeptSelect(selectedKeys: string[]) {
-  selectedDeptId.value = selectedKeys[0] ?? '';
+function handleDeptSelect(selectedKeys: Array<number | string>) {
+  selectedDeptId.value = selectedKeys[0] ? String(selectedKeys[0]) : '';
   gridApi.reload();
 }
 
@@ -210,7 +214,7 @@ function handleResetPassword(row: UsersItem) {
     async onOk() {
       if (!newPassword) {
         message.warning('请输入新密码');
-        return Promise.reject();
+        throw undefined;
       }
       await resetUsersPassword({ id: row.id, password: newPassword });
       message.success('密码重置成功');
@@ -234,7 +238,7 @@ function handleResetPassword(row: UsersItem) {
           />
         </template>
         <Tree
-          :tree-data="deptTree"
+          :tree-data="deptTreeData"
           :field-names="{ title: 'title', key: 'id', children: 'children' }"
           :selected-keys="selectedDeptId ? [selectedDeptId] : []"
           v-model:expanded-keys="deptExpandedKeys"
@@ -258,7 +262,7 @@ function handleResetPassword(row: UsersItem) {
           </template>
           <template #status_cell="{ row }">
             <Tag :color="getStatusColor(row.status)">
-              {{ statusMap[row.status] || row.status }}
+              {{ row.status === undefined ? '-' : (statusMap[row.status] || row.status) }}
             </Tag>
           </template>
           <template #roleTitles_cell="{ row }">

@@ -98,6 +98,19 @@ func TestIsSuspiciousPathRejectsColonTitles(t *testing.T) {
 	}
 }
 
+func TestNormalizeRelativePathStripsTreePrefixAndInlineAnnotation(t *testing.T) {
+	t.Parallel()
+
+	input := "└── .gitignore         # 版本控制忽略规则"
+	got, ok := NormalizeRelativePath(input)
+	if !ok {
+		t.Fatalf("NormalizeRelativePath(%q) expected success", input)
+	}
+	if got != ".gitignore" {
+		t.Fatalf("NormalizeRelativePath(%q)=%q, want %q", input, got, ".gitignore")
+	}
+}
+
 func TestReadGitStatusTrimsQuotedUTF8Paths(t *testing.T) {
 	t.Parallel()
 

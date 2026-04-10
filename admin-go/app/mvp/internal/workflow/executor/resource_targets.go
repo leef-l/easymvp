@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"easymvp/app/mvp/internal/workflow/resourcepath"
 	"easymvp/utility/worktreeguard"
 )
 
@@ -69,12 +70,7 @@ func parseResourceTargets(jsonStr string) resourceTargets {
 }
 
 func looksLikeDirectoryResource(value string) bool {
-	value = strings.TrimSpace(strings.Trim(value, "`'\""))
-	if value == "" {
-		return false
-	}
-	value = strings.TrimSpace(strings.TrimPrefix(value, "-"))
-	return strings.HasSuffix(value, "/") || strings.HasSuffix(value, "\\")
+	return resourcepath.LooksLikeDirectoryResource(value)
 }
 
 func ensureDirectoryTargets(baseDir string, directories []string) error {

@@ -1,21 +1,22 @@
 <script setup lang="ts">
 import type { VbenFormProps } from '#/adapter/form';
 import type { VxeGridProps } from '#/adapter/vxe-table';
+import type { ConversationItem } from '#/api/mvp/conversation/types';
 
 import { ref } from 'vue';
+
 import { Page, useVbenModal } from '@vben/common-ui';
-import { Button, message, Modal, Tag } from 'ant-design-vue';
+
+import { Button, message, Modal } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getConversationList, deleteConversation, batchDeleteConversation, exportConversation, importConversation, downloadImportTemplateConversation, batchUpdateConversation } from '#/api/mvp/conversation';
-import type { ConversationItem } from '#/api/mvp/conversation/types';
+import { batchDeleteConversation, batchUpdateConversation, deleteConversation, downloadImportTemplateConversation, exportConversation, getConversationList, importConversation } from '#/api/mvp/conversation';
 import { getProjectList } from '#/api/mvp/project';
-import FormModal from './modules/form.vue';
+
+import { roleTypeOptions } from '../consts';
+import { loadRoleDefinitions, toRoleTypeOptions } from '../role-definitions';
 import DetailDrawer from './modules/detail-drawer.vue';
-
-/** 标签颜色池 */
-const TAG_COLORS = ['green', 'red', 'blue', 'orange', 'cyan', 'purple', 'geekblue', 'magenta'];
-
+import FormModal from './modules/form.vue';
 
 /** 表单弹窗 */
 const [FormModalComp, formModalApi] = useVbenModal({
@@ -31,6 +32,7 @@ const [DetailDrawerComp, detailDrawerApi] = useVbenModal({
 
 /** 项目选项 */
 const projectOptions = ref<{ label: string; value: string }[]>([]);
+const roleTypeOptionsRef = ref(roleTypeOptions);
 async function loadProjectOptions() {
   try {
     const res = await getProjectList({ pageNum: 1, pageSize: 200 } as any);
@@ -42,7 +44,12 @@ async function loadProjectOptions() {
     // ignore
   }
 }
-loadProjectOptions().catch((e) => console.warn('[conversation] loadProjectOptions 失败:', e));
+loadProjectOptions().catch((error) => console.warn('[conversation] loadProjectOptions 失败:', error));
+loadRoleDefinitions()
+  .then((definitions) => {
+    roleTypeOptionsRef.value = toRoleTypeOptions(definitions);
+  })
+  .catch(() => undefined);
 
 /** 搜索表单配置 */
 const formOptions: VbenFormProps = {
@@ -66,11 +73,7 @@ const formOptions: VbenFormProps = {
       componentProps: {
         placeholder: '请选择角色类型',
         allowClear: true,
-        options: [
-          { label: '架构师', value: 'architect' },
-          { label: '实施员', value: 'implementer' },
-          { label: '审���员', value: 'auditor' },
-        ],
+        options: roleTypeOptionsRef,
       },
       fieldName: 'roleType',
       label: '角色类型',
@@ -226,7 +229,7 @@ async function handleImport() {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = '.csv,.xlsx,.xls';
-  input.onchange = async () => {
+  input.addEventListener('change', async () => {
     const file = input.files?.[0];
     if (!file) { input.remove(); return; }
     const formData = new FormData();
@@ -240,8 +243,8 @@ async function handleImport() {
     } finally {
       input.remove();
     }
-  };
-  document.body.appendChild(input);
+  });
+  document.body.append(input);
   input.click();
 }
 

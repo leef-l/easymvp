@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 
 import { Page } from '@vben/common-ui';
+
 import {
   Alert,
   Button,
@@ -9,6 +10,7 @@ import {
   Form,
   FormItem,
   Input,
+  message,
   Modal,
   Select,
   Space,
@@ -16,13 +18,16 @@ import {
   Table,
   Tabs,
   Tag,
-  message,
 } from 'ant-design-vue';
 
 import {
   bindFeishuUser,
+  type BotMenuItem,
+  type ChatMenuItem,
   createChatMenu,
   deleteChatMenu,
+  type FeishuBindingItem,
+  type FeishuConfigItem,
   getBotMenu,
   getChatMenu,
   getFeishuBindings,
@@ -31,10 +36,6 @@ import {
   setBotMenu,
   testFeishuMessage,
   unbindFeishuUser,
-  type BotMenuItem,
-  type ChatMenuItem,
-  type FeishuBindingItem,
-  type FeishuConfigItem,
 } from '#/api/mvp/workflow';
 
 defineOptions({ name: 'MvpWorkflowFeishu' });
@@ -132,23 +133,25 @@ async function submitBinding() {
   }
 }
 
-function confirmUnbind(row: FeishuBindingItem) {
+function confirmUnbind(row: FeishuBindingItem | Record<string, any>) {
+  const binding = row as FeishuBindingItem;
   Modal.confirm({
     title: '确认解绑',
-    content: `确认解绑系统用户 ${row.userId} 与飞书用户 ${row.platformUserId} 吗？`,
+    content: `确认解绑系统用户 ${binding.userId} 与飞书用户 ${binding.platformUserId} 吗？`,
     okType: 'danger',
     async onOk() {
-      await unbindFeishuUser(row.id);
+      await unbindFeishuUser(binding.id);
       message.success('解绑成功');
       await loadBindings();
     },
   });
 }
 
-async function sendTest(row: FeishuBindingItem) {
+async function sendTest(row: FeishuBindingItem | Record<string, any>) {
+  const binding = row as FeishuBindingItem;
   await testFeishuMessage({
-    bindingId: row.id,
-    content: `EasyMVP 飞书测试消息：系统用户 ${row.userId} 绑定正常。`,
+    bindingId: binding.id,
+    content: `EasyMVP 飞书测试消息：系统用户 ${binding.userId} 绑定正常。`,
   });
   message.success('测试消息已发送');
 }
@@ -161,6 +164,10 @@ async function testConnection() {
   testing.value = true;
   try {
     const first = bindings.value[0];
+    if (!first) {
+      message.warning('请先绑定飞书用户再测试');
+      return;
+    }
     await testFeishuMessage({
       bindingId: first.id,
       content: `EasyMVP 连通测试：飞书配置正常，系统用户 ${first.userId} 绑定有效。`,
@@ -201,7 +208,7 @@ async function loadBotMenu() {
   menuLoading.value = true;
   try {
     const res = await getBotMenu();
-    menuItems.value = JSON.parse(JSON.stringify(res.menuItems ?? []));
+    menuItems.value = structuredClone(res.menuItems ?? []);
     menuIsDefault.value = res.isDefault ?? true;
     defaultMenuItems.value = res.defaultItems ?? [];
   } finally {
@@ -233,6 +240,7 @@ function addTopMenu() {
 
 function addSubMenu(parentIdx: number) {
   const parent = menuItems.value[parentIdx];
+  if (!parent) return;
   if (!parent.children) parent.children = [];
   if (parent.children.length >= 5) {
     message.warning('每个一级菜单最多支持 5 个子菜单');
@@ -246,7 +254,8 @@ function removeTopMenu(idx: number) {
 }
 
 function removeSubMenu(parentIdx: number, subIdx: number) {
-  menuItems.value[parentIdx].children?.splice(subIdx, 1);
+  const parent = menuItems.value[parentIdx];
+  parent?.children?.splice(subIdx, 1);
 }
 
 // 在 onMounted 中加载菜单（懒加载：切换到菜单 tab 时再加载）
@@ -294,8 +303,8 @@ async function loadChatMenu() {
   try {
     const res = await getChatMenu(chatID.value);
     chatMenuList.value = res.menuItems ?? [];
-  } catch (e: any) {
-    message.error(e?.message || '获取群菜单失败');
+  } catch (error: any) {
+    message.error(error?.message || '获取群菜单失败');
   } finally {
     chatMenuLoading.value = false;
   }
@@ -311,8 +320,8 @@ async function handleCreateChatMenu() {
     const res = await createChatMenu({ chatId: chatID.value });
     message.success(res.message || '群菜单创建成功');
     await loadChatMenu();
-  } catch (e: any) {
-    message.error(e?.message || '创建群菜单失败');
+  } catch (error: any) {
+    message.error(error?.message || '创建群菜单失败');
   } finally {
     chatMenuSaving.value = false;
   }
@@ -326,15 +335,15 @@ async function handleDeleteAllChatMenu() {
     await deleteChatMenu({ chatId: chatID.value, menuIds: ids });
     message.success('群菜单已清空');
     chatMenuList.value = [];
-  } catch (e: any) {
-    message.error(e?.message || '删除群菜单失败');
+  } catch (error: any) {
+    message.error(error?.message || '删除群菜单失败');
   } finally {
     chatMenuDeleting.value = false;
   }
 }
 
-function onTabChange(key: string) {
-  if (key === 'menu' && !menuTabLoaded.value) {
+function onTabChange(key: number | string) {
+  if (String(key) === 'menu' && !menuTabLoaded.value) {
     menuTabLoaded.value = true;
     loadBotMenu();
   }
@@ -457,12 +466,12 @@ const menuEventKeyDocs = [
               <div class="mt-4 space-y-2 text-sm">
                 <div class="font-semibold text-gray-700">配置步骤</div>
                 <div class="rounded bg-gray-100 p-3 font-mono text-xs leading-6 text-gray-700">
-                  1. 飞书开发者后台 → 选择你的应用<br>
-                  2. 左侧「事件订阅」<br>
-                  3. 添加事件：<br>
-                  &nbsp;&nbsp;&nbsp;→ 搜索 im.message.receive_v1 → 添加（必须）<br>
-                  &nbsp;&nbsp;&nbsp;→ 搜索 application.bot.menu_v6 → 添加（使用菜单功能时必须）<br>
-                  4. Webhook 模式：填写「请求地址」= 本页「回调地址」中的 URL<br>
+                  1. 飞书开发者后台 → 选择你的应用<br />
+                  2. 左侧「事件订阅」<br />
+                  3. 添加事件：<br />
+                  &nbsp;&nbsp;&nbsp;→ 搜索 im.message.receive_v1 → 添加（必须）<br />
+                  &nbsp;&nbsp;&nbsp;→ 搜索 application.bot.menu_v6 → 添加（使用菜单功能时必须）<br />
+                  4. Webhook 模式：填写「请求地址」= 本页「回调地址」中的 URL<br />
                   &nbsp;&nbsp;&nbsp;WebSocket 模式：选择「使用长连接接收事件」，无需填 URL
                 </div>
               </div>

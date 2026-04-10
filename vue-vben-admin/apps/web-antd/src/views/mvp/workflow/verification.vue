@@ -27,8 +27,8 @@ import {
   startVerification,
   type VerificationEvidenceItem,
   type VerificationIssueItem,
-  type VerificationStatusResult,
   verificationRepair,
+  type VerificationStatusResult,
 } from '#/api/mvp/workflow';
 
 const props = defineProps<{ projectId?: string }>();
@@ -63,8 +63,8 @@ const canRepair = computed(
     ),
 );
 
-function handleSelectionChange(keys: string[]) {
-  selectedIssueIDs.value = keys;
+function handleSelectionChange(keys: Array<number | string>) {
+  selectedIssueIDs.value = keys.map(String);
 }
 
 async function loadData() {
@@ -132,42 +132,55 @@ onUnmounted(() => {
 
 function statusColor(value?: string) {
   switch (value) {
-    case 'completed':
+    case 'completed': {
       return 'green';
-    case 'failed':
+    }
+    case 'failed': {
       return 'red';
-    case 'running':
+    }
+    case 'running': {
       return 'processing';
-    default:
+    }
+    default: {
       return 'default';
+    }
   }
 }
 
 function decisionColor(value?: string) {
   switch (value) {
-    case 'passed':
-      return 'green';
-    case 'failed':
+    case 'failed': {
       return 'red';
-    case 'manual_review':
+    }
+    case 'manual_review': {
       return 'orange';
-    default:
+    }
+    case 'passed': {
+      return 'green';
+    }
+    default: {
       return 'default';
+    }
   }
 }
 
 function severityColor(value: string) {
   switch (value) {
-    case 'blocker':
+    case 'blocker': {
       return 'red';
-    case 'error':
+    }
+    case 'error': {
       return 'volcano';
-    case 'warn':
-      return 'gold';
-    case 'info':
+    }
+    case 'info': {
       return 'blue';
-    default:
+    }
+    case 'warn': {
+      return 'gold';
+    }
+    default: {
       return 'default';
+    }
   }
 }
 
@@ -204,16 +217,17 @@ async function handleRepairSelected() {
   }
 }
 
-function handleIssueRepair(issue: VerificationIssueItem) {
-  if (!issue.domainTaskID) {
+function handleIssueRepair(issue: Record<string, any> | VerificationIssueItem) {
+  const currentIssue = issue as VerificationIssueItem;
+  if (!currentIssue.domainTaskID) {
     message.warning('该问题未关联任务，暂时无法直接返工');
     return;
   }
   Modal.confirm({
     title: '将验证问题转为返工',
-    content: `问题「${issue.title}」将作为返工原因回流到执行链路。`,
+    content: `问题「${currentIssue.title}」将作为返工原因回流到执行链路。`,
     onOk: async () => {
-      const res = await verificationRepair(projectID.value, [issue.id]);
+      const res = await verificationRepair(projectID.value, [currentIssue.id]);
       message.success(res.message || '已触发返工');
       await loadData();
     },

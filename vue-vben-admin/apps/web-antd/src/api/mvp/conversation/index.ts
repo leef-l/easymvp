@@ -69,6 +69,6 @@ export function downloadImportTemplateConversation() {
 }
 
 /** 批量编辑MVP对话表 */
-export function batchUpdateConversation(data: { ids: string[]; status?: number }) {
+export function batchUpdateConversation(data: { ids: string[]; status?: number | string }) {
   return requestClient.put(`${PREFIX}/batch-update`, data);
 }

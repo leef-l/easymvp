@@ -1,21 +1,29 @@
 <script setup lang="ts">
-import { h } from 'vue';
 import type { VbenFormProps } from '#/adapter/form';
 import type { VxeGridProps } from '#/adapter/vxe-table';
+import type { RolePresetItem } from '#/api/mvp/role_preset/types';
+
+import { h, ref } from 'vue';
 
 import { Page, useVbenModal } from '@vben/common-ui';
-import { Button, message, Modal, Tag, Tooltip } from 'ant-design-vue';
+
 import { QuestionCircleOutlined } from '@ant-design/icons-vue';
+import { Button, message, Modal, Tag, Tooltip } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getRolePresetList, deleteRolePreset, batchDeleteRolePreset, exportRolePreset, importRolePreset, downloadImportTemplateRolePreset, batchUpdateRolePreset } from '#/api/mvp/role_preset';
-import type { RolePresetItem } from '#/api/mvp/role_preset/types';
-import FormModal from './modules/form.vue';
-import DetailDrawer from './modules/detail-drawer.vue';
-import { roleTypeMap, roleLevelMap, executionModeMap } from '../consts';
+import { batchDeleteRolePreset, batchUpdateRolePreset, deleteRolePreset, downloadImportTemplateRolePreset, exportRolePreset, getRolePresetList, importRolePreset } from '#/api/mvp/role_preset';
 
-/** 标签颜色池 */
-const TAG_COLORS = ['green', 'red', 'blue', 'orange', 'cyan', 'purple', 'geekblue', 'magenta'];
+import { executionModeMap, roleLevelMap } from '../consts';
+import { loadRoleTypeMap } from '../role-definitions';
+import DetailDrawer from './modules/detail-drawer.vue';
+import FormModal from './modules/form.vue';
+
+const dynamicRoleTypeMap = ref<Record<string, { color: string; label: string; }>>({});
+loadRoleTypeMap()
+  .then((value) => {
+    dynamicRoleTypeMap.value = value;
+  })
+  .catch(() => undefined);
 
 /** 状态选项 */
 const statusOptions = [
@@ -29,8 +37,24 @@ const statusMap: Record<string, string> = {
   '1': '启用',
 };
 
+function getExecutionModeMeta(mode?: string) {
+  return mode ? executionModeMap[mode] : undefined;
+}
+
+function getRoleLevelMeta(level?: string) {
+  return level ? roleLevelMap[level] : undefined;
+}
+
+function getRoleTypeMeta(roleType?: string) {
+  return roleType ? dynamicRoleTypeMap.value[roleType] : undefined;
+}
+
+function getStatusLabel(status?: number | string) {
+  return status === undefined ? '-' : (statusMap[String(status)] ?? String(status));
+}
+
 /** 状态颜色 */
-function getStatusColor(val: string | number): string {
+function getStatusColor(val: number | string): string {
   const colorMap: Record<string, string> = { '0': 'red', '1': 'green' };
   return colorMap[String(val)] ?? 'default';
 }
@@ -211,7 +235,7 @@ async function handleImport() {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = '.csv,.xlsx,.xls';
-  input.onchange = async () => {
+  input.addEventListener('change', async () => {
     const file = input.files?.[0];
     if (!file) { input.remove(); return; }
     const formData = new FormData();
@@ -225,8 +249,8 @@ async function handleImport() {
     } finally {
       input.remove();
     }
-  };
-  document.body.appendChild(input);
+  });
+  document.body.append(input);
   input.click();
 }
 
@@ -279,26 +303,26 @@ function handleBatchUpdateStatus() {
         <Button v-auth="['mvp:role_preset:batch-update']" class="ml-2" @click="handleBatchUpdateStatus">批量修改状态</Button>
       </template>
       <template #roleType_cell="{ row }">
-        <Tag v-if="roleTypeMap[row.roleType]" :color="roleTypeMap[row.roleType].color">
-          {{ roleTypeMap[row.roleType].label }}
+        <Tag v-if="getRoleTypeMeta(row.roleType)" :color="getRoleTypeMeta(row.roleType)?.color">
+          {{ getRoleTypeMeta(row.roleType)?.label }}
         </Tag>
         <span v-else>{{ row.roleType || '-' }}</span>
       </template>
       <template #roleLevel_cell="{ row }">
-        <Tag v-if="roleLevelMap[row.roleLevel]" :color="roleLevelMap[row.roleLevel].color">
-          {{ roleLevelMap[row.roleLevel].label }}
+        <Tag v-if="getRoleLevelMeta(row.roleLevel)" :color="getRoleLevelMeta(row.roleLevel)?.color">
+          {{ getRoleLevelMeta(row.roleLevel)?.label }}
         </Tag>
         <span v-else>{{ row.roleLevel || '-' }}</span>
       </template>
       <template #executionMode_cell="{ row }">
-        <Tag v-if="executionModeMap[row.executionMode]" :color="executionModeMap[row.executionMode].color">
-          {{ executionModeMap[row.executionMode].label }}
+        <Tag v-if="getExecutionModeMeta(row.executionMode)" :color="getExecutionModeMeta(row.executionMode)?.color">
+          {{ getExecutionModeMeta(row.executionMode)?.label }}
         </Tag>
         <span v-else>{{ row.executionMode || 'Chat' }}</span>
       </template>
       <template #status_cell="{ row }">
-        <Tag :color="getStatusColor(row.status)">
-          {{ statusMap[row.status] || row.status }}
+        <Tag :color="getStatusColor(row.status ?? 'unknown')">
+          {{ getStatusLabel(row.status) }}
         </Tag>
       </template>
       <template #action="{ row }">

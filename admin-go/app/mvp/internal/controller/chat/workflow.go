@@ -13,8 +13,10 @@ import (
 	v1 "easymvp/app/mvp/api/mvp/v1"
 	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/middleware"
+	"easymvp/app/mvp/internal/workflow/event"
 	"easymvp/app/mvp/internal/workflow/orchestrator"
 	"easymvp/app/mvp/internal/workflow/repo"
+	"easymvp/app/mvp/internal/workflow/resourcepath"
 	"easymvp/app/mvp/internal/workspace"
 	"easymvp/utility/snowflake"
 )
@@ -58,16 +60,11 @@ func checkProjectOwnership(ctx context.Context, projectID int64) error {
 }
 
 func latestWorkflowRunForProject(ctx context.Context, projectID int64) (gdb.Record, error) {
-	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		OrderDesc("run_no").
-		OrderDesc("created_at").
-		One()
+	wfRun, err := repo.NewWorkflowRunRepo().GetLatestByProject(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("查询工作流运行失败: %w", err)
 	}
-	if wfRun.IsEmpty() {
+	if wfRun == nil || wfRun.IsEmpty() {
 		return nil, fmt.Errorf("项目 %d 没有工作流运行记录", projectID)
 	}
 	return wfRun, nil
@@ -475,7 +472,7 @@ func updateDomainTaskInternal(ctx context.Context, projectID int64, opts domainT
 		Where("t.id", taskID).
 		Where("wf.project_id", projectID).
 		WhereNull("t.deleted_at").
-		Fields("t.id, t.workflow_run_id, t.status").
+		Fields("t.id, t.workflow_run_id, t.status, t.affected_resources").
 		One()
 	if err != nil {
 		return nil, fmt.Errorf("查询任务失败: %w", err)
@@ -539,6 +536,13 @@ func updateDomainTaskInternal(ctx context.Context, projectID int64, opts domainT
 		changed = true
 	}
 	if opts.ReplaceAffectedResources {
+		currentResources, decodeErr := decodeAffectedResourcesJSON(task["affected_resources"].String())
+		if decodeErr != nil {
+			return nil, fmt.Errorf("解析任务现有 affected_resources 失败: %w", decodeErr)
+		}
+		if introduced := resourcepath.FindNewlyIntroducedGovernedRootFiles(currentResources, opts.AffectedResources); len(introduced) > 0 {
+			return nil, fmt.Errorf("affectedResources 不允许新增受治理仓库文件: %s", strings.Join(introduced, ", "))
+		}
 		resJSON, jsonErr := json.Marshal(opts.AffectedResources)
 		if jsonErr != nil {
 			return nil, fmt.Errorf("序列化 affectedResources 失败: %w", jsonErr)
@@ -599,31 +603,28 @@ func updateDomainTaskInternal(ctx context.Context, projectID int64, opts domainT
 	return res, nil
 }
 
-func recordWorkflowEvent(ctx context.Context, workflowRunID int64, entityType, eventType string, entityID, stageRunID *int64, payload map[string]interface{}) {
-	var payloadJSON string
-	if len(payload) > 0 {
-		if data, err := json.Marshal(payload); err == nil {
-			payloadJSON = string(data)
-		} else {
-			g.Log().Warningf(ctx, "[WorkflowEvent] payload 序列化失败: event=%s err=%v", eventType, err)
-		}
+func decodeAffectedResourcesJSON(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
 	}
 
-	data := g.Map{
-		"id":              int64(snowflake.Generate()),
-		"workflow_run_id": workflowRunID,
-		"entity_type":     entityType,
-		"event_type":      eventType,
-		"payload":         payloadJSON,
-		"created_at":      gtime.Now(),
+	var resources []string
+	if err := json.Unmarshal([]byte(raw), &resources); err != nil {
+		return nil, err
 	}
-	if entityID != nil {
-		data["entity_id"] = *entityID
-	}
-	if stageRunID != nil {
-		data["stage_run_id"] = *stageRunID
-	}
-	if _, err := g.DB().Model("mvp_workflow_event").Ctx(ctx).Insert(data); err != nil {
+	return resources, nil
+}
+
+func recordWorkflowEvent(ctx context.Context, workflowRunID int64, entityType, eventType string, entityID, stageRunID *int64, payload map[string]interface{}) {
+	if err := event.PersistRecord(ctx, event.Event{
+		WorkflowRunID: workflowRunID,
+		StageRunID:    stageRunID,
+		EntityType:    entityType,
+		EntityID:      entityID,
+		EventType:     eventType,
+		Payload:       payload,
+	}); err != nil {
 		g.Log().Warningf(ctx, "[WorkflowEvent] 写入失败: event=%s workflowRunID=%d err=%v", eventType, workflowRunID, err)
 	}
 }
@@ -1274,26 +1275,30 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 		projectID, len([]rune(aiReply)), convID, lastMsgID)
 
 	// 快速正则提取（毫秒级）
-	plan, fastErr := engine.GetParser().FastExtract(aiReply)
+	fastTasks, fastReport, fastErr := engine.GetParser().FastExtractWithReport(ctx, aiReply, projectCategory.String())
 	if fastErr != nil {
-		g.Log().Warningf(ctx, "[ParseTasks] FastExtract 错误: projectID=%d err=%v", projectID, fastErr)
+		g.Log().Warningf(ctx, "[ParseTasks] FastExtractWithReport 错误: projectID=%d err=%v", projectID, fastErr)
 	}
-	if plan != nil && len(plan.Tasks) > 0 {
-		tasks := engine.GetParser().NormalizeTasks(ctx, plan.Tasks, projectCategory.String())
-		g.Log().Infof(ctx, "[ParseTasks] FastExtract 成功: projectID=%d rawTasks=%d normalized=%d",
-			projectID, len(plan.Tasks), len(tasks))
-		if len(tasks) > 0 {
-			count, err := createBlueprints(ctx, projectID, convID, lastMsgID, tasks)
-			if err != nil {
-				g.Log().Errorf(ctx, "[ParseTasks] createBlueprints 失败: projectID=%d err=%v", projectID, err)
-				return &v1.WorkflowParseTasksRes{
-					HasTasks: false, TaskCount: 0,
-					Message: fmt.Sprintf("创建蓝图失败: %v", err),
-				}, nil
-			}
-			g.Log().Infof(ctx, "[ParseTasks] 创建蓝图成功: projectID=%d count=%d", projectID, count)
-			return &v1.WorkflowParseTasksRes{HasTasks: count > 0, TaskCount: count}, nil
+	if fastReport != nil && fastReport.HasBlockingIssue() {
+		engine.NotifyProjectArchitectConversation(ctx, projectID, fastReport.BuildContinuationPrompt())
+		return &v1.WorkflowParseTasksRes{
+			HasTasks:  false,
+			TaskCount: 0,
+			Message:   "任务清单分段/数量不一致，已自动要求架构师补齐缺失块并重发修正块",
+		}, nil
+	}
+	if len(fastTasks) > 0 {
+		g.Log().Infof(ctx, "[ParseTasks] FastExtract 成功: projectID=%d summary=%s", projectID, fastReport.Summary())
+		count, err := createBlueprints(ctx, projectID, convID, lastMsgID, fastTasks)
+		if err != nil {
+			g.Log().Errorf(ctx, "[ParseTasks] createBlueprints 失败: projectID=%d err=%v", projectID, err)
+			return &v1.WorkflowParseTasksRes{
+				HasTasks: false, TaskCount: 0,
+				Message: fmt.Sprintf("创建蓝图失败: %v", err),
+			}, nil
 		}
+		g.Log().Infof(ctx, "[ParseTasks] 创建蓝图成功: projectID=%d count=%d", projectID, count)
+		return &v1.WorkflowParseTasksRes{HasTasks: count > 0, TaskCount: count}, nil
 	}
 
 	g.Log().Infof(ctx, "[ParseTasks] FastExtract 无结果，启动异步 AI 提取: projectID=%d", projectID)
@@ -1307,7 +1312,12 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 			}
 		}()
 
-		tasks, err := engine.GetParser().AIExtractTasks(bgCtx, extractionInput, projectCategory.String())
+		tasks, report, err := engine.GetParser().ExtractAndNormalizeWithReport(bgCtx, extractionInput, projectCategory.String())
+		if report != nil && report.HasBlockingIssue() {
+			g.Log().Warningf(bgCtx, "[ParseTasks] AI 异步提取发现阻断问题: projectID=%d summary=%s", projectID, report.Summary())
+			engine.NotifyProjectArchitectConversation(bgCtx, projectID, report.BuildContinuationPrompt())
+			return
+		}
 		if err != nil || len(tasks) == 0 {
 			g.Log().Warningf(bgCtx, "[ParseTasks] AI 异步提取失败或无结果: projectID=%d err=%v", projectID, err)
 			engine.NotifyProjectArchitectConversation(bgCtx, projectID,
@@ -1315,8 +1325,7 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 			return
 		}
 
-		normalized := engine.GetParser().NormalizeTasks(bgCtx, tasks, projectCategory.String())
-		count, createErr := createBlueprints(bgCtx, projectID, convID, lastMsgID, normalized)
+		count, createErr := createBlueprints(bgCtx, projectID, convID, lastMsgID, tasks)
 		if createErr != nil {
 			g.Log().Errorf(bgCtx, "[ParseTasks] AI 提取后创建蓝图失败: projectID=%d err=%v", projectID, createErr)
 			return

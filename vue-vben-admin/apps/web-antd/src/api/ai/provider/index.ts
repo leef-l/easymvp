@@ -69,6 +69,6 @@ export function downloadImportTemplateProvider() {
 }
 
 /** 批量编辑AI供应商表 */
-export function batchUpdateProvider(data: { ids: string[]; status?: number }) {
+export function batchUpdateProvider(data: { ids: string[]; status?: number | string }) {
   return requestClient.put(`${PREFIX}/batch-update`, data);
 }

@@ -43,3 +43,32 @@ func TestNormalizeTasksKeepsDeliverableTask(t *testing.T) {
 		t.Fatalf("expected default role_type implementer, got %q", tasks[0].RoleType)
 	}
 }
+
+func TestNormalizeTasksWithReportPrefersLatestDuplicate(t *testing.T) {
+	parser := &TaskParser{}
+
+	tasks, report := parser.normalizeTasksWithReport(context.Background(), []ArchitectTask{
+		{
+			Name:        "初始化前端",
+			Description: "旧描述",
+			RoleLevel:   "pro",
+			BatchNo:     1,
+		},
+		{
+			Name:        "初始化前端",
+			Description: "新描述",
+			RoleLevel:   "pro",
+			BatchNo:     1,
+		},
+	}, "软件开发")
+
+	if len(tasks) != 1 {
+		t.Fatalf("expected one normalized task, got %d", len(tasks))
+	}
+	if tasks[0].Description != "新描述" {
+		t.Fatalf("expected latest duplicate to win, got %+v", tasks[0])
+	}
+	if len(report.DuplicateDropped) != 1 || report.DuplicateDropped[0] != "初始化前端" {
+		t.Fatalf("unexpected duplicate report: %+v", report)
+	}
+}

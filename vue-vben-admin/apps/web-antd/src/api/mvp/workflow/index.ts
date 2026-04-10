@@ -18,18 +18,18 @@ export function getCategories() {
 
 /** 创建项目（通过工作流，返回项目ID和对话ID） */
 export function createProject(data: {
-  name: string;
-  projectCategory?: string;
+  architectModelID?: string;
   categoryCode?: string;
   description: string;
-  workDir: string;
-  architectModelID?: string;
   engineVersion?: string;
+  name: string;
+  projectCategory?: string;
   selectedRoles?: { presetID: string }[];
+  workDir: string;
 }) {
   return requestClient.post<{
-    projectID: string;
     conversationID: string;
+    projectID: string;
     workflowRunID: string;
   }>(`${PREFIX}/create-project`, data);
 }
@@ -43,9 +43,9 @@ export interface ConfirmPlanResult {
   message?: string;
   rejectReason?: string;
   issues?: Array<{
+    message: string;
     severity: string;
     taskName?: string;
-    message: string;
   }>;
   errorCount?: number;
   warningCount?: number;
@@ -57,7 +57,11 @@ export function confirmPlan(projectID: string) {
 
 /** 手动解析架构师回复中的任务清单（托底机制） */
 export function parseTasks(projectID: string, dryRun = false) {
-  return requestClient.post<{ hasTasks: boolean; taskCount: number }>(
+  return requestClient.post<{
+    hasTasks: boolean;
+    message?: string;
+    taskCount: number;
+  }>(
     `${PREFIX}/parse-tasks`,
     { projectID, dryRun },
   );
@@ -65,8 +69,8 @@ export function parseTasks(projectID: string, dryRun = false) {
 
 /** 暂停项目 */
 export function pauseProject(data: {
-  projectID: string;
   pauseReason: string;
+  projectID: string;
 }) {
   return requestClient.post(`${PREFIX}/pause`, data);
 }
@@ -89,8 +93,8 @@ export function retryTask(data: { projectID: string; taskID: string }) {
 /** 跳过失败任务（防止批次永久阻塞） */
 export function skipTask(data: {
   projectID: string;
-  taskID: string;
   reason: string;
+  taskID: string;
 }) {
   return requestClient.post(`${PREFIX}/skip-task`, data);
 }
@@ -107,6 +111,17 @@ export interface RolePresetItem {
   isDefault: boolean;
 }
 
+export interface RoleDefinitionItem {
+  roleType: string;
+  displayName: string;
+  color: string;
+  description: string;
+  preferredLevels: string[];
+  defaultSystemPrompt: string;
+  acceptanceJudge: boolean;
+  sort: number;
+}
+
 /** 获取角色预设列表（可按项目分类过滤，优先 categoryCode） */
 export function getRolePresets(categoryCodeOrDisplayName?: string) {
   if (!categoryCodeOrDisplayName) {
@@ -121,6 +136,21 @@ export function getRolePresets(categoryCodeOrDisplayName?: string) {
     `${PREFIX}/role-presets`,
     { params },
   );
+}
+
+/** 获取角色定义列表 */
+export function getRoleDefinitions() {
+  return requestClient.get<{ list: RoleDefinitionItem[] }>(`${PREFIX}/role-definitions`);
+}
+
+/** 保存角色定义配置 */
+export function saveRoleDefinitions(list: RoleDefinitionItem[]) {
+  return requestClient.post<{ message: string }>(`${PREFIX}/save-role-definitions`, { list });
+}
+
+/** 清空自定义角色定义配置，回退系统默认 */
+export function resetRoleDefinitions() {
+  return requestClient.post<{ message: string }>(`${PREFIX}/reset-role-definitions`);
 }
 
 /** 项目状态响应 */
@@ -160,7 +190,7 @@ export interface SystemCheckItem {
 
 /** 获取系统配置检测结果 */
 export function getSystemCheck() {
-  return requestClient.get<{ items: SystemCheckItem[]; allPass: boolean }>(
+  return requestClient.get<{ allPass: boolean; items: SystemCheckItem[]; }>(
     `${PREFIX}/system-check`,
   );
 }
@@ -236,10 +266,10 @@ export interface ReworkRoundInfo {
 /** 获取返工阶段状态 */
 export function getReworkStatus(projectID: string) {
   return requestClient.get<{
-    hasRework: boolean;
-    reworkRounds: number;
     currentStage?: ReworkStageInfo;
+    hasRework: boolean;
     history: ReworkRoundInfo[];
+    reworkRounds: number;
   }>(`${PREFIX}/rework-status`, { params: { projectID } });
 }
 
@@ -291,14 +321,14 @@ export interface ReviewIssueItem {
 /** 获取审核状态 */
 export function getReviewStatus(projectID: string) {
   return requestClient.get<{
+    blueprintCount: number;
+    errorCount: number;
     planVersionID: string;
     reviewStatus: string;
     stageRunID: string;
     stageStatus: string;
     stageTasks: ReviewStageTask[];
-    errorCount: number;
     warningCount: number;
-    blueprintCount: number;
   }>(`${PREFIX}/review-status`, { params: { projectID } });
 }
 
@@ -701,10 +731,10 @@ export interface VerificationStatusResult {
 /** 启动验证 */
 export function startVerification(projectID: string, reason?: string) {
   return requestClient.post<{
+    message?: string;
+    status: string;
     verificationRunID: string;
     workflowRunID: string;
-    status: string;
-    message?: string;
   }>(`${PREFIX}/verification-start`, { projectID, reason });
 }
 
@@ -830,7 +860,7 @@ export function rejectDecision(projectID: string, decisionID: string) {
 
 /** 查询项目待处理人工节点 + 关联决策动作 */
 export function getAutonomyCheckpoints(projectID: string) {
-  return requestClient.get<{ checkpoints: AutonomyCheckpointItem[]; actions: AutonomyActionItem[] }>(
+  return requestClient.get<{ actions: AutonomyActionItem[]; checkpoints: AutonomyCheckpointItem[]; }>(
     `${PREFIX}/autonomy-checkpoints`,
     { params: { projectID } },
   );
@@ -941,9 +971,9 @@ export function getFeishuBindings() {
 }
 
 export function bindFeishuUser(data: {
-  userId: string;
-  platformUserId: string;
   platformName?: string;
+  platformUserId: string;
+  userId: string;
 }) {
   return requestClient.post<{ id: string }>(`${PREFIX}/bind-feishu-user`, data);
 }
@@ -1133,9 +1163,9 @@ export function getSituation(workflowRunID: string) {
 
 /** 查询态势快照历史 */
 export function getSituationHistory(params: {
+  limit?: number;
   projectID: string;
   workflowRunID?: string;
-  limit?: number;
 }) {
   return requestClient.get<{ snapshots: SituationSnapshot[] }>(
     `${PREFIX}/situation-history`,
@@ -1171,7 +1201,7 @@ export function getObjective(projectID: string) {
 }
 
 /** 保存项目目标约束 */
-export function saveObjective(data: { projectID: string } & Partial<ObjectiveData>) {
+export function saveObjective(data: Partial<ObjectiveData> & { projectID: string }) {
   return requestClient.post(`${PREFIX}/save-objective`, data);
 }
 
@@ -1337,7 +1367,7 @@ export function getTelegramConfig() {
   return requestClient.get<{ config: TelegramConfigItem }>(`${PREFIX}/telegram-config`);
 }
 
-export function saveTelegramConfig(data: { enabled: number; botToken: string }) {
+export function saveTelegramConfig(data: { botToken: string; enabled: number; }) {
   return requestClient.post(`${PREFIX}/save-telegram-config`, data);
 }
 
@@ -1346,9 +1376,9 @@ export function getTelegramBindings() {
 }
 
 export function bindTelegramUser(data: {
-  userId: string;
-  platformUserId: string;
   platformName?: string;
+  platformUserId: string;
+  userId: string;
 }) {
   return requestClient.post<{ id: string }>(`${PREFIX}/bind-telegram-user`, data);
 }
@@ -1362,5 +1392,5 @@ export function testTelegramMessage(data: { bindingId: string; content?: string 
 }
 
 export function setTelegramCommands(data: { commands?: TelegramCommandItem[]; useDefault?: boolean }) {
-  return requestClient.post<{ message: string; commands: TelegramCommandItem[] }>(`${PREFIX}/telegram-set-commands`, data);
+  return requestClient.post<{ commands: TelegramCommandItem[]; message: string; }>(`${PREFIX}/telegram-set-commands`, data);
 }

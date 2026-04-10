@@ -13,7 +13,9 @@ import (
 
 	"easymvp/app/mvp/internal/consts"
 	"easymvp/app/mvp/internal/engine"
+	"easymvp/app/mvp/internal/workflow/qualitygate"
 	"easymvp/app/mvp/internal/workflow/repo"
+	"easymvp/app/mvp/internal/workflow/resourcepath"
 	"easymvp/utility/snowflake"
 )
 
@@ -155,6 +157,8 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 	resolvedRoleLevels := make(map[string]string)
 
 	batchResources := make(map[int]map[string]string)
+	requiresBrowserPlan := false
+	hasBrowserPlan := false
 
 	for _, bp := range blueprints {
 		name := bp["name"].String()
@@ -184,6 +188,19 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 					"affected_resources 格式非法: "+err.Error())
 				result.HasErrors = true
 			}
+		}
+		if family == engine.CategoryFamilyCoding {
+			for _, resource := range resourcepath.FindCodingDirectoryPlaceholders(resources) {
+				s.createIssue(ctx, workflowRunID, stageRunID, planVersionID, bpID, "error", "directory_resource_placeholder", "precheck", name,
+					fmt.Sprintf("affected_resources 必须写明确文件路径，不能使用目录占位: %s", resource))
+				result.HasErrors = true
+			}
+		}
+		if qualitygate.BlueprintNeedsBrowserVerification(name, desc, resources) {
+			requiresBrowserPlan = true
+		}
+		if qualitygate.BlueprintProvidesBrowserVerification(name, desc, resources) {
+			hasBrowserPlan = true
 		}
 
 		// 编码类项目允许创建新文件；这里只做路径格式校验，不再把“不存在”当成阻塞问题。
@@ -242,6 +259,16 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 			}
 		}
 	}
+	signals := qualitygate.DetectProjectSignals(workDir, string(family), project["category_code"].String())
+	if requiresBrowserPlan {
+		signals.HasFrontendApp = true
+	}
+	standard := qualitygate.ResolveVerificationStandard(signals)
+	if shouldWarnMissingBrowserVerificationPlan(standard, hasBrowserPlan) {
+		s.createIssue(ctx, workflowRunID, stageRunID, planVersionID, 0, "warning", "missing_browser_verification_plan", "precheck", "",
+			"方案包含前端/客户端关键交互，但未规划浏览器级或端到端验证任务。生产级交付必须在 review 阶段明确关键用户路径验证任务。")
+	}
+	s.warnMissingStandardProjectRoles(ctx, workflowRunID, stageRunID, planVersionID, projectID, standard)
 
 	// 完成 stage_task
 	status := "completed"
@@ -255,6 +282,22 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 
 	g.Log().Infof(ctx, "[ReviewStage] Precheck done hasErrors=%v blueprintCount=%d", result.HasErrors, len(blueprints))
 	return result, nil
+}
+
+func shouldWarnMissingBrowserVerificationPlan(standard qualitygate.VerificationStandard, hasBrowserPlan bool) bool {
+	return standard.RequireBrowserPlan && !hasBrowserPlan
+}
+
+func (s *Service) warnMissingStandardProjectRoles(ctx context.Context, workflowRunID, stageRunID, planVersionID, projectID int64, standard qualitygate.VerificationStandard) {
+	for _, requirement := range standard.RequiredProjectRoles {
+		if !requirement.Blocking {
+			continue
+		}
+		if _, err := engine.ResolveProjectRoleByLevel(ctx, projectID, requirement.RoleType, requirement.RoleLevel); err != nil {
+			s.createIssue(ctx, workflowRunID, stageRunID, planVersionID, 0, "warning", "missing_standard_project_role", "precheck", requirement.RoleType,
+				fmt.Sprintf("当前标准 %s 要求项目具备 %s，但目前无法解析该角色：%v", standard.DisplayName, requirement.ExpectedRoleRef(), err))
+		}
+	}
 }
 
 // runAuditorReview 审计员 AI 审核。

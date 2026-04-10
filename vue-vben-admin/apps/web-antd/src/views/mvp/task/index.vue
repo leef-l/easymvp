@@ -1,14 +1,25 @@
 <script setup lang="ts">
-import { h, ref, computed, onMounted, onUnmounted } from 'vue';
 import type { VxeGridProps } from '#/adapter/vxe-table';
+import type { TaskItem } from '#/api/mvp/task/types';
+
+import { computed, h, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import dayjs from 'dayjs';
 
 import { useVbenModal } from '@vben/common-ui';
+
+import {
+  ArrowLeftOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  LoadingOutlined,
+  ReloadOutlined,
+  UnorderedListOutlined,
+} from '@ant-design/icons-vue';
 import {
   Button,
   Card,
   Col,
+  Input,
   message,
   Progress,
   Row,
@@ -16,22 +27,15 @@ import {
   SelectOption,
   Statistic,
   Tag,
-  Input,
 } from 'ant-design-vue';
-import {
-  ArrowLeftOutlined,
-  ReloadOutlined,
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-  LoadingOutlined,
-  UnorderedListOutlined,
-} from '@ant-design/icons-vue';
+import dayjs from 'dayjs';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getTaskTree, getTaskDetail } from '#/api/mvp/task';
 import { getProjectList } from '#/api/mvp/project';
+import { getTaskTree } from '#/api/mvp/task';
 import { getProjectStatus, retryTask, skipTask } from '#/api/mvp/workflow';
-import type { TaskItem } from '#/api/mvp/task/types';
+
+import { loadRoleTypeMap } from '../role-definitions';
 import DetailDrawer from './modules/detail-drawer.vue';
 
 // ===== 路由 =====
@@ -49,12 +53,6 @@ const STATUS_MAP: Record<string, { color: string; text: string }> = {
   bug_found: { color: 'error', text: '发现Bug' },
   bug_dispatched: { color: 'purple', text: '修复中' },
   submit_error: { color: 'error', text: '提交错误' },
-};
-
-const ROLE_MAP: Record<string, { color: string; text: string }> = {
-  architect: { color: 'purple', text: '架构师' },
-  implementer: { color: 'blue', text: '实施员' },
-  auditor: { color: 'orange', text: '审计员' },
 };
 
 const LEVEL_MAP: Record<string, { color: string; text: string }> = {
@@ -93,6 +91,7 @@ const projectStatus = ref<ProjectStatusData>({
   stalledTaskCount: 0,
 });
 const statusLoading = ref(false);
+const dynamicRoleTypeMap = ref<Record<string, { color: string; label: string; }>>({});
 
 /** 计算进度百分比 */
 const progressPercent = computed(() => {
@@ -123,9 +122,10 @@ function formatDateTime(value?: string) {
 }
 
 // 自动刷新定时器
-let statusTimer: ReturnType<typeof setInterval> | null = null;
+let statusTimer: null | ReturnType<typeof setInterval> = null;
 
 onMounted(() => {
+  void loadRoleTypeMeta();
   loadProjectStatus();
   loadProjectOptions();
   statusTimer = setInterval(loadProjectStatus, 5000);
@@ -152,6 +152,14 @@ async function loadProjectOptions() {
     }));
   } catch {
     // 静默
+  }
+}
+
+async function loadRoleTypeMeta() {
+  try {
+    dynamicRoleTypeMap.value = await loadRoleTypeMap();
+  } catch {
+    dynamicRoleTypeMap.value = {};
   }
 }
 
@@ -182,8 +190,8 @@ const gridOptions: VxeGridProps<TaskItem> = {
       width: 100,
       slots: {
         default: ({ row }: { row: TaskItem }) => {
-          const m = ROLE_MAP[row.roleType] ?? { color: 'default', text: row.roleType };
-          return [h(Tag, { color: m.color }, () => m.text)];
+          const m = dynamicRoleTypeMap.value[row.roleType] ?? { color: 'default', label: row.roleType };
+          return [h(Tag, { color: m.color }, () => m.label)];
         },
       },
     },
@@ -217,8 +225,8 @@ const gridOptions: VxeGridProps<TaskItem> = {
             nodes.push(
               h(
                 Tag,
-                { color: row.stalled ? 'error' : row.isActuallyWorking ? 'success' : 'warning' },
-                () => (row.stalled ? '疑似卡住' : row.isActuallyWorking ? '活跃中' : '待判定'),
+                { color: row.stalled ? 'error' : (row.isActuallyWorking ? 'success' : 'warning') },
+                () => (row.stalled ? '疑似卡住' : (row.isActuallyWorking ? '活跃中' : '待判定')),
               ),
             );
           }
@@ -369,7 +377,7 @@ async function refreshBatchOptions() {
       }
     }
     collectBatch(list ?? []);
-    batchOptions.value = [...batchSet].sort((a, b) => a - b);
+    batchOptions.value = [...batchSet].toSorted((a, b) => a - b);
   } catch {
     // 忽略
   }
@@ -543,8 +551,8 @@ onMounted(() => {
           style="width: 120px"
           @change="handleSearch"
         >
-          <SelectOption v-for="(v, k) in ROLE_MAP" :key="k" :value="k">
-            <Tag :color="v.color" class="mr-1" />{{ v.text }}
+          <SelectOption v-for="(v, k) in dynamicRoleTypeMap" :key="k" :value="k">
+            <Tag :color="v.color" class="mr-1" />{{ v.label }}
           </SelectOption>
         </Select>
         <Button type="primary" @click="handleSearch">查询</Button>

@@ -105,7 +105,7 @@ export class ModalApi {
     }
   }
 
-  getData<T extends object = Record<string, any>>() {
+  getData<T = Record<string, any>>() {
     return (this.sharedData?.payload ?? {}) as T;
   }
 

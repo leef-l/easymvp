@@ -11,10 +11,12 @@ import {
 } from '#/api/mvp/project_role';
 import { getProjectList } from '#/api/mvp/project';
 import { getModelList } from '#/api/ai/model';
-import { roleTypeOptions, roleLevelOptions, executionModeOptions } from '../../consts';
+import { roleLevelOptions, executionModeOptions } from '../../consts';
+import { loadRoleDefinitions, toRoleTypeOptions } from '../../role-definitions';
 
 const projectIDOptions = ref<{ label: string; value: string }[]>([]);
 const modelIDOptions = ref<{ label: string; value: string }[]>([]);
+const roleTypeOptionsRef = ref<{ label: string; value: string }[]>([]);
 /** 渲染带 Tooltip 的表单 label */
 function tooltipLabel(label: string, tip: string) {
   return () => h('span', {}, [
@@ -45,7 +47,7 @@ const [Form, formApi] = useVbenForm({
       fieldName: 'roleType',
       label: '角色类型',
       rules: 'selectRequired',
-      componentProps: { options: roleTypeOptions, placeholder: '请选择角色类型', allowClear: true, class: 'w-full' },
+      componentProps: { options: roleTypeOptionsRef, placeholder: '请选择角色类型', allowClear: true, class: 'w-full' },
     },
     {
       component: 'Select',
@@ -120,6 +122,7 @@ const [Modal, modalApi] = useVbenModal({
       } catch {
         // ignore
       }
+      roleTypeOptionsRef.value = toRoleTypeOptions(await loadRoleDefinitions());
       // 加载AI模型选项
       try {
         const modelRes = await getModelList({ pageNum: 1, pageSize: 1000 });

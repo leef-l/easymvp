@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { useVbenModal } from '@vben/common-ui';
-import { Descriptions, DescriptionsItem, Tag } from 'ant-design-vue';
-import { getModelDetail } from '#/api/ai/model';
 import type { ModelItem } from '#/api/ai/model/types';
+
+import { ref } from 'vue';
+
+import { useVbenModal } from '@vben/common-ui';
+
+import { Descriptions, DescriptionsItem, Tag } from 'ant-design-vue';
+
+import { getModelDetail } from '#/api/ai/model';
+import { roleTypeMap as capabilityMap } from '#/views/mvp/consts';
 
 /** 是否支持流式输出映射 */
 const supportsStreamMap: Record<number, string> = {
@@ -11,13 +16,25 @@ const supportsStreamMap: Record<number, string> = {
   1: '是',
 };
 
-import { roleTypeMap as capabilityMap } from '#/views/mvp/consts';
-
 /** 状态映射 */
 const statusMap: Record<number, string> = {
   0: '禁用',
   1: '启用',
 };
+
+function getCapabilityMeta(capability?: string) {
+  return capability ? capabilityMap[capability] : undefined;
+}
+
+function getStatusLabel(status?: number) {
+  return status === undefined ? '-' : (statusMap[status] ?? status);
+}
+
+function getSupportsStreamLabel(supportsStream?: number) {
+  return supportsStream === undefined
+    ? '-'
+    : (supportsStreamMap[supportsStream] ?? supportsStream);
+}
 
 const detail = ref<ModelItem | null>(null);
 
@@ -51,19 +68,19 @@ const [Modal, modalApi] = useVbenModal({
       <DescriptionsItem label="模型显示名称">{{ detail.name || '-' }}</DescriptionsItem>
       <DescriptionsItem label="模型代码">{{ detail.modelCode || '-' }}</DescriptionsItem>
       <DescriptionsItem label="项目角色">
-        <Tag v-if="capabilityMap[detail.capability]" :color="capabilityMap[detail.capability].color">
-          {{ capabilityMap[detail.capability].label }}
+        <Tag v-if="getCapabilityMeta(detail.capability)" :color="getCapabilityMeta(detail.capability)?.color">
+          {{ getCapabilityMeta(detail.capability)?.label }}
         </Tag>
         <span v-else>{{ detail.capability || '-' }}</span>
       </DescriptionsItem>
       <DescriptionsItem label="最大输出token">{{ detail.maxTokens || '-' }}</DescriptionsItem>
       <DescriptionsItem label="上下文窗口大小">{{ detail.contextWindow || '-' }}</DescriptionsItem>
       <DescriptionsItem label="是否支持流式输出">
-        <Tag>{{ supportsStreamMap[detail.supportsStream] || detail.supportsStream }}</Tag>
+        <Tag>{{ getSupportsStreamLabel(detail.supportsStream) }}</Tag>
       </DescriptionsItem>
       <DescriptionsItem label="默认角色提示词">{{ detail.rolePrompt || '-' }}</DescriptionsItem>
       <DescriptionsItem label="状态">
-        <Tag>{{ statusMap[detail.status] || detail.status }}</Tag>
+        <Tag>{{ getStatusLabel(detail.status) }}</Tag>
       </DescriptionsItem>
       <DescriptionsItem label="排序">{{ detail.sort || '-' }}</DescriptionsItem>
       <DescriptionsItem label="创建时间">{{ detail.createdAt || '-' }}</DescriptionsItem>

@@ -397,6 +397,9 @@ func parseXReadGroupResult(result interface{ Interface() any }) ([]streamMessage
 	if result == nil {
 		return nil, nil
 	}
+	if messages, ok := parseXReadGroupMapResult(result.Interface()); ok {
+		return messages, nil
+	}
 	streams := toAnySlice(result.Interface())
 	if len(streams) == 0 {
 		return nil, nil
@@ -404,6 +407,10 @@ func parseXReadGroupResult(result interface{ Interface() any }) ([]streamMessage
 
 	messages := make([]streamMessage, 0, len(streams))
 	for _, streamItem := range streams {
+		if streamMessages, ok := parseStreamMessagesFromStruct(streamItem); ok {
+			messages = append(messages, streamMessages...)
+			continue
+		}
 		pair := toAnySlice(streamItem)
 		if len(pair) < 2 {
 			continue
@@ -423,6 +430,20 @@ func parseXClaimResult(result interface{ Interface() any }) ([]streamMessage, er
 	if result == nil {
 		return nil, nil
 	}
+	if stringItems, ok := toStringSlice(result.Interface()); ok {
+		messages := make([]streamMessage, 0, len(stringItems))
+		for _, item := range stringItems {
+			entry, ok := parseJSONArrayEntry(item)
+			if !ok {
+				continue
+			}
+			msg, ok := parseStreamMessageEntry(entry)
+			if ok {
+				messages = append(messages, msg)
+			}
+		}
+		return messages, nil
+	}
 	items := toAnySlice(result.Interface())
 	if len(items) == 0 {
 		return nil, nil
@@ -438,6 +459,9 @@ func parseXClaimResult(result interface{ Interface() any }) ([]streamMessage, er
 }
 
 func parseStreamMessageEntry(entry any) (streamMessage, bool) {
+	if msg, ok := parseStreamMessageStruct(entry); ok {
+		return msg, true
+	}
 	values := toAnySlice(entry)
 	if len(values) < 2 {
 		return streamMessage{}, false
@@ -457,24 +481,34 @@ func parsePendingEntries(result interface{ Interface() any }) []pendingEntry {
 	if result == nil {
 		return nil
 	}
+	if stringItems, ok := toStringSlice(result.Interface()); ok {
+		entries := make([]pendingEntry, 0, len(stringItems))
+		for _, item := range stringItems {
+			entry, ok := parseJSONArrayEntry(item)
+			if !ok {
+				continue
+			}
+			pending, ok := parsePendingEntrySlice(entry)
+			if ok {
+				entries = append(entries, pending)
+			}
+		}
+		return entries
+	}
 	items := toAnySlice(result.Interface())
 	if len(items) == 0 {
 		return nil
 	}
 	entries := make([]pendingEntry, 0, len(items))
 	for _, item := range items {
-		entry := toAnySlice(item)
-		if len(entry) < 3 {
+		if entry, ok := parsePendingEntryStruct(item); ok {
+			entries = append(entries, entry)
 			continue
 		}
-		id := strings.TrimSpace(toString(entry[0]))
-		if id == "" {
-			continue
+		entry, ok := parsePendingEntrySlice(toAnySlice(item))
+		if ok {
+			entries = append(entries, entry)
 		}
-		entries = append(entries, pendingEntry{
-			ID:     id,
-			IdleMS: parseInt64(toString(entry[2])),
-		})
 	}
 	return entries
 }
@@ -486,12 +520,35 @@ type groupInfo struct {
 }
 
 func parseGroupInfo(result interface{ Interface() any }, consumerGroup string) (groupInfo, bool) {
+	if stringItems, ok := toStringSlice(result.Interface()); ok {
+		for _, item := range stringItems {
+			kv, ok := parseBracketMapString(item)
+			if !ok {
+				continue
+			}
+			if strings.TrimSpace(kv["name"]) != strings.TrimSpace(consumerGroup) {
+				continue
+			}
+
+			info := groupInfo{}
+			info.Pending = parseAnyInt64(kv["pending"])
+			if raw, ok := kv["lag"]; ok {
+				info.Lag = parseAnyInt64(raw)
+				info.LagKnown = true
+			}
+			return info, true
+		}
+	}
+
 	items := toAnySlice(result.Interface())
 	if len(items) == 0 {
 		return groupInfo{}, false
 	}
 
 	for _, item := range items {
+		if info, ok := parseGroupInfoStruct(item, consumerGroup); ok {
+			return info, true
+		}
 		kv, ok := toStringMapFromPairs(item)
 		if !ok {
 			continue
@@ -549,6 +606,172 @@ func toAnySlice(value any) []any {
 	}
 }
 
+func parseStreamMessagesFromStruct(value any) ([]streamMessage, bool) {
+	streamName, ok := structFieldValue(value, "Stream")
+	if !ok || strings.TrimSpace(toString(streamName)) == "" {
+		return nil, false
+	}
+	rawMessages, ok := structFieldValue(value, "Messages")
+	if !ok {
+		return nil, false
+	}
+	items := toAnySlice(rawMessages)
+	if len(items) == 0 {
+		return nil, true
+	}
+	messages := make([]streamMessage, 0, len(items))
+	for _, item := range items {
+		msg, ok := parseStreamMessageEntry(item)
+		if ok {
+			messages = append(messages, msg)
+		}
+	}
+	return messages, true
+}
+
+func parseXReadGroupMapResult(value any) ([]streamMessage, bool) {
+	rv := reflect.ValueOf(value)
+	if !rv.IsValid() {
+		return nil, false
+	}
+	for rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return nil, false
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Map {
+		return nil, false
+	}
+
+	messages := make([]streamMessage, 0, rv.Len())
+	iter := rv.MapRange()
+	for iter.Next() {
+		entryItems := toAnySlice(iter.Value().Interface())
+		for _, entry := range entryItems {
+			msg, ok := parseStreamMessageEntry(entry)
+			if ok {
+				messages = append(messages, msg)
+			}
+		}
+	}
+	return messages, true
+}
+
+func parseStreamMessageStruct(value any) (streamMessage, bool) {
+	rawID, ok := structFieldValue(value, "ID")
+	if !ok {
+		return streamMessage{}, false
+	}
+	messageID := strings.TrimSpace(toString(rawID))
+	if messageID == "" {
+		return streamMessage{}, false
+	}
+	rawValues, ok := structFieldValue(value, "Values")
+	if !ok {
+		return streamMessage{}, false
+	}
+	fields, ok := toStringMap(rawValues)
+	if !ok {
+		return streamMessage{}, false
+	}
+	return streamMessage{ID: messageID, Fields: fields}, true
+}
+
+func parsePendingEntryStruct(value any) (pendingEntry, bool) {
+	rawID, ok := structFieldValue(value, "ID")
+	if !ok {
+		return pendingEntry{}, false
+	}
+	id := strings.TrimSpace(toString(rawID))
+	if id == "" {
+		return pendingEntry{}, false
+	}
+	rawIdle, ok := structFieldValue(value, "Idle")
+	if !ok {
+		return pendingEntry{}, false
+	}
+
+	var idleMS int64
+	switch typed := rawIdle.(type) {
+	case time.Duration:
+		idleMS = typed.Milliseconds()
+	default:
+		idleMS = parseAnyInt64(toString(rawIdle))
+	}
+
+	return pendingEntry{ID: id, IdleMS: idleMS}, true
+}
+
+func parsePendingEntrySlice(values []any) (pendingEntry, bool) {
+	if len(values) < 3 {
+		return pendingEntry{}, false
+	}
+	id := strings.TrimSpace(toString(values[0]))
+	if id == "" {
+		return pendingEntry{}, false
+	}
+	return pendingEntry{
+		ID:     id,
+		IdleMS: parseInt64(toString(values[2])),
+	}, true
+}
+
+func parseGroupInfoStruct(value any, consumerGroup string) (groupInfo, bool) {
+	rawName, ok := structFieldValue(value, "Name")
+	if !ok || strings.TrimSpace(toString(rawName)) != strings.TrimSpace(consumerGroup) {
+		return groupInfo{}, false
+	}
+
+	info := groupInfo{}
+	if rawPending, ok := structFieldValue(value, "Pending"); ok {
+		info.Pending = parseAnyInt64(toString(rawPending))
+	}
+	if rawLag, ok := structFieldValue(value, "Lag"); ok {
+		info.Lag = parseAnyInt64(toString(rawLag))
+		info.LagKnown = true
+	}
+	return info, true
+}
+
+func structFieldValue(value any, fieldName string) (any, bool) {
+	rv := reflect.ValueOf(value)
+	if !rv.IsValid() {
+		return nil, false
+	}
+	for rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return nil, false
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		return nil, false
+	}
+	field := rv.FieldByName(fieldName)
+	if !field.IsValid() || !field.CanInterface() {
+		return nil, false
+	}
+	return field.Interface(), true
+}
+
+func toStringSlice(value any) ([]string, bool) {
+	switch typed := value.(type) {
+	case []string:
+		return typed, true
+	}
+
+	rv := reflect.ValueOf(value)
+	if !rv.IsValid() || rv.Kind() != reflect.Slice || rv.Type().Elem().Kind() != reflect.String {
+		return nil, false
+	}
+	out := make([]string, 0, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		out = append(out, toString(rv.Index(i).Interface()))
+	}
+	return out, true
+}
+
 func toString(value any) string {
 	switch typed := value.(type) {
 	case string:
@@ -558,6 +781,77 @@ func toString(value any) string {
 	default:
 		return fmt.Sprint(value)
 	}
+}
+
+func parseJSONArrayEntry(raw string) ([]any, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, false
+	}
+	var entry []any
+	if err := json.Unmarshal([]byte(raw), &entry); err != nil {
+		return nil, false
+	}
+	return entry, true
+}
+
+func parseBracketMapString(raw string) (map[string]string, bool) {
+	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(raw, "map[") || !strings.HasSuffix(raw, "]") {
+		return nil, false
+	}
+	body := strings.TrimSuffix(strings.TrimPrefix(raw, "map["), "]")
+	if strings.TrimSpace(body) == "" {
+		return map[string]string{}, true
+	}
+
+	fields := make(map[string]string)
+	for _, token := range strings.Fields(body) {
+		parts := strings.SplitN(token, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		fields[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+	}
+	return fields, true
+}
+
+func toStringMap(value any) (map[string]string, bool) {
+	switch typed := value.(type) {
+	case map[string]string:
+		return typed, true
+	case map[string]interface{}:
+		fields := make(map[string]string, len(typed))
+		for key, raw := range typed {
+			fields[key] = toString(raw)
+		}
+		return fields, true
+	}
+
+	rv := reflect.ValueOf(value)
+	if !rv.IsValid() {
+		return nil, false
+	}
+	for rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return nil, false
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Map {
+		return nil, false
+	}
+
+	fields := make(map[string]string, rv.Len())
+	iter := rv.MapRange()
+	for iter.Next() {
+		key := strings.TrimSpace(toString(iter.Key().Interface()))
+		if key == "" {
+			continue
+		}
+		fields[key] = toString(iter.Value().Interface())
+	}
+	return fields, true
 }
 
 func toStringMapFromPairs(value any) (map[string]string, bool) {

@@ -383,7 +383,10 @@ async function handleSend(content: string) {
     });
 
     // 更新 AI 消息 ID（用真实 ID）
-    messages.value[aiMsgIndex].id = result.replyID;
+    const aiMsgRecord = messages.value[aiMsgIndex];
+    if (aiMsgRecord) {
+      aiMsgRecord.id = result.replyID;
+    }
 
     // 开始 SSE 流式接收
     await connectSSE(result.replyID, aiMsgIndex);
@@ -512,11 +515,13 @@ async function loadHistory() {
     const streamingIdx = messages.value.findIndex((m) => m.status === 'streaming');
     if (streamingIdx >= 0) {
       const streamingMsg = messages.value[streamingIdx];
-      isSending.value = true;
-      connectSSE(streamingMsg.id, streamingIdx).finally(() => {
-        isSending.value = false;
-        loadProjectStatus();
-      });
+      if (streamingMsg) {
+        isSending.value = true;
+        connectSSE(streamingMsg.id, streamingIdx).finally(() => {
+          isSending.value = false;
+          loadProjectStatus();
+        });
+      }
     } else {
       // 没有 streaming 消息，确保输入框可用（防止上次 isSending 残留）
       isSending.value = false;
@@ -553,7 +558,10 @@ onMounted(async () => {
         orderDir: 'desc',
       } as any);
       if (res?.list?.length) {
-        conversationId.value = res.list[0].id;
+        const [latestConversation] = res.list;
+        if (latestConversation) {
+          conversationId.value = latestConversation.id;
+        }
       }
     } catch {
       // 忽略

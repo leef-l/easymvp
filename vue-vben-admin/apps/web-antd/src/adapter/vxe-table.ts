@@ -1,4 +1,9 @@
-import type { VxeTableGridOptions } from '@vben/plugins/vxe-table';
+import type {
+  VxeGridListeners,
+  VxeGridPropTypes,
+  VxeTableGridColumns,
+  VxeTableGridOptions,
+} from '@vben/plugins/vxe-table';
 
 import { h } from 'vue';
 
@@ -67,4 +72,12 @@ setupVbenVxeTable({
 
 export { useVbenVxeGrid };
 
-export type * from '@vben/plugins/vxe-table';
+export type {
+  VxeGridListeners,
+  VxeGridPropTypes,
+  VxeTableGridColumns,
+  VxeTableGridOptions,
+};
+
+// App pages use this alias for the inner grid options object.
+export type VxeGridProps<T = Record<string, any>> = VxeTableGridOptions<T>;

@@ -35,6 +35,25 @@ type ArchitectReviewResubmitter func(ctx context.Context, projectID int64) error
 var architectReviewResubmitterFn ArchitectReviewResubmitter
 
 const architectAutoContinueToken = "[AUTO_CONTINUE_NEXT]"
+const architectFollowUpLimitDefault = 24
+
+func normalizeArchitectFollowUpLimit(limit int) int {
+	if limit <= 0 {
+		return architectFollowUpLimitDefault
+	}
+	return limit
+}
+
+var loadArchitectFollowUpLimit = func(ctx context.Context) int {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return normalizeArchitectFollowUpLimit(GetConfigInt(ctx,
+		"workflow.architect.follow_up_limit",
+		"engine.workflow.architect.followUpLimit",
+		architectFollowUpLimitDefault,
+	))
+}
 
 func RegisterBlueprintPatchApplier(fn BlueprintPatchApplier) {
 	blueprintPatchApplierFn = fn
@@ -91,14 +110,15 @@ func isWorkflowApprovalPrompt(content string) bool {
 		strings.Contains(content, "执行阶段启动失败")
 }
 
-func shouldParseArchitectReply(userContents []string) bool {
+func shouldParseArchitectReply(ctx context.Context, userContents []string) bool {
+	followUpLimit := loadArchitectFollowUpLimit(ctx)
 	followUpCount := 0
 	for _, content := range userContents {
 		if isArchitectFollowUpMessage(content) {
 			followUpCount++
 			continue
 		}
-		if followUpCount >= 6 {
+		if followUpCount >= followUpLimit {
 			return false
 		}
 		return !isWorkflowApprovalPrompt(content)
@@ -115,14 +135,23 @@ type architectReplyPolicy struct {
 	allowAutoResubmit bool
 }
 
-func resolveArchitectReplyPolicy(userContents []string) architectReplyPolicy {
+func shouldApplyArchitectBlueprintMutation(currentStage string, policy architectReplyPolicy) bool {
+	currentStage = strings.TrimSpace(strings.ToLower(currentStage))
+	if currentStage == "" || currentStage == "design" {
+		return true
+	}
+	return policy.allowAutoResubmit
+}
+
+func resolveArchitectReplyPolicy(ctx context.Context, userContents []string) architectReplyPolicy {
+	followUpLimit := loadArchitectFollowUpLimit(ctx)
 	followUpCount := 0
 	for _, content := range userContents {
 		if isArchitectFollowUpMessage(content) {
 			followUpCount++
 			continue
 		}
-		if followUpCount >= 6 {
+		if followUpCount >= followUpLimit {
 			return architectReplyPolicy{}
 		}
 		if !isReviewRemediationPrompt(content) {
@@ -213,7 +242,7 @@ func (e *ChatEngine) shouldAutoContinueArchitectReply(ctx context.Context, conve
 	if err != nil || len(userContents) == 0 {
 		return false
 	}
-	return resolveArchitectReplyPolicy(userContents).allowAutoContinue
+	return resolveArchitectReplyPolicy(ctx, userContents).allowAutoContinue
 }
 
 func (e *ChatEngine) shouldAutoResubmitArchitectReview(ctx context.Context, conversationID int64) bool {
@@ -221,7 +250,7 @@ func (e *ChatEngine) shouldAutoResubmitArchitectReview(ctx context.Context, conv
 	if err != nil || len(userContents) == 0 {
 		return false
 	}
-	return resolveArchitectReplyPolicy(userContents).allowAutoResubmit
+	return resolveArchitectReplyPolicy(ctx, userContents).allowAutoResubmit
 }
 
 func (e *ChatEngine) autoContinueArchitectReply(ctx context.Context, conversationID int64) {

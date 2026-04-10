@@ -25,26 +25,22 @@ function transformMenus(menus: BackendMenu[]): RouteRecordStringComponent[] {
     .filter((m) => m.status === 1) // 只过滤禁用的，隐藏菜单仍注册路由
     .map((menu) => {
       const route: RouteRecordStringComponent = {
-        name: menu.path?.replace(/\//g, '-').replace(/^-/, '') || `menu-${menu.id}`,
+        name: menu.path?.replaceAll('/', '-').replace(/^-/, '') || `menu-${menu.id}`,
         path: menu.path || '',
         component: menu.component || '',
         meta: {
-          title: menu.title,
+          title: menu.title || menu.path || `menu-${menu.id}`,
           icon: menu.icon || undefined,
           order: menu.sort,
           hideInMenu: menu.isShow !== 1, // 隐藏菜单不在侧边栏显示，但路由可访问
           keepAlive: menu.isCache === 1,
           authority: menu.permission ? [menu.permission] : undefined,
+          link: menu.type === 4 && menu.linkUrl ? menu.linkUrl : undefined,
         },
       };
 
       if (menu.children?.length) {
         route.children = transformMenus(menu.children);
-      }
-
-      // 外链
-      if (menu.type === 4 && menu.linkUrl) {
-        route.meta = { ...route.meta, link: menu.linkUrl };
       }
 
       return route;

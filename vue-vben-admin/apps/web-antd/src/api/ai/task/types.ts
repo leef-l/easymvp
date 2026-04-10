@@ -26,13 +26,13 @@ export interface TaskListParams {
 }
 
 export interface TaskExecuteParams {
-  title: string;
-  engineCode: string;
+  title?: string;
+  engineCode?: string;
   projectID?: string;
-  repoPath: string;
+  repoPath?: string;
   worktreePath?: string;
   branchName?: string;
-  instruction: string;
+  instruction?: string;
 }
 
 export interface TaskLogItem {

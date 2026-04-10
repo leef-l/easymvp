@@ -15,6 +15,9 @@ func TestPreferredRoleLevels(t *testing.T) {
 	if got := strings.Join(PreferredRoleLevels("auditor"), ","); got != "pro,max,lite" {
 		t.Fatalf("unexpected auditor order: %s", got)
 	}
+	if got := strings.Join(PreferredRoleLevels("experience_reviewer"), ","); got != "max,pro,lite" {
+		t.Fatalf("unexpected experience reviewer order: %s", got)
+	}
 }
 
 func TestBuildRoleSystemPromptFallsBackToCategory(t *testing.T) {
@@ -49,6 +52,9 @@ func TestBuildArchitectSystemPromptAppendsProjectContextAndFormat(t *testing.T) 
 	if !strings.Contains(prompt, "禁止输出 <minimax:tool_call>") {
 		t.Fatalf("missing tool-call guard: %s", prompt)
 	}
+	if !strings.Contains(prompt, "\"plan_meta\"") || !strings.Contains(prompt, "\"chunk_index\"") {
+		t.Fatalf("missing plan_meta guidance: %s", prompt)
+	}
 }
 
 func TestBuildArchitectSystemPromptAddsCodingBootstrapRules(t *testing.T) {
@@ -60,17 +66,43 @@ func TestBuildArchitectSystemPromptAddsCodingBootstrapRules(t *testing.T) {
 	if !strings.Contains(prompt, "尽量并行") {
 		t.Fatalf("missing parallel bootstrap guidance: %s", prompt)
 	}
-	if !strings.Contains(prompt, "affected_resources 只能写目录或文件相对路径") {
+	if !strings.Contains(prompt, "affected_resources 只能写代码文件相对路径") {
 		t.Fatalf("missing affected_resources guard: %s", prompt)
 	}
 }
 
 func TestBuildRoleSystemPromptAddsCodingImplementerRuntimeRules(t *testing.T) {
 	prompt := BuildRoleSystemPrompt("software_dev", "implementer", "pro", "", "")
+	if !strings.Contains(prompt, "工程铁律：数据访问与分层") {
+		t.Fatalf("missing db layering iron law: %s", prompt)
+	}
+	if !strings.Contains(prompt, "禁止在 controller、workflow、stage、review、acceptance、verification 等编排层直接调用 g.DB()") {
+		t.Fatalf("missing direct db ban: %s", prompt)
+	}
 	if !strings.Contains(prompt, "优先使用这些方式快速初始化") {
 		t.Fatalf("missing scaffold execution guidance: %s", prompt)
 	}
 	if !strings.Contains(prompt, "前端、后端、基础设施等独立根目录不要混成一次无边界改动") {
 		t.Fatalf("missing scoped bootstrap guidance: %s", prompt)
+	}
+}
+
+func TestBuildRoleSystemPromptSupportsExperienceReviewer(t *testing.T) {
+	prompt := BuildRoleSystemPrompt("game_dev", "experience_reviewer", "max", "", "")
+	if !strings.Contains(prompt, "体验评审师") {
+		t.Fatalf("missing experience reviewer role: %s", prompt)
+	}
+	if !strings.Contains(prompt, "dimension") || !strings.Contains(prompt, "blocking") {
+		t.Fatalf("missing structured experience review guidance: %s", prompt)
+	}
+}
+
+func TestBuildRoleSystemPromptFallsBackForConfiguredFutureRole(t *testing.T) {
+	prompt := BuildRoleSystemPrompt("software_dev", "qa_guardian", "pro", "", "")
+	if !strings.Contains(prompt, "qa_guardian") {
+		t.Fatalf("missing generic role type prompt: %s", prompt)
+	}
+	if !strings.Contains(prompt, "软件开发项目") {
+		t.Fatalf("missing project category context: %s", prompt)
 	}
 }

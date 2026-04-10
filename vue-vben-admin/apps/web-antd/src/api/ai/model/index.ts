@@ -69,6 +69,6 @@ export function downloadImportTemplateModel() {
 }
 
 /** 批量编辑AI模型表 */
-export function batchUpdateModel(data: { ids: string[]; status?: number }) {
+export function batchUpdateModel(data: { ids: string[]; status?: number | string }) {
   return requestClient.put(`${PREFIX}/batch-update`, data);
 }

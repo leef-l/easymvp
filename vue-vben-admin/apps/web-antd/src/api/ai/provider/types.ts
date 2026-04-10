@@ -28,10 +28,10 @@ export interface ProviderListParams {
 
 /** AI供应商表创建参数 */
 export interface ProviderCreateParams {
-  name: string;
-  code: string;
-  providerType: string;
-  baseURL: string;
+  name?: string;
+  code?: string;
+  providerType?: string;
+  baseURL?: string;
   icon?: string;
   status?: number;
   sort?: number;
@@ -40,10 +40,10 @@ export interface ProviderCreateParams {
 /** AI供应商表更新参数 */
 export interface ProviderUpdateParams {
   id: string;
-  name: string;
-  code: string;
-  providerType: string;
-  baseURL: string;
+  name?: string;
+  code?: string;
+  providerType?: string;
+  baseURL?: string;
   icon?: string;
   status?: number;
   sort?: number;

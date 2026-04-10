@@ -69,6 +69,6 @@ export function downloadImportTemplateProject() {
 }
 
 /** 批量编辑MVP项目表 */
-export function batchUpdateProject(data: { ids: string[]; status?: number }) {
+export function batchUpdateProject(data: { ids: string[]; status?: number | string }) {
   return requestClient.put(`${PREFIX}/batch-update`, data);
 }

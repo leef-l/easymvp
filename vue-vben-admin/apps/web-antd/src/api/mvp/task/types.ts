@@ -28,6 +28,8 @@ export interface TaskItem {
   lastActiveAt?: string;
   isActuallyWorking?: boolean;
   stalled?: boolean;
+  dependencies?: Array<Pick<TaskItem, 'id' | 'name' | 'status'>>;
+  dependents?: Array<Pick<TaskItem, 'id' | 'name' | 'status'>>;
   children?: TaskItem[];
 }
 
@@ -58,11 +60,11 @@ export interface TaskTreeParams {
 
 /** MVP任务表创建参数 */
 export interface TaskCreateParams {
-  projectID: string;
+  projectID?: string;
   parentID?: string;
-  name: string;
+  name?: string;
   description?: string;
-  roleType: string;
+  roleType?: string;
   roleLevel?: string;
   modelID?: string;
   status?: string;
@@ -80,11 +82,11 @@ export interface TaskCreateParams {
 /** MVP任务表更新参数 */
 export interface TaskUpdateParams {
   id: string;
-  projectID: string;
+  projectID?: string;
   parentID?: string;
-  name: string;
+  name?: string;
   description?: string;
-  roleType: string;
+  roleType?: string;
   roleLevel?: string;
   modelID?: string;
   status?: string;

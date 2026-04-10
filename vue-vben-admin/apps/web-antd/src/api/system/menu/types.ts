@@ -3,6 +3,7 @@
 /** 菜单表项 */
 export interface MenuItem {
   id: string;
+  key?: string;
   parentID?: string;
   title: string;
   type?: number;
@@ -33,7 +34,7 @@ export interface MenuListParams {
 /** 菜单表创建参数 */
 export interface MenuCreateParams {
   parentID?: string;
-  title: string;
+  title?: string;
   type?: number;
   path?: string;
   component?: string;
@@ -50,7 +51,7 @@ export interface MenuCreateParams {
 export interface MenuUpdateParams {
   id: string;
   parentID?: string;
-  title: string;
+  title?: string;
   type?: number;
   path?: string;
   component?: string;

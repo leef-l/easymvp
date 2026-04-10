@@ -76,3 +76,28 @@ func TestAiderBuildArgsDisablesGitignoreMutation(t *testing.T) {
 		t.Fatalf("expected --no-gitignore in aider args, got %v", args)
 	}
 }
+
+func TestMarkTokenLimitFailureTurnsOutputOnlyTokenLimitIntoError(t *testing.T) {
+	runner := &AiderRunner{}
+	result := &AiderResult{
+		Output: "Model anthropic/kimi-k2.5 has hit a token limit!\nToken counts below are approximate.",
+	}
+
+	runner.markTokenLimitFailure(result)
+
+	if result.Error == nil {
+		t.Fatalf("expected token limit output to become an error")
+	}
+	if result.Category != taskFailureExecution {
+		t.Fatalf("expected category %q, got %q", taskFailureExecution, result.Category)
+	}
+}
+
+func TestIsSuccessfulResultRejectsTokenLimitOutput(t *testing.T) {
+	runner := &AiderRunner{}
+	if runner.isSuccessfulResult(&AiderResult{
+		Output: "Model anthropic/kimi-k2.5 has hit a token limit!",
+	}) {
+		t.Fatalf("expected token limit output to be treated as unsuccessful")
+	}
+}

@@ -69,6 +69,6 @@ export function downloadImportTemplateProjectCategory() {
 }
 
 /** 批量编辑项目分类配置表 */
-export function batchUpdateProjectCategory(data: { ids: string[]; status?: number }) {
+export function batchUpdateProjectCategory(data: { ids: string[]; status?: number | string }) {
   return requestClient.put(`${PREFIX}/batch-update`, data);
 }

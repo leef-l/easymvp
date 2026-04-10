@@ -239,9 +239,9 @@ if (-not $NoInfra) {
 $jobs = @()
 
 $goApps = @(
-    @{ Name = 'system'; Dir = Join-Path $adminGo 'app\system'; Port = 9000 },
-    @{ Name = 'ai';     Dir = Join-Path $adminGo 'app\ai'; Port = 9001 },
-    @{ Name = 'mvp';    Dir = Join-Path $adminGo 'app\mvp'; Port = 9002 }
+    @{ Name = 'system'; Dir = Join-Path $adminGo 'app\system'; Port = 41002 },
+    @{ Name = 'ai';     Dir = Join-Path $adminGo 'app\ai'; Port = 41003 },
+    @{ Name = 'mvp';    Dir = Join-Path $adminGo 'app\mvp'; Port = 41004 }
 )
 
 foreach ($app in $goApps) {
@@ -263,9 +263,9 @@ if (-not $NoWeb) {
     $jobs += Start-Job -Name 'web' -ScriptBlock {
         param($dir)
         Set-Location $dir
-        $env:VITE_PROXY_SYSTEM_TARGET = 'http://localhost:9000'
-        $env:VITE_PROXY_AI_TARGET = 'http://localhost:9001'
-        $env:VITE_PROXY_MVP_TARGET = 'http://localhost:9002'
+        $env:VITE_PROXY_SYSTEM_TARGET = 'http://localhost:41002'
+        $env:VITE_PROXY_AI_TARGET = 'http://localhost:41003'
+        $env:VITE_PROXY_MVP_TARGET = 'http://localhost:41004'
         & pnpm -F @vben/web-antd run dev 2>&1 | ForEach-Object { "[web] $_" }
     } -ArgumentList $webDir
 }
@@ -277,9 +277,9 @@ Write-Host '  EasyMVP Local Dev Environment' -ForegroundColor Green
 Write-Host '========================================' -ForegroundColor Green
 Write-Host "  MySQL:  127.0.0.1:3306  (Docker)" -ForegroundColor White
 Write-Host "  Redis:  127.0.0.1:6379  (Docker)" -ForegroundColor White
-Write-Host "  system: http://localhost:9000  (gf run)" -ForegroundColor White
-Write-Host "  ai:     http://localhost:9001  (gf run)" -ForegroundColor White
-Write-Host "  mvp:    http://localhost:9002  (gf run)" -ForegroundColor White
+Write-Host "  system: http://localhost:41002  (gf run)" -ForegroundColor White
+Write-Host "  ai:     http://localhost:41003  (gf run)" -ForegroundColor White
+Write-Host "  mvp:    http://localhost:41004  (gf run)" -ForegroundColor White
 if (-not $NoWeb) {
     Write-Host "  web:    http://localhost:5173  (pnpm dev)" -ForegroundColor White
 }

@@ -232,11 +232,14 @@ func (e *ChatEngine) tryParseArchitectTasks(conversationID, messageID int64, aiR
 		return
 	}
 	userContents, userErr := loadRecentArchitectUserMessages(ctx, conversationID, 12)
+	replyPolicy := architectReplyPolicy{}
 	if userErr != nil {
 		g.Log().Warningf(ctx, "[ChatEngine] 查询架构师最近用户消息失败: conversationID=%d err=%v", conversationID, userErr)
-	} else if !shouldParseArchitectReply(userContents) {
+	} else if !shouldParseArchitectReply(ctx, userContents) {
 		g.Log().Infof(ctx, "[ChatEngine] 跳过解析架构师回复: conversationID=%d messageID=%d 原因=最近触发消息属于系统状态通知", conversationID, messageID)
 		return
+	} else {
+		replyPolicy = resolveArchitectReplyPolicy(ctx, userContents)
 	}
 
 	projectID := conv["project_id"].Int64()
@@ -253,7 +256,7 @@ func (e *ChatEngine) tryParseArchitectTasks(conversationID, messageID int64, aiR
 		g.Log().Warningf(ctx, "[ChatEngine] 查询 engine_version 失败: projectID=%d err=%v", projectID, evErr)
 	}
 	if ev.String() == "workflow_v2" {
-		e.tryParseArchitectBlueprints(ctx, projectID, conv["id"].Int64(), messageID, replyForParse)
+		e.tryParseArchitectBlueprints(ctx, projectID, conv["id"].Int64(), messageID, replyForParse, replyPolicy)
 		return
 	}
 
@@ -280,7 +283,7 @@ func RegisterBlueprintCreator(fn BlueprintCreator) {
 }
 
 // tryParseArchitectBlueprints V2 专用：解析 AI 回复并创建蓝图。
-func (e *ChatEngine) tryParseArchitectBlueprints(ctx context.Context, projectID, conversationID, messageID int64, aiReply string) {
+func (e *ChatEngine) tryParseArchitectBlueprints(ctx context.Context, projectID, conversationID, messageID int64, aiReply string, replyPolicy architectReplyPolicy) {
 	if blueprintCreatorFn == nil {
 		g.Log().Warningf(ctx, "[ChatEngine] V2 蓝图创建回调未注册，跳过")
 		return
@@ -304,19 +307,34 @@ func (e *ChatEngine) tryParseArchitectBlueprints(ctx context.Context, projectID,
 		g.Log().Warningf(ctx, "[ChatEngine] 查询活跃 workflow_run 失败: projectID=%d err=%v", projectID, wfErr)
 	}
 	var wfRunID int64
+	var currentStage string
 	if !wfRun.IsEmpty() {
 		wfRunID = wfRun["id"].Int64()
+		currentStage = wfRun["current_stage"].String()
+	}
+	if !shouldApplyArchitectBlueprintMutation(currentStage, replyPolicy) {
+		g.Log().Infof(ctx, "[ChatEngine] 跳过晚到的架构师蓝图回写: project=%d workflowRun=%d currentStage=%s messageID=%d",
+			projectID, wfRunID, currentStage, messageID)
+		return
 	}
 
-	fastPlan, fastErr := GetParser().FastExtract(aiReply)
-	if fastErr == nil && fastPlan != nil && len(fastPlan.Tasks) > 0 {
-		tasks := GetParser().NormalizeTasks(ctx, fastPlan.Tasks, projectCategory.String())
-		pvID, bpCount, createErr := blueprintCreatorFn(ctx, projectID, wfRunID, conversationID, messageID, tasks)
+	fastTasks, fastReport, fastErr := GetParser().FastExtractWithReport(ctx, aiReply, projectCategory.String())
+	if fastErr != nil {
+		g.Log().Warningf(ctx, "[ChatEngine] V2 FastExtractWithReport 失败: %v", fastErr)
+	}
+	if fastReport != nil && fastReport.HasBlockingIssue() {
+		g.Log().Warningf(ctx, "[ChatEngine] V2 架构师任务清单存在阻断问题: project=%d summary=%s", projectID, fastReport.Summary())
+		NotifyProjectArchitectConversation(ctx, projectID, fastReport.BuildContinuationPrompt())
+		return
+	}
+	if len(fastTasks) > 0 {
+		pvID, bpCount, createErr := blueprintCreatorFn(ctx, projectID, wfRunID, conversationID, messageID, fastTasks)
 		if createErr != nil {
 			g.Log().Warningf(ctx, "[ChatEngine] V2 创建蓝图失败: %v", createErr)
 			return
 		}
-		g.Log().Infof(ctx, "[ChatEngine] V2 架构师回复解析出 %d 个蓝图, planVersion=%d, 项目 %d", bpCount, pvID, projectID)
+		g.Log().Infof(ctx, "[ChatEngine] V2 架构师回复解析出 %d 个蓝图, planVersion=%d, 项目 %d, report=%s",
+			bpCount, pvID, projectID, fastReport.Summary())
 		e.autoResubmitArchitectReviewIfNeeded(ctx, projectID, conversationID, pvID)
 		return
 	}
@@ -339,7 +357,12 @@ func (e *ChatEngine) tryParseArchitectBlueprints(ctx context.Context, projectID,
 		return
 	}
 
-	tasks, err := GetParser().ExtractAndNormalize(ctx, aiReply, projectCategory.String())
+	tasks, report, err := GetParser().ExtractAndNormalizeWithReport(ctx, aiReply, projectCategory.String())
+	if report != nil && report.HasBlockingIssue() {
+		g.Log().Warningf(ctx, "[ChatEngine] V2 架构师任务清单存在阻断问题: project=%d summary=%s", projectID, report.Summary())
+		NotifyProjectArchitectConversation(ctx, projectID, report.BuildContinuationPrompt())
+		return
+	}
 	if err != nil || len(tasks) == 0 {
 		return
 	}
@@ -349,7 +372,8 @@ func (e *ChatEngine) tryParseArchitectBlueprints(ctx context.Context, projectID,
 		g.Log().Warningf(ctx, "[ChatEngine] V2 创建蓝图失败: %v", err)
 		return
 	}
-	g.Log().Infof(ctx, "[ChatEngine] V2 架构师回复解析出 %d 个蓝图, planVersion=%d, 项目 %d", bpCount, pvID, projectID)
+	g.Log().Infof(ctx, "[ChatEngine] V2 架构师回复解析出 %d 个蓝图, planVersion=%d, 项目 %d, report=%s",
+		bpCount, pvID, projectID, report.Summary())
 	e.autoResubmitArchitectReviewIfNeeded(ctx, projectID, conversationID, pvID)
 }
 

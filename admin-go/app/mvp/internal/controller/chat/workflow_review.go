@@ -7,11 +7,11 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/gtime"
 
 	v1 "easymvp/app/mvp/api/mvp/v1"
 	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/workflow/orchestrator"
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/utility/snowflake"
 )
 
@@ -60,14 +60,8 @@ func manualApproveModeForPlanVersion(record gdb.Record) string {
 }
 
 func loadManualApprovablePlanVersion(ctx context.Context, projectID int64) (gdb.Record, string, error) {
-	plans, err := g.DB().Model("mvp_plan_version").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		Where("(status = ? AND review_status = ?) OR (status = ? AND review_status = ?)",
-			"active", "pending", "draft", "rejected").
-		OrderDesc("version_no").
-		Limit(5).
-		All()
+	plans, err := repo.NewPlanVersionRepo().ListByProjectStatuses(ctx, projectID, []string{"active", "draft"},
+		"id", "status", "review_status", "version_no")
 	if err != nil {
 		return nil, "", err
 	}
@@ -80,77 +74,50 @@ func loadManualApprovablePlanVersion(ctx context.Context, projectID int64) (gdb.
 }
 
 func restoreRejectedPlanVersionForManualApprove(ctx context.Context, planVersionID int64) error {
-	now := gtime.Now()
-	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		result, err := tx.Model("mvp_plan_version").Ctx(ctx).
-			Where("id", planVersionID).
-			Where("status", "draft").
-			Where("review_status", "rejected").
-			Update(g.Map{
-				"status":        "active",
-				"review_status": "approved",
-				"approved_at":   now,
-				"rejected_at":   nil,
-				"updated_at":    now,
-			})
-		if err != nil {
-			return fmt.Errorf("恢复被驳回方案版本失败: %w", err)
-		}
-		if rows, _ := result.RowsAffected(); rows == 0 {
-			return fmt.Errorf("方案版本已不是可人工放行的 rejected 状态")
-		}
+	if err := repo.NewPlanVersionRepo().RestoreRejectedForManualApprove(ctx, planVersionID); err != nil {
+		return fmt.Errorf("恢复被驳回方案版本失败: %w", err)
+	}
+	return nil
+}
 
-		if _, err := tx.Model("mvp_task_blueprint").Ctx(ctx).
-			Where("plan_version_id", planVersionID).
-			Where("blueprint_status", "draft").
-			Update(g.Map{
-				"blueprint_status": "confirmed",
-				"updated_at":       now,
-			}); err != nil {
-			return fmt.Errorf("恢复蓝图状态失败: %w", err)
-		}
+func latestReviewStageRunForProject(ctx context.Context, projectID int64, fields ...string) (gdb.Record, error) {
+	wfRun, err := latestWorkflowRunForProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return repo.NewStageRunRepo().GetLatestByWorkflowAndType(ctx, wfRun["id"].Int64(), "review", fields...)
+}
 
-		return nil
-	})
+func latestActiveOrDraftPlanVersion(ctx context.Context, projectID int64, fields ...string) (gdb.Record, error) {
+	plans, err := repo.NewPlanVersionRepo().ListByProjectStatuses(ctx, projectID, []string{"draft", "active"}, fields...)
+	if err != nil || len(plans) == 0 {
+		return nil, err
+	}
+	return plans[0], nil
 }
 
 // buildConfirmPlanResult 查询最新审核结果，组装 ConfirmPlan 响应。
 func buildConfirmPlanResult(ctx context.Context, projectID int64) *v1.WorkflowConfirmPlanRes {
 	res := &v1.WorkflowConfirmPlanRes{}
 
-	stageRun, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).
-		InnerJoin("mvp_workflow_run wf", "wf.id = mvp_stage_run.workflow_run_id").
-		Where("wf.project_id", projectID).
-		Where("mvp_stage_run.stage_type", "review").
-		WhereNull("mvp_stage_run.deleted_at").
-		Fields("mvp_stage_run.id, mvp_stage_run.status, mvp_stage_run.error_message").
-		OrderDesc("mvp_stage_run.stage_no").
-		One()
-	if stageRun.IsEmpty() {
+	stageRun, err := latestReviewStageRunForProject(ctx, projectID, "id", "status", "error_message")
+	if err != nil || stageRun == nil || stageRun.IsEmpty() {
 		return res
 	}
 	stageRunID := stageRun["id"].Int64()
 
 	var countErr error
-	res.ErrorCount, countErr = g.DB().Model("mvp_review_issue").Ctx(ctx).
-		Where("stage_run_id", stageRunID).Where("severity", "error").Where("status", "open").Count()
+	reviewIssueRepo := repo.NewReviewIssueRepo()
+	res.ErrorCount, countErr = reviewIssueRepo.CountOpenByStageRunAndSeverity(ctx, stageRunID, "error")
 	if countErr != nil {
 		g.Log().Warningf(ctx, "[ReviewStatus] 统计 error issue 失败: stageRun=%d err=%v", stageRunID, countErr)
 	}
-	res.WarningCount, countErr = g.DB().Model("mvp_review_issue").Ctx(ctx).
-		Where("stage_run_id", stageRunID).Where("severity", "warning").Where("status", "open").Count()
+	res.WarningCount, countErr = reviewIssueRepo.CountOpenByStageRunAndSeverity(ctx, stageRunID, "warning")
 	if countErr != nil {
 		g.Log().Warningf(ctx, "[ReviewStatus] 统计 warning issue 失败: stageRun=%d err=%v", stageRunID, countErr)
 	}
 
-	issues, _ := g.DB().Model("mvp_review_issue").Ctx(ctx).
-		Where("stage_run_id", stageRunID).
-		Where("status", "open").
-		WhereNull("deleted_at").
-		OrderDesc("severity").
-		OrderDesc("created_at").
-		Limit(50).
-		All()
+	issues, _ := reviewIssueRepo.ListByStageRun(ctx, stageRunID, true, 50)
 
 	for _, issue := range issues {
 		res.Issues = append(res.Issues, buildReviewIssueItem(issue))
@@ -165,10 +132,14 @@ func buildConfirmPlanResult(ctx context.Context, projectID int64) *v1.WorkflowCo
 
 // parseAndCreateBlueprints V2 专用：解析 AI 回复并创建蓝图。
 func parseAndCreateBlueprints(ctx context.Context, projectID, conversationID, messageID int64, aiReply string) (int, error) {
-	projectCategory, _ := g.DB().Model("mvp_project").Ctx(ctx).
-		Where("id", projectID).Value("project_category")
+	project, _ := repo.NewProjectRepo().GetByID(ctx, projectID, "project_category")
+	projectCategory := g.NewVar(project["project_category"]).String()
 
-	tasks, err := engine.GetParser().ExtractAndNormalize(ctx, aiReply, projectCategory.String())
+	tasks, report, err := engine.GetParser().ExtractAndNormalizeWithReport(ctx, aiReply, projectCategory)
+	if report != nil && report.HasBlockingIssue() {
+		engine.NotifyProjectArchitectConversation(ctx, projectID, report.BuildContinuationPrompt())
+		return 0, fmt.Errorf("任务清单存在阻断问题: %s", report.Summary())
+	}
 	if err != nil || len(tasks) == 0 {
 		return 0, err
 	}
@@ -178,15 +149,10 @@ func parseAndCreateBlueprints(ctx context.Context, projectID, conversationID, me
 
 // createBlueprints 将已提取的任务列表写入 plan_version + task_blueprint。
 func createBlueprints(ctx context.Context, projectID, conversationID, messageID int64, tasks []engine.ArchitectTask) (int, error) {
-	wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereNotIn("status", g.Slice{"completed", "canceled"}).
-		WhereNull("deleted_at").
-		OrderDesc("run_no").
-		One()
+	wfRun, _ := repo.NewWorkflowRunRepo().GetLatestByProjectExcludingStatuses(ctx, projectID, []string{"completed", "canceled"}, "id")
 	var wfRunID int64
-	if !wfRun.IsEmpty() {
-		wfRunID = wfRun["id"].Int64()
+	if len(wfRun) != 0 {
+		wfRunID = g.NewVar(wfRun["id"]).Int64()
 	}
 
 	pvSvc := orchestrator.GetPlanVersionService()
@@ -206,51 +172,33 @@ func (c *cWorkflow) ReviewStatus(ctx context.Context, req *v1.WorkflowReviewStat
 
 	res = &v1.WorkflowReviewStatusRes{}
 
-	pv, err := g.DB().Model("mvp_plan_version").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereIn("status", g.Slice{"draft", "active"}).
-		WhereNull("deleted_at").
-		OrderDesc("version_no").
-		One()
-	if err != nil || pv.IsEmpty() {
+	pv, err := latestActiveOrDraftPlanVersion(ctx, projectID, "id", "review_status")
+	if err != nil || pv == nil || pv.IsEmpty() {
 		return res, nil
 	}
 	pvID := pv["id"].Int64()
 	res.PlanVersionID = snowflake.JsonInt64(pvID)
 	res.ReviewStatus = pv["review_status"].String()
 
-	bpCount, _ := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
-		Where("plan_version_id", pvID).WhereNull("deleted_at").Count()
+	bpCount, _ := repo.NewBlueprintRepo().CountByPlanVersion(ctx, pvID)
 	res.BlueprintCount = bpCount
 
-	stageRun, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).
-		InnerJoin("mvp_workflow_run wf", "wf.id = mvp_stage_run.workflow_run_id").
-		Where("wf.project_id", projectID).
-		Where("mvp_stage_run.stage_type", "review").
-		WhereNull("mvp_stage_run.deleted_at").
-		Fields("mvp_stage_run.*").
-		OrderDesc("mvp_stage_run.stage_no").
-		One()
-	if !stageRun.IsEmpty() {
+	stageRun, _ := latestReviewStageRunForProject(ctx, projectID)
+	if stageRun != nil && !stageRun.IsEmpty() {
 		stageRunID := stageRun["id"].Int64()
 		res.StageRunID = snowflake.JsonInt64(stageRunID)
 		res.StageStatus = stageRun["status"].String()
 
 		var stageTasks []v1.ReviewStageTask
-		tasks, _ := g.DB().Model("mvp_stage_task").Ctx(ctx).
-			Where("stage_run_id", stageRunID).
-			WhereNull("deleted_at").
-			OrderAsc("created_at").
-			All()
+		tasks, _ := repo.NewStageTaskRepo().ListByStageRun(ctx, stageRunID)
 		for _, t := range tasks {
 			stageTasks = append(stageTasks, buildReviewStageTask(t))
 		}
 		res.StageTasks = stageTasks
 
-		res.ErrorCount, _ = g.DB().Model("mvp_review_issue").Ctx(ctx).
-			Where("stage_run_id", stageRunID).Where("severity", "error").Where("status", "open").Count()
-		res.WarningCount, _ = g.DB().Model("mvp_review_issue").Ctx(ctx).
-			Where("stage_run_id", stageRunID).Where("severity", "warning").Where("status", "open").Count()
+		reviewIssueRepo := repo.NewReviewIssueRepo()
+		res.ErrorCount, _ = reviewIssueRepo.CountOpenByStageRunAndSeverity(ctx, stageRunID, "error")
+		res.WarningCount, _ = reviewIssueRepo.CountOpenByStageRunAndSeverity(ctx, stageRunID, "warning")
 	}
 
 	return res, nil
@@ -263,24 +211,12 @@ func (c *cWorkflow) ReviewIssues(ctx context.Context, req *v1.WorkflowReviewIssu
 		return nil, err
 	}
 
-	stageRun, _ := g.DB().Model("mvp_stage_run").Ctx(ctx).
-		InnerJoin("mvp_workflow_run wf", "wf.id = mvp_stage_run.workflow_run_id").
-		Where("wf.project_id", projectID).
-		Where("mvp_stage_run.stage_type", "review").
-		WhereNull("mvp_stage_run.deleted_at").
-		Fields("mvp_stage_run.id").
-		OrderDesc("mvp_stage_run.stage_no").
-		One()
-	if stageRun.IsEmpty() {
+	stageRun, _ := latestReviewStageRunForProject(ctx, projectID, "id")
+	if stageRun == nil || stageRun.IsEmpty() {
 		return &v1.WorkflowReviewIssuesRes{Issues: []v1.ReviewIssueItem{}}, nil
 	}
 
-	issues, _ := g.DB().Model("mvp_review_issue").Ctx(ctx).
-		Where("stage_run_id", stageRun["id"].Int64()).
-		WhereNull("deleted_at").
-		OrderDesc("severity").
-		OrderDesc("created_at").
-		All()
+	issues, _ := repo.NewReviewIssueRepo().ListByStageRun(ctx, stageRun["id"].Int64(), false, 0)
 
 	items := make([]v1.ReviewIssueItem, 0, len(issues))
 	for _, issue := range issues {
@@ -320,27 +256,15 @@ func (c *cWorkflow) ManualApprove(ctx context.Context, req *v1.WorkflowManualApp
 		return nil, fmt.Errorf("方案版本当前状态不支持人工审批通过")
 	}
 
-	wfRun, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereNotIn("status", g.Slice{"completed", "canceled"}).
-		WhereNull("deleted_at").
-		OrderDesc("run_no").
-		One()
-	if !wfRun.IsEmpty() {
-		wfRunID := wfRun["id"].Int64()
-		currentStageRunID := wfRun["current_stage_run_id"].Int64()
+	wfRun, _ := repo.NewWorkflowRunRepo().GetLatestByProjectExcludingStatuses(ctx, projectID, []string{"completed", "canceled"}, "id", "current_stage_run_id")
+	if len(wfRun) != 0 {
+		wfRunID := g.NewVar(wfRun["id"]).Int64()
+		currentStageRunID := g.NewVar(wfRun["current_stage_run_id"]).Int64()
 		if approveMode == manualApproveModeRejected {
-			now := gtime.Now()
-			if _, upErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-				Where("id", wfRunID).
-				Where("status", "designing").
-				Update(g.Map{"status": "reviewing", "updated_at": now}); upErr != nil {
+			if _, upErr := repo.NewWorkflowRunRepo().UpdateStatus(ctx, wfRunID, "designing", "reviewing", nil); upErr != nil {
 				return nil, fmt.Errorf("恢复工作流审核状态失败: %w", upErr)
 			}
-			if _, upErr := g.DB().Model("mvp_project").Ctx(ctx).
-				Where("id", projectID).
-				Where("status", "designing").
-				Update(g.Map{"status": "reviewing", "updated_at": now}); upErr != nil {
+			if _, upErr := repo.NewProjectRepo().UpdateStatusIfCurrent(ctx, projectID, "designing", "reviewing"); upErr != nil {
 				return nil, fmt.Errorf("恢复项目审核状态失败: %w", upErr)
 			}
 		}
@@ -372,14 +296,8 @@ func (c *cWorkflow) ManualReject(ctx context.Context, req *v1.WorkflowManualReje
 		return nil, err
 	}
 
-	pv, err := g.DB().Model("mvp_plan_version").Ctx(ctx).
-		Where("project_id", projectID).
-		Where("status", "active").
-		Where("review_status", "pending").
-		WhereNull("deleted_at").
-		OrderDesc("version_no").
-		One()
-	if err != nil || pv.IsEmpty() {
+	pv, err := repo.NewPlanVersionRepo().GetLatestByProjectStatusAndReviewStatus(ctx, projectID, "active", "pending", "id")
+	if err != nil || pv == nil || pv.IsEmpty() {
 		return nil, fmt.Errorf("没有待审核的方案版本")
 	}
 
@@ -388,9 +306,7 @@ func (c *cWorkflow) ManualReject(ctx context.Context, req *v1.WorkflowManualReje
 		return nil, err
 	}
 
-	if _, upErr := g.DB().Model("mvp_project").Ctx(ctx).
-		Where("id", projectID).
-		Update(g.Map{"status": "designing", "updated_at": gdb.Raw("NOW()")}); upErr != nil {
+	if upErr := repo.NewProjectRepo().UpdateStatus(ctx, projectID, "designing"); upErr != nil {
 		g.Log().Errorf(ctx, "[ManualReject] 项目状态回退失败: project=%d err=%v", projectID, upErr)
 	}
 
@@ -413,14 +329,8 @@ func (c *cWorkflow) ReviewIssueReplan(ctx context.Context, req *v1.WorkflowRevie
 	}
 	workflowRunID := wfRun["id"].Int64()
 
-	stageRun, stageErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Where("stage_type", "review").
-		WhereNull("deleted_at").
-		OrderDesc("stage_no").
-		Fields("id").
-		One()
-	if stageErr != nil || stageRun.IsEmpty() {
+	stageRun, stageErr := repo.NewStageRunRepo().GetLatestByWorkflowAndType(ctx, workflowRunID, "review", "id")
+	if stageErr != nil || stageRun == nil || stageRun.IsEmpty() {
 		return nil, fmt.Errorf("当前工作流没有审核阶段记录")
 	}
 	stageRunID := stageRun["id"].Int64()
@@ -431,14 +341,7 @@ func (c *cWorkflow) ReviewIssueReplan(ctx context.Context, req *v1.WorkflowRevie
 			issueIDs = append(issueIDs, int64(id))
 		}
 	}
-	issues, err := g.DB().Model("mvp_review_issue").Ctx(ctx).
-		Where("stage_run_id", stageRunID).
-		WhereIn("id", issueIDs).
-		Where("status", "open").
-		WhereNull("deleted_at").
-		OrderDesc("severity").
-		OrderDesc("created_at").
-		All()
+	issues, err := repo.NewReviewIssueRepo().ListOpenByStageRunAndIDs(ctx, stageRunID, issueIDs)
 	if err != nil {
 		return nil, fmt.Errorf("查询审核问题失败: %w", err)
 	}

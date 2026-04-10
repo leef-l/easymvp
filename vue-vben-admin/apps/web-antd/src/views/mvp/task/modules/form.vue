@@ -1,20 +1,27 @@
 <script setup lang="ts">
-import { h, ref } from 'vue';
-import { useVbenModal } from '@vben/common-ui';
-import { useVbenForm } from '#/adapter/form';
-import { message, Tooltip } from 'ant-design-vue';
-import { QuestionCircleOutlined } from '@ant-design/icons-vue';
-import {
-  getTaskDetail,
-  createTask,
-  updateTask,
-  getTaskTree,
-} from '#/api/mvp/task';
-import type { TaskItem } from '#/api/mvp/task/types';
+import type { TaskTreeOption } from '../../task-tree-options';
 
-const treeData = ref<TaskItem[]>([]);
-import { getProjectList } from '#/api/mvp/project';
+import { h, ref } from 'vue';
+
+import { useVbenModal } from '@vben/common-ui';
+
+import { QuestionCircleOutlined } from '@ant-design/icons-vue';
+import { message, Tooltip } from 'ant-design-vue';
+
+import { useVbenForm } from '#/adapter/form';
+import {
+  createTask,
+  getTaskDetail,
+  getTaskTree,
+  updateTask,
+} from '#/api/mvp/task';
+
+import { toTaskTreeOptions } from '../../task-tree-options';
+
+const emit = defineEmits<{ success: [] }>();
+const treeData = ref<TaskTreeOption[]>([]);
 import { getConversationList } from '#/api/mvp/conversation';
+import { getProjectList } from '#/api/mvp/project';
 
 const projectIDOptions = ref<{ label: string; value: string }[]>([]);
 const conversationIDOptions = ref<{ label: string; value: string }[]>([]);
@@ -28,7 +35,6 @@ function tooltipLabel(label: string, tip: string) {
   ]);
 }
 
-const emit = defineEmits<{ success: [] }>();
 const isEdit = ref(false);
 const editId = ref('');
 
@@ -49,7 +55,7 @@ const [Form, formApi] = useVbenForm({
       label: '父任务ID，0=顶级',
       componentProps: {
         treeData: treeData.value,
-        fieldNames: { label: 'name', value: 'id', children: 'children' },
+        fieldNames: { label: 'label', value: 'value', children: 'children' },
         placeholder: '请选择父任务ID，0=顶级',
         allowClear: true,
         treeDefaultExpandAll: true,
@@ -67,7 +73,7 @@ const [Form, formApi] = useVbenForm({
       component: 'Textarea',
       fieldName: 'description',
       label: '任务描述',
-      componentProps: { placeholder: '请输入任务描述', rows: 4, maxlength: 65535 },
+      componentProps: { placeholder: '请输入任务描述', rows: 4, maxlength: 65_535 },
     },
     {
       component: 'Input',
@@ -129,19 +135,19 @@ const [Form, formApi] = useVbenForm({
       component: 'Textarea',
       fieldName: 'result',
       label: '任务执行结果',
-      componentProps: { placeholder: '请输入任务执行结果', rows: 4, maxlength: 4294967295 },
+      componentProps: { placeholder: '请输入任务执行结果', rows: 4, maxlength: 4_294_967_295 },
     },
     {
       component: 'Textarea',
       fieldName: 'contextSummary',
       label: '任务完成后的上下文压缩摘要，供后续AI读取',
-      componentProps: { placeholder: '请输入任务完成后的上下文压缩摘要，供后续AI读取', rows: 4, maxlength: 65535 },
+      componentProps: { placeholder: '请输入任务完成后的上下文压缩摘要，供后续AI读取', rows: 4, maxlength: 65_535 },
     },
     {
       component: 'Textarea',
       fieldName: 'errorMessage',
       label: '错误信息',
-      componentProps: { placeholder: '请输入错误信息', rows: 4, maxlength: 65535 },
+      componentProps: { placeholder: '请输入错误信息', rows: 4, maxlength: 65_535 },
     },
     {
       component: 'DatePicker',
@@ -184,12 +190,19 @@ const [Modal, modalApi] = useVbenModal({
   },
   async onOpenChange(isOpen: boolean) {
     if (isOpen) {
-      const data = modalApi.getData<{ id?: string } | null>();
+      const data = modalApi.getData<null | { id?: string }>();
       // 加载树形数据
       try {
         const res = await getTaskTree();
         treeData.value = [
-          { id: '0', title: '顶级节点', children: res ?? [] } as TaskItem,
+          {
+            id: '0',
+            label: '顶级节点',
+            name: '顶级节点',
+            title: '顶级节点',
+            value: '0',
+            children: toTaskTreeOptions(res ?? []),
+          },
         ];
         formApi.updateSchema([
           {

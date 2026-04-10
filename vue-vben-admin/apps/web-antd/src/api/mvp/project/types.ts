@@ -11,6 +11,7 @@ export interface ProjectItem {
   pauseReason?: string;
   globalContext?: string;
   architectModelID?: string;
+  architectModelName?: string;
   workDir?: string;
   engineVersion?: string;
   createdAt?: string;
@@ -36,7 +37,7 @@ export interface ProjectListParams {
 
 /** MVP项目表创建参数 */
 export interface ProjectCreateParams {
-  name: string;
+  name?: string;
   projectCategory?: string;
   categoryCode?: string;
   description?: string;
@@ -49,7 +50,7 @@ export interface ProjectCreateParams {
 /** MVP项目表更新参数 */
 export interface ProjectUpdateParams {
   id: string;
-  name: string;
+  name?: string;
   projectCategory?: string;
   categoryCode?: string;
   description?: string;

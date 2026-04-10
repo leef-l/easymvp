@@ -12,6 +12,8 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+
+	"easymvp/app/mvp/internal/workflow/resourcepath"
 )
 
 // ReviewResult 审核结果
@@ -185,6 +187,14 @@ func systemPrecheck(ctx context.Context, projectID int64, tasks gdb.Result, work
 				result.Errors = append(result.Errors, ReviewIssue{
 					TaskName: name, Severity: "error",
 					Message: fmt.Sprintf("affected_resources 包含疑似乱码路径: %s", res),
+				})
+			}
+		}
+		if family == CategoryFamilyCoding {
+			for _, resource := range resourcepath.FindCodingDirectoryPlaceholders(resources) {
+				result.Errors = append(result.Errors, ReviewIssue{
+					TaskName: name, Severity: "error",
+					Message: fmt.Sprintf("affected_resources 必须写明确文件路径，不能使用目录占位: %s", resource),
 				})
 			}
 		}

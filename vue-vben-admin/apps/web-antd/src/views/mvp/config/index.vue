@@ -1,26 +1,28 @@
 <script setup lang="ts">
+import type { ConfigItem } from '#/api/mvp/config/types';
+
 import { computed, h, onMounted, ref } from 'vue';
 
-import { DeleteOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons-vue';
 import { Page, useVbenModal } from '@vben/common-ui';
+
+import { DeleteOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons-vue';
 import {
   Alert,
   Badge,
   Button,
   Card,
+  message,
   Modal,
   Space,
   Spin,
   Tag,
   Tooltip,
-  message,
 } from 'ant-design-vue';
 
 import { deleteConfig, getConfigList } from '#/api/mvp/config';
-import type { ConfigItem } from '#/api/mvp/config/types';
 
-import DetailDrawer from './modules/detail-drawer.vue';
 import FormModal from './modules/form.vue';
+import RoleDefinitionsModal from './modules/role-definitions-modal.vue';
 
 /** 弹窗组件 */
 const [FormModalComp, formModalApi] = useVbenModal({
@@ -28,8 +30,8 @@ const [FormModalComp, formModalApi] = useVbenModal({
   destroyOnClose: true,
 });
 
-const [DetailDrawerComp, detailDrawerApi] = useVbenModal({
-  connectedComponent: DetailDrawer,
+const [RoleDefinitionsModalComp, roleDefinitionsModalApi] = useVbenModal({
+  connectedComponent: RoleDefinitionsModal,
   destroyOnClose: true,
 });
 
@@ -81,7 +83,7 @@ onMounted(loadConfigs);
 /** 按分类分组，顺序固定 */
 const groupedConfigs = computed(() => {
   const map = new Map<string, ConfigItem[]>();
-  for (const item of allConfigs.value) {
+  for (const item of allConfigs.value.filter((entry) => entry.configKey !== 'workflow.role_definitions')) {
     const cat = item.category || 'unknown';
     if (!map.has(cat)) map.set(cat, []);
     map.get(cat)!.push(item);
@@ -107,6 +109,10 @@ const groupedConfigs = computed(() => {
   return result;
 });
 
+const roleDefinitionsConfig = computed(() =>
+  allConfigs.value.find((item) => item.configKey === 'workflow.role_definitions'),
+);
+
 /** 判断是否是 0/1 的 int 开关 */
 function isBoolInt(item: ConfigItem) {
   return item.configType === 'int' && (item.configValue === '0' || item.configValue === '1');
@@ -121,6 +127,10 @@ function truncate(str: string | undefined, len: number) {
 /** 新建 */
 function handleCreate() {
   formModalApi.setData(null).open();
+}
+
+function handleEditRoleDefinitions() {
+  roleDefinitionsModalApi.open();
 }
 
 /** 编辑 */
@@ -151,7 +161,7 @@ async function onFormSuccess() {
 <template>
   <Page auto-content-height>
     <FormModalComp @success="onFormSuccess" />
-    <DetailDrawerComp />
+    <RoleDefinitionsModalComp @success="onFormSuccess" />
 
     <!-- 顶部标题栏 -->
     <div class="mb-4 flex items-center justify-between">
@@ -161,12 +171,31 @@ async function onFormSuccess() {
       </div>
       <Space>
         <Button :icon="h(ReloadOutlined)" :loading="loading" @click="loadConfigs">刷新</Button>
+        <Button @click="handleEditRoleDefinitions">角色定义</Button>
         <Button type="primary" @click="handleCreate">新建配置</Button>
       </Space>
     </div>
 
     <Spin :spinning="loading">
       <div class="space-y-4">
+        <Card :body-style="{ padding: '16px' }" class="config-group-card">
+          <template #title>
+            <div class="flex items-center gap-2">
+              <Tag color="magenta" class="font-medium">角色定义</Tag>
+              <span class="text-sm text-gray-500">workflow.role_definitions 专用配置入口</span>
+            </div>
+          </template>
+          <div class="flex items-center justify-between gap-4">
+            <div class="text-sm text-gray-600">
+              <div>新增角色、改展示名、调默认提示词，都在这里维护。</div>
+              <div class="mt-1 text-xs text-gray-400">
+                当前状态：{{ roleDefinitionsConfig ? '已配置' : '使用系统默认定义' }}
+              </div>
+            </div>
+            <Button type="primary" @click="handleEditRoleDefinitions">打开编辑器</Button>
+          </div>
+        </Card>
+
         <template v-for="group in groupedConfigs" :key="group.def.key">
           <Card :body-style="{ padding: '0' }" class="config-group-card">
             <!-- 卡片标题 -->

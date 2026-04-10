@@ -1,18 +1,21 @@
 <script setup lang="ts">
 import type { VbenFormProps } from '#/adapter/form';
 import type { VxeGridProps } from '#/adapter/vxe-table';
+import type { RoleItem } from '#/api/system/role/types';
+
+import { ref } from 'vue';
 
 import { Page, useVbenModal } from '@vben/common-ui';
+
 import { Button, message, Modal, Tag } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getRoleTree, deleteRole } from '#/api/system/role';
-import type { RoleItem } from '#/api/system/role/types';
+import { deleteRole, getRoleTree } from '#/api/system/role';
+
 import FormModal from './modules/form.vue';
-import GrantMenuModal from './modules/grant-menu.vue';
-import GrantDeptModal from './modules/grant-dept.vue';
 import GrantAiEngineModal from './modules/grant-ai-engine.vue';
-import { ref } from 'vue';
+import GrantDeptModal from './modules/grant-dept.vue';
+import GrantMenuModal from './modules/grant-menu.vue';
 
 /** 标签颜色池 */
 const TAG_COLORS = ['green', 'red', 'blue', 'orange', 'cyan', 'purple', 'geekblue', 'magenta'];
@@ -36,9 +39,9 @@ const dataScopeMap: Record<number, string> = {
 };
 
 /** 数据范围颜色 */
-function getDataScopeColor(val: number): string {
+function getDataScopeColor(val?: number): string {
   const keys = [1, 2, 3, 4, 5];
-  const idx = keys.indexOf(val);
+  const idx = val === undefined ? -1 : keys.indexOf(val);
   return TAG_COLORS[idx >= 0 ? idx % TAG_COLORS.length : 0] ?? 'default';
 }
 
@@ -55,9 +58,9 @@ const statusMap: Record<number, string> = {
 };
 
 /** 状态颜色 */
-function getStatusColor(val: number): string {
+function getStatusColor(val?: number): string {
   const keys = [0, 1];
-  const idx = keys.indexOf(val);
+  const idx = val === undefined ? -1 : keys.indexOf(val);
   return TAG_COLORS[idx >= 0 ? idx % TAG_COLORS.length : 0] ?? 'default';
 }
 
@@ -68,7 +71,7 @@ const isAdminMap: Record<number, string> = {
 };
 
 /** 超级管理员颜色 */
-function getIsAdminColor(val: number): string {
+function getIsAdminColor(val?: number): string {
   return val === 1 ? 'red' : 'default';
 }
 
@@ -200,17 +203,17 @@ function handleGrantAiEngine(row: RoleItem) {
       </template>
       <template #dataScope_cell="{ row }">
         <Tag :color="getDataScopeColor(row.dataScope)">
-          {{ dataScopeMap[row.dataScope] || row.dataScope }}
+          {{ row.dataScope === undefined ? '-' : (dataScopeMap[row.dataScope] || row.dataScope) }}
         </Tag>
       </template>
       <template #status_cell="{ row }">
         <Tag :color="getStatusColor(row.status)">
-          {{ statusMap[row.status] || row.status }}
+          {{ row.status === undefined ? '-' : (statusMap[row.status] || row.status) }}
         </Tag>
       </template>
       <template #isAdmin_cell="{ row }">
         <Tag :color="getIsAdminColor(row.isAdmin)">
-          {{ isAdminMap[row.isAdmin] || '否' }}
+          {{ row.isAdmin === undefined ? '否' : (isAdminMap[row.isAdmin] || '否') }}
         </Tag>
       </template>
       <template #action="{ row }">

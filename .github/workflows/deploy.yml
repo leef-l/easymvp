@@ -58,7 +58,7 @@ jobs:
           fi
 
   # ============================================
-  # Build & Deploy system (port 9000)
+  # Build & Deploy system (port 41002)
   # ============================================
   deploy-system:
     needs: detect-changes
@@ -111,8 +111,11 @@ jobs:
           cp /tmp/mvp_stage/$APP/$APP $DEPLOY_DIR/$APP/$APP
           chmod +x $DEPLOY_DIR/$APP/$APP
 
-          if [ ! -f $DEPLOY_DIR/$APP/manifest/config/config.yaml ]; then
+          if [ ! -d $DEPLOY_DIR/$APP/manifest ]; then
               cp -r /tmp/mvp_stage/$APP/manifest $DEPLOY_DIR/$APP/
+          else
+              mkdir -p $DEPLOY_DIR/$APP/manifest/config
+              cp /tmp/mvp_stage/$APP/manifest/config/config.yaml $DEPLOY_DIR/$APP/manifest/config/config.yaml
           fi
 
           echo "[$APP] Starting service..."
@@ -132,7 +135,7 @@ jobs:
           EOF
 
   # ============================================
-  # Build & Deploy ai (port 9001)
+  # Build & Deploy ai (port 41003)
   # ============================================
   deploy-ai:
     needs: [detect-changes, deploy-system]
@@ -189,8 +192,11 @@ jobs:
           cp /tmp/mvp_stage/$APP/$APP $DEPLOY_DIR/$APP/$APP
           chmod +x $DEPLOY_DIR/$APP/$APP
 
-          if [ ! -f $DEPLOY_DIR/$APP/manifest/config/config.yaml ]; then
+          if [ ! -d $DEPLOY_DIR/$APP/manifest ]; then
               cp -r /tmp/mvp_stage/$APP/manifest $DEPLOY_DIR/$APP/
+          else
+              mkdir -p $DEPLOY_DIR/$APP/manifest/config
+              cp /tmp/mvp_stage/$APP/manifest/config/config.yaml $DEPLOY_DIR/$APP/manifest/config/config.yaml
           fi
 
           echo "[$APP] Starting service..."
@@ -210,7 +216,7 @@ jobs:
           EOF
 
   # ============================================
-  # Build & Deploy mvp (port 9002)
+  # Build & Deploy mvp (port 41004)
   # ============================================
   deploy-mvp:
     needs: [detect-changes, deploy-ai]
@@ -267,8 +273,11 @@ jobs:
           cp /tmp/mvp_stage/$APP/$APP $DEPLOY_DIR/$APP/$APP
           chmod +x $DEPLOY_DIR/$APP/$APP
 
-          if [ ! -f $DEPLOY_DIR/$APP/manifest/config/config.yaml ]; then
+          if [ ! -d $DEPLOY_DIR/$APP/manifest ]; then
               cp -r /tmp/mvp_stage/$APP/manifest $DEPLOY_DIR/$APP/
+          else
+              mkdir -p $DEPLOY_DIR/$APP/manifest/config
+              cp /tmp/mvp_stage/$APP/manifest/config/config.yaml $DEPLOY_DIR/$APP/manifest/config/config.yaml
           fi
 
           echo "[$APP] Starting service..."
@@ -380,7 +389,7 @@ jobs:
           echo "## Deploy Results" >> $GITHUB_STEP_SUMMARY
           echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| system (9000) | ${{ needs.deploy-system.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| ai (9001) | ${{ needs.deploy-ai.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| mvp (9002) | ${{ needs.deploy-mvp.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| system (41002) | ${{ needs.deploy-system.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ai (41003) | ${{ needs.deploy-ai.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| mvp (41004) | ${{ needs.deploy-mvp.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Frontend | ${{ needs.deploy-frontend.result }} |" >> $GITHUB_STEP_SUMMARY

@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 
 	"easymvp/app/mvp/internal/model/entity"
@@ -34,4 +35,42 @@ func (r *ReviewIssueRepo) ListByPlanVersion(ctx context.Context, planVersionID i
 		OrderDesc("severity").
 		Scan(&list)
 	return list, err
+}
+
+// CountOpenByStageRunAndSeverity 统计阶段下指定严重级别的 open 问题数。
+func (r *ReviewIssueRepo) CountOpenByStageRunAndSeverity(ctx context.Context, stageRunID int64, severity string) (int, error) {
+	return g.DB().Model(r.table()).Ctx(ctx).
+		Where("stage_run_id", stageRunID).
+		Where("severity", severity).
+		Where("status", "open").
+		WhereNull("deleted_at").
+		Count()
+}
+
+// ListByStageRun 查询阶段下的问题列表。
+func (r *ReviewIssueRepo) ListByStageRun(ctx context.Context, stageRunID int64, onlyOpen bool, limit int) (gdb.Result, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("stage_run_id", stageRunID).
+		WhereNull("deleted_at").
+		OrderDesc("severity").
+		OrderDesc("created_at")
+	if onlyOpen {
+		model = model.Where("status", "open")
+	}
+	if limit > 0 {
+		model = model.Limit(limit)
+	}
+	return model.All()
+}
+
+// ListOpenByStageRunAndIDs 查询阶段下指定的 open 问题。
+func (r *ReviewIssueRepo) ListOpenByStageRunAndIDs(ctx context.Context, stageRunID int64, issueIDs []int64) (gdb.Result, error) {
+	return g.DB().Model(r.table()).Ctx(ctx).
+		Where("stage_run_id", stageRunID).
+		WhereIn("id", issueIDs).
+		Where("status", "open").
+		WhereNull("deleted_at").
+		OrderDesc("severity").
+		OrderDesc("created_at").
+		All()
 }

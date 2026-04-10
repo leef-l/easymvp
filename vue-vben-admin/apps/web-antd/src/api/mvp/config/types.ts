@@ -24,8 +24,8 @@ export interface ConfigListParams {
 
 /** MVP配置表创建参数 */
 export interface ConfigCreateParams {
-  configKey: string;
-  configValue: string;
+  configKey?: string;
+  configValue?: string;
   configType?: string;
   category?: string;
   description?: string;
@@ -34,8 +34,8 @@ export interface ConfigCreateParams {
 /** MVP配置表更新参数 */
 export interface ConfigUpdateParams {
   id: string;
-  configKey: string;
-  configValue: string;
+  configKey?: string;
+  configValue?: string;
   configType?: string;
   category?: string;
   description?: string;

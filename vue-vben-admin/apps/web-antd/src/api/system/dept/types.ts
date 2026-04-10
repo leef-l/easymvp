@@ -3,6 +3,7 @@
 /** 部门表项 */
 export interface DeptItem {
   id: string;
+  key?: string;
   parentID?: string;
   deptTitle?: string;
   title: string;
@@ -25,7 +26,7 @@ export interface DeptListParams {
 /** 部门表创建参数 */
 export interface DeptCreateParams {
   parentID?: string;
-  title: string;
+  title?: string;
   username?: string;
   email?: string;
   sort?: number;
@@ -36,7 +37,7 @@ export interface DeptCreateParams {
 export interface DeptUpdateParams {
   id: string;
   parentID?: string;
-  title: string;
+  title?: string;
   username?: string;
   email?: string;
   sort?: number;

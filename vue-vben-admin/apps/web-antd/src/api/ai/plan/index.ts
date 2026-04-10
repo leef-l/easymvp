@@ -69,6 +69,6 @@ export function downloadImportTemplatePlan() {
 }
 
 /** 批量编辑AI套餐表 */
-export function batchUpdatePlan(data: { ids: string[]; status?: number }) {
+export function batchUpdatePlan(data: { ids: string[]; status?: number | string }) {
   return requestClient.put(`${PREFIX}/batch-update`, data);
 }

@@ -1,33 +1,33 @@
 <script setup lang="ts">
-import { ref, watch, h } from 'vue';
+import { h, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { message } from 'ant-design-vue';
 
 import { Page } from '@vben/common-ui';
+
+import { ReloadOutlined, SaveOutlined } from '@ant-design/icons-vue';
+import { message } from 'ant-design-vue';
 import {
+  Alert,
+  Button,
   Card,
+  Col,
+  Descriptions,
+  DescriptionsItem,
   Form,
   FormItem,
   Input,
   InputNumber,
+  Row,
   Select,
   SelectOption,
-  Button,
   Space,
   Spin,
-  Divider,
-  Row,
-  Col,
-  Alert,
-  Descriptions,
-  DescriptionsItem,
 } from 'ant-design-vue';
-import { SaveOutlined, ReloadOutlined } from '@ant-design/icons-vue';
 
 import {
   getObjective,
-  saveObjective,
   type ObjectiveData,
+  saveObjective,
 } from '../../../api/mvp/workflow';
 
 const route = useRoute();
@@ -95,8 +95,8 @@ async function handleSave() {
     await saveObjective({ projectID: projectId.value, ...form.value });
     message.success('目标约束已保存');
     isEdit.value = false;
-  } catch (e: any) {
-    message.error(e?.message || '保存失败');
+  } catch (error: any) {
+    message.error(error?.message || '保存失败');
   } finally {
     saving.value = false;
   }

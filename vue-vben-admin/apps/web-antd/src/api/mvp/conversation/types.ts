@@ -9,7 +9,7 @@ export interface ConversationItem {
   taskName?: string;
   title?: string;
   roleType: string;
-  status?: string;
+  status?: number | string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -29,19 +29,19 @@ export interface ConversationListParams {
 
 /** MVP对话表创建参数 */
 export interface ConversationCreateParams {
-  projectID: string;
+  projectID?: string;
   taskID?: string;
   title?: string;
-  roleType: string;
-  status?: string;
+  roleType?: string;
+  status?: number | string;
 }
 
 /** MVP对话表更新参数 */
 export interface ConversationUpdateParams {
   id: string;
-  projectID: string;
+  projectID?: string;
   taskID?: string;
   title?: string;
-  roleType: string;
-  status?: string;
+  roleType?: string;
+  status?: number | string;
 }

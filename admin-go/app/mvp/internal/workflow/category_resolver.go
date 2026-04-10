@@ -22,6 +22,7 @@ type CategoryInfo struct {
 // 所有需要读取项目分类的模块都通过此入口，不直接摸 project_category 字段。
 type CategoryResolver struct {
 	categoryRepo *repo.ProjectCategoryRepo
+	projectRepo  *repo.ProjectRepo
 
 	// 内存缓存：display_name → CategoryInfo
 	mu          sync.RWMutex
@@ -34,6 +35,7 @@ type CategoryResolver struct {
 func NewCategoryResolver() *CategoryResolver {
 	return &CategoryResolver{
 		categoryRepo: repo.NewProjectCategoryRepo(),
+		projectRepo:  repo.NewProjectRepo(),
 		codeCache:    make(map[string]*CategoryInfo),
 		nameCache:    make(map[string]*CategoryInfo),
 	}
@@ -43,20 +45,16 @@ func NewCategoryResolver() *CategoryResolver {
 // 优先读 category_code，若为空则根据 project_category 兼容映射并异步回填。
 func (r *CategoryResolver) ResolveByProject(ctx context.Context, projectID int64) (*CategoryInfo, error) {
 	// 查询项目的 category_code 和 project_category
-	record, err := g.DB().Model("mvp_project").Ctx(ctx).
-		Fields("category_code", "project_category").
-		Where("id", projectID).
-		WhereNull("deleted_at").
-		One()
+	record, err := r.projectRepo.GetByID(ctx, projectID, "category_code", "project_category")
 	if err != nil {
 		return nil, err
 	}
-	if record.IsEmpty() {
+	if len(record) == 0 {
 		return r.fallbackDefault(), nil
 	}
 
-	categoryCode := record["category_code"].String()
-	projectCategory := record["project_category"].String()
+	categoryCode := gconv.String(record["category_code"])
+	projectCategory := gconv.String(record["project_category"])
 
 	// 优先走 category_code
 	if categoryCode != "" {
@@ -73,15 +71,11 @@ func (r *CategoryResolver) ResolveByProject(ctx context.Context, projectID int64
 			// 异步回填 category_code
 			go func() {
 				defer func() {
-					if r := recover(); r != nil {
-						g.Log().Errorf(context.Background(), "[CategoryResolver] 回填 category_code panic: %v", r)
+					if recovered := recover(); recovered != nil {
+						g.Log().Errorf(context.Background(), "[CategoryResolver] 回填 category_code panic: %v", recovered)
 					}
 				}()
-				if _, bfErr := g.DB().Model("mvp_project").Ctx(context.Background()).
-					Where("id", projectID).
-					Where("category_code IS NULL OR category_code = ''").
-					Data(g.Map{"category_code": info.CategoryCode}).
-					Update(); bfErr != nil {
+				if bfErr := r.projectRepo.BackfillCategoryCodeIfEmpty(context.Background(), projectID, info.CategoryCode); bfErr != nil {
 					g.Log().Warningf(context.Background(), "[CategoryResolver] 回填 category_code 失败: projectID=%d err=%v", projectID, bfErr)
 				}
 			}()

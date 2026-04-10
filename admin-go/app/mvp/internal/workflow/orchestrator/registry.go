@@ -249,8 +249,12 @@ func Init() {
 						"task_id":       failedTaskID,
 					},
 				})
-				if resp.Handled {
+				if shouldDeferToDecisionCenterRework(resp) {
 					return nil
+				}
+				if resp != nil && resp.Handled && resp.HumanRequired {
+					g.Log().Infof(ctx, "[Registry] accept.failed 已创建人工检查点，保留审计但继续自动返工: workflowRunID=%d taskID=%d actionID=%d",
+						workflowRunID, failedTaskID, resp.ActionID)
 				}
 			}
 			return triggerReworkStage(ctx, workflowRunID, failedTaskID, "accept")
@@ -267,8 +271,12 @@ func Init() {
 					ProjectID:     projectID.Int64(),
 					TriggerSource: consts.TriggerReworkCompleted,
 				})
-				if resp.Handled {
+				if shouldDeferToDecisionCenterRework(resp) {
 					return nil
+				}
+				if resp != nil && resp.Handled && resp.HumanRequired {
+					g.Log().Infof(ctx, "[Registry] rework.completed 已创建人工检查点，保留审计但继续自动回验收: workflowRunID=%d actionID=%d",
+						workflowRunID, resp.ActionID)
 				}
 			}
 
@@ -1006,4 +1014,8 @@ func triggerReworkStage(ctx context.Context, workflowRunID int64, failedTaskID i
 	g.Log().Infof(ctx, "[triggerReworkStage] 返工阶段已启动 workflowRunID=%d stageRunID=%d failedTask=%d",
 		workflowRunID, stageRunID, failedTaskID)
 	return nil
+}
+
+func shouldDeferToDecisionCenterRework(resp *autonomy.DecisionResponse) bool {
+	return resp != nil && resp.Handled && !resp.HumanRequired
 }

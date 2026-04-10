@@ -1,18 +1,20 @@
 <script setup lang="ts">
-import { useRouter } from 'vue-router';
 import type { VbenFormProps } from '#/adapter/form';
 import type { VxeGridProps } from '#/adapter/vxe-table';
+import type { ProjectItem } from '#/api/mvp/project/types';
+
+import { useRouter } from 'vue-router';
 
 import { Page, useVbenModal } from '@vben/common-ui';
-import { Button, Dropdown, Menu, MenuItem, message, Modal, Progress, Tag } from 'ant-design-vue';
+
 import { DownOutlined } from '@ant-design/icons-vue';
+import { Button, Dropdown, Menu, MenuItem, message, Modal, Progress, Tag } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getProjectList, deleteProject } from '#/api/mvp/project';
-import { confirmPlan, resumeProject, batchProjectStats } from '#/api/mvp/workflow';
-import type { ProjectItem } from '#/api/mvp/project/types';
-import { stageTypeMap } from '../consts';
+import { deleteProject, getProjectList } from '#/api/mvp/project';
+import { batchProjectStats, confirmPlan, resumeProject } from '#/api/mvp/workflow';
 
+import { stageTypeMap } from '../consts';
 import FormModal from './modules/form.vue';
 import PauseModal from './modules/pause-modal.vue';
 import StatusPanel from './modules/status-panel.vue';
@@ -225,19 +227,9 @@ function handleViewStatus(row: ProjectItem) {
   statusPanelApi.setData({ project: row }).open();
 }
 
-/** 打开执行控制台 */
-function handleExecution(row: ProjectItem) {
-  router.push({ path: '/mvp/workflow/execution', query: { projectId: row.id } });
-}
-
 /** 打开仪表板 */
 function handleDashboard(row: ProjectItem) {
   router.push({ path: '/mvp/workflow/dashboard', query: { projectId: row.id } });
-}
-
-/** 打开元认知页面 */
-function handleMetaCognition(row: ProjectItem) {
-  router.push({ path: '/mvp/workflow/meta-cognition', query: { projectID: row.id } });
 }
 
 /** 确认方案（设计阶段 -> 执行阶段） */
@@ -326,8 +318,8 @@ function handleDelete(row: ProjectItem) {
 
       <!-- 状态 Tag 列 -->
       <template #col-status="{ row }">
-        <Tag :color="STATUS_COLORS[row.status] ?? 'default'">
-          {{ STATUS_LABELS[row.status] ?? row.status ?? '-' }}
+        <Tag :color="row.status ? (STATUS_COLORS[row.status] ?? 'default') : 'default'">
+          {{ row.status ? (STATUS_LABELS[row.status] ?? row.status) : '-' }}
         </Tag>
       </template>
 
@@ -341,7 +333,7 @@ function handleDelete(row: ProjectItem) {
 
       <!-- 任务进度列 -->
       <template #col-progress="{ row }">
-        <div v-if="row.totalTasks > 0" class="flex items-center gap-2">
+        <div v-if="(row.totalTasks ?? 0) > 0" class="flex items-center gap-2">
           <Progress
             :percent="
               row.totalTasks
@@ -367,7 +359,7 @@ function handleDelete(row: ProjectItem) {
 
         <!-- 主按钮2 -->
         <Button v-if="row.status === 'designing'" type="link" size="small" @click="handleDashboard(row)">仪表板</Button>
-        <Button v-else-if="['running', 'executing', 'reworking'].includes(row.status)" type="link" size="small" class="text-orange-500" @click="handlePause(row)">暂停</Button>
+        <Button v-else-if="row.status && ['running', 'executing', 'reworking'].includes(row.status)" type="link" size="small" class="text-orange-500" @click="handlePause(row)">暂停</Button>
         <Button v-else-if="row.status === 'paused'" type="link" size="small" @click="handleDashboard(row)">仪表板</Button>
 
         <!-- 更多操作下拉 -->
@@ -378,7 +370,7 @@ function handleDelete(row: ProjectItem) {
           <template #overlay>
             <Menu>
               <MenuItem v-if="row.status === 'designing'" @click="handleConfirmPlan(row)">确认方案</MenuItem>
-              <MenuItem v-if="row.status === 'designing'" @click="handleDashboard(row)">查看详情</MenuItem>
+              <MenuItem v-if="row.status === 'designing'" @click="handleViewStatus(row)">查看详情</MenuItem>
               <MenuItem v-if="row.status !== 'designing'" @click="handleChat(row)">进入对话</MenuItem>
               <MenuItem v-if="row.status !== 'designing'" @click="handleDashboard(row)">仪表板</MenuItem>
               <MenuItem @click="handleEdit(row)">编辑</MenuItem>

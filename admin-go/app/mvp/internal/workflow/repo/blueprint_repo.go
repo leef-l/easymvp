@@ -35,3 +35,11 @@ func (r *BlueprintRepo) ListByPlanVersion(ctx context.Context, planVersionID int
 		Scan(&list)
 	return list, err
 }
+
+// CountByPlanVersion 统计计划版本下的蓝图数量。
+func (r *BlueprintRepo) CountByPlanVersion(ctx context.Context, planVersionID int64) (int, error) {
+	return g.DB().Model(r.table()).Ctx(ctx).
+		Where("plan_version_id", planVersionID).
+		WhereNull("deleted_at").
+		Count()
+}

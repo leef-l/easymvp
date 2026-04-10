@@ -97,11 +97,15 @@ func setupWorkflowEventing(ctx context.Context) {
 	}
 
 	redisClient := safeGetWorkflowEventRedis(ctx)
-	bridge := eventstream.NewBridge(redisClient, cfg)
+	var redisCommander eventstream.RedisCommander
+	if redisClient != nil {
+		redisCommander = redisClient
+	}
+	bridge := eventstream.NewBridge(redisCommander, cfg)
 	eventPublisher.SetStreamSink(bridge)
 
 	if cfg.ConsumerEnabled {
-		workflowEventConsumer = eventstream.NewConsumer(redisClient, cfg, handleWorkflowRecoveryEvent)
+		workflowEventConsumer = eventstream.NewConsumer(redisCommander, cfg, handleWorkflowRecoveryEvent)
 		return
 	}
 	workflowEventConsumer = nil
@@ -174,7 +178,7 @@ func safeGetWorkflowEventRedis(ctx context.Context) (r *gredis.Redis) {
 			return r
 		} else {
 			g.Log().Warningf(ctx, "[WorkflowEvent] default redis ping failed, retry fallback: %v", err)
-			if !isRedisAuthErr(err) {
+			if !shouldFallbackToDirectRedisErr(err) {
 				return r
 			}
 		}
@@ -184,7 +188,7 @@ func safeGetWorkflowEventRedis(ctx context.Context) (r *gredis.Redis) {
 	if addr == "" {
 		addr = "127.0.0.1:6379"
 	}
-	pass := strings.TrimSpace(os.Getenv("REDIS_PASS"))
+	pass := resolveRedisPass()
 	client, err := gredis.New(&gredis.Config{
 		Address: addr,
 		Pass:    pass,
@@ -521,10 +525,20 @@ func expandConfigEnv(raw string) string {
 	return strings.TrimSpace(os.ExpandEnv(strings.TrimSpace(raw)))
 }
 
-func isRedisAuthErr(err error) bool {
+func shouldFallbackToDirectRedisErr(err error) bool {
 	if err == nil {
 		return false
 	}
 	lowerErr := strings.ToLower(err.Error())
-	return strings.Contains(lowerErr, "noauth") || strings.Contains(lowerErr, "authentication")
+	return strings.Contains(lowerErr, "noauth") ||
+		strings.Contains(lowerErr, "authentication") ||
+		strings.Contains(lowerErr, "redis object is nil") ||
+		strings.Contains(lowerErr, "redis client unavailable")
+}
+
+func resolveRedisPass() string {
+	if pass := strings.TrimSpace(os.Getenv("REDIS_PASS")); pass != "" {
+		return pass
+	}
+	return strings.TrimSpace(os.Getenv("REDIS_PASSWORD"))
 }

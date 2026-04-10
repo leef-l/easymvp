@@ -1,17 +1,22 @@
 <script setup lang="ts">
 import type { VbenFormProps } from '#/adapter/form';
 import type { VxeGridProps } from '#/adapter/vxe-table';
+import type { ModelItem } from '#/api/ai/model/types';
 
 import { Page, useVbenModal } from '@vben/common-ui';
+
 import { Button, message, Modal, Switch, Tag } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getModelList, deleteModel, batchDeleteModel, updateModel } from '#/api/ai/model';
-import type { ModelItem } from '#/api/ai/model/types';
-import FormModal from './modules/form.vue';
-import DetailDrawer from './modules/detail-drawer.vue';
-
+import { batchDeleteModel, deleteModel, getModelList, updateModel } from '#/api/ai/model';
 import { roleTypeMap as capabilityMap } from '#/views/mvp/consts';
+
+import DetailDrawer from './modules/detail-drawer.vue';
+import FormModal from './modules/form.vue';
+
+function getCapabilityMeta(capability?: string) {
+  return capability ? capabilityMap[capability] : undefined;
+}
 
 /** 状态选项 */
 const statusOptions = [
@@ -211,8 +216,8 @@ async function handleStatusChange(row: ModelItem, checked: boolean) {
         <Button v-auth="['ai:model:batch-delete']" danger class="ml-2" @click="handleBatchDelete">批量删除</Button>
       </template>
       <template #capability_cell="{ row }">
-        <Tag v-if="capabilityMap[row.capability]" :color="capabilityMap[row.capability].color">
-          {{ capabilityMap[row.capability].label }}
+        <Tag v-if="getCapabilityMeta(row.capability)" :color="getCapabilityMeta(row.capability)?.color">
+          {{ getCapabilityMeta(row.capability)?.label }}
         </Tag>
         <span v-else>{{ row.capability || '-' }}</span>
       </template>
@@ -220,8 +225,8 @@ async function handleStatusChange(row: ModelItem, checked: boolean) {
         <Switch
           v-auth="['ai:model:update']"
           :checked="row.status === 1"
-          :checked-children="'启用'"
-          :un-checked-children="'禁用'"
+          checked-children="启用"
+          un-checked-children="禁用"
           size="small"
           @change="(checked) => handleStatusChange(row, checked as boolean)"
         />

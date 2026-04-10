@@ -168,7 +168,7 @@ func (r *Reporter) collectReworkMetrics(ctx context.Context, workflowRunID int64
 
 	handoffs, hoErr := g.DB().Model("mvp_handoff_record").Ctx(ctx).
 		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").Count()
+		Count()
 	if hoErr != nil {
 		g.Log().Warningf(ctx, "[Reporter] 查询交接记录失败: wfRunID=%d err=%v", workflowRunID, hoErr)
 	}

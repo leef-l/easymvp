@@ -1,18 +1,43 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { useVbenModal } from '@vben/common-ui';
-import { Descriptions, DescriptionsItem, Tag } from 'ant-design-vue';
-import { getProjectRoleDetail } from '#/api/mvp/project_role';
 import type { ProjectRoleItem } from '#/api/mvp/project_role/types';
-import { roleTypeMap, roleLevelMap } from '../../consts';
+
+import { ref } from 'vue';
+
+import { useVbenModal } from '@vben/common-ui';
+
+import { Descriptions, DescriptionsItem, Tag } from 'ant-design-vue';
+
+import { getProjectRoleDetail } from '#/api/mvp/project_role';
+
+import { roleLevelMap } from '../../consts';
+import { loadRoleTypeMap } from '../../role-definitions';
 
 /** 状态映射 */
-const statusMap: Record<number, string> = {
+const statusMap: Record<string, string> = {
   0: '禁用',
   1: '启用',
 };
 
-const detail = ref<ProjectRoleItem | null>(null);
+const detail = ref<null | ProjectRoleItem>(null);
+const dynamicRoleTypeMap = ref<Record<string, { color: string; label: string; }>>({});
+
+loadRoleTypeMap()
+  .then((value) => {
+    dynamicRoleTypeMap.value = value;
+  })
+  .catch(() => undefined);
+
+function getRoleLevelMeta(level?: string) {
+  return level ? roleLevelMap[level] : undefined;
+}
+
+function getRoleTypeMeta(roleType?: string) {
+  return roleType ? dynamicRoleTypeMap.value[roleType] : undefined;
+}
+
+function getStatusLabel(status?: number | string) {
+  return status === undefined ? '-' : (statusMap[String(status)] ?? String(status));
+}
 
 const [Modal, modalApi] = useVbenModal({
   fullscreenButton: false,
@@ -41,21 +66,21 @@ const [Modal, modalApi] = useVbenModal({
       <DescriptionsItem label="ID">{{ detail.id }}</DescriptionsItem>
       <DescriptionsItem label="所属项目">{{ detail.projectName || '-' }}</DescriptionsItem>
       <DescriptionsItem label="角色类型">
-        <Tag v-if="roleTypeMap[detail.roleType]" :color="roleTypeMap[detail.roleType].color">
-          {{ roleTypeMap[detail.roleType].label }}
+        <Tag v-if="getRoleTypeMeta(detail.roleType)" :color="getRoleTypeMeta(detail.roleType)?.color">
+          {{ getRoleTypeMeta(detail.roleType)?.label }}
         </Tag>
         <span v-else>{{ detail.roleType || '-' }}</span>
       </DescriptionsItem>
       <DescriptionsItem label="角色等级">
-        <Tag v-if="roleLevelMap[detail.roleLevel]" :color="roleLevelMap[detail.roleLevel].color">
-          {{ roleLevelMap[detail.roleLevel].label }}
+        <Tag v-if="getRoleLevelMeta(detail.roleLevel)" :color="getRoleLevelMeta(detail.roleLevel)?.color">
+          {{ getRoleLevelMeta(detail.roleLevel)?.label }}
         </Tag>
         <span v-else>{{ detail.roleLevel || '-' }}</span>
       </DescriptionsItem>
       <DescriptionsItem label="AI模型">{{ detail.modelName || '-' }}</DescriptionsItem>
       <DescriptionsItem label="系统提示词">{{ detail.systemPrompt || '-' }}</DescriptionsItem>
       <DescriptionsItem label="状态">
-        <Tag>{{ statusMap[detail.status] || detail.status }}</Tag>
+        <Tag>{{ getStatusLabel(detail.status) }}</Tag>
       </DescriptionsItem>
       <DescriptionsItem label="创建时间">{{ detail.createdAt || '-' }}</DescriptionsItem>
       <DescriptionsItem label="更新时间">{{ detail.updatedAt || '-' }}</DescriptionsItem>

@@ -38,6 +38,17 @@ func TestParseResourceTargetsNormalizesAndDeduplicates(t *testing.T) {
 	}
 }
 
+func TestParseResourceTargetsTreatsBareDirectoryLikePathAsDirectory(t *testing.T) {
+	targets := parseResourceTargets(`["frontend/src/components","frontend/src/hooks/useSnakeGame.ts","Dockerfile"]`)
+
+	if !reflect.DeepEqual(targets.FilePaths, []string{"frontend/src/hooks/useSnakeGame.ts", "Dockerfile"}) {
+		t.Fatalf("unexpected file paths: %#v", targets.FilePaths)
+	}
+	if !reflect.DeepEqual(targets.DirectoryPaths, []string{"frontend/src/components"}) {
+		t.Fatalf("unexpected directory paths: %#v", targets.DirectoryPaths)
+	}
+}
+
 func TestEnsureDirectoryTargetsCreatesNestedDirectories(t *testing.T) {
 	baseDir := t.TempDir()
 	if err := ensureDirectoryTargets(baseDir, []string{"cmd/server", "internal/handler"}); err != nil {

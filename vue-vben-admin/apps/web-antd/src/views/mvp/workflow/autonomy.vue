@@ -1,39 +1,41 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
+
 import {
-  Card,
-  Table,
-  Tabs,
-  TabPane,
-  Tag,
   Button,
-  Space,
-  Spin,
+  Card,
   Empty,
+  Input,
+  message,
   Modal,
   Select,
-  Input,
+  Space,
+  Spin,
+  Table,
+  TabPane,
+  Tabs,
+  Tag,
   Typography,
-  message,
 } from 'ant-design-vue';
+
 import {
-  getAutonomyCheckpoints,
-  getAutonomyActions,
-  getAutonomyGateRules,
-  getAutonomyPolicyRules,
-  autonomyApprove,
-  autonomyReject,
-  triggerReplan,
-  getProjectReports,
-  triggerReport,
-  getAutonomyMode,
-  setAutonomyMode,
-  type AutonomyCheckpointItem,
   type AutonomyActionItem,
-  type RiskGateRuleItem,
+  autonomyApprove,
+  type AutonomyCheckpointItem,
+  autonomyReject,
+  getAutonomyActions,
+  getAutonomyCheckpoints,
+  getAutonomyGateRules,
+  getAutonomyMode,
+  getAutonomyPolicyRules,
+  getProjectReports,
   type PolicyRuleItem,
   type ProjectReportItem,
+  type RiskGateRuleItem,
+  setAutonomyMode,
+  triggerReplan,
+  triggerReport,
 } from '#/api/mvp/workflow';
 
 const props = defineProps<{ projectId?: string }>();
@@ -61,8 +63,17 @@ const policyRules = ref<PolicyRuleItem[]>([]);
 // 报告
 const reports = ref<ProjectReportItem[]>([]);
 const reportTypeFilter = ref<string | undefined>(undefined);
-const selectedReport = ref<ProjectReportItem | null>(null);
+const selectedReport = ref<null | ProjectReportItem>(null);
 const reportDetailVisible = ref(false);
+const reportDetailText = computed(() => {
+  const content = selectedReport.value?.content || '';
+  if (!content) return '';
+  if (typeof DOMParser === 'undefined') {
+    return content;
+  }
+  const parsed = new DOMParser().parseFromString(content, 'text/html');
+  return parsed.body.textContent || content;
+});
 
 // 自治模式
 const autonomyMode = ref<string>('suggest');
@@ -147,7 +158,7 @@ const pendingCount = computed(() =>
 
 // ==================== 映射表 ====================
 
-const levelMap: Record<string, { label: string; color: string }> = {
+const levelMap: Record<string, { color: string; label: string; }> = {
   A: { label: 'A 自动', color: 'green' },
   B: { label: 'B 建议', color: 'orange' },
   C: { label: 'C 人工', color: 'red' },
@@ -186,14 +197,14 @@ const triggerSourceMap: Record<string, string> = {
   'human.override': '人工覆盖',
 };
 
-const checkpointStatusMap: Record<string, { label: string; color: string }> = {
+const checkpointStatusMap: Record<string, { color: string; label: string; }> = {
   open: { label: '待处理', color: 'orange' },
   handled: { label: '已处理', color: 'green' },
   expired: { label: '已过期', color: 'default' },
   canceled: { label: '已取消', color: 'default' },
 };
 
-const actionStatusMap: Record<string, { label: string; color: string }> = {
+const actionStatusMap: Record<string, { color: string; label: string; }> = {
   pending: { label: '待处理', color: 'blue' },
   waiting_human: { label: '等待人工', color: 'orange' },
   auto_executed: { label: '自动执行', color: 'green' },
@@ -202,7 +213,7 @@ const actionStatusMap: Record<string, { label: string; color: string }> = {
   failed: { label: '执行失败', color: 'red' },
 };
 
-const gateTypeMap: Record<string, { label: string; color: string }> = {
+const gateTypeMap: Record<string, { color: string; label: string; }> = {
   permission: { label: '权限', color: 'red' },
   quality: { label: '质量', color: 'orange' },
   cost: { label: '成本', color: 'gold' },
@@ -271,8 +282,26 @@ const reportColumns = [
 
 // ==================== 辅助函数 ====================
 
-function getAction(record: AutonomyCheckpointItem): AutonomyActionItem | undefined {
-  return actionMap.value.get(record.decisionActionId);
+function getAction(record: Record<string, any> | { decisionActionId?: string }) {
+  const actionId = typeof record?.decisionActionId === 'string'
+    ? record.decisionActionId
+    : '';
+  return actionId ? actionMap.value.get(actionId) : undefined;
+}
+
+function getDecisionLevelMeta(record: Record<string, any> | { decisionActionId?: string }) {
+  const level = getAction(record)?.decisionLevel;
+  return level ? levelMap[level] : undefined;
+}
+
+function getActionTypeLabel(record: Record<string, any> | { decisionActionId?: string }) {
+  const actionType = getAction(record)?.actionType;
+  return actionType ? (actionTypeMap[actionType] || actionType) : '-';
+}
+
+function getTriggerSourceLabel(record: Record<string, any> | { decisionActionId?: string }) {
+  const triggerSource = getAction(record)?.triggerSource;
+  return triggerSource ? (triggerSourceMap[triggerSource] || triggerSource) : '-';
 }
 
 function parseRecommendation(json?: string): string {
@@ -300,7 +329,7 @@ function parseResult(json?: string): string {
 
 // ==================== 操作 ====================
 
-async function handleApprove(record: AutonomyCheckpointItem) {
+async function handleApprove(record: AutonomyCheckpointItem | Record<string, any>) {
   const action = getAction(record);
   if (!action) {
     message.error('未找到关联的决策动作');
@@ -317,14 +346,14 @@ async function handleApprove(record: AutonomyCheckpointItem) {
   });
 }
 
-function handleReject(record: AutonomyCheckpointItem) {
+function handleReject(record: AutonomyCheckpointItem | Record<string, any>) {
   const action = getAction(record);
   if (!action) {
     message.error('未找到关联的决策动作');
     return;
   }
   rejectReason.value = '';
-  rejectTarget.value = record;
+  rejectTarget.value = record as AutonomyCheckpointItem;
   rejectModalVisible.value = true;
 }
 
@@ -361,8 +390,8 @@ async function handleTriggerReport() {
   loadData();
 }
 
-function viewReport(record: ProjectReportItem) {
-  selectedReport.value = record;
+function viewReport(record: ProjectReportItem | Record<string, any>) {
+  selectedReport.value = record as ProjectReportItem;
   reportDetailVisible.value = true;
 }
 
@@ -375,12 +404,13 @@ async function loadMode() {
   }
 }
 
-async function handleModeChange(mode: string) {
+async function handleModeChange(mode: unknown) {
+  const nextMode = String(mode || 'suggest');
   modeLoading.value = true;
   try {
-    await setAutonomyMode(mode as 'auto' | 'suggest');
-    autonomyMode.value = mode;
-    message.success(`已切换为${mode === 'auto' ? '全自动' : '建议'}模式`);
+    await setAutonomyMode(nextMode as 'auto' | 'suggest');
+    autonomyMode.value = nextMode;
+    message.success(`已切换为${nextMode === 'auto' ? '全自动' : '建议'}模式`);
   } catch {
     message.error('模式切换失败');
   } finally {
@@ -389,11 +419,12 @@ async function handleModeChange(mode: string) {
 }
 
 /** Tab 切换时按需加载 */
-function onTabChange(key: string) {
-  if (key === 'history' && allActions.value.length === 0) {
+function onTabChange(key: number | string) {
+  const activeKey = String(key);
+  if (activeKey === 'history' && allActions.value.length === 0) {
     loadHistory();
   }
-  if (key === 'gates' && gateRules.value.length === 0) {
+  if (activeKey === 'gates' && gateRules.value.length === 0) {
     loadRules();
   }
 }
@@ -443,7 +474,7 @@ void loadMode();
     </Card>
 
     <Spin :spinning="loading">
-      <Tabs v-model:activeKey="activeTab" @change="onTabChange">
+      <Tabs v-model:active-key="activeTab" @change="onTabChange">
         <!-- Tab 1: 决策中心 -->
         <TabPane key="decisions">
           <template #tab>
@@ -475,17 +506,17 @@ void loadMode();
                 </Tag>
               </template>
               <template v-if="column.key === 'decisionLevel'">
-                <Tag :color="levelMap[getAction(record)?.decisionLevel]?.color || 'default'">
-                  {{ levelMap[getAction(record)?.decisionLevel]?.label || getAction(record)?.decisionLevel || '-' }}
+                <Tag :color="getDecisionLevelMeta(record)?.color || 'default'">
+                  {{ getDecisionLevelMeta(record)?.label || '-' }}
                 </Tag>
               </template>
               <template v-if="column.key === 'actionType'">
                 <Tag color="purple">
-                  {{ actionTypeMap[getAction(record)?.actionType] || getAction(record)?.actionType || '-' }}
+                  {{ getActionTypeLabel(record) }}
                 </Tag>
               </template>
               <template v-if="column.key === 'triggerSource'">
-                {{ triggerSourceMap[getAction(record)?.triggerSource] || getAction(record)?.triggerSource || '-' }}
+                {{ getTriggerSourceLabel(record) }}
               </template>
               <template v-if="column.key === 'recommendation'">
                 <Typography.Text :ellipsis="{ tooltip: true }" style="max-width: 300px">
@@ -711,7 +742,7 @@ void loadMode();
       width="700px"
       :footer="null"
     >
-      <div v-if="selectedReport" v-html="selectedReport.content" class="prose max-w-none" />
+      <div v-if="selectedReport" class="prose max-w-none whitespace-pre-wrap">{{ reportDetailText }}</div>
     </Modal>
 
     <!-- 驳回理由弹窗 -->

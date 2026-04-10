@@ -1,6 +1,10 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import type { TaskItem } from '#/api/mvp/task/types';
+
+import { computed, ref } from 'vue';
+
 import { useVbenModal } from '@vben/common-ui';
+
 import {
   Alert,
   Button,
@@ -11,12 +15,13 @@ import {
   Spin,
   Tag,
   Typography,
-  TypographyParagraph,
   TypographyText,
 } from 'ant-design-vue';
+
 import { getTaskDetail } from '#/api/mvp/task';
 import { retryTask } from '#/api/mvp/workflow';
-import type { TaskItem } from '#/api/mvp/task/types';
+
+import { loadRoleTypeMap } from '../../role-definitions';
 
 // ===== 状态/颜色映射 =====
 const STATUS_MAP: Record<string, { color: string; text: string }> = {
@@ -30,12 +35,6 @@ const STATUS_MAP: Record<string, { color: string; text: string }> = {
   submit_error: { color: 'error', text: '提交错误' },
 };
 
-const ROLE_MAP: Record<string, { color: string; text: string }> = {
-  architect: { color: 'purple', text: '架构师' },
-  implementer: { color: 'blue', text: '实施员' },
-  auditor: { color: 'orange', text: '审计员' },
-};
-
 const LEVEL_MAP: Record<string, { color: string; text: string }> = {
   lite: { color: 'default', text: 'Lite' },
   pro: { color: 'blue', text: 'Pro' },
@@ -43,9 +42,10 @@ const LEVEL_MAP: Record<string, { color: string; text: string }> = {
 };
 
 // ===== 状态 =====
-const detail = ref<TaskItem | null>(null);
+const detail = ref<null | TaskItem>(null);
 const loading = ref(false);
 const retrying = ref(false);
+const dynamicRoleTypeMap = ref<Record<string, { color: string; label: string; }>>({});
 
 // 当前 projectId（从 setData 传入）
 const currentProjectId = ref('');
@@ -107,20 +107,27 @@ async function handleRetry() {
     retrying.value = false;
   }
 }
+
+loadRoleTypeMap()
+  .then((value) => {
+    dynamicRoleTypeMap.value = value;
+  })
+  .catch(() => {
+    dynamicRoleTypeMap.value = {};
+  });
 </script>
 
 <template>
   <Modal class="w-[720px]">
     <Spin :spinning="loading">
       <div v-if="detail" class="task-detail">
-
-        <!-- 失败提示 -->
+<!-- 失败提示 -->
         <Alert
           v-if="isFailed"
           type="error"
           class="mb-4"
           show-icon
-          :message="'任务执行失败'"
+          message="任务执行失败"
           :description="detail.errorMessage || '未知错误'"
         >
           <template #action>
@@ -157,9 +164,9 @@ async function handleRetry() {
           <DescriptionsItem label="角色类型">
             <Tag
               v-if="detail.roleType"
-              :color="ROLE_MAP[detail.roleType]?.color || 'default'"
+              :color="dynamicRoleTypeMap[detail.roleType]?.color || 'default'"
             >
-              {{ ROLE_MAP[detail.roleType]?.text || detail.roleType }}
+              {{ dynamicRoleTypeMap[detail.roleType]?.label || detail.roleType }}
             </Tag>
             <span v-else>-</span>
           </DescriptionsItem>
@@ -215,8 +222,8 @@ async function handleRetry() {
               :key="dep.id"
               class="dep-item"
             >
-              <Tag :color="STATUS_MAP[dep.status]?.color || 'default'" size="small">
-                {{ STATUS_MAP[dep.status]?.text || dep.status }}
+              <Tag :color="dep.status ? (STATUS_MAP[dep.status]?.color || 'default') : 'default'" size="small">
+                {{ dep.status ? (STATUS_MAP[dep.status]?.text || dep.status) : '-' }}
               </Tag>
               <span class="dep-name">{{ dep.name }}</span>
               <span class="dep-arrow">→ 当前任务</span>
@@ -235,8 +242,8 @@ async function handleRetry() {
             >
               <span class="dep-arrow">当前任务 →</span>
               <span class="dep-name">{{ dep.name }}</span>
-              <Tag :color="STATUS_MAP[dep.status]?.color || 'default'" size="small">
-                {{ STATUS_MAP[dep.status]?.text || dep.status }}
+              <Tag :color="dep.status ? (STATUS_MAP[dep.status]?.color || 'default') : 'default'" size="small">
+                {{ dep.status ? (STATUS_MAP[dep.status]?.text || dep.status) : '-' }}
               </Tag>
             </div>
           </div>

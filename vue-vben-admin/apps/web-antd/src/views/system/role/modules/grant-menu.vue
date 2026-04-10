@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import type { MenuItem } from '#/api/system/menu/types';
+
+import { computed, ref } from 'vue';
+
 import { message, Modal, Tree } from 'ant-design-vue';
+
 import { getMenuTree } from '#/api/system/menu';
 import { getRoleMenuIds, grantRoleMenu } from '#/api/system/role';
-import type { MenuItem } from '#/api/system/menu/types';
+
+import { withTreeKeys } from '../../tree-utils';
 
 const emit = defineEmits<{ success: [] }>();
 
@@ -14,6 +19,7 @@ const checkedKeys = ref<string[]>([]);
 const halfCheckedKeys = ref<string[]>([]);
 const treeData = ref<MenuItem[]>([]);
 const expandedKeys = ref<string[]>([]);
+const treeDataSource = computed(() => withTreeKeys(treeData.value));
 
 /** 递归收集所有节点 key */
 function collectKeys(nodes: MenuItem[]): string[] {
@@ -31,10 +37,10 @@ function collectKeys(nodes: MenuItem[]): string[] {
 function collectLeafKeys(nodes: MenuItem[]): string[] {
   const keys: string[] = [];
   for (const node of nodes) {
-    if (!node.children?.length) {
-      keys.push(node.id);
-    } else {
+    if (node.children?.length) {
       keys.push(...collectLeafKeys(node.children));
+    } else {
+      keys.push(node.id);
     }
   }
   return keys;
@@ -68,9 +74,10 @@ async function open(id: string) {
 }
 
 /** 勾选事件 */
-function handleCheck(_checkedKeys: string[], e: any) {
-  checkedKeys.value = _checkedKeys as string[];
-  halfCheckedKeys.value = e.halfCheckedKeys as string[];
+function handleCheck(checked: any, e: any) {
+  const nextChecked = Array.isArray(checked) ? checked : (checked?.checked ?? []);
+  checkedKeys.value = nextChecked.map(String);
+  halfCheckedKeys.value = (e?.halfCheckedKeys ?? []).map(String);
 }
 
 /** 提交 */
@@ -104,8 +111,8 @@ defineExpose({ open });
     <div class="max-h-[400px] overflow-auto py-2">
       <Tree
         :checked-keys="checkedKeys"
-        v-model:expandedKeys="expandedKeys"
-        :tree-data="treeData"
+        v-model:expanded-keys="expandedKeys"
+        :tree-data="treeDataSource"
         :field-names="{ title: 'title', key: 'id', children: 'children' }"
         checkable
         @check="handleCheck"

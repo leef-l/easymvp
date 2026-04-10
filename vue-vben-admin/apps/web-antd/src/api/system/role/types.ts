@@ -27,7 +27,7 @@ export interface RoleListParams {
 /** 角色表创建参数 */
 export interface RoleCreateParams {
   parentID?: string;
-  title: string;
+  title?: string;
   dataScope?: number;
   defaultAiEngine?: string;
   sort?: number;
@@ -39,7 +39,7 @@ export interface RoleCreateParams {
 export interface RoleUpdateParams {
   id: string;
   parentID?: string;
-  title: string;
+  title?: string;
   dataScope?: number;
   defaultAiEngine?: string;
   sort?: number;

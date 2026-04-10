@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { useVbenModal } from '@vben/common-ui';
-import { Descriptions, DescriptionsItem, Tag } from 'ant-design-vue';
-import { getConversationDetail } from '#/api/mvp/conversation';
 import type { ConversationItem } from '#/api/mvp/conversation/types';
+
+import { ref } from 'vue';
+
+import { useVbenModal } from '@vben/common-ui';
+
+import { Descriptions, DescriptionsItem } from 'ant-design-vue';
+
+import { getConversationDetail } from '#/api/mvp/conversation';
 
 const detail = ref<ConversationItem | null>(null);
 

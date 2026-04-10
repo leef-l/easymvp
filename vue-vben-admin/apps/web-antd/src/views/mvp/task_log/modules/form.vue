@@ -1,18 +1,26 @@
 <script setup lang="ts">
+import type { TaskTreeOption } from '../../task-tree-options';
+
 import { ref } from 'vue';
+
 import { useVbenModal } from '@vben/common-ui';
-import { useVbenForm } from '#/adapter/form';
+
 import { message } from 'ant-design-vue';
+
+import { useVbenForm } from '#/adapter/form';
+import { getTaskTree } from '#/api/mvp/task';
 import {
-  getTaskLogDetail,
   createTaskLog,
+  getTaskLogDetail,
   updateTaskLog,
 } from '#/api/mvp/task_log';
-import { getTaskTree } from '#/api/mvp/task';
 
-const taskIDOptions = ref<{ label: string; value: string }[]>([]);
+import { toTaskTreeOptions } from '../../task-tree-options';
 
 const emit = defineEmits<{ success: [] }>();
+
+const taskIDOptions = ref<TaskTreeOption[]>([]);
+
 const isEdit = ref(false);
 const editId = ref('');
 
@@ -27,7 +35,7 @@ const [Form, formApi] = useVbenForm({
       rules: 'selectRequired',
       componentProps: {
         treeData: taskIDOptions.value,
-        fieldNames: { label: 'name', value: 'id', children: 'children' },
+        fieldNames: { label: 'label', value: 'value', children: 'children' },
         placeholder: '请选择任务ID',
         allowClear: true,
         treeDefaultExpandAll: true,
@@ -57,7 +65,7 @@ const [Form, formApi] = useVbenForm({
       component: 'Textarea',
       fieldName: 'message',
       label: '日志内容',
-      componentProps: { placeholder: '请输入日志内容', rows: 4, maxlength: 65535 },
+      componentProps: { placeholder: '请输入日志内容', rows: 4, maxlength: 65_535 },
     },
     {
       component: 'Input',
@@ -94,11 +102,11 @@ const [Modal, modalApi] = useVbenModal({
   },
   async onOpenChange(isOpen: boolean) {
     if (isOpen) {
-      const data = modalApi.getData<{ id?: string } | null>();
+      const data = modalApi.getData<null | { id?: string }>();
       // 加载任务ID树形数据
       try {
         const taskRes = await getTaskTree();
-        taskIDOptions.value = taskRes ?? [];
+        taskIDOptions.value = toTaskTreeOptions(taskRes ?? []);
         formApi.updateSchema([
           {
             fieldName: 'taskID',

@@ -10,11 +10,20 @@ import (
 
 // normalizeTasks 标准化和校验任务列表
 func (p *TaskParser) normalizeTasks(ctx context.Context, tasks []ArchitectTask, projectCategory string) []ArchitectTask {
-	normalized := make([]ArchitectTask, 0, len(tasks))
-	seenNames := make(map[string]struct{}, len(tasks))
-	family := GetCategoryFamily(projectCategory)
+	normalized, _ := p.normalizeTasksWithReport(ctx, tasks, projectCategory)
+	return normalized
+}
 
-	for _, task := range tasks {
+func (p *TaskParser) normalizeTasksWithReport(ctx context.Context, tasks []ArchitectTask, projectCategory string) ([]ArchitectTask, *TaskNormalizationReport) {
+	var (
+		normalizedRev []ArchitectTask
+		family        = GetCategoryFamily(projectCategory)
+		seenNames     = make(map[string]struct{}, len(tasks))
+		report        = &TaskNormalizationReport{}
+	)
+
+	for i := len(tasks) - 1; i >= 0; i-- {
+		task := tasks[i]
 		task.Name = strings.TrimSpace(task.Name)
 		task.Description = strings.TrimSpace(task.Description)
 		task.RoleType = strings.TrimSpace(task.RoleType)
@@ -22,32 +31,25 @@ func (p *TaskParser) normalizeTasks(ctx context.Context, tasks []ArchitectTask, 
 		task.ParentName = strings.TrimSpace(task.ParentName)
 
 		if task.Name == "" {
+			report.EmptyNameDropped++
 			g.Log().Warning(ctx, "[TaskParser] 跳过空任务名的任务项")
-			continue
-		}
-		if _, exists := seenNames[task.Name]; exists {
-			g.Log().Warningf(ctx, "[TaskParser] 跳过重复任务名: %s", task.Name)
 			continue
 		}
 
 		// 分类感知校验
 		switch family {
 		case CategoryFamilyCoding:
-			// 编码类：默认角色 implementer，affected_resources 应为代码路径
 			if task.RoleType == "" {
 				task.RoleType = "implementer"
 			}
 		case CategoryFamilyCreative:
-			// 创意类：默认角色 implementer，affected_resources 为内容文件路径
 			if task.RoleType == "" {
 				task.RoleType = "implementer"
 			}
-			// 创意类任务如果没有 affected_resources，自动生成基于任务名的路径
 			if len(task.AffectedResources) == 0 && task.RoleType == "implementer" {
 				task.AffectedResources = []string{fmt.Sprintf("content/%s.md", task.Name)}
 			}
 		case CategoryFamilyAnalysis:
-			// 分析类：默认角色 implementer
 			if task.RoleType == "" {
 				task.RoleType = "implementer"
 			}
@@ -56,21 +58,30 @@ func (p *TaskParser) normalizeTasks(ctx context.Context, tasks []ArchitectTask, 
 			}
 		}
 
-		// RoleLevel 校验
 		validLevels := map[string]bool{"lite": true, "pro": true, "max": true}
 		if !validLevels[task.RoleLevel] {
-			task.RoleLevel = "pro" // 默认 pro
+			task.RoleLevel = "pro"
 		}
 		if isExplorationPlaceholderTask(task) {
+			report.PlaceholderDropped = append(report.PlaceholderDropped, task.Name)
 			g.Log().Warningf(ctx, "[TaskParser] 跳过无交付占位任务: %s", task.Name)
+			continue
+		}
+		if _, exists := seenNames[task.Name]; exists {
+			report.DuplicateDropped = append(report.DuplicateDropped, task.Name)
+			g.Log().Warningf(ctx, "[TaskParser] 跳过重复任务名（已由后发块覆盖）: %s", task.Name)
 			continue
 		}
 
 		seenNames[task.Name] = struct{}{}
-		normalized = append(normalized, task)
+		normalizedRev = append(normalizedRev, task)
 	}
 
-	return normalized
+	normalized := make([]ArchitectTask, 0, len(normalizedRev))
+	for i := len(normalizedRev) - 1; i >= 0; i-- {
+		normalized = append(normalized, normalizedRev[i])
+	}
+	return normalized, report
 }
 
 func isExplorationPlaceholderTask(task ArchitectTask) bool {

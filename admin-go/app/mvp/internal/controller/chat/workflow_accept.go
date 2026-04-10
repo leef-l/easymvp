@@ -5,14 +5,63 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	v1 "easymvp/app/mvp/api/mvp/v1"
+	"easymvp/app/mvp/internal/consts"
 	"easymvp/app/mvp/internal/workflow/orchestrator"
 	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/utility/snowflake"
 )
+
+func acceptRelatedWorkflowStatuses() g.Slice {
+	return g.Slice{
+		consts.WorkflowRunStatusAccepting,
+		consts.WorkflowRunStatusExecuting,
+		consts.WorkflowRunStatusReworking,
+		consts.WorkflowRunStatusPaused,
+		consts.WorkflowRunStatusCompleted,
+		"running", // 兼容历史脏数据
+	}
+}
+
+func loadLatestAcceptBundle(ctx context.Context, projectID int64) (int64, g.Map, []g.Map, []g.Map, error) {
+	workflowRun, err := repo.NewWorkflowRunRepo().GetLatestByProjectStatuses(ctx, projectID, []string{
+		consts.WorkflowRunStatusAccepting,
+		consts.WorkflowRunStatusExecuting,
+		consts.WorkflowRunStatusReworking,
+		consts.WorkflowRunStatusPaused,
+		consts.WorkflowRunStatusCompleted,
+		"running",
+	}, "id")
+	if err != nil {
+		return 0, nil, nil, nil, err
+	}
+	if len(workflowRun) == 0 {
+		return 0, nil, nil, nil, nil
+	}
+
+	workflowRunID := g.NewVar(workflowRun["id"]).Int64()
+	acceptRunRepo := repo.NewAcceptRunRepo()
+	acceptRun, err := acceptRunRepo.GetLatestByWorkflow(ctx, workflowRunID)
+	if err != nil || len(acceptRun) == 0 {
+		return workflowRunID, nil, nil, nil, err
+	}
+
+	acceptRunID := g.NewVar(acceptRun["id"]).Int64()
+	issueRepo := repo.NewAcceptIssueRepo()
+	issues, err := issueRepo.ListByAcceptRun(ctx, acceptRunID)
+	if err != nil {
+		return 0, nil, nil, nil, err
+	}
+	evidenceRepo := repo.NewAcceptEvidenceRepo()
+	evidence, err := evidenceRepo.ListByAcceptRun(ctx, acceptRunID)
+	if err != nil {
+		return 0, nil, nil, nil, err
+	}
+	return workflowRunID, acceptRun, issues, evidence, nil
+}
 
 // AcceptStatus 验收状态总览
 func (c *cWorkflow) AcceptStatus(ctx context.Context, req *v1.WorkflowAcceptStatusReq) (res *v1.WorkflowAcceptStatusRes, err error) {
@@ -21,27 +70,20 @@ func (c *cWorkflow) AcceptStatus(ctx context.Context, req *v1.WorkflowAcceptStat
 		return nil, err
 	}
 
-	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereIn("status", g.Slice{"accepting", "running", "paused", "completed"}).
-		WhereNull("deleted_at").
-		OrderDesc("created_at").One()
-	if err != nil || wfRun.IsEmpty() {
+	workflowRunID, acceptRun, issues, evidenceList, err := loadLatestAcceptBundle(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if workflowRunID == 0 {
 		return nil, fmt.Errorf("项目无工作流运行")
 	}
-	workflowRunID := wfRun["id"].Int64()
-
-	acceptRunRepo := repo.NewAcceptRunRepo()
-	acceptRun, err := acceptRunRepo.GetLatestByWorkflow(ctx, workflowRunID)
-	if err != nil || len(acceptRun) == 0 {
+	if len(acceptRun) == 0 {
 		return &v1.WorkflowAcceptStatusRes{Status: "none"}, nil
 	}
 
 	acceptRunID := acceptRun["id"]
 	acceptRunIDInt := g.NewVar(acceptRunID).Int64()
 
-	issueRepo := repo.NewAcceptIssueRepo()
-	issues, _ := issueRepo.ListByAcceptRun(ctx, acceptRunIDInt)
 	var blockers, errors, warns, infos int
 	for _, issue := range issues {
 		switch g.NewVar(issue["severity"]).String() {
@@ -56,14 +98,11 @@ func (c *cWorkflow) AcceptStatus(ctx context.Context, req *v1.WorkflowAcceptStat
 		}
 	}
 
-	evidenceRepo := repo.NewAcceptEvidenceRepo()
-	evidenceList, _ := evidenceRepo.ListByAcceptRun(ctx, acceptRunIDInt)
-
 	res = &v1.WorkflowAcceptStatusRes{
 		AcceptRunID:   snowflake.JsonInt64(acceptRunIDInt),
 		WorkflowRunID: snowflake.JsonInt64(workflowRunID),
 		AcceptRound:   g.NewVar(acceptRun["accept_round"]).Int(),
-		Status:        g.NewVar(acceptRun["status"]).String(),
+		Status:        normalizeAcceptRunStatus(g.NewVar(acceptRun["status"]).String(), g.NewVar(acceptRun["decision"]).String(), g.NewVar(acceptRun["finished_at"]).GTime()),
 		Decision:      g.NewVar(acceptRun["decision"]).String(),
 		Score:         g.NewVar(acceptRun["score"]).Float64(),
 		Summary:       g.NewVar(acceptRun["summary"]).String(),
@@ -79,6 +118,18 @@ func (c *cWorkflow) AcceptStatus(ctx context.Context, req *v1.WorkflowAcceptStat
 	return res, nil
 }
 
+func normalizeAcceptRunStatus(status, decision string, finishedAt *gtime.Time) string {
+	status = strings.ToLower(strings.TrimSpace(status))
+	decision = strings.ToLower(strings.TrimSpace(decision))
+	if status == "running" && finishedAt != nil {
+		switch decision {
+		case "passed", "failed", "manual_review":
+			return "completed"
+		}
+	}
+	return status
+}
+
 // AcceptIssues 验收问题列表
 func (c *cWorkflow) AcceptIssues(ctx context.Context, req *v1.WorkflowAcceptIssuesReq) (res *v1.WorkflowAcceptIssuesRes, err error) {
 	projectID := int64(req.ProjectID)
@@ -86,25 +137,12 @@ func (c *cWorkflow) AcceptIssues(ctx context.Context, req *v1.WorkflowAcceptIssu
 		return nil, err
 	}
 
-	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereIn("status", g.Slice{"accepting", "running", "paused", "completed"}).
-		WhereNull("deleted_at").
-		OrderDesc("created_at").One()
-	if err != nil || wfRun.IsEmpty() {
-		return &v1.WorkflowAcceptIssuesRes{Issues: []v1.AcceptIssueItem{}}, nil
-	}
-
-	acceptRunRepo := repo.NewAcceptRunRepo()
-	acceptRun, err := acceptRunRepo.GetLatestByWorkflow(ctx, wfRun["id"].Int64())
-	if err != nil || len(acceptRun) == 0 {
-		return &v1.WorkflowAcceptIssuesRes{Issues: []v1.AcceptIssueItem{}}, nil
-	}
-
-	issueRepo := repo.NewAcceptIssueRepo()
-	issues, err := issueRepo.ListByAcceptRun(ctx, g.NewVar(acceptRun["id"]).Int64())
+	_, acceptRun, issues, _, err := loadLatestAcceptBundle(ctx, projectID)
 	if err != nil {
 		return nil, err
+	}
+	if len(acceptRun) == 0 {
+		return &v1.WorkflowAcceptIssuesRes{Issues: []v1.AcceptIssueItem{}}, nil
 	}
 
 	var items []v1.AcceptIssueItem
@@ -142,25 +180,12 @@ func (c *cWorkflow) AcceptEvidence(ctx context.Context, req *v1.WorkflowAcceptEv
 		return nil, err
 	}
 
-	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereIn("status", g.Slice{"accepting", "running", "paused", "completed"}).
-		WhereNull("deleted_at").
-		OrderDesc("created_at").One()
-	if err != nil || wfRun.IsEmpty() {
-		return &v1.WorkflowAcceptEvidenceRes{Evidence: []v1.AcceptEvidenceItem{}}, nil
-	}
-
-	acceptRunRepo := repo.NewAcceptRunRepo()
-	acceptRun, err := acceptRunRepo.GetLatestByWorkflow(ctx, wfRun["id"].Int64())
-	if err != nil || len(acceptRun) == 0 {
-		return &v1.WorkflowAcceptEvidenceRes{Evidence: []v1.AcceptEvidenceItem{}}, nil
-	}
-
-	evidenceRepo := repo.NewAcceptEvidenceRepo()
-	evidenceList, err := evidenceRepo.ListByAcceptRun(ctx, g.NewVar(acceptRun["id"]).Int64())
+	_, acceptRun, _, evidenceList, err := loadLatestAcceptBundle(ctx, projectID)
 	if err != nil {
 		return nil, err
+	}
+	if len(acceptRun) == 0 {
+		return &v1.WorkflowAcceptEvidenceRes{Evidence: []v1.AcceptEvidenceItem{}}, nil
 	}
 
 	var items []v1.AcceptEvidenceItem
@@ -273,14 +298,7 @@ func (c *cWorkflow) AcceptIssueRework(ctx context.Context, req *v1.WorkflowAccep
 			issueIDs = append(issueIDs, int64(id))
 		}
 	}
-	issues, err := g.DB().Model("mvp_accept_issue").Ctx(ctx).
-		Where("accept_run_id", g.NewVar(acceptRun["id"]).Int64()).
-		WhereIn("id", issueIDs).
-		Where("status", "open").
-		WhereNull("deleted_at").
-		OrderDesc("severity").
-		OrderDesc("created_at").
-		All()
+	issues, err := repo.NewAcceptIssueRepo().ListOpenByAcceptRunAndIDs(ctx, g.NewVar(acceptRun["id"]).Int64(), issueIDs)
 	if err != nil {
 		return nil, fmt.Errorf("查询验收问题失败: %w", err)
 	}
@@ -308,7 +326,7 @@ func (c *cWorkflow) AcceptIssueRework(ctx context.Context, req *v1.WorkflowAccep
 	}, nil
 }
 
-func buildAcceptIssueReworkReason(issues gdb.Result, extraReason string) string {
+func buildAcceptIssueReworkReason(issues []g.Map, extraReason string) string {
 	lines := []string{"基于验收问题触发返工："}
 	for i, issue := range issues {
 		if i >= 5 {

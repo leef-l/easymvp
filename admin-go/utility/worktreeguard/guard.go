@@ -234,18 +234,116 @@ func NormalizeRelativePaths(values []string) ([]string, []string) {
 }
 
 func NormalizeRelativePath(value string) (string, bool) {
-	value = strings.TrimSpace(strings.Trim(value, "`'\""))
+	value = normalizeDisplayPathValue(value)
 	if value == "" {
 		return "", false
 	}
-
-	value = bulletPrefixPattern.ReplaceAllString(value, "")
-	value = strings.TrimSpace(value)
 
 	if matches := titleWrappedPathRegexp.FindStringSubmatch(value); len(matches) == 2 && looksLikePath(matches[1]) {
 		value = matches[1]
 	}
 
+	for _, candidate := range displayPathCandidates(value) {
+		if normalized, ok := normalizeRelativePathCore(candidate); ok {
+			return normalized, true
+		}
+	}
+	return "", false
+}
+
+func normalizeDisplayPathValue(value string) string {
+	value = strings.TrimSpace(strings.Trim(value, "`'\""))
+	if value == "" {
+		return ""
+	}
+	value = bulletPrefixPattern.ReplaceAllString(value, "")
+	value = strings.TrimSpace(trimTreeLinePrefix(value))
+	return strings.TrimSpace(value)
+}
+
+func trimTreeLinePrefix(value string) string {
+	if value == "" || !strings.ContainsAny(value, "│├└─") {
+		return value
+	}
+	trimmed := strings.TrimLeft(value, " \t│├└─")
+	if trimmed == "" {
+		return value
+	}
+	return trimmed
+}
+
+func displayPathCandidates(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+
+	var (
+		candidates = []string{value}
+		seen       = map[string]struct{}{value: {}}
+	)
+	for _, idx := range inlineAnnotationSplitIndexes(value) {
+		candidate := strings.TrimSpace(value[:idx])
+		if candidate == "" {
+			continue
+		}
+		if _, exists := seen[candidate]; exists {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		candidates = append(candidates, candidate)
+	}
+	return candidates
+}
+
+func inlineAnnotationSplitIndexes(value string) []int {
+	var (
+		indexes []int
+		seen    = make(map[int]struct{})
+	)
+	addIndex := func(idx int) {
+		if idx <= 0 {
+			return
+		}
+		if _, exists := seen[idx]; exists {
+			return
+		}
+		seen[idx] = struct{}{}
+		indexes = append(indexes, idx)
+	}
+
+	for _, marker := range []string{" #", "\t#", " //", "\t//", " （", " ("} {
+		if idx := strings.Index(value, marker); idx > 0 {
+			addIndex(idx)
+		}
+	}
+
+	var (
+		runStart = -1
+		runLen   = 0
+	)
+	for idx, r := range value {
+		switch r {
+		case ' ', '\t':
+			if runStart < 0 {
+				runStart = idx
+				runLen = 0
+			}
+			runLen++
+			if runLen >= 2 {
+				addIndex(runStart)
+			}
+		default:
+			runStart = -1
+			runLen = 0
+		}
+	}
+
+	sort.Ints(indexes)
+	return indexes
+}
+
+func normalizeRelativePathCore(value string) (string, bool) {
 	value = strings.ReplaceAll(value, "\\", "/")
 	value = strings.TrimPrefix(value, "./")
 	value = path.Clean(value)

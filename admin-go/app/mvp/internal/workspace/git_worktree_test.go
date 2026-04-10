@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -153,6 +154,15 @@ func TestSyncWorktreeCommitFallsBackToCopyOnCherryPickConflict(t *testing.T) {
 	}
 
 	status := runGit(t, mainDir, "status", "--short")
+	var kept []string
+	for _, line := range strings.Split(status, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || line == "?? .mvp-worktrees/" {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	status = strings.Join(kept, "\n")
 	if strings.TrimSpace(status) != "" {
 		t.Fatalf("expected clean main worktree after fallback commit, got %q", status)
 	}
@@ -271,6 +281,46 @@ func TestValidateSyncBackPathsRejectsOutOfScopeFile(t *testing.T) {
 	}
 }
 
+func TestValidateSyncBackPathsRejectsInternalWorkspaceMetadata(t *testing.T) {
+	changedFiles := []gitChangedFile{
+		{Status: "A", NewPath: ".mvp-worktrees/artifacts/task-1.patch"},
+	}
+
+	err := validateSyncBackPaths(changedFiles, nil)
+	if err == nil {
+		t.Fatal("expected internal workspace metadata to be rejected")
+	}
+	if !strings.Contains(err.Error(), "检测到内部工作区元数据: .mvp-worktrees/artifacts/task-1.patch") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateSyncBackPathsAllowsDecoratedAllowedPath(t *testing.T) {
+	changedFiles := []gitChangedFile{
+		{Status: "A", NewPath: "└── .gitignore         # 版本控制忽略规则"},
+		{Status: "A", NewPath: "├── scripts/"},
+	}
+
+	err := validateSyncBackPaths(changedFiles, []string{".gitignore", "scripts/"})
+	if err != nil {
+		t.Fatalf("expected decorated allowed paths to pass, got %v", err)
+	}
+}
+
+func TestValidateSyncBackPathsNormalizesDecoratedOutOfScopeFile(t *testing.T) {
+	changedFiles := []gitChangedFile{
+		{Status: "A", NewPath: "└── frontend/extra.md         # 越界文件"},
+	}
+
+	err := validateSyncBackPaths(changedFiles, []string{"frontend/e2e/snake.spec.ts", "frontend/playwright.config.ts"})
+	if err == nil {
+		t.Fatal("expected decorated out-of-scope syncBack path to be rejected")
+	}
+	if !strings.Contains(err.Error(), "检测到越界修改: frontend/extra.md") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestEnsureRepositoryBaselineCreatesInitialCommitForEmptyRepo(t *testing.T) {
 	mainDir := t.TempDir()
 	runGit(t, mainDir, "init")
@@ -292,6 +342,42 @@ func TestEnsureRepositoryBaselineCreatesInitialCommitForEmptyRepo(t *testing.T) 
 	}
 	if got := runGit(t, mainDir, "show", "HEAD:README.md"); got != "hello" {
 		t.Fatalf("unexpected committed README content: %q", got)
+	}
+}
+
+func TestCommitSyncedFilesToMainStagesOnlyExplicitPaths(t *testing.T) {
+	mainDir := t.TempDir()
+	runGit(t, mainDir, "init")
+	runGit(t, mainDir, "config", "user.name", "Test User")
+	runGit(t, mainDir, "config", "user.email", "test@example.com")
+
+	if err := os.WriteFile(filepath.Join(mainDir, "README.md"), []byte("hello\n"), 0644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	runGit(t, mainDir, "add", "README.md")
+	runGit(t, mainDir, "commit", "-m", "init")
+
+	if err := os.WriteFile(filepath.Join(mainDir, "README.md"), []byte("hello world\n"), 0644); err != nil {
+		t.Fatalf("update README: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(mainDir, ".mvp-worktrees", "artifacts"), 0755); err != nil {
+		t.Fatalf("mkdir internal metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mainDir, ".mvp-worktrees", "artifacts", "task-9.patch"), []byte("diff --git a/x b/x\n"), 0644); err != nil {
+		t.Fatalf("write internal metadata: %v", err)
+	}
+
+	if err := commitSyncedFilesToMain(mainDir, 9, []gitChangedFile{
+		{Status: "M", NewPath: "README.md"},
+	}); err != nil {
+		t.Fatalf("commitSyncedFilesToMain() error = %v", err)
+	}
+
+	if got := strings.TrimSpace(runGit(t, mainDir, "show", "--name-only", "--pretty=format:", "HEAD")); got != "README.md" {
+		t.Fatalf("unexpected committed files: %q", got)
+	}
+	if got := strings.TrimSpace(runGit(t, mainDir, "ls-files", ".mvp-worktrees")); got != "" {
+		t.Fatalf("internal metadata should not be tracked, got %q", got)
 	}
 }
 
@@ -317,6 +403,64 @@ func TestEnsureRepositoryBaselineKeepsExistingHead(t *testing.T) {
 	}
 	if got := runGit(t, mainDir, "rev-list", "--count", "HEAD"); got != "1" {
 		t.Fatalf("unexpected commit count after baseline ensure: %q", got)
+	}
+}
+
+func TestEnsureRepositoryBaselineConcurrentCallsShareOneInitialCommit(t *testing.T) {
+	mainDir := t.TempDir()
+	runGit(t, mainDir, "init")
+
+	if err := os.WriteFile(filepath.Join(mainDir, "README.md"), []byte("hello\n"), 0644); err != nil {
+		t.Fatalf("write initial file: %v", err)
+	}
+
+	const workers = 4
+
+	var (
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		errs []error
+		refs []string
+	)
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			ref, err := ensureRepositoryBaseline(context.Background(), mainDir)
+
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				errs = append(errs, err)
+				return
+			}
+			refs = append(refs, ref)
+		}()
+	}
+	wg.Wait()
+
+	if len(errs) > 0 {
+		t.Fatalf("ensureRepositoryBaseline() concurrent errors = %v", errs)
+	}
+	if len(refs) != workers {
+		t.Fatalf("ensureRepositoryBaseline() refs = %d, want %d", len(refs), workers)
+	}
+
+	refSet := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		if strings.TrimSpace(ref) == "" {
+			t.Fatal("expected non-empty head ref")
+		}
+		refSet[ref] = struct{}{}
+	}
+	if len(refSet) != 1 {
+		t.Fatalf("expected one shared head ref, got %v", refs)
+	}
+
+	if got := runGit(t, mainDir, "rev-list", "--count", "HEAD"); got != "1" {
+		t.Fatalf("unexpected commit count after concurrent baseline ensure: %q", got)
 	}
 }
 

@@ -3,6 +3,7 @@ package repo
 
 import (
 	"context"
+	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
@@ -45,6 +46,38 @@ func (r *WorkflowRunRepo) GetByID(ctx context.Context, id int64) (*entity.MvpWor
 	return &ent, err
 }
 
+// GetLatestByProject 查询项目下最近一次工作流运行记录。
+func (r *WorkflowRunRepo) GetLatestByProject(ctx context.Context, projectID int64) (gdb.Record, error) {
+	record, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at").
+		OrderDesc("run_no").
+		OrderDesc("created_at").
+		One()
+	if err != nil || record.IsEmpty() {
+		return nil, err
+	}
+	return record, nil
+}
+
+// GetLatestByProjectExcludingStatuses 查询项目下最近一条不在给定状态集合内的工作流。
+func (r *WorkflowRunRepo) GetLatestByProjectExcludingStatuses(ctx context.Context, projectID int64, excluded []string, fields ...string) (g.Map, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at")
+	if len(excluded) > 0 {
+		model = model.WhereNotIn("status", excluded)
+	}
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	record, err := model.OrderDesc("run_no").OrderDesc("created_at").One()
+	if err != nil || record.IsEmpty() {
+		return nil, err
+	}
+	return record.Map(), nil
+}
+
 // GetActiveByProject 查询项目的活跃工作流运行。
 func (r *WorkflowRunRepo) GetActiveByProject(ctx context.Context, projectID int64) (*entity.MvpWorkflowRun, error) {
 	var ent entity.MvpWorkflowRun
@@ -56,6 +89,24 @@ func (r *WorkflowRunRepo) GetActiveByProject(ctx context.Context, projectID int6
 		Limit(1).
 		Scan(&ent)
 	return &ent, err
+}
+
+// GetLatestByProjectStatuses 查询项目下最近一条命中状态集合的工作流。
+func (r *WorkflowRunRepo) GetLatestByProjectStatuses(ctx context.Context, projectID int64, statuses []string, fields ...string) (g.Map, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at")
+	if len(statuses) > 0 {
+		model = model.WhereIn("status", statuses)
+	}
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	record, err := model.OrderDesc("created_at").One()
+	if err != nil || record.IsEmpty() {
+		return nil, err
+	}
+	return record.Map(), nil
 }
 
 // UpdateStatus CAS 更新状态。

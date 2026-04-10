@@ -69,6 +69,6 @@ export function downloadImportTemplateProjectRole() {
 }
 
 /** 批量编辑项目角色配置表 */
-export function batchUpdateProjectRole(data: { ids: string[]; status?: number }) {
+export function batchUpdateProjectRole(data: { ids: string[]; status?: number | string }) {
   return requestClient.put(`${PREFIX}/batch-update`, data);
 }

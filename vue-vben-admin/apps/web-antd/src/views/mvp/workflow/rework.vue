@@ -1,10 +1,19 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
+
+import {
+  CheckCircleOutlined,
+  ReloadOutlined,
+  SyncOutlined,
+  ToolOutlined,
+} from '@ant-design/icons-vue';
 import {
   Card,
+  Collapse,
+  CollapsePanel,
   Descriptions,
   DescriptionsItem,
   Empty,
@@ -12,16 +21,7 @@ import {
   Tag,
   Timeline,
   TimelineItem,
-  Collapse,
-  CollapsePanel,
 } from 'ant-design-vue';
-import {
-  ExclamationCircleOutlined,
-  CheckCircleOutlined,
-  SyncOutlined,
-  ToolOutlined,
-  ReloadOutlined,
-} from '@ant-design/icons-vue';
 
 import { getReworkStatus, type ReworkRoundInfo, type ReworkStageInfo } from '#/api/mvp/workflow';
 
@@ -35,10 +35,10 @@ const loading = ref(false);
 
 const hasRework = ref(false);
 const reworkRounds = ref(0);
-const currentStage = ref<ReworkStageInfo | null>(null);
+const currentStage = ref<null | ReworkStageInfo>(null);
 const history = ref<ReworkRoundInfo[]>([]);
 
-const stageStatusConfig: Record<string, { label: string; color: string }> = {
+const stageStatusConfig: Record<string, { color: string; label: string; }> = {
   running: { label: '返工中', color: 'processing' },
   completed: { label: '已完成', color: 'success' },
   failed: { label: '失败', color: 'error' },

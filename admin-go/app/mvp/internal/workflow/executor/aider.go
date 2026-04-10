@@ -127,6 +127,58 @@ func buildStrictAiderTaskPrompt(description string, allowPaths []string) string 
 // ChatExecutor ChatStream 执行器。
 type ChatExecutor struct{}
 
+type chatReplySnapshot struct {
+	Status  string
+	Content string
+}
+
+var loadChatReplySnapshot = func(ctx context.Context, replyID int64) (chatReplySnapshot, error) {
+	reply, err := g.DB().Model("mvp_message").Ctx(ctx).
+		Where("id", replyID).
+		WhereNull("deleted_at").
+		Fields("status, content").
+		One()
+	if err != nil {
+		return chatReplySnapshot{}, err
+	}
+	if reply.IsEmpty() {
+		return chatReplySnapshot{}, fmt.Errorf("chat reply %d 不存在", replyID)
+	}
+
+	return chatReplySnapshot{
+		Status:  strings.TrimSpace(reply["status"].String()),
+		Content: reply["content"].String(),
+	}, nil
+}
+
+var chatReplyPollInterval = 500 * time.Millisecond
+
+func waitForChatReply(ctx context.Context, replyID int64) (string, error) {
+	for {
+		snapshot, err := loadChatReplySnapshot(ctx, replyID)
+		if err != nil {
+			return "", err
+		}
+
+		switch snapshot.Status {
+		case "completed":
+			return snapshot.Content, nil
+		case "failed":
+			errMsg := strings.TrimSpace(snapshot.Content)
+			if errMsg == "" {
+				errMsg = fmt.Sprintf("chat reply %d 执行失败", replyID)
+			}
+			return "", fmt.Errorf("%s", errMsg)
+		}
+
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(chatReplyPollInterval):
+		}
+	}
+}
+
 // NewChatExecutor 创建 Chat 执行器。
 func NewChatExecutor() *ChatExecutor { return &ChatExecutor{} }
 
@@ -135,18 +187,30 @@ func (e *ChatExecutor) NeedsWorkspace() bool { return false }
 
 // Execute 执行 Chat 任务。
 func (e *ChatExecutor) Execute(ctx context.Context, req *Request) *Result {
+	timeoutSeconds := engine.GetConfigInt(ctx, "runtime.task_timeout_seconds", "engine.runtime.taskTimeoutSeconds", 600)
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 600
+	}
+	execCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+	defer cancel()
+
 	// 创建或获取任务对话
-	convID, err := engine.EnsureDomainTaskConversation(ctx, req.ProjectID, req.TaskID,
+	convID, err := engine.EnsureDomainTaskConversation(execCtx, req.ProjectID, req.TaskID,
 		req.TaskRecord["role_type"].String(), req.TaskRecord["name"].String())
 	if err != nil {
 		return &Result{Success: false, Error: err}
 	}
 
 	// 发送任务描述到对话
-	_, _, err = engine.GetEngine().SendMessage(ctx, convID, req.TaskRecord["description"].String(), 0, 0)
+	_, replyID, err := engine.GetEngine().SendMessage(execCtx, convID, req.TaskRecord["description"].String(), 0, 0)
 	if err != nil {
 		return &Result{Success: false, Error: fmt.Errorf("chat 执行失败: %w", err)}
 	}
 
-	return &Result{Success: true, Output: "chat execution completed"}
+	output, err := waitForChatReply(execCtx, replyID)
+	if err != nil {
+		return &Result{Success: false, Error: fmt.Errorf("chat 执行失败: %w", err)}
+	}
+
+	return &Result{Success: true, Output: output}
 }

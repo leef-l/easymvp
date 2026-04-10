@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/gogf/gf/v2/container/gvar"
+	redis "github.com/redis/go-redis/v9"
 
 	"easymvp/app/mvp/internal/workflow/event"
 )
@@ -61,6 +63,119 @@ func TestParsePendingEntries(t *testing.T) {
 	}
 	if entries[0].IdleMS != 70000 {
 		t.Fatalf("unexpected idle ms: %d", entries[0].IdleMS)
+	}
+}
+
+func TestParseRedisStructResults(t *testing.T) {
+	xreadRaw := gvar.New([]redis.XStream{
+		{
+			Stream: "stream-key",
+			Messages: []redis.XMessage{
+				{
+					ID: "1716300000-0",
+					Values: map[string]interface{}{
+						"event_id":        "evt-1",
+						"idempotency_key": "idem-1",
+						"event_type":      event.EventTaskCompleted,
+						"workflow_run_id": "101",
+						"entity_type":     event.EntityDomainTask,
+						"entity_id":       "202",
+						"attempt":         "1",
+						"created_at":      "1716300000",
+						"payload_json":    `{"task_id":202}`,
+					},
+				},
+			},
+		},
+	})
+	messages, err := parseXReadGroupResult(xreadRaw)
+	if err != nil {
+		t.Fatalf("parse redis xreadgroup result failed: %v", err)
+	}
+	if len(messages) != 1 || messages[0].ID != "1716300000-0" {
+		t.Fatalf("unexpected redis xreadgroup parse result: %+v", messages)
+	}
+
+	xclaimRaw := gvar.New([]redis.XMessage{
+		{
+			ID: "1716300000-1",
+			Values: map[string]interface{}{
+				"event_id":        "evt-2",
+				"idempotency_key": "idem-2",
+				"event_type":      event.EventTaskCompleted,
+				"workflow_run_id": "102",
+				"entity_type":     event.EntityDomainTask,
+				"entity_id":       "203",
+				"attempt":         "1",
+				"created_at":      "1716300001",
+				"payload_json":    `{"task_id":203}`,
+			},
+		},
+	})
+	claimed, err := parseXClaimResult(xclaimRaw)
+	if err != nil {
+		t.Fatalf("parse redis xclaim result failed: %v", err)
+	}
+	if len(claimed) != 1 || claimed[0].ID != "1716300000-1" {
+		t.Fatalf("unexpected redis xclaim parse result: %+v", claimed)
+	}
+
+	pendingRaw := gvar.New([]redis.XPendingExt{
+		{
+			ID:         "1716300000-2",
+			Consumer:   "consumer-a",
+			Idle:       70 * time.Second,
+			RetryCount: 1,
+		},
+	})
+	entries := parsePendingEntries(pendingRaw)
+	if len(entries) != 1 || entries[0].IdleMS != 70000 {
+		t.Fatalf("unexpected redis pending parse result: %+v", entries)
+	}
+
+	groupRaw := gvar.New([]redis.XInfoGroup{
+		{
+			Name:      "group-a",
+			Consumers: 1,
+			Pending:   2,
+			Lag:       3,
+		},
+	})
+	group, ok := parseGroupInfo(groupRaw, "group-a")
+	if !ok {
+		t.Fatal("expected redis group info to be parsed")
+	}
+	if group.Pending != 2 || !group.LagKnown || group.Lag != 3 {
+		t.Fatalf("unexpected redis group info parse result: %+v", group)
+	}
+}
+
+func TestParseRedisStringifiedResults(t *testing.T) {
+	pendingEntries := parsePendingEntries(gvar.New([]string{
+		`["1716300000-0","consumer-a",70000,1]`,
+	}))
+	if len(pendingEntries) != 1 || pendingEntries[0].IdleMS != 70000 {
+		t.Fatalf("unexpected stringified pending parse result: %+v", pendingEntries)
+	}
+
+	claimed, err := parseXClaimResult(gvar.New([]string{
+		`["1716300000-1",["event_id","evt-2","idempotency_key","idem-2","event_type","task.completed","workflow_run_id","101","entity_type","domain_task","entity_id","202","attempt","1","created_at","1716300000","payload_json","{\"task_id\":202}"]]`,
+	}))
+	if err != nil {
+		t.Fatalf("parse stringified xclaim result failed: %v", err)
+	}
+	if len(claimed) != 1 || claimed[0].ID != "1716300000-1" {
+		t.Fatalf("unexpected stringified xclaim parse result: %+v", claimed)
+	}
+
+	group, ok := parseGroupInfo(gvar.New([]string{
+		`map[consumers:2 entries-read:1 lag:0 last-delivered-id:1716300000-1 name:group-a pending:1]`,
+	}), "group-a")
+	if !ok {
+		t.Fatal("expected stringified group info to be parsed")
+	}
+	if group.Pending != 1 || !group.LagKnown || group.Lag != 0 {
+		t.Fatalf("unexpected stringified group info parse result: %+v", group)
 	}
 }
 

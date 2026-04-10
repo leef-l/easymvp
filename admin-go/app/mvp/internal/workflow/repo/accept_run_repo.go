@@ -59,6 +59,15 @@ func (r *AcceptRunRepo) GetNextRound(ctx context.Context, workflowRunID int64) (
 	return int(maxRound) + 1, nil
 }
 
+// CountRunningByStageRun 统计指定 stage_run 下运行中的验收任务。
+func (r *AcceptRunRepo) CountRunningByStageRun(ctx context.Context, stageRunID int64) (int, error) {
+	return g.DB().Model(r.table()).Ctx(ctx).
+		Where("stage_run_id", stageRunID).
+		Where("status", "running").
+		WhereNull("deleted_at").
+		Count()
+}
+
 // UpdateStatus CAS 更新状态。
 func (r *AcceptRunRepo) UpdateStatus(ctx context.Context, id int64, from, to string, extra g.Map) (int64, error) {
 	data := g.Map{"status": to, "updated_at": gtime.Now()}
@@ -89,5 +98,18 @@ func (r *AcceptRunRepo) UpdateDecision(ctx context.Context, id int64, decision s
 			"finished_at": gtime.Now(),
 			"updated_at":  gtime.Now(),
 		}).Update()
+	return err
+}
+
+// UpdateRulesSnapshot 写入规则快照。
+func (r *AcceptRunRepo) UpdateRulesSnapshot(ctx context.Context, id int64, rulesSnapshot string) error {
+	_, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("id", id).
+		WhereNull("deleted_at").
+		Data(g.Map{
+			"rules_snapshot_ref": rulesSnapshot,
+			"updated_at":         gtime.Now(),
+		}).
+		Update()
 	return err
 }

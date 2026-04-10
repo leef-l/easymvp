@@ -19,7 +19,7 @@ done
 # 2. 创建 Systemd 服务
 echo "[2/3] 创建 Systemd 服务..."
 
-# mvp-system (port 9000)
+# mvp-system (port 41002)
 cat > /etc/systemd/system/mvp-system.service <<'EOF'
 [Unit]
 Description=EasyMVP system
@@ -37,7 +37,7 @@ LimitNOFILE=65536
 WantedBy=multi-user.target
 EOF
 
-# mvp-ai (port 9001)
+# mvp-ai (port 41003)
 cat > /etc/systemd/system/mvp-ai.service <<'EOF'
 [Unit]
 Description=EasyMVP ai
@@ -55,7 +55,7 @@ LimitNOFILE=65536
 WantedBy=multi-user.target
 EOF
 
-# mvp-mvp (port 9002)
+# mvp-mvp (port 41004)
 cat > /etc/systemd/system/mvp-mvp.service <<'EOF'
 [Unit]
 Description=EasyMVP mvp
@@ -76,9 +76,9 @@ EOF
 systemctl daemon-reload
 systemctl enable mvp-system mvp-ai mvp-mvp
 
-echo "  mvp-system (port 9000) ✓"
-echo "  mvp-ai     (port 9001) ✓"
-echo "  mvp-mvp    (port 9002) ✓"
+echo "  mvp-system (port 41002) ✓"
+echo "  mvp-ai     (port 41003) ✓"
+echo "  mvp-mvp    (port 41004) ✓"
 
 # 3. 生成 Nginx 扩展配置（不覆盖宝塔主配置）
 echo "[3/3] 生成 Nginx 配置..."
@@ -88,9 +88,9 @@ mkdir -p $NGINX_EXT_DIR
 
 cat > $NGINX_EXT_DIR/proxy.conf <<'NGINX'
 # EasyMVP 反向代理配置
-# system 服务 (port 9000)
+# system 服务 (port 41002)
 location /api/system/ {
-    proxy_pass http://127.0.0.1:9000;
+    proxy_pass http://127.0.0.1:41002;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -100,9 +100,9 @@ location /api/system/ {
     proxy_send_timeout 120s;
 }
 
-# ai 服务 (port 9001)
+# ai 服务 (port 41003)
 location /api/ai/ {
-    proxy_pass http://127.0.0.1:9001;
+    proxy_pass http://127.0.0.1:41003;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -112,9 +112,9 @@ location /api/ai/ {
     proxy_send_timeout 120s;
 }
 
-# mvp 服务 (port 9002) — SSE 需要长连接
+# mvp 服务 (port 41004) — SSE 需要长连接
 location /api/mvp/ {
-    proxy_pass http://127.0.0.1:9002;
+    proxy_pass http://127.0.0.1:41004;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -146,9 +146,9 @@ echo ""
 echo "===== 初始化完成 ====="
 echo ""
 echo "端口分配："
-echo "  system : 9000  →  /api/system/"
-echo "  ai     : 9001  →  /api/ai/"
-echo "  mvp    : 9002  →  /api/mvp/"
+echo "  system : 41002 →  /api/system/"
+echo "  ai     : 41003 →  /api/ai/"
+echo "  mvp    : 41004 →  /api/mvp/"
 echo "  前端   : Nginx →  /admin/"
 echo ""
 echo "管理命令："

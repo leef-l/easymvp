@@ -17,10 +17,48 @@ import (
 	"easymvp/app/mvp/internal/engine"
 	domainTask "easymvp/app/mvp/internal/workflow/domain/task"
 	"easymvp/app/mvp/internal/workflow/repo"
+	"easymvp/app/mvp/internal/workflow/resourcepath"
 	"easymvp/utility/snowflake"
 )
 
 var reworkJsonBlockRe = regexp.MustCompile("(?s)```json\\s*(\\{.*?\\})\\s*```")
+
+func marshalHandoffPayload(payload interface{}) string {
+	switch v := payload.(type) {
+	case nil:
+		return ""
+	case string:
+		text := strings.TrimSpace(v)
+		if text == "" {
+			return ""
+		}
+		if json.Valid([]byte(text)) {
+			return text
+		}
+		data, err := json.Marshal(map[string]string{"content": text})
+		if err != nil {
+			return ""
+		}
+		return string(data)
+	default:
+		data, err := json.Marshal(v)
+		if err != nil {
+			return ""
+		}
+		return string(data)
+	}
+}
+
+func classifyOriginalTaskStatusForRework(status string) (allowReset bool, alreadyRecovered bool) {
+	switch strings.TrimSpace(strings.ToLower(status)) {
+	case domainTask.StatusFailed, domainTask.StatusEscalated:
+		return true, false
+	case domainTask.StatusPending, domainTask.StatusRunning, domainTask.StatusCompleted:
+		return false, true
+	default:
+		return false, false
+	}
+}
 
 // StageCompleter 阶段操作回调（避免循环依赖）。
 type StageCompleter interface {
@@ -113,6 +151,7 @@ func (s *Service) HandleReworkWithSource(ctx context.Context, stageRunID int64, 
 				"必须明确指出失败是由哪条命令、哪条路径、哪个资源冲突、哪次越界修改或哪个依赖缺失引起；不要只给泛泛结论。\n\n"+
 				"关联任务ID：%d\n角色：%s\n错误信息：\n%s\n\n"+
 				"原任务名称：%s\n原任务描述：\n%s\n\n"+
+				"修复方案不得新增 .gitignore 这类仓库级控制文件，除非原任务 affected_resources 已明确包含该文件。\n"+
 				"修复方案必须严格围绕当前任务，不能改变原任务目标、不能脱离原有任务设定、不能把范围扩展到无关任务。\n"+
 				"推荐输出任务级修复 JSON：\n"+
 				"{\"task_repair\":{\"task_name\":%q,\"description\":\"修订后的任务描述\",\"affected_resources\":[\"路径\"],\"reason\":\"修订原因，必须写清具体失败原因\"}}\n\n"+
@@ -144,9 +183,9 @@ func (s *Service) HandleReworkWithSource(ctx context.Context, stageRunID int64, 
 
 	// 6. 写 handoff_record（payload 中记录来源阶段，用于返工完成后决定回流目标）
 	handoffID := int64(snowflake.Generate())
-	payloadJSON, jsonErr := json.Marshal(map[string]string{"source_stage": sourceStage})
-	if jsonErr != nil {
-		g.Log().Warningf(ctx, "[ReworkStage] 序列化 handoff payload 失败: %v", jsonErr)
+	payloadJSON := marshalHandoffPayload(map[string]string{"source_stage": sourceStage})
+	if payloadJSON == "" {
+		g.Log().Warningf(ctx, "[ReworkStage] 序列化 handoff payload 失败: sourceStage=%s", sourceStage)
 	}
 	if _, insErr := g.DB().Model("mvp_handoff_record").Ctx(ctx).Insert(g.Map{
 		"id":              handoffID,
@@ -155,7 +194,7 @@ func (s *Service) HandleReworkWithSource(ctx context.Context, stageRunID int64, 
 		"to_task_id":      analysisTaskID,
 		"handoff_type":    "failure_escalation",
 		"reason":          failedTask["result"].String(),
-		"payload":         string(payloadJSON),
+		"payload":         payloadJSON,
 		"created_at":      now,
 	}); insErr != nil {
 		g.Log().Errorf(ctx, "[ReworkStage] 写入 handoff_record 失败: wfRun=%d task=%d err=%v", workflowRunID, failedTaskID, insErr)
@@ -185,7 +224,7 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 	failedTask, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("id", failedTaskID).
 		WhereNull("deleted_at").
-		Fields("id, name").
+		Fields("id, name, affected_resources").
 		One()
 	if err != nil || failedTask.IsEmpty() {
 		return fmt.Errorf("原失败任务(%d) 不存在", failedTaskID)
@@ -213,6 +252,13 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 		updateData["description"] = patch.Description
 	}
 	if len(patch.AffectedResources) > 0 {
+		currentResources, decodeErr := decodeAffectedResourcesJSON(failedTask["affected_resources"].String())
+		if decodeErr != nil {
+			return fmt.Errorf("解析原任务 affected_resources 失败: %w", decodeErr)
+		}
+		if introduced := resourcepath.FindNewlyIntroducedGovernedRootFiles(currentResources, patch.AffectedResources); len(introduced) > 0 {
+			return fmt.Errorf("返工 patch 不允许新增受治理仓库文件: %s", strings.Join(introduced, ", "))
+		}
 		resJSON, jsonErr := json.Marshal(patch.AffectedResources)
 		if jsonErr != nil {
 			g.Log().Warningf(ctx, "[ReworkStage] 序列化 affected_resources 失败: %v", jsonErr)
@@ -223,24 +269,43 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 
 	res, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("id", failedTaskID).
-		Where("status", domainTask.StatusFailed).
+		WhereIn("status", g.Slice{domainTask.StatusFailed, domainTask.StatusEscalated}).
 		Update(updateData)
 	if err != nil {
 		return fmt.Errorf("回写原任务失败: %w", err)
 	}
 	rows, _ := res.RowsAffected()
+	reconciledWithoutWrite := false
 	if rows == 0 {
-		// 原任务已不在 failed 状态（被手动重试或其他流程改状态），标记 rework 失败
-		reason := fmt.Sprintf("原任务(%d)已不在 failed 状态，回写跳过", failedTaskID)
-		g.Log().Warningf(ctx, "[ReworkStage] %s", reason)
-		if s.stageCompleter != nil {
-			_ = s.stageCompleter.FailStage(ctx, stageRunID, reason)
+		currentStatus, statusErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
+			Where("id", failedTaskID).
+			WhereNull("deleted_at").
+			Value("status")
+		if statusErr != nil {
+			return fmt.Errorf("查询原任务当前状态失败: %w", statusErr)
 		}
-		return nil
+
+		_, alreadyRecovered := classifyOriginalTaskStatusForRework(currentStatus.String())
+		if !alreadyRecovered {
+			reason := fmt.Sprintf("原任务(%d)状态异常(%s)，回写跳过", failedTaskID, currentStatus.String())
+			g.Log().Warningf(ctx, "[ReworkStage] %s", reason)
+			if s.stageCompleter != nil {
+				_ = s.stageCompleter.FailStage(ctx, stageRunID, reason)
+			}
+			return nil
+		}
+
+		reconciledWithoutWrite = true
+		g.Log().Infof(ctx, "[ReworkStage] 原任务(%d)已由其他链路推进到 %s，视为返工已收敛",
+			failedTaskID, currentStatus.String())
 	}
 
 	// 5. 写 handoff_record（分析 → 原任务）
 	handoffID := int64(snowflake.Generate())
+	payloadJSON := marshalHandoffPayload(map[string]interface{}{
+		"content": patchContent,
+		"reason":  patch.Reason,
+	})
 	if _, insErr := g.DB().Model("mvp_handoff_record").Ctx(ctx).Insert(g.Map{
 		"id":              handoffID,
 		"workflow_run_id": analysisTask["workflow_run_id"].Int64(),
@@ -248,13 +313,17 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 		"to_task_id":      failedTaskID,
 		"handoff_type":    "rework",
 		"reason":          patch.Reason,
-		"payload":         patchContent,
+		"payload":         payloadJSON,
 		"created_at":      gtime.Now(),
 	}); insErr != nil {
 		g.Log().Errorf(ctx, "[ReworkStage] 写入 handoff_record(rework) 失败: analysis=%d target=%d err=%v", analysisTaskID, failedTaskID, insErr)
 	}
 
-	g.Log().Infof(ctx, "[ReworkStage] 回写完成: analysis=%d → original=%d reason=%s", analysisTaskID, failedTaskID, patch.Reason)
+	if reconciledWithoutWrite {
+		g.Log().Infof(ctx, "[ReworkStage] 返工收敛完成: analysis=%d target=%d reason=%s", analysisTaskID, failedTaskID, patch.Reason)
+	} else {
+		g.Log().Infof(ctx, "[ReworkStage] 回写完成: analysis=%d → original=%d reason=%s", analysisTaskID, failedTaskID, patch.Reason)
+	}
 
 	// 6. 完成 rework stage
 	if s.stageCompleter != nil {
@@ -434,6 +503,19 @@ func normalizeEscapedPatchContent(content string) string {
 		`\"`, `"`,
 	)
 	return replacer.Replace(content)
+}
+
+func decodeAffectedResourcesJSON(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+
+	var resources []string
+	if err := json.Unmarshal([]byte(raw), &resources); err != nil {
+		return nil, err
+	}
+	return resources, nil
 }
 
 func parseTaskPatchPayload(content string, taskName string) (*taskPatch, error) {

@@ -30,6 +30,7 @@ export interface ModelListParams {
   orderDir?: string;
   startTime?: string;
   endTime?: string;
+  capability?: string;
   supportsStream?: number;
   status?: number;
   name?: string;
@@ -37,10 +38,10 @@ export interface ModelListParams {
 
 /** AI模型表创建参数 */
 export interface ModelCreateParams {
-  planID: string;
-  providerID: string;
-  name: string;
-  modelCode: string;
+  planID?: string;
+  providerID?: string;
+  name?: string;
+  modelCode?: string;
   capability?: string;
   maxTokens?: number;
   contextWindow?: number;
@@ -53,10 +54,10 @@ export interface ModelCreateParams {
 /** AI模型表更新参数 */
 export interface ModelUpdateParams {
   id: string;
-  planID: string;
-  providerID: string;
-  name: string;
-  modelCode: string;
+  planID?: string;
+  providerID?: string;
+  name?: string;
+  modelCode?: string;
   capability?: string;
   maxTokens?: number;
   contextWindow?: number;

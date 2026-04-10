@@ -29,8 +29,8 @@ export interface UsersListParams {
 
 /** 用户表创建参数 */
 export interface UsersCreateParams {
-  username: string;
-  password: string;
+  username?: string;
+  password?: string;
   nickname?: string;
   email?: string;
   avatar?: string;
@@ -42,7 +42,7 @@ export interface UsersCreateParams {
 /** 用户表更新参数 */
 export interface UsersUpdateParams {
   id: string;
-  username: string;
+  username?: string;
   password?: string;
   nickname?: string;
   email?: string;

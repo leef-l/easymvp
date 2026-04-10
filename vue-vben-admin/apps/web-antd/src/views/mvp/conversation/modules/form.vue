@@ -1,20 +1,27 @@
 <script setup lang="ts">
+import type { TaskTreeOption } from '../../task-tree-options';
+
 import { ref } from 'vue';
+
 import { useVbenModal } from '@vben/common-ui';
-import { useVbenForm } from '#/adapter/form';
+
 import { message } from 'ant-design-vue';
+
+import { useVbenForm } from '#/adapter/form';
 import {
-  getConversationDetail,
   createConversation,
+  getConversationDetail,
   updateConversation,
 } from '#/api/mvp/conversation';
 import { getProjectList } from '#/api/mvp/project';
 import { getTaskTree } from '#/api/mvp/task';
 
-const projectIDOptions = ref<{ label: string; value: string }[]>([]);
-const taskIDOptions = ref<{ label: string; value: string }[]>([]);
+import { toTaskTreeOptions } from '../../task-tree-options';
 
 const emit = defineEmits<{ success: [] }>();
+const projectIDOptions = ref<{ label: string; value: string }[]>([]);
+const taskIDOptions = ref<TaskTreeOption[]>([]);
+
 const isEdit = ref(false);
 const editId = ref('');
 
@@ -35,7 +42,7 @@ const [Form, formApi] = useVbenForm({
       label: '关联任务ID，NULL=项目级对话',
       componentProps: {
         treeData: taskIDOptions.value,
-        fieldNames: { label: 'name', value: 'id', children: 'children' },
+        fieldNames: { label: 'label', value: 'value', children: 'children' },
         placeholder: '请选择关联任务ID，NULL=项目级对话',
         allowClear: true,
         treeDefaultExpandAll: true,
@@ -91,7 +98,7 @@ const [Modal, modalApi] = useVbenModal({
   },
   async onOpenChange(isOpen: boolean) {
     if (isOpen) {
-      const data = modalApi.getData<{ id?: string } | null>();
+      const data = modalApi.getData<null | { id?: string }>();
       // 加载项目ID选项
       try {
         const projectRes = await getProjectList({ pageNum: 1, pageSize: 1000 });
@@ -105,7 +112,7 @@ const [Modal, modalApi] = useVbenModal({
       // 加载关联任务ID，NULL=项目级对话树形数据
       try {
         const taskRes = await getTaskTree();
-        taskIDOptions.value = taskRes ?? [];
+        taskIDOptions.value = toTaskTreeOptions(taskRes ?? []);
         formApi.updateSchema([
           {
             fieldName: 'taskID',

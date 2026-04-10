@@ -1,17 +1,23 @@
 <script setup lang="ts">
-import { h, ref, computed, onMounted } from 'vue';
+import { computed, h, ref } from 'vue';
 import { useRouter } from 'vue-router';
+
 import { useVbenModal } from '@vben/common-ui';
-import { useVbenForm } from '#/adapter/form';
-import { message, Tooltip, Tag, Checkbox } from 'ant-design-vue';
+
 import { QuestionCircleOutlined, TeamOutlined } from '@ant-design/icons-vue';
+import { Checkbox, message, Tag, Tooltip } from 'ant-design-vue';
+
+import { useVbenForm, type VbenFormSchema } from '#/adapter/form';
+import { getModelList } from '#/api/ai/model';
 import {
   getProjectDetail,
   updateProject,
 } from '#/api/mvp/project';
-import { createProject as workflowCreateProject, getRolePresets, getCategories, type RolePresetItem, type CategoryItem } from '#/api/mvp/workflow';
-import { getModelList } from '#/api/ai/model';
-import { projectCategoryOptions, engineVersionOptions, roleTypeMap, roleLevelMap, executionModeMap, CODING_FAMILY } from '#/views/mvp/consts';
+import { type CategoryItem, getCategories, getRolePresets, type RolePresetItem, createProject as workflowCreateProject } from '#/api/mvp/workflow';
+import { CODING_FAMILY, engineVersionOptions, executionModeMap, projectCategoryOptions, roleLevelMap } from '#/views/mvp/consts';
+import { loadRoleTypeMap } from '#/views/mvp/role-definitions';
+
+const emit = defineEmits<{ success: [] }>();
 
 const router = useRouter();
 
@@ -25,6 +31,7 @@ const selectedCategoryCode = ref<string>('software_dev');
 const defaultPresets = ref<RolePresetItem[]>([]);
 /** 用户选中的预设 ID 集合 */
 const selectedPresetIDs = ref<Set<string>>(new Set());
+const dynamicRoleTypeMap = ref<Record<string, { color: string; label: string; }>>({});
 
 /** 切换预设选中状态 */
 function togglePreset(presetId: string) {
@@ -38,7 +45,7 @@ function togglePreset(presetId: string) {
 }
 
 /** 动态分类选项（从 API 加载，value=categoryCode, label=displayName） */
-const dynamicCategoryOptions = ref<{ label: string; value: string; familyCode: string }[]>([]);
+const dynamicCategoryOptions = ref<{ familyCode: string; label: string; value: string; }[]>([]);
 /** 分类配置缓存 */
 const categoryMap = ref<Map<string, CategoryItem>>(new Map());
 
@@ -91,12 +98,11 @@ function tooltipLabel(label: string, tip: string) {
   ]);
 }
 
-const emit = defineEmits<{ success: [] }>();
 const isEdit = ref(false);
 const editId = ref('');
 
 /** 新建时的表单字段 */
-const createSchema = [
+const createSchema: VbenFormSchema[] = [
   {
     component: 'Input',
     fieldName: 'name',
@@ -116,13 +122,16 @@ const createSchema = [
     component: 'Textarea',
     fieldName: 'description',
     label: '项目简介',
-    componentProps: { placeholder: '请输入项目简介', rows: 4, maxlength: 65535 },
+    componentProps: { placeholder: '请输入项目简介', rows: 4, maxlength: 65_535 },
   },
   {
     component: 'Input',
     fieldName: 'workDir',
     label: tooltipLabel('工作目录', '编码类项目必填（Aider代码编辑的根目录）；非编码类可留空（系统自动生成）'),
-    rules: computed(() => isWorkDirRequired.value ? 'required' : undefined),
+    dependencies: {
+      triggerFields: ['categoryCode'],
+      rules: () => (isWorkDirRequired.value ? 'required' : null),
+    },
     componentProps: { placeholder: computed(() => isWorkDirRequired.value ? '如：/www/wwwroot/project/my-app' : '可留空，系统自动生成'), maxlength: 500 },
   },
   {
@@ -141,7 +150,7 @@ const createSchema = [
 ];
 
 /** 编辑时的表单字段 */
-const editSchema = [
+const editSchema: VbenFormSchema[] = [
   {
     component: 'Input',
     fieldName: 'name',
@@ -159,7 +168,7 @@ const editSchema = [
     component: 'Textarea',
     fieldName: 'description',
     label: '项目简介',
-    componentProps: { placeholder: '请输入项目简介', rows: 4, maxlength: 65535 },
+    componentProps: { placeholder: '请输入项目简介', rows: 4, maxlength: 65_535 },
   },
   {
     component: 'Input',
@@ -171,13 +180,13 @@ const editSchema = [
     component: 'Textarea',
     fieldName: 'pauseReason',
     label: '暂停原因',
-    componentProps: { placeholder: '请输入暂停原因', rows: 4, maxlength: 65535 },
+    componentProps: { placeholder: '请输入暂停原因', rows: 4, maxlength: 65_535 },
   },
   {
     component: 'Textarea',
     fieldName: 'globalContext',
     label: tooltipLabel('项目全局上下文', '架构师需求分析+方案设计的压缩摘要'),
-    componentProps: { placeholder: '请输入项目全局上下文（架构师需求分析+方案设计的压缩摘要）', rows: 4, maxlength: 65535 },
+    componentProps: { placeholder: '请输入项目全局上下文（架构师需求分析+方案设计的压缩摘要）', rows: 4, maxlength: 65_535 },
   },
   {
     component: 'Select',
@@ -238,7 +247,7 @@ const [Modal, modalApi] = useVbenModal({
   },
   async onOpenChange(isOpen: boolean) {
     if (isOpen) {
-      const data = modalApi.getData<{ id?: string } | null>();
+      const data = modalApi.getData<null | { id?: string }>();
       if (data?.id) {
         // 编辑模式：加载所有模型
         isEdit.value = true;
@@ -269,11 +278,13 @@ const [Modal, modalApi] = useVbenModal({
         formApi.resetForm();
         try {
           // 并行加载：分类列表、架构师模型列表、默认预设
-          const [, modelRes, presetRes] = await Promise.all([
+          const [roleTypeMap, , modelRes, presetRes] = await Promise.all([
+            loadRoleTypeMap(),
             loadCategories(),
             getModelList({ pageNum: 1, pageSize: 1000, capability: 'architect' }),
             getRolePresets('software_dev'),
           ]);
+          dynamicRoleTypeMap.value = roleTypeMap;
           // 架构师模型下拉选项
           architectModelOptions.value = (modelRes?.list ?? []).map((item: any) => ({
             label: `${item.name} (${item.modelCode})`,
@@ -312,8 +323,8 @@ const [Modal, modalApi] = useVbenModal({
             @click.stop
             @change="togglePreset(preset.id)"
           />
-          <Tag :color="roleTypeMap[preset.roleType]?.color || 'default'">
-            {{ roleTypeMap[preset.roleType]?.label || preset.roleType }}
+          <Tag :color="dynamicRoleTypeMap[preset.roleType]?.color || 'default'">
+            {{ dynamicRoleTypeMap[preset.roleType]?.label || preset.roleType }}
           </Tag>
           <span class="text-xs text-gray-500">
             {{ roleLevelMap[preset.roleLevel]?.label || preset.roleLevel }}

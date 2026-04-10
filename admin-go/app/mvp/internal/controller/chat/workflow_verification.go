@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/gtime"
 
 	v1 "easymvp/app/mvp/api/mvp/v1"
 	"easymvp/app/mvp/internal/middleware"
@@ -177,19 +175,15 @@ func startVerificationRun(ctx context.Context, projectID, userID, deptID int64, 
 	if err != nil {
 		return 0, 0, err
 	}
-	project, err := g.DB().Model("mvp_project").Ctx(ctx).
-		Where("id", projectID).
-		WhereNull("deleted_at").
-		Fields("created_by, dept_id").
-		One()
+	project, err := repo.NewProjectRepo().GetByID(ctx, projectID, "created_by", "dept_id")
 	if err != nil {
 		return 0, 0, fmt.Errorf("查询项目信息失败: %w", err)
 	}
 	if userID == 0 {
-		userID = project["created_by"].Int64()
+		userID = g.NewVar(project["created_by"]).Int64()
 	}
 	if deptID == 0 {
-		deptID = project["dept_id"].Int64()
+		deptID = g.NewVar(project["dept_id"]).Int64()
 	}
 
 	svc := verificationsvc.NewService(nil, nil, nil)
@@ -248,13 +242,8 @@ func requestVerificationRepair(ctx context.Context, projectID int64, issueIDs []
 	}
 	verificationRunID := g.NewVar(verificationRun["id"]).Int64()
 
-	issues, err := g.DB().Model("mvp_verification_issue").Ctx(ctx).
-		Where("verification_run_id", verificationRunID).
-		WhereIn("id", issueIDs).
-		Where("status", "open").
-		WhereNull("deleted_at").
-		OrderDesc("created_at").
-		All()
+	issueRepo := repo.NewVerificationIssueRepo()
+	issues, err := issueRepo.ListOpenByVerificationRunAndIDs(ctx, verificationRunID, issueIDs)
 	if err != nil {
 		return "", fmt.Errorf("查询验证问题失败: %w", err)
 	}
@@ -271,44 +260,26 @@ func requestVerificationRepair(ctx context.Context, projectID int64, issueIDs []
 			if taskID <= 0 {
 				continue
 			}
-			if _, upErr := g.DB().Model("mvp_verification_issue").Ctx(ctx).
-				Where("id", issueID).
-				Where("verification_run_id", verificationRunID).
-				Data(g.Map{"domain_task_id": taskID}).
-				Update(); upErr != nil {
+			if upErr := issueRepo.UpdateDomainTaskID(ctx, verificationRunID, issueID, taskID); upErr != nil {
 				g.Log().Warningf(ctx, "[VerificationRepair] 回写 issue 任务归属失败: issue=%d task=%d err=%v", issueID, taskID, upErr)
 			}
 		}
 	}
 
-	task, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("id", failedTaskID).
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		Fields("id, name, status").
-		One()
+	domainTaskRepo := repo.NewDomainTaskRepo()
+	task, err := domainTaskRepo.GetByWorkflowAndID(ctx, workflowRunID, failedTaskID, "id", "name", "status")
 	if err != nil {
 		return "", fmt.Errorf("查询返工任务失败: %w", err)
 	}
-	if task.IsEmpty() {
+	if len(task) == 0 {
 		return "", fmt.Errorf("返工任务 %d 不存在", failedTaskID)
 	}
-	if task["status"].String() == "running" {
+	if g.NewVar(task["status"]).String() == "running" {
 		return "", fmt.Errorf("任务 %d 当前仍在运行，不能直接进入返工", failedTaskID)
 	}
 
 	reason := buildVerificationRepairReason(issues, extraReason)
-	now := gtime.Now()
-	if _, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("id", failedTaskID).
-		Data(g.Map{
-			"status":       "failed",
-			"result":       reason,
-			"started_at":   nil,
-			"completed_at": nil,
-			"updated_at":   now,
-		}).
-		Update(); err != nil {
+	if err := domainTaskRepo.MarkFailedForRework(ctx, failedTaskID, reason); err != nil {
 		return "", fmt.Errorf("标记返工任务失败: %w", err)
 	}
 
@@ -331,11 +302,7 @@ func requestVerificationRepair(ctx context.Context, projectID int64, issueIDs []
 		return "", fmt.Errorf("启动 rework 调度器失败: %w", err)
 	}
 
-	if _, err := g.DB().Model("mvp_verification_issue").Ctx(ctx).
-		Where("verification_run_id", verificationRunID).
-		WhereIn("id", issueIDs).
-		Where("status", "open").
-		Update(g.Map{"status": "rework_requested", "updated_at": now}); err != nil {
+	if err := issueRepo.MarkReworkRequested(ctx, verificationRunID, issueIDs); err != nil {
 		g.Log().Warningf(ctx, "[VerificationRepair] 更新 issue 状态失败: run=%d err=%v", verificationRunID, err)
 	}
 
@@ -349,7 +316,7 @@ func requestVerificationRepair(ctx context.Context, projectID int64, issueIDs []
 	return fmt.Sprintf("已基于 %d 条验证问题触发返工，关联任务 %d", len(issues), failedTaskID), nil
 }
 
-func resolveVerificationRepairTask(ctx context.Context, workflowRunID int64, issues gdb.Result) (int64, map[int64]int64, error) {
+func resolveVerificationRepairTask(ctx context.Context, workflowRunID int64, issues []g.Map) (int64, map[int64]int64, error) {
 	resolved := make(map[int64]int64, len(issues))
 	targetSet := make(map[int64]struct{}, len(issues))
 
@@ -357,19 +324,19 @@ func resolveVerificationRepairTask(ctx context.Context, workflowRunID int64, iss
 		taskID, err := verificationsvc.ResolveIssueTaskID(
 			ctx,
 			workflowRunID,
-			issue["domain_task_id"].Int64(),
-			issue["title"].String(),
-			issue["detail"].String(),
-			issue["resource_ref"].String(),
+			g.NewVar(issue["domain_task_id"]).Int64(),
+			g.NewVar(issue["title"]).String(),
+			g.NewVar(issue["detail"]).String(),
+			g.NewVar(issue["resource_ref"]).String(),
 		)
 		if err != nil {
-			g.Log().Warningf(ctx, "[VerificationRepair] 解析 issue 任务归属失败: issue=%d err=%v", issue["id"].Int64(), err)
-			taskID = issue["domain_task_id"].Int64()
+			g.Log().Warningf(ctx, "[VerificationRepair] 解析 issue 任务归属失败: issue=%d err=%v", g.NewVar(issue["id"]).Int64(), err)
+			taskID = g.NewVar(issue["domain_task_id"]).Int64()
 		}
 		if taskID <= 0 {
 			continue
 		}
-		resolved[issue["id"].Int64()] = taskID
+		resolved[g.NewVar(issue["id"]).Int64()] = taskID
 		targetSet[taskID] = struct{}{}
 	}
 
@@ -394,17 +361,13 @@ func loadVerificationRepairTaskNames(ctx context.Context, taskIDs []int64) []str
 	if len(taskIDs) == 0 {
 		return nil
 	}
-	rows, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		WhereIn("id", taskIDs).
-		WhereNull("deleted_at").
-		Fields("id, name").
-		All()
+	rows, err := repo.NewDomainTaskRepo().ListByIDs(ctx, taskIDs, "id", "name")
 	if err != nil {
 		return nil
 	}
 	nameByID := make(map[int64]string, len(rows))
 	for _, row := range rows {
-		nameByID[row["id"].Int64()] = strings.TrimSpace(row["name"].String())
+		nameByID[g.NewVar(row["id"]).Int64()] = strings.TrimSpace(g.NewVar(row["name"]).String())
 	}
 	names := make([]string, 0, len(taskIDs))
 	for _, taskID := range taskIDs {
@@ -437,27 +400,27 @@ func countVerificationSeverities(issues []g.Map) (blockers, errorsCount, warns, 
 	return
 }
 
-func pickVerificationRepairTaskID(issues gdb.Result) int64 {
+func pickVerificationRepairTaskID(issues []g.Map) int64 {
 	for _, issue := range issues {
-		if taskID := issue["domain_task_id"].Int64(); taskID > 0 {
+		if taskID := g.NewVar(issue["domain_task_id"]).Int64(); taskID > 0 {
 			return taskID
 		}
 	}
 	return 0
 }
 
-func buildVerificationRepairReason(issues gdb.Result, extraReason string) string {
+func buildVerificationRepairReason(issues []g.Map, extraReason string) string {
 	lines := []string{"基于验证问题触发返工："}
 	for i, issue := range issues {
 		if i >= 5 {
 			lines = append(lines, fmt.Sprintf("其余 %d 条问题请查看验证问题列表。", len(issues)-i))
 			break
 		}
-		line := fmt.Sprintf("%d. [%s] %s", i+1, issue["severity"].String(), issue["title"].String())
-		if detail := strings.TrimSpace(issue["detail"].String()); detail != "" {
+		line := fmt.Sprintf("%d. [%s] %s", i+1, g.NewVar(issue["severity"]).String(), g.NewVar(issue["title"]).String())
+		if detail := strings.TrimSpace(g.NewVar(issue["detail"]).String()); detail != "" {
 			line += " - " + detail
 		}
-		if action := strings.TrimSpace(issue["suggested_action"].String()); action != "" {
+		if action := strings.TrimSpace(g.NewVar(issue["suggested_action"]).String()); action != "" {
 			line += "；建议：" + action
 		}
 		lines = append(lines, line)

@@ -11,6 +11,7 @@ import (
 
 	v1 "easymvp/app/mvp/api/mvp/v1"
 	"easymvp/app/mvp/internal/workflow/autonomy"
+	"easymvp/app/mvp/internal/workflow/event"
 	"easymvp/app/mvp/internal/workflow/orchestrator"
 	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/utility/snowflake"
@@ -178,17 +179,11 @@ func (c *cWorkflow) TriggerReplan(ctx context.Context, req *v1.WorkflowTriggerRe
 				g.Log().Infof(bgCtx, "[TriggerReplan] 重规划完成: projectID=%d action=%s", projectID, result.Action)
 			}
 		}
-		payloadJSON, jsonErr := json.Marshal(payloadMap)
-		if jsonErr != nil {
-			g.Log().Warningf(bgCtx, "[TriggerReplan] 序列化事件 payload 失败: %v", jsonErr)
-		}
-		if _, insErr := g.DB().Model("mvp_workflow_event").Ctx(bgCtx).Insert(g.Map{
-			"id":              int64(snowflake.Generate()),
-			"workflow_run_id": wfRunID,
-			"entity_type":     "workflow",
-			"event_type":      eventType,
-			"payload":         string(payloadJSON),
-			"created_at":      gtime.Now(),
+		if insErr := event.PersistRecord(bgCtx, event.Event{
+			WorkflowRunID: wfRunID,
+			EntityType:    "workflow",
+			EventType:     eventType,
+			Payload:       payloadMap,
 		}); insErr != nil {
 			g.Log().Warningf(bgCtx, "[TriggerReplan] 记录重规划事件失败: wfRun=%d err=%v", wfRunID, insErr)
 		}

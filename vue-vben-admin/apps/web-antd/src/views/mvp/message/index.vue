@@ -1,18 +1,17 @@
 <script setup lang="ts">
 import type { VbenFormProps } from '#/adapter/form';
 import type { VxeGridProps } from '#/adapter/vxe-table';
+import type { MessageItem } from '#/api/mvp/message/types';
 
 import { Page, useVbenModal } from '@vben/common-ui';
+
 import { Button, message, Modal, Tag } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getMessageList, deleteMessage, batchDeleteMessage, exportMessage, importMessage, downloadImportTemplateMessage, batchUpdateMessage } from '#/api/mvp/message';
-import type { MessageItem } from '#/api/mvp/message/types';
-import FormModal from './modules/form.vue';
-import DetailDrawer from './modules/detail-drawer.vue';
+import { batchDeleteMessage, batchUpdateMessage, deleteMessage, downloadImportTemplateMessage, exportMessage, getMessageList, importMessage } from '#/api/mvp/message';
 
-/** 标签颜色池 */
-const TAG_COLORS = ['green', 'red', 'blue', 'orange', 'cyan', 'purple', 'geekblue', 'magenta'];
+import DetailDrawer from './modules/detail-drawer.vue';
+import FormModal from './modules/form.vue';
 
 const messageTypeOptions = [
   { label: '普通对话-用户', value: 'chat_user' },
@@ -212,7 +211,7 @@ async function handleImport() {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = '.csv,.xlsx,.xls';
-  input.onchange = async () => {
+  input.addEventListener('change', async () => {
     const file = input.files?.[0];
     if (!file) { input.remove(); return; }
     const formData = new FormData();
@@ -226,8 +225,8 @@ async function handleImport() {
     } finally {
       input.remove();
     }
-  };
-  document.body.appendChild(input);
+  });
+  document.body.append(input);
   input.click();
 }
 

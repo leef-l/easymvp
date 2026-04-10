@@ -1,3 +1,5 @@
+import { fallbackRoleDefinitions } from './role-definitions';
+
 // ==================== 项目状态 ====================
 
 /** 项目状态枚举 */
@@ -10,7 +12,7 @@ export const ProjectStatus = {
 } as const;
 
 /** 项目状态映射（用于列表/详情展示） */
-export const projectStatusMap: Record<string, { label: string; color: string }> = {
+export const projectStatusMap: Record<string, { color: string; label: string; }> = {
   designing: { label: '设计中', color: 'blue' },
   reviewing: { label: '方案审核中', color: 'cyan' },
   running: { label: '执行中', color: 'green' },
@@ -44,7 +46,7 @@ export const TaskStatus = {
 } as const;
 
 /** 任务状态映射 */
-export const taskStatusMap: Record<string, { label: string; color: string }> = {
+export const taskStatusMap: Record<string, { color: string; label: string; }> = {
   draft: { label: '草稿', color: 'default' },
   pending: { label: '待执行', color: 'blue' },
   running: { label: '执行中', color: 'processing' },
@@ -81,21 +83,20 @@ export const projectCategoryOptions = [
 /** 编码类分类的 familyCode */
 export const CODING_FAMILY = 'coding';
 
-/** 角色类型选项 */
-export const roleTypeOptions = [
-  { label: '架构师', value: 'architect' },
-  { label: '实现者', value: 'implementer' },
-  { label: '审核者', value: 'auditor' },
-  { label: '协调者', value: 'coordinator' },
-];
+/** 角色类型选项（兜底，真实可选值以 workflow.role_definitions 为准） */
+export const roleTypeOptions = fallbackRoleDefinitions.map((item) => ({
+  label: item.displayName || item.roleType,
+  value: item.roleType,
+}));
 
-/** 角色类型映射（用于列表/详情展示） */
-export const roleTypeMap: Record<string, { label: string; color: string }> = {
-  architect: { label: '架构师', color: 'purple' },
-  implementer: { label: '实现者', color: 'blue' },
-  auditor: { label: '审核者', color: 'green' },
-  coordinator: { label: '协调者', color: 'orange' },
-};
+/** 角色类型映射（兜底，真实展示值以 workflow.role_definitions 为准） */
+export const roleTypeMap: Record<string, { color: string; label: string; }> = {};
+for (const item of fallbackRoleDefinitions) {
+  roleTypeMap[item.roleType] = {
+    label: item.displayName || item.roleType,
+    color: item.color || 'default',
+  };
+}
 
 /** 角色等级选项 */
 export const roleLevelOptions = [
@@ -105,7 +106,7 @@ export const roleLevelOptions = [
 ];
 
 /** 角色等级映射（用于列表/详情展示） */
-export const roleLevelMap: Record<string, { label: string; color: string }> = {
+export const roleLevelMap: Record<string, { color: string; label: string; }> = {
   lite: { label: 'Lite', color: 'default' },
   pro: { label: 'Pro', color: 'blue' },
   max: { label: 'Max', color: 'gold' },
@@ -119,7 +120,7 @@ export const EngineVersion = {
 } as const;
 
 /** 引擎版本映射 */
-export const engineVersionMap: Record<string, { label: string; color: string }> = {
+export const engineVersionMap: Record<string, { color: string; label: string; }> = {
   workflow_v2: { label: 'Workflow V2', color: 'green' },
 };
 
@@ -143,7 +144,7 @@ export const WorkflowRunStatus = {
 } as const;
 
 /** 工作流状态映射 */
-export const workflowRunStatusMap: Record<string, { label: string; color: string }> = {
+export const workflowRunStatusMap: Record<string, { color: string; label: string; }> = {
   designing: { label: '设计中', color: 'cyan' },
   reviewing: { label: '审核中', color: 'purple' },
   executing: { label: '执行中', color: 'green' },
@@ -166,7 +167,7 @@ export const StageType = {
 } as const;
 
 /** 阶段类型映射 */
-export const stageTypeMap: Record<string, { label: string; color: string }> = {
+export const stageTypeMap: Record<string, { color: string; label: string; }> = {
   design: { label: '设计', color: 'blue' },
   review: { label: '审核', color: 'cyan' },
   execute: { label: '执行', color: 'green' },
@@ -176,7 +177,7 @@ export const stageTypeMap: Record<string, { label: string; color: string }> = {
 };
 
 /** 阶段运行状态映射 */
-export const stageRunStatusMap: Record<string, { label: string; color: string }> = {
+export const stageRunStatusMap: Record<string, { color: string; label: string; }> = {
   pending: { label: '待启动', color: 'default' },
   running: { label: '进行中', color: 'processing' },
   completed: { label: '已完成', color: 'success' },
@@ -197,7 +198,7 @@ export const executionModeOptions = [
 ];
 
 /** 执行方式映射 */
-export const executionModeMap: Record<string, { label: string; color: string }> = {
+export const executionModeMap: Record<string, { color: string; label: string; }> = {
   auto: { label: 'Auto', color: 'gold' },
   chat: { label: 'Chat', color: 'blue' },
   aider: { label: 'Aider', color: 'green' },

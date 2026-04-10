@@ -95,7 +95,7 @@ func (r *AiderRunner) Run(ctx context.Context, cfg *AiderConfig) *AiderResult {
 
 	result := r.runOnce(ctx, cfg)
 
-	if result.Error != nil && r.isTokenLimitFailure(result.Output) && !cfg.CompactMode {
+	if r.isTokenLimitFailure(result.Output) && !cfg.CompactMode {
 		if maxSteps <= 1 {
 			g.Log().Warningf(ctx, "[AiderRunner] 检测到 token limit，但 maxSteps=%d，跳过精简重试", maxSteps)
 		} else {
@@ -104,12 +104,14 @@ func (r *AiderRunner) Run(ctx context.Context, cfg *AiderConfig) *AiderResult {
 			retryResult := r.runOnce(ctx, compactCfg)
 			retryResult.Output = strings.TrimSpace(result.Output) + "\n\n[AiderRunner] 检测到 token limit，已自动切换为精简上下文模式重试。\n\n" + strings.TrimSpace(retryResult.Output)
 			retryResult.Duration = time.Since(start)
-			if retryResult.Error == nil {
+			if r.isSuccessfulResult(retryResult) {
 				return retryResult
 			}
 			result = retryResult
 		}
 	}
+
+	r.markTokenLimitFailure(result)
 
 	// 对非 token-limit 错误进行分类和智能重试
 	if result.Error != nil {
@@ -138,6 +140,20 @@ func (r *AiderRunner) Run(ctx context.Context, cfg *AiderConfig) *AiderResult {
 		result.Duration, len(result.Output), result.Category)
 
 	return result
+}
+
+func (r *AiderRunner) isSuccessfulResult(result *AiderResult) bool {
+	return result != nil && result.Error == nil && !r.isTokenLimitFailure(result.Output)
+}
+
+func (r *AiderRunner) markTokenLimitFailure(result *AiderResult) {
+	if result == nil || result.Error != nil || !r.isTokenLimitFailure(result.Output) {
+		return
+	}
+	result.Error = fmt.Errorf("aider hit token limit")
+	if result.Category == "" {
+		result.Category = taskFailureExecution
+	}
 }
 
 func (r *AiderRunner) runOnce(ctx context.Context, cfg *AiderConfig) *AiderResult {

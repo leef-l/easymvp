@@ -1,6 +1,10 @@
 package review
 
-import "testing"
+import (
+	"testing"
+
+	"easymvp/app/mvp/internal/workflow/qualitygate"
+)
 
 func TestFinalizeReviewConclusionBlocksWarnings(t *testing.T) {
 	t.Parallel()
@@ -45,5 +49,19 @@ func TestFinalizeReviewConclusionPreservesOriginalFailure(t *testing.T) {
 	}
 	if got.summary != "系统预检发现错误" {
 		t.Fatalf("summary = %q, want %q", got.summary, "系统预检发现错误")
+	}
+}
+
+func TestShouldWarnMissingBrowserVerificationPlan(t *testing.T) {
+	t.Parallel()
+
+	if !shouldWarnMissingBrowserVerificationPlan(qualitygate.VerificationStandard{RequireBrowserPlan: true}, false) {
+		t.Fatal("expected coding interactive plan without browser verification to warn")
+	}
+	if shouldWarnMissingBrowserVerificationPlan(qualitygate.VerificationStandard{RequireBrowserPlan: true}, true) {
+		t.Fatal("did not expect warning when browser verification plan exists")
+	}
+	if shouldWarnMissingBrowserVerificationPlan(qualitygate.VerificationStandard{RequireBrowserPlan: false}, false) {
+		t.Fatal("did not expect analysis family to require browser verification plan")
 	}
 }

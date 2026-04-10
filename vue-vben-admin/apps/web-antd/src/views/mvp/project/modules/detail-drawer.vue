@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { useVbenModal } from '@vben/common-ui';
-import { Descriptions, DescriptionsItem, Tag } from 'ant-design-vue';
-import { getProjectDetail } from '#/api/mvp/project';
 import type { ProjectItem } from '#/api/mvp/project/types';
 
-const detail = ref<ProjectItem | null>(null);
+import { ref } from 'vue';
+
+import { useVbenModal } from '@vben/common-ui';
+
+import { Descriptions, DescriptionsItem } from 'ant-design-vue';
+
+import { getProjectDetail } from '#/api/mvp/project';
+
+const detail = ref<null | ProjectItem>(null);
 
 const [Modal, modalApi] = useVbenModal({
   fullscreenButton: false,

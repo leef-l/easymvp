@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,13 +16,18 @@ import (
 )
 
 var (
-	tasksRe              = regexp.MustCompile(`(?s)\{\s*"tasks"\s*:\s*\[.*?\]\s*\}`)
-	tasksGreedyRe        = regexp.MustCompile(`(?s)\{\s*"tasks"\s*:\s*\[[\s\S]*\]\s*\}`)
+	planMetaPrefixRe     = `(?:"plan_meta"\s*:\s*\{[\s\S]*?\}\s*,\s*)?`
+	tasksRe              = regexp.MustCompile(`(?s)\{\s*` + planMetaPrefixRe + `"tasks"\s*:\s*\[.*?\]\s*\}`)
+	tasksGreedyRe        = regexp.MustCompile(`(?s)\{\s*` + planMetaPrefixRe + `"tasks"\s*:\s*\[[\s\S]*\]\s*\}`)
 	arrayRe              = regexp.MustCompile(`(?s)\[\s*\{[\s\S]*\}\s*\]`)
 	multiCommentRe       = regexp.MustCompile(`(?s)/\*.*?\*/`)
 	trailingCommaRe      = regexp.MustCompile(`,\s*([\]\}])`)
 	codeBlockReParserExt = regexp.MustCompile("(?s)```(?:json)?\\s*\\n?([\\{\\[][\\s\\S]*?[\\}\\]])\\s*```")
 )
+
+type architectPlanBlock struct {
+	Plan *ArchitectTaskPlan
+}
 
 // extractJSONFromCodeBlocks 从 markdown 代码块中提取 JSON 字符串。
 // 使用字符串分割而非正则，避免嵌套 JSON 的 } 导致非贪婪匹配提前截断。
@@ -68,37 +74,104 @@ func extractJSONFromCodeBlocks(text string) []string {
 //  3. 混合文本中的 JSON 片段
 //  4. 独立的 JSON 数组 [{ ... }]
 func (p *TaskParser) extractTaskPlan(text string) (*ArchitectTaskPlan, error) {
+	plan, _, err := p.extractTaskPlanWithReport(text)
+	return plan, err
+}
+
+func (p *TaskParser) extractTaskPlanWithReport(text string) (*ArchitectTaskPlan, *ArchitectPlanParseReport, error) {
 	var allTasks []ArchitectTask
+	var (
+		report           = &ArchitectPlanParseReport{}
+		chunkedBlocks    = make(map[int]architectPlanBlock)
+		standaloneBlocks []architectPlanBlock
+	)
 
 	// 策略1：从所有 ```json 代码块中提取并合并
 	// 先按 ``` 分割找代码块，再从中提取 JSON，避免正则嵌套匹配问题
 	matches := extractJSONFromCodeBlocks(text)
+	report.CodeBlockCount = len(matches)
 	for _, jsonStr := range matches {
-		if plan, err := p.tryParseJSON(jsonStr); err == nil && len(plan.Tasks) > 0 {
-			allTasks = append(allTasks, plan.Tasks...)
+		plan, err := p.tryParseJSON(jsonStr)
+		if err != nil || len(plan.Tasks) == 0 {
+			report.InvalidCodeBlockCount++
+			continue
 		}
+		report.ParsedBlockCount++
+		report.RawTaskCount += len(plan.Tasks)
+		report.mergePlanMeta(plan.PlanMeta)
+
+		if plan.PlanMeta != nil && plan.PlanMeta.ChunkIndex != nil && *plan.PlanMeta.ChunkIndex > 0 {
+			chunkIndex := *plan.PlanMeta.ChunkIndex
+			if len(standaloneBlocks) > 0 {
+				report.MixedChunkEncoding = true
+			}
+			if _, exists := chunkedBlocks[chunkIndex]; exists {
+				report.ReplacedChunkIndexes = append(report.ReplacedChunkIndexes, chunkIndex)
+			}
+			chunkedBlocks[chunkIndex] = architectPlanBlock{
+				Plan: plan,
+			}
+			continue
+		}
+		if len(chunkedBlocks) > 0 {
+			report.MixedChunkEncoding = true
+		}
+		standaloneBlocks = append(standaloneBlocks, architectPlanBlock{
+			Plan: plan,
+		})
 	}
 
 	// 如果从代码块中已收集到任务，直接返回（最常见的分段输出场景）
-	if len(allTasks) > 0 {
-		return &ArchitectTaskPlan{Tasks: allTasks}, nil
+	if len(chunkedBlocks) > 0 || len(standaloneBlocks) > 0 {
+		if len(chunkedBlocks) > 0 {
+			indexes := make([]int, 0, len(chunkedBlocks))
+			for chunkIndex := range chunkedBlocks {
+				indexes = append(indexes, chunkIndex)
+			}
+			sort.Ints(indexes)
+			for _, chunkIndex := range indexes {
+				report.ChunkIndexes = append(report.ChunkIndexes, chunkIndex)
+				allTasks = append(allTasks, chunkedBlocks[chunkIndex].Plan.Tasks...)
+			}
+		}
+		for _, block := range standaloneBlocks {
+			allTasks = append(allTasks, block.Plan.Tasks...)
+		}
+		report.RawTaskCount = len(allTasks)
+		report.finalize()
+		return &ArchitectTaskPlan{
+			PlanMeta: &ArchitectPlanMeta{
+				PlanID:        report.PlanID,
+				DeclaredTotal: report.DeclaredTotal,
+				ChunkTotal:    report.ChunkTotal,
+			},
+			Tasks: allTasks,
+		}, report, nil
 	}
 
 	// 策略2：查找所有 { "tasks": [...] } 格式的 JSON 块
 	tasksMatches := tasksRe.FindAllString(text, -1)
 	for _, m := range tasksMatches {
 		if plan, err := p.tryParseJSON(m); err == nil && len(plan.Tasks) > 0 {
+			report.ParsedBlockCount++
 			allTasks = append(allTasks, plan.Tasks...)
+			report.mergePlanMeta(plan.PlanMeta)
+			report.RawTaskCount += len(plan.Tasks)
 		}
 	}
 	if len(allTasks) > 0 {
-		return &ArchitectTaskPlan{Tasks: allTasks}, nil
+		report.finalize()
+		return &ArchitectTaskPlan{Tasks: allTasks}, report, nil
 	}
 
 	// 策略3：贪婪匹配单个大 JSON（兼容旧的单块输出）
 	if m := tasksGreedyRe.FindString(text); m != "" {
 		if plan, err := p.tryParseJSON(m); err == nil && len(plan.Tasks) > 0 {
-			return plan, nil
+			report.ParsedBlockCount = 1
+			report.mergePlanMeta(plan.PlanMeta)
+			report.RawTaskCount = len(plan.Tasks)
+			report.finalize()
+			return plan, report, nil
 		}
 	}
 
@@ -107,12 +180,16 @@ func (p *TaskParser) extractTaskPlan(text string) (*ArchitectTaskPlan, error) {
 		cleaned := p.cleanJSON(m)
 		var tasks []ArchitectTask
 		if err := json.Unmarshal([]byte(cleaned), &tasks); err == nil && len(tasks) > 0 {
-			return &ArchitectTaskPlan{Tasks: tasks}, nil
+			report.ParsedBlockCount = 1
+			report.RawTaskCount = len(tasks)
+			report.finalize()
+			return &ArchitectTaskPlan{Tasks: tasks}, report, nil
 		}
 	}
 
 	// 没找到有效的任务清单
-	return &ArchitectTaskPlan{}, nil
+	report.finalize()
+	return &ArchitectTaskPlan{}, report, nil
 }
 
 // tryParseJSON 尝试解析 JSON 为 ArchitectTaskPlan

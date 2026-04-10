@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { useVbenModal } from '@vben/common-ui';
-import { Descriptions, DescriptionsItem, Tag } from 'ant-design-vue';
-import { getProviderDetail } from '#/api/ai/provider';
 import type { ProviderItem } from '#/api/ai/provider/types';
+
+import { ref } from 'vue';
+
+import { useVbenModal } from '@vben/common-ui';
+
+import { Descriptions, DescriptionsItem, Tag } from 'ant-design-vue';
+
+import { getProviderDetail } from '#/api/ai/provider';
 
 /** 状态映射 */
 const statusMap: Record<number, string> = {
@@ -11,7 +15,11 @@ const statusMap: Record<number, string> = {
   1: '启用',
 };
 
-const detail = ref<ProviderItem | null>(null);
+function getStatusLabel(status?: number) {
+  return status === undefined ? '-' : (statusMap[status] ?? status);
+}
+
+const detail = ref<null | ProviderItem>(null);
 
 const [Modal, modalApi] = useVbenModal({
   fullscreenButton: false,
@@ -44,7 +52,7 @@ const [Modal, modalApi] = useVbenModal({
       <DescriptionsItem label="API基础地址">{{ detail.baseURL || '-' }}</DescriptionsItem>
       <DescriptionsItem label="图标URL">{{ detail.icon || '-' }}</DescriptionsItem>
       <DescriptionsItem label="状态">
-        <Tag>{{ statusMap[detail.status] || detail.status }}</Tag>
+        <Tag>{{ getStatusLabel(detail.status) }}</Tag>
       </DescriptionsItem>
       <DescriptionsItem label="排序">{{ detail.sort || '-' }}</DescriptionsItem>
       <DescriptionsItem label="创建时间">{{ detail.createdAt || '-' }}</DescriptionsItem>

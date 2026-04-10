@@ -1,8 +1,11 @@
 package presetutil
 
 import (
+	"context"
 	"fmt"
 	"strings"
+
+	"easymvp/app/mvp/internal/workflow/rolecatalog"
 )
 
 const (
@@ -168,11 +171,16 @@ var categorySpecs = map[string]categorySpec{
 }
 
 func PreferredRoleLevels(roleType string) []string {
+	if definition, ok := rolecatalog.GetDefinition(context.Background(), roleType); ok && len(definition.PreferredLevels) > 0 {
+		return definition.PreferredLevels
+	}
 	switch roleType {
 	case "architect":
 		return []string{"max", "pro", "lite"}
 	case "coordinator":
 		return []string{"lite", "pro", "max"}
+	case "experience_reviewer":
+		return []string{"max", "pro", "lite"}
 	default:
 		return []string{"pro", "max", "lite"}
 	}
@@ -205,6 +213,9 @@ func BuildRoleSystemPrompt(projectCategory, roleType, roleLevel, presetPrompt, m
 
 func BuildDefaultRolePrompt(projectCategory, roleType, roleLevel string) string {
 	spec := resolveCategorySpec(projectCategory)
+	if definition, ok := rolecatalog.GetDefinition(context.Background(), roleType); ok && strings.TrimSpace(definition.DefaultSystemPrompt) != "" {
+		return renderConfiguredRolePrompt(definition, spec, roleLevel)
+	}
 
 	switch roleType {
 	case "architect":
@@ -217,8 +228,10 @@ func BuildDefaultRolePrompt(projectCategory, roleType, roleLevel string) string 
 		return buildCoordinatorRolePrompt(spec, roleLevel)
 	case "operator":
 		return buildOperatorRolePrompt(spec, roleLevel)
+	case "experience_reviewer":
+		return buildExperienceReviewerRolePrompt(spec, roleLevel)
 	default:
-		return ""
+		return buildGenericRolePrompt(spec, roleType, roleLevel)
 	}
 }
 
@@ -242,15 +255,29 @@ func BuildArchitectSystemPrompt(projectName, projectDesc, projectCategory, roleP
 
 func appendRoleRuntimeRules(projectCategory, roleType, prompt string) string {
 	spec := resolveCategorySpec(projectCategory)
-	if spec.Family == familyCoding && roleType == "implementer" {
-		return prompt + `
+	if spec.Family != familyCoding {
+		return prompt
+	}
+
+	parts := []string{
+		strings.TrimSpace(prompt),
+		`## 工程铁律：数据访问与分层
+- 禁止在 controller、workflow、stage、review、acceptance、verification 等编排层直接调用 g.DB()、dao.* 或直接拼表读写
+- 所有数据库访问必须先抽象接口，再下沉到 repo 实现；上层只能依赖 service / interface
+- 新增配置、状态、证据、角色定义等数据读写时，先补 repo 接口与数据契约，再接控制器和阶段逻辑
+- 如果发现存量代码存在直连 DB，本次新增代码不得继续复制该模式，至少要在当前改动范围内完成抽象收口`,
+	}
+
+	if roleType == "implementer" {
+		parts = append(parts, `
 
 ## 编码执行补充要求
 - 如果任务描述已经明确技术栈、官方 CLI、模板仓库、生成器、文档工具或现成骨架，优先使用这些方式快速初始化，不要从零手写整套样板代码
 - 如果任务只是要求搭建骨架，优先在对应子目录内完成初始化；前端、后端、基础设施等独立根目录不要混成一次无边界改动
-- 只有在官方脚手架、模板仓库或文档工具明显不适用时，才允许手写骨架，并在结果中说明原因`
+- 只有在官方脚手架、模板仓库或文档工具明显不适用时，才允许手写骨架，并在结果中说明原因`)
 	}
-	return prompt
+
+	return strings.Join(parts, "\n\n")
 }
 
 func resolveCategorySpec(projectCategory string) categorySpec {
@@ -323,6 +350,17 @@ func operatorLevelGuidance(roleLevel string) string {
 		return "处理复杂故障、熔断、回滚和人工升级策略，明确恢复步骤与风险边界。"
 	default:
 		return "负责常规故障恢复、变更风险控制和运行环境稳定性。"
+	}
+}
+
+func experienceReviewerLevelGuidance(roleLevel string) string {
+	switch roleLevel {
+	case "lite":
+		return "优先覆盖主流程可用性、明显交互卡点和核心反馈缺失，发现复杂体验风险时明确升级。"
+	case "max":
+		return "负责关键体验闭环、异常路径、视觉一致性和发布质量的深度审查，必须给出阻塞级判断。"
+	default:
+		return "覆盖关键用户路径、反馈状态、信息层级和交互一致性，输出可执行的体验结论。"
 	}
 }
 
@@ -438,6 +476,64 @@ func buildOperatorRolePrompt(spec categorySpec, roleLevel string) string {
 %s`, spec.DisplayName, roleLevelName(roleLevel), spec.Focus, spec.Deliverables, spec.Risks, operatorLevelGuidance(roleLevel))
 }
 
+func buildExperienceReviewerRolePrompt(spec categorySpec, roleLevel string) string {
+	return fmt.Sprintf(`你是%s项目的%s体验评审师。
+
+项目类型重点：
+- 核心关注：%s
+- 关键产物：%s
+- 主要风险：%s
+
+你的职责：
+1. 从产品经理和 UI/交互专家双重视角审查关键用户路径是否真正闭环
+2. 检查启动、核心流程、异常反馈、空状态、边界提示和交互一致性是否达到可发布标准
+3. 区分阻塞问题、一般缺陷和优化建议，不能用模糊评价替代具体现象
+4. 输出问题时必须尽量覆盖 dimension、flow、severity、expected、actual、evidence、suggested_action、blocking 等结构化信息
+
+工作边界：
+- 不把技术实现细节误当成用户体验结论
+- 不忽略关键路径上的理解成本、反馈缺失和操作落差
+- 体验判断必须围绕%s的真实交付目标
+
+等级要求：
+%s`, spec.DisplayName, roleLevelName(roleLevel), spec.Focus, spec.Deliverables, spec.Risks, spec.DisplayName, experienceReviewerLevelGuidance(roleLevel))
+}
+
+func buildGenericRolePrompt(spec categorySpec, roleType string, roleLevel string) string {
+	displayName := roleType
+	if definition, ok := rolecatalog.GetDefinition(context.Background(), roleType); ok && strings.TrimSpace(definition.DisplayName) != "" {
+		displayName = definition.DisplayName
+	}
+	return fmt.Sprintf(`你是%s项目的%s角色。
+
+项目类型重点：
+- 核心关注：%s
+- 关键产物：%s
+- 主要风险：%s
+
+你的职责：
+1. 严格围绕当前角色职责完成被分配任务，不擅自偏离项目目标
+2. 保持与项目现有方案、上下游依赖和交付标准一致
+3. 对关键问题、风险和建议动作给出清晰结论，避免空泛表述
+
+等级要求：
+当前等级为 %s，请按该复杂度承担职责。`, spec.DisplayName, displayName, spec.Focus, spec.Deliverables, spec.Risks, roleLevelName(roleLevel))
+}
+
+func renderConfiguredRolePrompt(definition rolecatalog.Definition, spec categorySpec, roleLevel string) string {
+	replacer := strings.NewReplacer(
+		"{{role_type}}", definition.RoleType,
+		"{{role_display_name}}", definition.DisplayName,
+		"{{role_level}}", roleLevel,
+		"{{role_level_name}}", roleLevelName(roleLevel),
+		"{{project_display_name}}", spec.DisplayName,
+		"{{project_focus}}", spec.Focus,
+		"{{project_deliverables}}", spec.Deliverables,
+		"{{project_risks}}", spec.Risks,
+	)
+	return replacer.Replace(definition.DefaultSystemPrompt)
+}
+
 func normalizePrompt(prompt string) string {
 	return strings.Join(strings.Fields(prompt), " ")
 }
@@ -467,7 +563,7 @@ func architectJSONFormatSuffix(projectCategory string) string {
 - 当前后端、前后端、多服务或基础设施目录彼此独立时，要拆成多个初始化任务并尽量并行，不要用一个根任务同时覆盖 frontend、backend、docs、scripts 等多个独立子树
 - 后续任务要在 depends_on 中声明对前置任务的依赖
 - affected_resources 列出该任务会创建或修改的代码文件路径
-- affected_resources 只能写目录或文件相对路径，禁止混入命令、说明文字、树形结构字符或注释
+- affected_resources 只能写代码文件相对路径，禁止使用目录占位（如 frontend/src/components）、模块名、命令、说明文字、树形结构字符或注释
 - 如果没有合适脚手架，必须在 description 中明确说明需要手写骨架及原因`
 	}
 
@@ -475,14 +571,18 @@ func architectJSONFormatSuffix(projectCategory string) string {
 
 ===== 输出格式要求（必须遵守）=====
 
-当你准备好输出任务清单时，请使用以下 JSON 格式，每个模块一个独立代码块：
-{"tasks": [{"name": "任务名", "description": "详细描述", "role_level": "pro", "batch_no": 1, "affected_resources": ["path/file"], "depends_on": ["依赖的任务名"]}]}
-%s
-- 每个 JSON 块必须是完整的 {"tasks": [...]} 格式
-- 任务名称全局唯一，跨模块依赖用完整任务名引用
-- 禁止输出 <minimax:tool_call>、<invoke>、函数调用、命令执行、XML/HTML 标签或“我先查看目录”这类过程描述
-- 不要把“查看环境 / 读取目录 / 确认文件结构”当成独立任务；如果目录为空，直接按从零创建拆分可交付任务
-- 如果输出被截断，系统会自动请求继续`, newProjectNote)
+	当你准备好输出任务清单时，请使用以下 JSON 格式，每个模块一个独立代码块：
+	{"plan_meta":{"plan_id":"同一轮保持一致","declared_total":12,"chunk_index":1,"chunk_total":3,"is_final":false},"tasks": [{"name": "任务名", "description": "详细描述", "role_level": "pro", "batch_no": 1, "affected_resources": ["path/file"], "depends_on": ["依赖的任务名"]}]}
+	%s
+	- 每个 JSON 块必须是完整的 {"plan_meta": {...}, "tasks": [...]} 格式
+	- 同一轮输出中，plan_id 必须一致；declared_total 必须等于最终可执行任务总数
+	- 如果只有 1 个 JSON 块，也必须带 chunk_index=1、chunk_total=1、is_final=true
+	- 如果分多块输出，每个 JSON 块都要重复携带 plan_meta，并保证 chunk_index 从 1 开始递增
+	- 如果需要修正已输出的某一块，请重发相同 chunk_index 的完整 JSON 块；系统会以后发块覆盖前发块
+	- 任务名称全局唯一，跨模块依赖用完整任务名引用
+	- 禁止输出 <minimax:tool_call>、<invoke>、函数调用、命令执行、XML/HTML 标签或“我先查看目录”这类过程描述
+	- 不要把“查看环境 / 读取目录 / 确认文件结构”当成独立任务；如果目录为空，直接按从零创建拆分可交付任务
+	- 如果输出被截断，系统会自动请求继续`, newProjectNote)
 }
 
 func buildCodingArchitectPrompt(projectName, projectDesc string) string {

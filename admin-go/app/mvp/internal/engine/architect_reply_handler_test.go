@@ -1,6 +1,17 @@
 package engine
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
+
+func repeatFollowUps(n int) []string {
+	values := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		values = append(values, "继续")
+	}
+	return values
+}
 
 func TestArchitectReplyRequestsContinuation(t *testing.T) {
 	t.Parallel()
@@ -61,8 +72,36 @@ func TestExtractArchitectTaskPatchesSupportsSinglePatchObject(t *testing.T) {
 	}
 }
 
+func TestBuildContinuationPromptIsFollowUp(t *testing.T) {
+	t.Parallel()
+
+	declaredTotal := 3
+	chunkTotal := 3
+	report := &ArchitectPlanParseReport{
+		DeclaredTotal:       &declaredTotal,
+		ChunkTotal:          &chunkTotal,
+		RawTaskCount:        2,
+		NormalizedTaskCount: 2,
+		MissingChunkIndexes: []int{2},
+	}
+
+	prompt := report.BuildContinuationPrompt()
+	if !isArchitectFollowUpMessage(prompt) {
+		t.Fatalf("expected continuation prompt to be treated as follow-up, got: %s", prompt)
+	}
+	if isReviewRemediationPrompt(prompt) {
+		t.Fatalf("continuation prompt should not look like review remediation: %s", prompt)
+	}
+}
+
 func TestResolveArchitectReplyPolicy(t *testing.T) {
 	t.Parallel()
+
+	originalLoad := loadArchitectFollowUpLimit
+	loadArchitectFollowUpLimit = func(ctx context.Context) int { return architectFollowUpLimitDefault }
+	t.Cleanup(func() {
+		loadArchitectFollowUpLimit = originalLoad
+	})
 
 	tests := []struct {
 		name         string
@@ -97,10 +136,10 @@ func TestResolveArchitectReplyPolicy(t *testing.T) {
 		},
 		{
 			name: "too many chained follow ups disable automation",
-			userContents: []string{
-				"继续", "继续", "继续", "继续", "继续", "继续",
+			userContents: append(
+				repeatFollowUps(architectFollowUpLimitDefault),
 				"## 方案审核未通过\n警告（当前会阻塞执行，必须修复）\n如果只是修正个别任务，请输出局部修订 JSON：{\"task_patches\": []}\n若你还有后续分段，请在当前消息最后单独追加一行 [AUTO_CONTINUE_NEXT]",
-			},
+			),
 			wantContinue: false,
 			wantResubmit: false,
 		},
@@ -111,7 +150,7 @@ func TestResolveArchitectReplyPolicy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := resolveArchitectReplyPolicy(tc.userContents)
+			got := resolveArchitectReplyPolicy(context.Background(), tc.userContents)
 			if got.allowAutoContinue != tc.wantContinue || got.allowAutoResubmit != tc.wantResubmit {
 				t.Fatalf("resolveArchitectReplyPolicy() = %+v, want continue=%v resubmit=%v", got, tc.wantContinue, tc.wantResubmit)
 			}
@@ -119,8 +158,69 @@ func TestResolveArchitectReplyPolicy(t *testing.T) {
 	}
 }
 
+func TestShouldApplyArchitectBlueprintMutation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		currentStage string
+		policy       architectReplyPolicy
+		want         bool
+	}{
+		{
+			name:         "design stage accepts normal replies",
+			currentStage: "design",
+			policy:       architectReplyPolicy{},
+			want:         true,
+		},
+		{
+			name:         "blank stage accepts normal replies",
+			currentStage: "",
+			policy:       architectReplyPolicy{},
+			want:         true,
+		},
+		{
+			name:         "review stage blocks stale design replies",
+			currentStage: "review",
+			policy:       architectReplyPolicy{},
+			want:         false,
+		},
+		{
+			name:         "review stage allows remediation replies",
+			currentStage: "review",
+			policy: architectReplyPolicy{
+				allowAutoResubmit: true,
+			},
+			want: true,
+		},
+		{
+			name:         "execute stage blocks non remediation replies",
+			currentStage: "execute",
+			policy:       architectReplyPolicy{},
+			want:         false,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := shouldApplyArchitectBlueprintMutation(tc.currentStage, tc.policy); got != tc.want {
+				t.Fatalf("shouldApplyArchitectBlueprintMutation(%q, %+v) = %v, want %v", tc.currentStage, tc.policy, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestShouldParseArchitectReply(t *testing.T) {
 	t.Parallel()
+
+	originalLoad := loadArchitectFollowUpLimit
+	loadArchitectFollowUpLimit = func(ctx context.Context) int { return architectFollowUpLimitDefault }
+	t.Cleanup(func() {
+		loadArchitectFollowUpLimit = originalLoad
+	})
 
 	tests := []struct {
 		name         string
@@ -162,9 +262,38 @@ func TestShouldParseArchitectReply(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := shouldParseArchitectReply(tc.userContents); got != tc.want {
+			if got := shouldParseArchitectReply(context.Background(), tc.userContents); got != tc.want {
 				t.Fatalf("shouldParseArchitectReply() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestNormalizeArchitectFollowUpLimitFallsBackToDefaultWhenInvalid(t *testing.T) {
+	t.Parallel()
+
+	if got := normalizeArchitectFollowUpLimit(0); got != architectFollowUpLimitDefault {
+		t.Fatalf("normalizeArchitectFollowUpLimit(0) = %d, want %d", got, architectFollowUpLimitDefault)
+	}
+	if got := normalizeArchitectFollowUpLimit(-1); got != architectFollowUpLimitDefault {
+		t.Fatalf("normalizeArchitectFollowUpLimit(-1) = %d, want %d", got, architectFollowUpLimitDefault)
+	}
+	if got := normalizeArchitectFollowUpLimit(5); got != 5 {
+		t.Fatalf("normalizeArchitectFollowUpLimit(5) = %d, want 5", got)
+	}
+}
+
+func TestShouldParseArchitectReplyUsesConfiguredFollowUpLimit(t *testing.T) {
+	t.Parallel()
+
+	originalLoad := loadArchitectFollowUpLimit
+	loadArchitectFollowUpLimit = func(ctx context.Context) int { return 2 }
+	t.Cleanup(func() {
+		loadArchitectFollowUpLimit = originalLoad
+	})
+
+	userContents := append(repeatFollowUps(2), "请重新规划方案")
+	if got := shouldParseArchitectReply(context.Background(), userContents); got {
+		t.Fatalf("expected parse to stop when follow-ups hit configured limit")
 	}
 }
