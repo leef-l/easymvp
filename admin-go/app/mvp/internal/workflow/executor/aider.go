@@ -51,7 +51,7 @@ func (e *AiderExecutor) Execute(ctx context.Context, req *Request) *Result {
 	if len(targets.DirectoryPaths) > 0 {
 		if err := ensureDirectoryTargets(workDir, targets.DirectoryPaths); err != nil {
 			if req.Workspace != nil && e.wsMgr != nil {
-				_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: false, Error: err.Error()})
+				finalizeWorkspaceFailure(ctx, e.wsMgr, req.TaskID, "AiderExecutor", err.Error(), false)
 			}
 			return &Result{Success: false, Error: err}
 		}
@@ -60,7 +60,6 @@ func (e *AiderExecutor) Execute(ctx context.Context, req *Request) *Result {
 		output := fmt.Sprintf("已准备目录资源: %s", strings.Join(targets.DirectoryPaths, ", "))
 		if req.Workspace != nil && e.wsMgr != nil {
 			if err := finalizeWorkspaceSuccess(ctx, e.wsMgr, req.TaskID, "AiderExecutor"); err != nil {
-				_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: false, Error: err.Error(), Retain: true})
 				return &Result{Success: false, Error: err}
 			}
 		}
@@ -84,12 +83,7 @@ func (e *AiderExecutor) Execute(ctx context.Context, req *Request) *Result {
 	if aiderResult.Error != nil {
 		// workspace finalize: 标记失败
 		if req.Workspace != nil && e.wsMgr != nil {
-			if fErr := e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{
-				Success: false,
-				Error:   aiderResult.Error.Error(),
-			}); fErr != nil {
-				g.Log().Warningf(ctx, "[AiderExecutor] workspace finalize(失败) 失败: task=%d err=%v", req.TaskID, fErr)
-			}
+			finalizeWorkspaceFailure(ctx, e.wsMgr, req.TaskID, "AiderExecutor", aiderResult.Error.Error(), false)
 		}
 		return &Result{Success: false, Error: aiderResult.Error}
 	}
@@ -97,7 +91,6 @@ func (e *AiderExecutor) Execute(ctx context.Context, req *Request) *Result {
 	// workspace finalize: 标记成功
 	if req.Workspace != nil && e.wsMgr != nil {
 		if err := finalizeWorkspaceSuccess(ctx, e.wsMgr, req.TaskID, "AiderExecutor"); err != nil {
-			_ = e.wsMgr.Finalize(ctx, req.TaskID, workspace.FinalizeRequest{Success: false, Error: err.Error(), Retain: true})
 			return &Result{Success: false, Error: err}
 		}
 	}

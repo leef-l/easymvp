@@ -5,12 +5,18 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 
 	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/workspace"
 	providerutil "easymvp/utility/provider"
+)
+
+const (
+	workspaceFinalizeTimeout = 45 * time.Second
+	workspaceCleanupTimeout  = 90 * time.Second
 )
 
 func shellQuoteArg(arg string) string {
@@ -138,11 +144,41 @@ func buildGeminiDefaultCommand(taskInstruction string, modelInfo *engine.ModelIn
 	return shellQuoteArgs(args)
 }
 
+func withDetachedWorkspaceCtx(_ context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		timeout = workspaceFinalizeTimeout
+	}
+	return context.WithTimeout(context.Background(), timeout)
+}
+
+func finalizeWorkspaceFailure(ctx context.Context, wsMgr workspace.Manager, taskID int64, executorName string, errMsg string, retain bool) {
+	if wsMgr == nil {
+		return
+	}
+	finalizeCtx, cancel := withDetachedWorkspaceCtx(ctx, workspaceFinalizeTimeout)
+	defer cancel()
+
+	req := workspace.FinalizeRequest{
+		Success: false,
+		Error:   strings.TrimSpace(errMsg),
+		Retain:  retain,
+	}
+	if err := wsMgr.Finalize(finalizeCtx, taskID, req); err != nil {
+		g.Log().Warningf(context.Background(), "[%s] workspace finalize(失败) 失败: task=%d err=%v", executorName, taskID, err)
+	}
+}
+
 func finalizeWorkspaceSuccess(ctx context.Context, wsMgr workspace.Manager, taskID int64, executorName string) error {
 	if wsMgr == nil {
 		return nil
 	}
-	if err := wsMgr.Finalize(ctx, taskID, workspace.FinalizeRequest{Success: true}); err != nil {
+
+	finalizeCtx, cancel := withDetachedWorkspaceCtx(ctx, workspaceFinalizeTimeout)
+	err := wsMgr.Finalize(finalizeCtx, taskID, workspace.FinalizeRequest{Success: true})
+	cancel()
+	if err != nil {
+		// 成功 finalize 失败时，尝试降级为失败 finalize，避免 workspace 长期停留在 running。
+		finalizeWorkspaceFailure(ctx, wsMgr, taskID, executorName, err.Error(), true)
 		return fmt.Errorf("%s workspace finalize failed: %w", executorName, err)
 	}
 
@@ -152,7 +188,9 @@ func finalizeWorkspaceSuccess(ctx context.Context, wsMgr workspace.Manager, task
 				g.Log().Errorf(context.Background(), "[%s] workspace cleanup panic: task=%d err=%v", executorName, taskID, r)
 			}
 		}()
-		if cleanErr := wsMgr.Cleanup(context.Background(), taskID); cleanErr != nil {
+		cleanupCtx, cancel := withDetachedWorkspaceCtx(context.Background(), workspaceCleanupTimeout)
+		defer cancel()
+		if cleanErr := wsMgr.Cleanup(cleanupCtx, taskID); cleanErr != nil {
 			g.Log().Warningf(context.Background(), "[%s] workspace cleanup 失败: task=%d err=%v", executorName, taskID, cleanErr)
 		}
 	}()

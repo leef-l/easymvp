@@ -8,12 +8,16 @@ import (
 
 // Event 工作流事件。
 type Event struct {
-	WorkflowRunID int64       `json:"workflow_run_id"`
-	StageRunID    *int64      `json:"stage_run_id,omitempty"`
-	EntityType    string      `json:"entity_type"`
-	EntityID      *int64      `json:"entity_id,omitempty"`
-	EventType     string      `json:"event_type"`
-	Payload       interface{} `json:"payload,omitempty"`
+	EventID        string      `json:"event_id,omitempty"`
+	IdempotencyKey string      `json:"idempotency_key,omitempty"`
+	WorkflowRunID  int64       `json:"workflow_run_id"`
+	StageRunID     *int64      `json:"stage_run_id,omitempty"`
+	EntityType     string      `json:"entity_type"`
+	EntityID       *int64      `json:"entity_id,omitempty"`
+	EventType      string      `json:"event_type"`
+	Attempt        int         `json:"attempt,omitempty"`
+	CreatedAtUnix  int64       `json:"created_at_unix,omitempty"`
+	Payload        interface{} `json:"payload,omitempty"`
 }
 
 // Handler 事件处理函数。

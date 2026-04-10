@@ -5,19 +5,38 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 
 	v1 "easymvp/app/mvp/api/mvp/v1"
 	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/regression"
+	"easymvp/app/mvp/internal/workflow/eventstream"
+	"easymvp/app/mvp/internal/workflow/orchestrator"
 	"easymvp/app/mvp/internal/workflow/repo"
 	workspacepkg "easymvp/app/mvp/internal/workspace"
 )
 
+var inspectWorkflowEventMetadataColumnsFn = func(ctx context.Context) error {
+	_, err := g.DB().Ctx(ctx).Model("mvp_workflow_event").
+		Fields("event_id,idempotency_key,attempt").
+		Limit(1).
+		All()
+	return err
+}
+
+var inspectWorkflowEventLedgerTableFn = func(ctx context.Context) error {
+	_, err := g.DB().Ctx(ctx).Model("mvp_workflow_event_ledger").
+		Fields("scope,event_id,idempotency_key,status").
+		Limit(1).
+		All()
+	return err
+}
+
 // SystemCheck 系统配置检测
 func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (res *v1.SystemCheckRes, err error) {
-	items := make([]v1.SystemCheckItem, 0, 12)
+	items := make([]v1.SystemCheckItem, 0, 13)
 	allPass := true
 
 	addItem := func(key, name, link, status, message string) {
@@ -161,6 +180,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 		"runtime.task_timeout_seconds",
 		"runtime.max_steps",
 		"watchdog.check_interval",
+		"watchdog.heartbeat_timeout_seconds",
 		"watchdog.max_stale_count",
 		"watchdog.max_retries",
 		"scheduler.poll_interval",
@@ -183,6 +203,77 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 				fmt.Sprintf("全部 %d 项核心配置已就绪，调度并发兼容键已配置", len(requiredKeys)+1))
 		}
 	}
+
+	watchdogStatus := "warning"
+	watchdogMessage := "watchdog 尚未初始化"
+	if wd := orchestrator.GetDomainWatchdog(); wd != nil {
+		snapshot := wd.Snapshot()
+		watchdogStatus = "ok"
+		if snapshot.CheckIntervalSeconds <= 0 || snapshot.HeartbeatTimeoutSeconds <= 0 {
+			watchdogStatus = "warning"
+		}
+		if snapshot.HeartbeatTimeoutSeconds > 90 {
+			watchdogStatus = "warning"
+		}
+		watchdogMessage = fmt.Sprintf(
+			"check=%ds lease=%ds max_retries=%d last_running=%s(%d) last_failed=%s(%d) timeout=%d retry=%d escalate=%d",
+			snapshot.CheckIntervalSeconds,
+			snapshot.HeartbeatTimeoutSeconds,
+			snapshot.MaxRetries,
+			formatSystemCheckTime(snapshot.LastRunningCheckAt),
+			snapshot.LastRunningTaskCount,
+			formatSystemCheckTime(snapshot.LastFailedCheckAt),
+			snapshot.LastFailedTaskCount,
+			snapshot.LeaseTimeoutDetections,
+			snapshot.AutoRetrySuccesses,
+			snapshot.AutoEscalations,
+		)
+	}
+	addItem("watchdog_runtime", "Watchdog 运行态", "/mvp/config", watchdogStatus, watchdogMessage)
+
+	streamEnabled := engine.GetConfigInt(ctx, "workflow.event_stream.enabled", "workflow.event_stream.enabled", 0) == 1
+	streamConsumerEnabled := engine.GetConfigInt(ctx, "workflow.event_stream.consumer_enabled", "workflow.event_stream.consumer_enabled", 0) == 1
+	streamRedisRequired := engine.GetConfigInt(ctx, "workflow.event_stream.redis_required", "workflow.event_stream.redis_required", 0) == 1
+	streamName := strings.TrimSpace(engine.GetConfigString(ctx, "workflow.event_stream.stream_name", "workflow.event_stream.stream_name", ""))
+	streamStatus := "warning"
+	streamMessage := "事件流未启用，当前仅依赖本地快路径 + watchdog"
+	if publisher := orchestrator.GetEventPublisher(); publisher != nil {
+		status := publisher.StreamStatus()
+		if strings.TrimSpace(streamName) == "" {
+			streamName = strings.TrimSpace(status.StreamName)
+		}
+		switch {
+		case !streamEnabled:
+		case status.Enabled && status.Degraded && streamRedisRequired:
+			streamStatus = "error"
+			streamMessage = fmt.Sprintf("stream=%s 已启用但 Redis 不可用: %s", safeSystemCheckValue(streamName), safeSystemCheckValue(status.LastError))
+		case status.Enabled && status.Degraded:
+			streamStatus = "warning"
+			streamMessage = fmt.Sprintf("stream=%s 已降级到本地快路径: %s", safeSystemCheckValue(streamName), safeSystemCheckValue(status.LastError))
+		case status.Enabled:
+			streamStatus = "ok"
+			streamMessage = fmt.Sprintf("stream=%s healthy consumer_enabled=%t consumer_started=%t updated=%s",
+				safeSystemCheckValue(streamName),
+				streamConsumerEnabled,
+				orchestrator.GetWorkflowEventConsumer() != nil,
+				formatSystemCheckTime(status.UpdatedAt),
+			)
+		default:
+			streamMessage = fmt.Sprintf("stream=%s 配置已启用，但桥接器尚未就绪", safeSystemCheckValue(streamName))
+		}
+	}
+	addItem("workflow_event_stream", "Workflow 事件流", "/mvp/config", streamStatus, streamMessage)
+
+	consumerStatus := "warning"
+	consumerMessage := "consumer 未创建，当前仅有 producer / local fast path"
+	if consumer := orchestrator.GetWorkflowEventConsumer(); consumer != nil {
+		snapshot := consumer.Snapshot(ctx)
+		consumerStatus, consumerMessage = summarizeWorkflowEventConsumerSnapshot(snapshot)
+	}
+	addItem("workflow_event_consumer", "Workflow 事件消费", "/mvp/config", consumerStatus, consumerMessage)
+
+	durableStatus, durableMessage := inspectWorkflowEventDurableSchema(ctx)
+	addItem("workflow_event_durable", "Workflow 事件幂等账本", "/mvp/config", durableStatus, durableMessage)
 
 	commandResourcePolicy := engine.GetCommandResourcePolicy(ctx)
 	commandResourceStatus := "ok"
@@ -300,6 +391,14 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 			fmt.Sprintf("已加载并校验样例清单: ready=%d planned=%d (%s)", report.ReadyCount, report.PlannedCount, manifestPath))
 	}
 
+	orphanReport, orphanErr := workspacepkg.RunOrphanSweep(ctx, workspacepkg.NewGitWorktreeManager(), workspacepkg.OrphanSweepConfig{})
+	if orphanErr != nil {
+		addItem("workspace_orphan", "Workspace Orphan 对账", "", "warning", "对账失败: "+orphanErr.Error())
+	} else {
+		orphanStatus, orphanMessage := summarizeOrphanSweepReport(orphanReport)
+		addItem("workspace_orphan", "Workspace Orphan 对账", "", orphanStatus, orphanMessage)
+	}
+
 	feishuEnabled := engine.GetConfigInt(ctx, "workflow.collab.feishu_enabled", "workflow.collab.feishuEnabled", 0)
 	feishuAppID := strings.TrimSpace(engine.GetConfigString(ctx, "workflow.collab.feishu_app_id", "workflow.collab.feishuAppId", ""))
 	feishuAppSecret := strings.TrimSpace(engine.GetConfigString(ctx, "workflow.collab.feishu_app_secret", "workflow.collab.feishuAppSecret", ""))
@@ -327,4 +426,126 @@ func summarizeRiskDeliveryPolicies(policies map[string]workspacepkg.RiskDelivery
 		return "warning", message + "；告警: " + strings.Join(report.Warnings, "；")
 	}
 	return "ok", message
+}
+
+func summarizeOrphanSweepReport(report *workspacepkg.OrphanSweepReport) (string, string) {
+	if report == nil {
+		return "warning", "未获取到 orphan 对账结果"
+	}
+	status := "ok"
+	if report.DiskOrphans > 0 || report.MissingOnDisk > 0 || report.RunningMismatch > 0 || report.Errors > 0 {
+		status = "warning"
+	}
+	return status, fmt.Sprintf(
+		"roots=%d db=%d disk=%d disk_orphan=%d db_orphan=%d running_mismatch=%d repaired_missing=%d repaired_running=%d cleaned_disk=%d errors=%d",
+		report.ScannedRoots,
+		report.DBWorkspaces,
+		report.DiskWorktrees,
+		report.DiskOrphans,
+		report.MissingOnDisk,
+		report.RunningMismatch,
+		report.RepairedMissingOnDisk,
+		report.RepairedRunningMismatch,
+		report.CleanedDiskOrphans,
+		report.Errors,
+	)
+}
+
+func formatSystemCheckTime(ts interface {
+	IsZero() bool
+	Format(string) string
+}) string {
+	if ts.IsZero() {
+		return "n/a"
+	}
+	return ts.Format("2006-01-02 15:04:05")
+}
+
+func safeSystemCheckValue(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "n/a"
+	}
+	return value
+}
+
+func summarizeWorkflowEventConsumerSnapshot(snapshot eventstream.RuntimeSnapshot) (string, string) {
+	status := "warning"
+	if !snapshot.ConsumerCreated {
+		return status, "consumer 未创建，当前仅有 producer / local fast path"
+	}
+
+	pending := formatSystemCheckInt64(snapshot.PendingKnown, snapshot.Pending)
+	lag := formatSystemCheckInt64(snapshot.LagKnown, snapshot.Lag)
+	heartbeat := formatSystemCheckTime(snapshot.WorkerHeartbeatAt)
+
+	if !snapshot.ConsumerStarted {
+		return status, fmt.Sprintf(
+			"consumer 已创建但未启动 stream=%s group=%s consumer=%s pending=%s lag=%s reclaim_attempts=%d reclaimed=%d last_consume=%s last_ack=%s heartbeat=%s",
+			safeSystemCheckValue(snapshot.StreamName),
+			safeSystemCheckValue(snapshot.ConsumerGroup),
+			safeSystemCheckValue(snapshot.ConsumerName),
+			pending,
+			lag,
+			snapshot.ReclaimAttempts,
+			snapshot.ReclaimedMessages,
+			formatSystemCheckTime(snapshot.LastConsumeAt),
+			formatSystemCheckTime(snapshot.LastAckAt),
+			heartbeat,
+		)
+	}
+
+	status = "ok"
+	if snapshot.Degraded {
+		status = "warning"
+	}
+	if !snapshot.WorkerHeartbeatAt.IsZero() && time.Since(snapshot.WorkerHeartbeatAt) > 30*time.Second {
+		status = "warning"
+	}
+
+	message := fmt.Sprintf(
+		"stream=%s group=%s consumer=%s pending=%s lag=%s reclaim_attempts=%d reclaimed=%d last_consume=%s last_ack=%s heartbeat=%s started=%s",
+		safeSystemCheckValue(snapshot.StreamName),
+		safeSystemCheckValue(snapshot.ConsumerGroup),
+		safeSystemCheckValue(snapshot.ConsumerName),
+		pending,
+		lag,
+		snapshot.ReclaimAttempts,
+		snapshot.ReclaimedMessages,
+		formatSystemCheckTime(snapshot.LastConsumeAt),
+		formatSystemCheckTime(snapshot.LastAckAt),
+		heartbeat,
+		formatSystemCheckTime(snapshot.StartedAt),
+	)
+	if snapshot.Degraded && strings.TrimSpace(snapshot.LastError) != "" {
+		message += " degraded=" + safeSystemCheckValue(snapshot.LastError)
+	}
+	return status, message
+}
+
+func formatSystemCheckInt64(known bool, value int64) string {
+	if !known {
+		return "n/a"
+	}
+	return fmt.Sprintf("%d", value)
+}
+
+func inspectWorkflowEventDurableSchema(ctx context.Context) (string, string) {
+	eventErr := inspectWorkflowEventMetadataColumnsFn(ctx)
+	ledgerErr := inspectWorkflowEventLedgerTableFn(ctx)
+
+	switch {
+	case eventErr == nil && ledgerErr == nil:
+		return "ok", "event metadata 列与 durable ledger 表已就绪"
+	case eventErr != nil && ledgerErr != nil:
+		return "warning", fmt.Sprintf(
+			"durable idempotency migration 未完全就绪: workflow_event=%s; ledger=%s",
+			safeSystemCheckValue(eventErr.Error()),
+			safeSystemCheckValue(ledgerErr.Error()),
+		)
+	case eventErr != nil:
+		return "warning", "workflow_event durable 元数据列未就绪: " + safeSystemCheckValue(eventErr.Error())
+	default:
+		return "warning", "workflow_event durable ledger 表未就绪: " + safeSystemCheckValue(ledgerErr.Error())
+	}
 }

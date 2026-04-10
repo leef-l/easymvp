@@ -176,6 +176,34 @@ func GetHeartbeatTimeout(ctx context.Context, projectCategory string) int {
 	}
 }
 
+// GetWatchdogHeartbeatTimeoutSeconds 读取 V2 watchdog 的 lease 超时阈值（秒）。
+// 优先读取 watchdog.heartbeat_timeout_seconds；未配置时回退到旧语义：
+// check_interval * max_stale_count。
+func GetWatchdogHeartbeatTimeoutSeconds(ctx context.Context) int {
+	explicitTimeout := GetConfigIntAny(ctx,
+		[]string{"watchdog.heartbeat_timeout_seconds"},
+		[]string{"watchdog.heartbeat_timeout_seconds", "engine.watchdog.heartbeatTimeoutSeconds"},
+		0,
+	)
+	checkInterval := GetConfigInt(ctx, "watchdog.check_interval", "engine.watchdog.checkInterval", 120)
+	maxStaleCount := GetConfigInt(ctx, "watchdog.max_stale_count", "engine.watchdog.maxStaleCount", 3)
+	return ResolveWatchdogHeartbeatTimeoutSeconds(explicitTimeout, checkInterval, maxStaleCount)
+}
+
+// ResolveWatchdogHeartbeatTimeoutSeconds 计算 watchdog lease 超时阈值（秒）。
+func ResolveWatchdogHeartbeatTimeoutSeconds(explicitTimeout, checkInterval, maxStaleCount int) int {
+	if explicitTimeout > 0 {
+		return explicitTimeout
+	}
+	if checkInterval < 1 {
+		checkInterval = 1
+	}
+	if maxStaleCount < 1 {
+		maxStaleCount = 1
+	}
+	return checkInterval * maxStaleCount
+}
+
 // GetReviewTimeout 获取方案审核超时时间（秒）
 func GetReviewTimeout(ctx context.Context) int {
 	return GetConfigInt(ctx, "review.timeout_seconds", "engine.review.timeoutSeconds", 300)

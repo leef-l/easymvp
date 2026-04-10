@@ -21,6 +21,7 @@ import (
 	"easymvp/app/mvp/internal/workflow/domain/plan"
 	domainTask "easymvp/app/mvp/internal/workflow/domain/task"
 	"easymvp/app/mvp/internal/workflow/event"
+	"easymvp/app/mvp/internal/workflow/eventstream"
 	executorPkg "easymvp/app/mvp/internal/workflow/executor"
 	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/app/mvp/internal/workflow/runtime"
@@ -90,6 +91,7 @@ func Init() {
 		taskRepo := repo.NewDomainTaskRepo()
 		taskSvc := domainTask.NewTaskService(taskRepo)
 		taskScheduler = scheduler.NewDomainTaskScheduler()
+		taskScheduler.SetEventPublisher(eventPublisher)
 		executeStageSvc = executeStage.NewService(taskSvc, taskScheduler, stageSvc, execRegistry)
 
 		// 审核阶段服务
@@ -315,6 +317,10 @@ func Init() {
 				}
 				if err := taskScheduler.Start(ctx, workflowRunID); err != nil {
 					g.Log().Errorf(ctx, "[Registry] 工作流恢复后调度器启动失败: workflowRunID=%d err=%v", workflowRunID, err)
+					return
+				}
+				if stageType == consts.StageTypeExecute {
+					taskScheduler.ReconcileWorkflowProgress(context.Background(), workflowRunID)
 				}
 			}
 		})
@@ -347,69 +353,13 @@ func Init() {
 			maxRetries := engine.GetConfigInt(ctx, "watchdog.max_retries", "engine.watchdog.maxRetries", 3)
 			nextRetry := taskRecord["retry_count"].Int() + 1
 			if !immediateEscalate && nextRetry < maxRetries {
-				now := gtime.Now()
-				result, upErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
-					Where("id", taskID).
-					Where("status", domainTask.StatusFailed).
-					Update(g.Map{
-						"status":           domainTask.StatusPending,
-						"retry_count":      nextRetry,
-						"result":           nil,
-						"error_message":    nil,
-						"started_at":       nil,
-						"completed_at":     nil,
-						"heartbeat_at":     nil,
-						"locked_resources": nil,
-						"updated_at":       now,
-					})
-				if upErr != nil {
-					g.Log().Errorf(ctx, "[Registry] 即时重试更新失败: task=%d err=%v", taskID, upErr)
-					return false
-				}
-				rows, _ := result.RowsAffected()
-				if rows == 0 {
-					return true
-				}
 				g.Log().Infof(ctx, "[Registry] 任务失败后即时重试: task=%d retry=%d/%d", taskID, nextRetry, maxRetries)
-				taskScheduler.Wakeup(ctx, workflowRunID)
+				emitTaskRetryDue(ctx, workflowRunID, taskID, nextRetry, maxRetries, normalizedErr)
 				return true
 			}
 
-			result, upErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
-				Where("id", taskID).
-				Where("status", domainTask.StatusFailed).
-				Update(g.Map{
-					"status":     domainTask.StatusEscalated,
-					"updated_at": gtime.Now(),
-				})
-			if upErr != nil {
-				g.Log().Errorf(ctx, "[Registry] 即时升级失败任务状态失败: task=%d err=%v", taskID, upErr)
-				return false
-			}
-			rows, _ := result.RowsAffected()
-			if rows == 0 {
-				return true
-			}
-
-			if decisionCenter.IsEnabled(ctx) {
-				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id") //nolint: errcheck
-				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
-					WorkflowRunID:  workflowRunID,
-					ProjectID:      projectID.Int64(),
-					DomainTaskID:   taskID,
-					TriggerSource:  consts.TriggerTaskRetryExhausted,
-					TriggerContext: map[string]interface{}{"task_id": taskID, "reason": normalizedErr},
-				})
-				if resp.Handled {
-					return true
-				}
-			}
-
-			if err := triggerReworkStage(ctx, workflowRunID, taskID); err != nil {
-				g.Log().Errorf(ctx, "[Registry] 即时触发 rework 失败: task=%d err=%v", taskID, err)
-				return false
-			}
-			g.Log().Infof(ctx, "[Registry] 任务失败后已即时触发 rework: workflowRunID=%d task=%d", workflowRunID, taskID)
+			g.Log().Infof(ctx, "[Registry] 任务失败后升级待处理: workflowRunID=%d task=%d", workflowRunID, taskID)
+			emitTaskEscalateDue(ctx, workflowRunID, taskID, nextRetry, normalizedErr)
 			return true
 		})
 
@@ -439,7 +389,9 @@ func Init() {
 				}
 				// 降级到原逻辑
 			}
-			taskScheduler.Wakeup(ctx, wfRunID.Int64())
+			emitSchedulerWakeup(ctx, wfRunID.Int64(), "watchdog.retry", map[string]interface{}{
+				"task_id": taskID,
+			})
 			return nil
 		})
 		domainWatchdog.SetEscalateFn(func(ctx context.Context, workflowRunID, taskID int64) error {
@@ -456,6 +408,16 @@ func Init() {
 					return nil
 				}
 			}
+			publishWorkflowEvent(ctx, event.Event{
+				WorkflowRunID: workflowRunID,
+				EntityType:    event.EntityDomainTask,
+				EntityID:      &taskID,
+				EventType:     event.EventTaskEscalated,
+				Payload: g.Map{
+					"task_id": taskID,
+					"reason":  "watchdog.retry_exhausted",
+				},
+			})
 			return triggerReworkStage(ctx, workflowRunID, taskID)
 		})
 		// 熔断器：项目级异常检测
@@ -577,7 +539,9 @@ func Init() {
 			if req.DomainTaskID == 0 {
 				return fmt.Errorf("retry_task: 缺少 domain_task_id")
 			}
-			taskScheduler.Wakeup(ctx, req.WorkflowRunID)
+			emitSchedulerWakeup(ctx, req.WorkflowRunID, "decision.retry_task", map[string]interface{}{
+				"task_id": req.DomainTaskID,
+			})
 			return nil
 		})
 		actionDispatcher.SetCallback(consts.ActionTypeTriggerRework, func(ctx context.Context, req *autonomy.DecisionRequest) error {
@@ -648,9 +612,15 @@ func Init() {
 				return fmt.Errorf("更新执行模式失败: %w", err)
 			}
 			// 唤醒调度器重新执行
-			taskScheduler.Wakeup(ctx, req.WorkflowRunID)
+			emitSchedulerWakeup(ctx, req.WorkflowRunID, "decision.switch_executor", map[string]interface{}{
+				"task_id":     req.DomainTaskID,
+				"engine_type": engineType,
+				"action_type": consts.ActionTypeSwitchExecutor,
+			})
 			return nil
 		})
+
+		setupWorkflowEventing(context.Background())
 
 		// Legacy → V2 执行器桥接：注入 V2ExecutorFn 到旧引擎，使 legacy 任务也能走 V2 执行器
 		legacyScheduler := engine.GetScheduler()
@@ -796,6 +766,18 @@ func GetEventBus() *event.Bus {
 func GetEventPublisher() *event.Publisher {
 	Init()
 	return eventPublisher
+}
+
+// GetDomainWatchdog 获取 watchdog 单例。
+func GetDomainWatchdog() *watchdogV2.DomainTaskWatchdog {
+	Init()
+	return domainWatchdog
+}
+
+// GetWorkflowEventConsumer 获取 workflow 事件流 consumer。
+func GetWorkflowEventConsumer() *eventstream.Consumer {
+	Init()
+	return workflowEventConsumer
 }
 
 // GetReviewStageService 获取审核阶段服务。

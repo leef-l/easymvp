@@ -1,11 +1,16 @@
 package executor
 
 import (
+	"context"
+	"errors"
 	"os"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"easymvp/app/mvp/internal/engine"
+	"easymvp/app/mvp/internal/workspace"
 )
 
 func TestShellQuoteArgEscapesSingleQuotes(t *testing.T) {
@@ -127,5 +132,125 @@ func TestBuildGeminiDefaultCommandUsesTaskModel(t *testing.T) {
 		if !strings.Contains(cmd, part) {
 			t.Fatalf("command %q missing %q", cmd, part)
 		}
+	}
+}
+
+type workspaceFinalizeCall struct {
+	ctxErr error
+	req    workspace.FinalizeRequest
+}
+
+type fakeWorkspaceManager struct {
+	mu                    sync.Mutex
+	finalizeCalls         []workspaceFinalizeCall
+	cleanupCtxErrs        []error
+	cleanupDone           chan struct{}
+	failOnSuccessFinalize bool
+}
+
+func (m *fakeWorkspaceManager) Prepare(ctx context.Context, req workspace.PrepareRequest) (*workspace.TaskWorkspace, error) {
+	return nil, nil
+}
+
+func (m *fakeWorkspaceManager) MarkRunning(ctx context.Context, taskID int64) error {
+	return nil
+}
+
+func (m *fakeWorkspaceManager) Get(ctx context.Context, taskID int64) (*workspace.TaskWorkspace, error) {
+	return nil, nil
+}
+
+func (m *fakeWorkspaceManager) Finalize(ctx context.Context, taskID int64, req workspace.FinalizeRequest) error {
+	m.mu.Lock()
+	m.finalizeCalls = append(m.finalizeCalls, workspaceFinalizeCall{
+		ctxErr: ctx.Err(),
+		req:    req,
+	})
+	fail := m.failOnSuccessFinalize && req.Success
+	m.mu.Unlock()
+
+	if fail {
+		return errors.New("finalize failed")
+	}
+	return nil
+}
+
+func (m *fakeWorkspaceManager) Cleanup(ctx context.Context, taskID int64) error {
+	m.mu.Lock()
+	m.cleanupCtxErrs = append(m.cleanupCtxErrs, ctx.Err())
+	m.mu.Unlock()
+	if m.cleanupDone != nil {
+		select {
+		case m.cleanupDone <- struct{}{}:
+		default:
+		}
+	}
+	return nil
+}
+
+func TestFinalizeWorkspaceSuccessUsesDetachedContexts(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	mgr := &fakeWorkspaceManager{
+		cleanupDone: make(chan struct{}, 1),
+	}
+	if err := finalizeWorkspaceSuccess(ctx, mgr, 99, "TestExecutor"); err != nil {
+		t.Fatalf("finalizeWorkspaceSuccess() error = %v", err)
+	}
+
+	select {
+	case <-mgr.cleanupDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cleanup was not called")
+	}
+
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	if len(mgr.finalizeCalls) != 1 {
+		t.Fatalf("expected 1 finalize call, got %d", len(mgr.finalizeCalls))
+	}
+	if mgr.finalizeCalls[0].ctxErr != nil {
+		t.Fatalf("expected detached finalize context, got err=%v", mgr.finalizeCalls[0].ctxErr)
+	}
+	if !mgr.finalizeCalls[0].req.Success {
+		t.Fatalf("expected success finalize request, got %#v", mgr.finalizeCalls[0].req)
+	}
+	if len(mgr.cleanupCtxErrs) != 1 || mgr.cleanupCtxErrs[0] != nil {
+		t.Fatalf("expected detached cleanup context, got %#v", mgr.cleanupCtxErrs)
+	}
+}
+
+func TestFinalizeWorkspaceSuccessFallsBackToFailureFinalize(t *testing.T) {
+	t.Parallel()
+
+	mgr := &fakeWorkspaceManager{
+		failOnSuccessFinalize: true,
+	}
+
+	if err := finalizeWorkspaceSuccess(context.Background(), mgr, 101, "TestExecutor"); err == nil {
+		t.Fatal("expected finalizeWorkspaceSuccess() to return error")
+	}
+
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	if len(mgr.finalizeCalls) != 2 {
+		t.Fatalf("expected 2 finalize calls, got %d", len(mgr.finalizeCalls))
+	}
+	first := mgr.finalizeCalls[0]
+	second := mgr.finalizeCalls[1]
+	if !first.req.Success {
+		t.Fatalf("expected first finalize to be success request, got %#v", first.req)
+	}
+	if second.req.Success {
+		t.Fatalf("expected fallback finalize to be failure request, got %#v", second.req)
+	}
+	if !second.req.Retain {
+		t.Fatalf("expected fallback finalize to retain workspace, got %#v", second.req)
+	}
+	if first.ctxErr != nil || second.ctxErr != nil {
+		t.Fatalf("expected detached contexts, got first=%v second=%v", first.ctxErr, second.ctxErr)
 	}
 }

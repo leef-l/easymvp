@@ -65,6 +65,9 @@ var (
 
 			// 启动异步删除 worker（Redis 队列消费）
 			worker.StartDeleteWorker(ctx)
+			if consumer := orchestrator.GetWorkflowEventConsumer(); consumer != nil {
+				worker.StartWorkflowEventWorker(ctx, consumer)
+			}
 
 			// 自动恢复飞书 WS 长连接（读取 DB 配置）
 			autoStartFeishuWS(ctx)

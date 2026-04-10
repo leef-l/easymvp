@@ -24,6 +24,20 @@ func TestParseResourceTargetsSplitsDirectoriesAndFiles(t *testing.T) {
 	}
 }
 
+func TestParseResourceTargetsNormalizesAndDeduplicates(t *testing.T) {
+	targets := parseResourceTargets(`["./frontend/src/App.tsx","frontend/src/App.tsx","frontend/src/components/","frontend/src/components/"]`)
+
+	if !reflect.DeepEqual(targets.AllowedPaths, []string{"frontend/src/App.tsx", "frontend/src/components"}) {
+		t.Fatalf("unexpected allowed paths: %#v", targets.AllowedPaths)
+	}
+	if !reflect.DeepEqual(targets.FilePaths, []string{"frontend/src/App.tsx"}) {
+		t.Fatalf("unexpected file paths: %#v", targets.FilePaths)
+	}
+	if !reflect.DeepEqual(targets.DirectoryPaths, []string{"frontend/src/components"}) {
+		t.Fatalf("unexpected directory paths: %#v", targets.DirectoryPaths)
+	}
+}
+
 func TestEnsureDirectoryTargetsCreatesNestedDirectories(t *testing.T) {
 	baseDir := t.TempDir()
 	if err := ensureDirectoryTargets(baseDir, []string{"cmd/server", "internal/handler"}); err != nil {
@@ -150,6 +164,27 @@ func TestPromptAllowedPathsForExecutionRebasesDeepSubdir(t *testing.T) {
 		"GameOverModal/GameOverModal.tsx",
 		"ControlPanel/ControlPanel.tsx",
 	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("promptAllowedPathsForExecution() = %#v, want %#v", got, want)
+	}
+}
+
+func TestPromptAllowedPathsForExecutionKeepsRepoRootPathsWhenNoRebase(t *testing.T) {
+	baseDir := t.TempDir()
+	targets := resourceTargets{
+		AllowedPaths: []string{
+			"./frontend/src/App.tsx",
+			"frontend/src/App.tsx",
+			"backend/main.go",
+		},
+		FilePaths: []string{
+			"./frontend/src/App.tsx",
+			"backend/main.go",
+		},
+	}
+
+	got := promptAllowedPathsForExecution(baseDir, targets)
+	want := []string{"frontend/src/App.tsx", "backend/main.go"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("promptAllowedPathsForExecution() = %#v, want %#v", got, want)
 	}

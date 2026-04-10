@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -425,6 +426,26 @@ func TestIsGitRepoAcceptsRepositoryRoot(t *testing.T) {
 
 	if !isGitRepo(repoDir) {
 		t.Fatalf("expected repo root to be treated as git repo")
+	}
+}
+
+func TestIsBenignWorktreeRemoveErr(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		err  error
+		want bool
+	}{
+		{err: fmt.Errorf("fatal: '/tmp/demo' is not a working tree"), want: true},
+		{err: fmt.Errorf("remove /tmp/demo: no such file or directory"), want: true},
+		{err: fmt.Errorf("path does not exist"), want: true},
+		{err: fmt.Errorf("permission denied"), want: false},
+		{err: nil, want: false},
+	}
+	for _, tc := range cases {
+		if got := isBenignWorktreeRemoveErr(tc.err); got != tc.want {
+			t.Fatalf("isBenignWorktreeRemoveErr(%v) = %v, want %v", tc.err, got, tc.want)
+		}
 	}
 }
 

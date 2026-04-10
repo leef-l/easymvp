@@ -24,6 +24,11 @@ type ValidationResult struct {
 	Suspicious []string
 }
 
+type GuardPruneReport struct {
+	DuplicatePaths  []string
+	SuspiciousPaths []string
+}
+
 var (
 	bulletPrefixPattern    = regexp.MustCompile(`^\s*(?:[-*]\s+|\d+\.\s+)?`)
 	titleWrappedPathRegexp = regexp.MustCompile(`^[^()\r\n（）]*[（(]([^()\r\n（）]+)[)）]\s*$`)
@@ -80,6 +85,9 @@ func (s *Snapshot) Validate(ctx context.Context, workDir string, allowPaths []st
 			result.Invalid = append(result.Invalid, currentPath)
 		}
 	}
+	sort.Strings(result.DeltaPaths)
+	sort.Strings(result.Suspicious)
+	sort.Strings(result.Invalid)
 
 	return result, nil
 }
@@ -116,7 +124,7 @@ func PruneEmbeddedAllowedDuplicates(ctx context.Context, workDir string, allowPa
 	}
 	baseDir := ResolveRepoRoot(workDir)
 
-	currentPaths, err := readGitStatus(ctx, workDir)
+	currentPaths, err := readGitStatus(ctx, baseDir)
 	if err != nil {
 		return nil, err
 	}
@@ -161,6 +169,44 @@ func PruneSuspiciousDeltaPaths(workDir string, suspicious []string) ([]string, e
 	}
 	sort.Strings(pruned)
 	return pruned, nil
+}
+
+func ListSuspiciousPaths(ctx context.Context, workDir string) ([]string, error) {
+	currentPaths, err := readGitStatus(ctx, ResolveRepoRoot(workDir))
+	if err != nil {
+		return nil, err
+	}
+
+	suspicious := make([]string, 0, len(currentPaths))
+	for currentPath := range currentPaths {
+		if IsSuspiciousPath(currentPath) {
+			suspicious = append(suspicious, currentPath)
+		}
+	}
+	sort.Strings(suspicious)
+	return suspicious, nil
+}
+
+func PruneGuardNoise(ctx context.Context, workDir string, allowPaths []string) (*GuardPruneReport, error) {
+	report := &GuardPruneReport{}
+
+	duplicatePaths, err := PruneEmbeddedAllowedDuplicates(ctx, workDir, allowPaths)
+	if err != nil {
+		return report, err
+	}
+	report.DuplicatePaths = duplicatePaths
+
+	suspicious, err := ListSuspiciousPaths(ctx, workDir)
+	if err != nil {
+		return report, err
+	}
+	suspiciousPaths, err := PruneSuspiciousDeltaPaths(workDir, suspicious)
+	if err != nil {
+		return report, err
+	}
+	report.SuspiciousPaths = suspiciousPaths
+
+	return report, nil
 }
 
 func NormalizeRelativePaths(values []string) ([]string, []string) {

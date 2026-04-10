@@ -210,6 +210,66 @@ func TestPruneSuspiciousDeltaPathsRemovesTitleFiles(t *testing.T) {
 	}
 }
 
+func TestPruneGuardNoiseFromDeepSubdir(t *testing.T) {
+	t.Parallel()
+
+	repoDir := initGitRepo(t)
+	workDir := filepath.Join(repoDir, "frontend", "src", "components")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir frontend src components: %v", err)
+	}
+
+	writeFile(t, repoDir, "frontend/src/components/ScoreBoard/ScoreBoard.tsx", "export const ScoreBoard = () => null\n")
+	writeFile(t, repoDir, "frontend/src/components/frontend/src/components/ScoreBoard/ScoreBoard.tsx", "export const Duplicate = () => null\n")
+	writeFile(t, repoDir, "运行方式：", "bad\n")
+
+	report, err := PruneGuardNoise(context.Background(), workDir, []string{"frontend/src/components/ScoreBoard/ScoreBoard.tsx"})
+	if err != nil {
+		t.Fatalf("PruneGuardNoise() error = %v", err)
+	}
+
+	if len(report.DuplicatePaths) != 1 || report.DuplicatePaths[0] != "frontend/src/components/frontend/src/components/ScoreBoard/ScoreBoard.tsx" {
+		t.Fatalf("unexpected duplicate paths: %#v", report.DuplicatePaths)
+	}
+	if len(report.SuspiciousPaths) != 1 || report.SuspiciousPaths[0] != "运行方式：" {
+		t.Fatalf("unexpected suspicious paths: %#v", report.SuspiciousPaths)
+	}
+
+	if _, err := os.Stat(filepath.Join(repoDir, "frontend/src/components/frontend/src/components/ScoreBoard/ScoreBoard.tsx")); !os.IsNotExist(err) {
+		t.Fatalf("expected duplicate path to be removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "运行方式：")); !os.IsNotExist(err) {
+		t.Fatalf("expected suspicious file to be removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "frontend/src/components/ScoreBoard/ScoreBoard.tsx")); err != nil {
+		t.Fatalf("expected allowed path to remain, stat err=%v", err)
+	}
+}
+
+func TestListSuspiciousPathsSorted(t *testing.T) {
+	t.Parallel()
+
+	repoDir := initGitRepo(t)
+	workDir := filepath.Join(repoDir, "frontend")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir frontend: %v", err)
+	}
+	writeFile(t, repoDir, "说明：", "a\n")
+	writeFile(t, repoDir, "运行方式：", "b\n")
+
+	paths, err := ListSuspiciousPaths(context.Background(), workDir)
+	if err != nil {
+		t.Fatalf("ListSuspiciousPaths() error = %v", err)
+	}
+
+	if len(paths) != 2 {
+		t.Fatalf("expected 2 suspicious paths, got %#v", paths)
+	}
+	if paths[0] != "说明：" || paths[1] != "运行方式：" {
+		t.Fatalf("expected sorted suspicious paths, got %#v", paths)
+	}
+}
+
 func initGitRepo(t *testing.T) string {
 	t.Helper()
 

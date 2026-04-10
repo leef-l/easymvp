@@ -1,9 +1,13 @@
 package chat
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	"easymvp/app/mvp/internal/workflow/eventstream"
 	workspacepkg "easymvp/app/mvp/internal/workspace"
 )
 
@@ -62,5 +66,103 @@ func TestSummarizeRiskDeliveryPoliciesWarnsOnUnsafePolicy(t *testing.T) {
 		if !strings.Contains(message, fragment) {
 			t.Fatalf("message missing %q: %s", fragment, message)
 		}
+	}
+}
+
+func TestSummarizeWorkflowEventConsumerSnapshotCreatedButNotStarted(t *testing.T) {
+	status, message := summarizeWorkflowEventConsumerSnapshot(eventstream.RuntimeSnapshot{
+		ConsumerCreated: true,
+		StreamName:      "test-stream",
+		ConsumerGroup:   "group-a",
+		ConsumerName:    "consumer-a",
+	})
+	if status != "warning" {
+		t.Fatalf("status = %s, want warning; message=%s", status, message)
+	}
+	if !strings.Contains(message, "consumer 已创建但未启动") {
+		t.Fatalf("unexpected message: %s", message)
+	}
+}
+
+func TestSummarizeWorkflowEventConsumerSnapshotHealthy(t *testing.T) {
+	status, message := summarizeWorkflowEventConsumerSnapshot(eventstream.RuntimeSnapshot{
+		ConsumerCreated:   true,
+		ConsumerStarted:   true,
+		StreamName:        "test-stream",
+		ConsumerGroup:     "group-a",
+		ConsumerName:      "consumer-a",
+		PendingKnown:      true,
+		Pending:           2,
+		LagKnown:          true,
+		Lag:               0,
+		WorkerHeartbeatAt: time.Now(),
+		StartedAt:         time.Now(),
+		ReclaimedMessages: 1,
+	})
+	if status != "ok" {
+		t.Fatalf("status = %s, want ok; message=%s", status, message)
+	}
+	if !strings.Contains(message, "pending=2") || !strings.Contains(message, "heartbeat=") {
+		t.Fatalf("unexpected message: %s", message)
+	}
+}
+
+func TestSummarizeWorkflowEventConsumerSnapshotWarnsOnStaleHeartbeat(t *testing.T) {
+	status, message := summarizeWorkflowEventConsumerSnapshot(eventstream.RuntimeSnapshot{
+		ConsumerCreated:   true,
+		ConsumerStarted:   true,
+		StreamName:        "test-stream",
+		ConsumerGroup:     "group-a",
+		ConsumerName:      "consumer-a",
+		WorkerHeartbeatAt: time.Now().Add(-31 * time.Second),
+		StartedAt:         time.Now().Add(-2 * time.Minute),
+	})
+	if status != "warning" {
+		t.Fatalf("status = %s, want warning; message=%s", status, message)
+	}
+	if !strings.Contains(message, "heartbeat=") {
+		t.Fatalf("unexpected message: %s", message)
+	}
+}
+
+func TestInspectWorkflowEventDurableSchemaReady(t *testing.T) {
+	originalEventProbe := inspectWorkflowEventMetadataColumnsFn
+	originalLedgerProbe := inspectWorkflowEventLedgerTableFn
+	defer func() {
+		inspectWorkflowEventMetadataColumnsFn = originalEventProbe
+		inspectWorkflowEventLedgerTableFn = originalLedgerProbe
+	}()
+
+	inspectWorkflowEventMetadataColumnsFn = func(ctx context.Context) error { return nil }
+	inspectWorkflowEventLedgerTableFn = func(ctx context.Context) error { return nil }
+
+	status, message := inspectWorkflowEventDurableSchema(context.Background())
+	if status != "ok" {
+		t.Fatalf("status = %s, want ok; message=%s", status, message)
+	}
+	if !strings.Contains(message, "已就绪") {
+		t.Fatalf("unexpected message: %s", message)
+	}
+}
+
+func TestInspectWorkflowEventDurableSchemaWarnsOnMissingLedger(t *testing.T) {
+	originalEventProbe := inspectWorkflowEventMetadataColumnsFn
+	originalLedgerProbe := inspectWorkflowEventLedgerTableFn
+	defer func() {
+		inspectWorkflowEventMetadataColumnsFn = originalEventProbe
+		inspectWorkflowEventLedgerTableFn = originalLedgerProbe
+	}()
+
+	inspectWorkflowEventMetadataColumnsFn = func(ctx context.Context) error { return nil }
+	inspectWorkflowEventLedgerTableFn = func(ctx context.Context) error {
+		return errors.New("Error 1146 (42S02): Table 'easymvp.mvp_workflow_event_ledger' doesn't exist")
+	}
+
+	status, message := inspectWorkflowEventDurableSchema(context.Background())
+	if status != "warning" {
+		t.Fatalf("status = %s, want warning; message=%s", status, message)
+	}
+	if !strings.Contains(message, "durable ledger 表未就绪") {
+		t.Fatalf("unexpected message: %s", message)
 	}
 }

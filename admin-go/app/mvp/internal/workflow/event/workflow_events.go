@@ -38,8 +38,13 @@ const (
 	EventTaskEscalated        = "task.escalated"
 	EventTaskReviewRequired   = "task.review_required"
 	EventTaskRetried          = "task.retried"
+	EventTaskRetryDue         = "task.retry_due"
+	EventTaskEscalateDue      = "task.escalate_due"
 	EventTaskSkipped          = "task.skipped"
 	EventTaskSyncApplied      = "task.sync_applied"
+
+	// Scheduler 级
+	EventSchedulerWakeup = "scheduler.wakeup"
 
 	// Resource 级
 	EventResourceLocked     = "resource.locked"
