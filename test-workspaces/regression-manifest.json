@@ -1,0 +1,54 @@
+{
+  "version": 2,
+  "updatedAt": "2026-04-09",
+  "scenarios": [
+    {
+      "scenarioCode": "workflow_v2_backend",
+      "name": "最小后端主链",
+      "workspaceDir": "workflow-v2-backend",
+      "status": "ready",
+      "goal": "覆盖 create-project -> review -> execute -> accept -> complete 主链",
+      "checkpoints": [
+        "审核阶段生成蓝图并可人工通过",
+        "执行阶段任务可产生 workspace 交付信息",
+        "验收阶段可查看 issue / evidence / delivery 状态"
+      ]
+    },
+    {
+      "scenarioCode": "readme_refresh",
+      "name": "README 修订",
+      "workspaceDir": "specs/readme-refresh",
+      "status": "ready",
+      "goal": "覆盖低风险 patch + auto_apply 路径",
+      "checkpoints": [
+        "任务默认输出 patch",
+        "低风险任务允许自动回写",
+        "验收证据包含 diff / ci 痕迹"
+      ]
+    },
+    {
+      "scenarioCode": "multi_task_dependency",
+      "name": "多任务依赖",
+      "workspaceDir": "specs/multi-task-dependency",
+      "status": "ready",
+      "goal": "覆盖批次门控、依赖推进和回写汇总",
+      "checkpoints": [
+        "批次推进状态可观测",
+        "项目轨迹页展示阶段与事件聚合",
+        "任务回放可查看日志、交接和证据"
+      ]
+    },
+    {
+      "scenarioCode": "manual_takeover",
+      "name": "人工接管回归",
+      "workspaceDir": "specs/manual-takeover",
+      "status": "ready",
+      "goal": "覆盖 manual_review、人工驳回和问题项回流修复",
+      "checkpoints": [
+        "审核问题可一键转修订",
+        "验收问题可一键转返工",
+        "项目轨迹中可见人工节点与待处理动作"
+      ]
+    }
+  ]
+}

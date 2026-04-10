@@ -487,16 +487,18 @@ func (m *GitWorktreeManager) ApplyDelivery(ctx context.Context, taskID int64) er
 	if ws.SyncStatus != SyncStatusPending && ws.SyncStatus != SyncStatusFailed {
 		return fmt.Errorf("任务 %d 回写状态为 %s，不允许回写", taskID, ws.SyncStatus)
 	}
-	if !isGitRepo(ws.WorkspacePath) {
-		return fmt.Errorf("任务 %d 的工作空间不可用: %s", taskID, ws.WorkspacePath)
-	}
 
 	mainWorkDir := resolveMainWorkDir(ws.WorkspacePath)
 	if !isGitRepo(mainWorkDir) {
 		return fmt.Errorf("主工作区不是 git 仓库: %s", mainWorkDir)
 	}
 
-	if err := syncWorktreeCommit(ctx, mainWorkDir, ws.WorkspacePath, taskID); err != nil {
+	if isGitRepo(ws.WorkspacePath) {
+		err = syncWorktreeCommit(ctx, mainWorkDir, ws.WorkspacePath, taskID)
+	} else {
+		err = applyPatchArtifactToMain(ctx, mainWorkDir, ws.PatchRef, taskID)
+	}
+	if err != nil {
 		_ = m.repo.updateStatus(ctx, ws.ID, ws.Status, g.Map{
 			"sync_status":   SyncStatusFailed,
 			"error_message": err.Error(),
@@ -942,6 +944,62 @@ func syncChangedFilesToMain(mainWorkDir, worktreePath string, changedFiles []git
 	return nil
 }
 
+func applyPatchArtifactToMain(ctx context.Context, mainWorkDir, patchRef string, taskID int64) error {
+	patchRef = strings.TrimSpace(patchRef)
+	if patchRef == "" {
+		return fmt.Errorf("任务 %d 缺少 patch 产物，无法回写", taskID)
+	}
+	if _, err := os.Stat(patchRef); err != nil {
+		return fmt.Errorf("patch 产物不可用: %s: %w", patchRef, err)
+	}
+
+	changedFiles, err := patchChangedFiles(patchRef)
+	if err != nil {
+		return fmt.Errorf("解析 patch 变更文件失败: %w", err)
+	}
+	allowPaths, err := loadTaskAllowedPaths(ctx, taskID)
+	if err != nil {
+		g.Log().Warningf(ctx, "[Workspace] 读取任务允许路径失败，退化为仅校验可疑文件: taskID=%d err=%v", taskID, err)
+		allowPaths = nil
+	}
+	if err := validateSyncBackPaths(changedFiles, allowPaths); err != nil {
+		return err
+	}
+
+	dirtyFiles, err := listDirtyMainWorktreeFiles(mainWorkDir)
+	if err != nil {
+		return err
+	}
+	for _, file := range changedFiles {
+		for _, target := range changedFileTargets(file) {
+			if _, exists := dirtyFiles[target]; exists {
+				return fmt.Errorf("主工作区存在冲突中的未提交变更: %s", target)
+			}
+		}
+	}
+
+	if err := gitApplyPatch(mainWorkDir, patchRef); err != nil {
+		cleanupErr := cleanupFailedPatchApply(mainWorkDir, changedFiles)
+		if snapshotErr := applyAddedFileSnapshots(mainWorkDir, patchRef, changedFiles); snapshotErr == nil {
+			if err := commitSyncedFilesToMain(mainWorkDir, taskID); err != nil {
+				return err
+			}
+			g.Log().Infof(ctx, "[Workspace] SyncBack: taskID=%d mode=patch-snapshot artifact=%s", taskID, patchRef)
+			return nil
+		}
+		if cleanupErr != nil {
+			return fmt.Errorf("应用 patch 到主工作区失败: %w；清理失败残留时出错: %v", err, cleanupErr)
+		}
+		return fmt.Errorf("应用 patch 到主工作区失败: %w", err)
+	}
+	if err := commitSyncedFilesToMain(mainWorkDir, taskID); err != nil {
+		return err
+	}
+
+	g.Log().Infof(ctx, "[Workspace] SyncBack: taskID=%d mode=patch artifact=%s", taskID, patchRef)
+	return nil
+}
+
 func commitSyncedFilesToMain(mainWorkDir string, taskID int64) error {
 	if err := gitAddAll(mainWorkDir); err != nil {
 		return fmt.Errorf("暂存主工作区同步结果失败: %w", err)
@@ -959,6 +1017,253 @@ func commitSyncedFilesToMain(mainWorkDir string, taskID int64) error {
 		return fmt.Errorf("提交主工作区同步结果失败: %w", err)
 	}
 	return nil
+}
+
+func gitApplyPatch(dir, patchRef string) error {
+	cmd := exec.Command("git", "-C", dir, "apply", "--3way", "--index", patchRef)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: %s", err, string(output))
+	}
+	return nil
+}
+
+func cleanupFailedPatchApply(mainWorkDir string, changedFiles []gitChangedFile) error {
+	restoreSet := make(map[string]struct{})
+	removeSet := make(map[string]struct{})
+
+	for _, file := range changedFiles {
+		switch {
+		case strings.HasPrefix(file.Status, "A"):
+			if file.NewPath != "" {
+				removeSet[file.NewPath] = struct{}{}
+			}
+		case strings.HasPrefix(file.Status, "R"):
+			if file.OldPath != "" {
+				restoreSet[file.OldPath] = struct{}{}
+			}
+			if file.NewPath != "" && file.NewPath != file.OldPath {
+				removeSet[file.NewPath] = struct{}{}
+			}
+		default:
+			target := file.NewPath
+			if target == "" {
+				target = file.OldPath
+			}
+			if target != "" {
+				restoreSet[target] = struct{}{}
+			}
+		}
+	}
+
+	restorePaths := mapKeysSorted(restoreSet)
+	removePaths := mapKeysSorted(removeSet)
+
+	if len(restorePaths) > 0 {
+		args := append([]string{"-C", mainWorkDir, "restore", "--source=HEAD", "--staged", "--worktree", "--"}, restorePaths...)
+		cmd := exec.Command("git", args...)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("restore 失败: %s: %s", err, string(output))
+		}
+	}
+
+	if len(removePaths) > 0 {
+		args := append([]string{"-C", mainWorkDir, "rm", "-f", "--cached", "--ignore-unmatch", "--"}, removePaths...)
+		cmd := exec.Command("git", args...)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			msg := strings.TrimSpace(string(output))
+			if msg != "" && !strings.Contains(strings.ToLower(msg), "did not match any files") {
+				return fmt.Errorf("git rm 失败: %s: %s", err, msg)
+			}
+		}
+		for _, target := range removePaths {
+			if err := os.RemoveAll(filepath.Join(mainWorkDir, target)); err != nil {
+				return fmt.Errorf("删除残留文件失败: %s: %w", target, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func patchChangedFiles(patchRef string) ([]gitChangedFile, error) {
+	content, err := os.ReadFile(patchRef)
+	if err != nil {
+		return nil, err
+	}
+
+	lines := strings.Split(string(content), "\n")
+	result := make([]gitChangedFile, 0)
+	var current *gitChangedFile
+
+	flushCurrent := func() {
+		if current == nil {
+			return
+		}
+		if current.NewPath == "" && current.OldPath == "" {
+			current = nil
+			return
+		}
+		if current.Status == "" {
+			current.Status = "M"
+		}
+		result = append(result, *current)
+		current = nil
+	}
+
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "diff --git "):
+			flushCurrent()
+			parts := strings.SplitN(strings.TrimSpace(line), " ", 4)
+			if len(parts) < 4 {
+				continue
+			}
+			current = &gitChangedFile{
+				OldPath: normalizePatchPath(parts[2]),
+				NewPath: normalizePatchPath(parts[3]),
+				Status:  "M",
+			}
+		case current == nil:
+			continue
+		case strings.HasPrefix(line, "new file mode "):
+			current.Status = "A"
+			current.OldPath = ""
+		case strings.HasPrefix(line, "deleted file mode "):
+			current.Status = "D"
+			current.NewPath = current.OldPath
+		case strings.HasPrefix(line, "rename from "):
+			current.Status = "R"
+			current.OldPath = normalizePatchPath(strings.TrimPrefix(line, "rename from "))
+		case strings.HasPrefix(line, "rename to "):
+			current.Status = "R"
+			current.NewPath = normalizePatchPath(strings.TrimPrefix(line, "rename to "))
+		case strings.HasPrefix(line, "--- "):
+			current.OldPath = normalizePatchPath(strings.TrimPrefix(line, "--- "))
+		case strings.HasPrefix(line, "+++ "):
+			current.NewPath = normalizePatchPath(strings.TrimPrefix(line, "+++ "))
+		}
+	}
+	flushCurrent()
+
+	return result, nil
+}
+
+func applyAddedFileSnapshots(mainWorkDir, patchRef string, changedFiles []gitChangedFile) error {
+	for _, file := range changedFiles {
+		if !strings.HasPrefix(file.Status, "A") {
+			return fmt.Errorf("patch 包含非新增文件，无法使用新增文件快照回退: %s", file.Status)
+		}
+		if file.NewPath == "" {
+			return fmt.Errorf("patch 缺少新增文件路径")
+		}
+	}
+
+	snapshots, err := extractAddedFileSnapshots(patchRef)
+	if err != nil {
+		return err
+	}
+
+	for _, file := range changedFiles {
+		content, ok := snapshots[file.NewPath]
+		if !ok {
+			return fmt.Errorf("patch 缺少新增文件快照: %s", file.NewPath)
+		}
+		dstPath := filepath.Join(mainWorkDir, file.NewPath)
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+			return fmt.Errorf("创建目标目录失败: %s: %w", file.NewPath, err)
+		}
+		if err := os.WriteFile(dstPath, content, 0644); err != nil {
+			return fmt.Errorf("写入新增文件快照失败: %s: %w", file.NewPath, err)
+		}
+	}
+
+	if err := gitAddAll(mainWorkDir); err != nil {
+		return fmt.Errorf("暂存新增文件快照失败: %w", err)
+	}
+	return nil
+}
+
+func extractAddedFileSnapshots(patchRef string) (map[string][]byte, error) {
+	content, err := os.ReadFile(patchRef)
+	if err != nil {
+		return nil, err
+	}
+
+	lines := strings.Split(string(content), "\n")
+	snapshots := make(map[string][]byte)
+
+	var (
+		currentPath string
+		eligible    bool
+		builder     strings.Builder
+		inHunk      bool
+	)
+
+	flushCurrent := func() {
+		if eligible && currentPath != "" {
+			snapshots[currentPath] = []byte(builder.String())
+		}
+		currentPath = ""
+		eligible = false
+		builder.Reset()
+		inHunk = false
+	}
+
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "diff --git "):
+			flushCurrent()
+			parts := strings.SplitN(strings.TrimSpace(line), " ", 4)
+			if len(parts) < 4 {
+				continue
+			}
+			currentPath = normalizePatchPath(parts[3])
+		case strings.HasPrefix(line, "new file mode "):
+			eligible = true
+		case strings.HasPrefix(line, "@@"):
+			if eligible {
+				inHunk = true
+			}
+		case strings.HasPrefix(line, "\\ No newline at end of file"):
+			if eligible && builder.Len() > 0 {
+				content := builder.String()
+				builder.Reset()
+				builder.WriteString(strings.TrimSuffix(content, "\n"))
+			}
+		case inHunk && strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++ "):
+			builder.WriteString(strings.TrimPrefix(line, "+"))
+			builder.WriteByte('\n')
+		case inHunk && strings.HasPrefix(line, " "):
+			builder.WriteString(strings.TrimPrefix(line, " "))
+			builder.WriteByte('\n')
+		}
+	}
+	flushCurrent()
+
+	return snapshots, nil
+}
+
+func normalizePatchPath(value string) string {
+	value = strings.TrimSpace(value)
+	switch value {
+	case "", "/dev/null":
+		return ""
+	}
+	value = strings.TrimPrefix(value, "a/")
+	value = strings.TrimPrefix(value, "b/")
+	return path.Clean(strings.ReplaceAll(value, "\\", "/"))
+}
+
+func mapKeysSorted(items map[string]struct{}) []string {
+	keys := make([]string, 0, len(items))
+	for key := range items {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func loadTaskAllowedPaths(ctx context.Context, taskID int64) (_ []string, err error) {

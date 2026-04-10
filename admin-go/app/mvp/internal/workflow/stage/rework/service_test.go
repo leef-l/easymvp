@@ -26,6 +26,20 @@ func TestParseTaskPatchSupportsFencedJSON(t *testing.T) {
 	}
 }
 
+func TestParseTaskPatchSupportsEscapedFencedJSON(t *testing.T) {
+	t.Parallel()
+
+	content := "根据错误信息分析，这是一个修复方案。\\n\\n```json\\n" +
+		"{\\\"task_repair\\\":{\\\"task_name\\\":\\\"backend-goframe-init\\\",\\\"description\\\":\\\"手工创建最小后端骨架\\\",\\\"affected_resources\\\":[\\\"backend/go.mod\\\",\\\"backend/main.go\\\"],\\\"reason\\\":\\\"消息内容被转义后仍应解析成功\\\"}}\\n```"
+	patch, err := parseTaskPatch(content, "backend-goframe-init")
+	if err != nil {
+		t.Fatalf("parseTaskPatch() error = %v", err)
+	}
+	if patch.Description != "手工创建最小后端骨架" || patch.Reason != "消息内容被转义后仍应解析成功" {
+		t.Fatalf("unexpected patch: %+v", patch)
+	}
+}
+
 func TestParseTaskPatchSupportsTaskRepairEnvelope(t *testing.T) {
 	t.Parallel()
 

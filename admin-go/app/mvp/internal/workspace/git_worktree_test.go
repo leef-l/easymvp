@@ -162,6 +162,84 @@ func TestSyncWorktreeCommitFallsBackToCopyOnCherryPickConflict(t *testing.T) {
 	}
 }
 
+func TestPatchChangedFiles(t *testing.T) {
+	patchFile := filepath.Join(t.TempDir(), "task.patch")
+	content := strings.Join([]string{
+		"diff --git a/README.md b/README.md",
+		"index 1111111..2222222 100644",
+		"--- a/README.md",
+		"+++ b/README.md",
+		"@@ -1 +1 @@",
+		"-old",
+		"+new",
+		"diff --git a/docs/old.md b/docs/new.md",
+		"similarity index 100%",
+		"rename from docs/old.md",
+		"rename to docs/new.md",
+		"diff --git a/tmp.txt b/tmp.txt",
+		"deleted file mode 100644",
+		"--- a/tmp.txt",
+		"+++ /dev/null",
+		"",
+	}, "\n")
+	if err := os.WriteFile(patchFile, []byte(content), 0644); err != nil {
+		t.Fatalf("write patch file: %v", err)
+	}
+
+	files, err := patchChangedFiles(patchFile)
+	if err != nil {
+		t.Fatalf("patchChangedFiles() error = %v", err)
+	}
+	if len(files) != 3 {
+		t.Fatalf("patchChangedFiles() count = %d", len(files))
+	}
+	if files[0].Status != "M" || files[0].NewPath != "README.md" {
+		t.Fatalf("unexpected modified file: %+v", files[0])
+	}
+	if files[1].Status != "R" || files[1].OldPath != "docs/old.md" || files[1].NewPath != "docs/new.md" {
+		t.Fatalf("unexpected renamed file: %+v", files[1])
+	}
+	if files[2].Status != "D" || files[2].OldPath != "tmp.txt" || files[2].NewPath != "" {
+		t.Fatalf("unexpected deleted file: %+v", files[2])
+	}
+}
+
+func TestExtractAddedFileSnapshots(t *testing.T) {
+	patchFile := filepath.Join(t.TempDir(), "task.patch")
+	content := strings.Join([]string{
+		"diff --git a/Makefile b/Makefile",
+		"new file mode 100644",
+		"--- /dev/null",
+		"+++ b/Makefile",
+		"@@ -0,0 +1,3 @@",
+		"+build:",
+		"+\tnode scripts/build.js all",
+		"+",
+		"diff --git a/scripts/build.js b/scripts/build.js",
+		"new file mode 100644",
+		"--- /dev/null",
+		"+++ b/scripts/build.js",
+		"@@ -0,0 +1,2 @@",
+		"+console.log('ok')",
+		"+",
+		"",
+	}, "\n")
+	if err := os.WriteFile(patchFile, []byte(content), 0644); err != nil {
+		t.Fatalf("write patch file: %v", err)
+	}
+
+	snapshots, err := extractAddedFileSnapshots(patchFile)
+	if err != nil {
+		t.Fatalf("extractAddedFileSnapshots() error = %v", err)
+	}
+	if got := string(snapshots["Makefile"]); got != "build:\n\tnode scripts/build.js all\n\n" {
+		t.Fatalf("unexpected Makefile snapshot: %q", got)
+	}
+	if got := string(snapshots["scripts/build.js"]); got != "console.log('ok')\n\n" {
+		t.Fatalf("unexpected scripts/build.js snapshot: %q", got)
+	}
+}
+
 func TestValidateSyncBackPathsRejectsSuspiciousFile(t *testing.T) {
 	changedFiles := []gitChangedFile{
 		{Status: "A", NewPath: "运行方式："},

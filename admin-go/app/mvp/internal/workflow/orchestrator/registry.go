@@ -928,6 +928,17 @@ func PrepareTaskSchedulerForStage(ctx context.Context, workflowRunID int64, stag
 	return nil
 }
 
+// ActivateReworkStage 绑定返工阶段调度器并立即启动，确保 failure_analysis 任务不会停在 pending。
+func ActivateReworkStage(ctx context.Context, workflowRunID, stageRunID int64) error {
+	if err := PrepareTaskSchedulerForStage(ctx, workflowRunID, consts.StageTypeRework, stageRunID); err != nil {
+		return err
+	}
+	if taskScheduler != nil {
+		return taskScheduler.Start(context.Background(), workflowRunID)
+	}
+	return nil
+}
+
 // GetExecuteStageService 获取执行阶段服务。
 func GetExecuteStageService() *executeStage.Service {
 	Init()
@@ -1004,6 +1015,10 @@ func triggerReworkStage(ctx context.Context, workflowRunID int64, failedTaskID i
 	if err := reworkStageSvc.HandleReworkWithSource(ctx, stageRunID, failedTaskID, sourceStage); err != nil {
 		_ = stageSvc.FailStage(ctx, stageRunID, err.Error())
 		return fmt.Errorf("返工阶段启动失败: %w", err)
+	}
+	if err := ActivateReworkStage(ctx, workflowRunID, stageRunID); err != nil {
+		_ = stageSvc.FailStage(ctx, stageRunID, err.Error())
+		return fmt.Errorf("返工阶段调度器启动失败: %w", err)
 	}
 
 	g.Log().Infof(ctx, "[triggerReworkStage] 返工阶段已启动 workflowRunID=%d stageRunID=%d failedTask=%d",

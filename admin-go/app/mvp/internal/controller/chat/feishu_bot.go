@@ -739,6 +739,11 @@ func handleBotForceStage(ctx context.Context, projectName, targetStage, taskIDSt
 			reply(fmt.Sprintf("❌ 启动返工阶段失败：%v", err))
 			return
 		}
+		if err := orchestrator.ActivateReworkStage(ctx, workflowRunID, stageRunID); err != nil {
+			_ = stageSvc.FailStage(context.Background(), stageRunID, err.Error())
+			reply(fmt.Sprintf("❌ 启动返工调度器失败：%v", err))
+			return
+		}
 	}
 
 	recordWorkflowEvent(ctx, workflowRunID, "workflow", "workflow.force_stage", &workflowRunID, &stageRunID, map[string]interface{}{

@@ -262,9 +262,23 @@ func requestVerificationRepair(ctx context.Context, projectID int64, issueIDs []
 		return "", fmt.Errorf("未找到可返工的验证问题")
 	}
 
-	failedTaskID := pickVerificationRepairTaskID(issues)
-	if failedTaskID == 0 {
-		return "", fmt.Errorf("选中的验证问题没有关联可返工任务")
+	failedTaskID, resolvedIssueTaskIDs, err := resolveVerificationRepairTask(ctx, workflowRunID, issues)
+	if err != nil {
+		return "", err
+	}
+	if len(resolvedIssueTaskIDs) > 0 {
+		for issueID, taskID := range resolvedIssueTaskIDs {
+			if taskID <= 0 {
+				continue
+			}
+			if _, upErr := g.DB().Model("mvp_verification_issue").Ctx(ctx).
+				Where("id", issueID).
+				Where("verification_run_id", verificationRunID).
+				Data(g.Map{"domain_task_id": taskID}).
+				Update(); upErr != nil {
+				g.Log().Warningf(ctx, "[VerificationRepair] 回写 issue 任务归属失败: issue=%d task=%d err=%v", issueID, taskID, upErr)
+			}
+		}
 	}
 
 	task, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
@@ -312,6 +326,10 @@ func requestVerificationRepair(ctx context.Context, projectID int64, issueIDs []
 		_ = stageSvc.FailStage(context.Background(), stageRunID, err.Error())
 		return "", fmt.Errorf("启动 rework 阶段失败: %w", err)
 	}
+	if err := orchestrator.ActivateReworkStage(ctx, workflowRunID, stageRunID); err != nil {
+		_ = stageSvc.FailStage(context.Background(), stageRunID, err.Error())
+		return "", fmt.Errorf("启动 rework 调度器失败: %w", err)
+	}
 
 	if _, err := g.DB().Model("mvp_verification_issue").Ctx(ctx).
 		Where("verification_run_id", verificationRunID).
@@ -329,6 +347,74 @@ func requestVerificationRepair(ctx context.Context, projectID int64, issueIDs []
 	})
 
 	return fmt.Sprintf("已基于 %d 条验证问题触发返工，关联任务 %d", len(issues), failedTaskID), nil
+}
+
+func resolveVerificationRepairTask(ctx context.Context, workflowRunID int64, issues gdb.Result) (int64, map[int64]int64, error) {
+	resolved := make(map[int64]int64, len(issues))
+	targetSet := make(map[int64]struct{}, len(issues))
+
+	for _, issue := range issues {
+		taskID, err := verificationsvc.ResolveIssueTaskID(
+			ctx,
+			workflowRunID,
+			issue["domain_task_id"].Int64(),
+			issue["title"].String(),
+			issue["detail"].String(),
+			issue["resource_ref"].String(),
+		)
+		if err != nil {
+			g.Log().Warningf(ctx, "[VerificationRepair] 解析 issue 任务归属失败: issue=%d err=%v", issue["id"].Int64(), err)
+			taskID = issue["domain_task_id"].Int64()
+		}
+		if taskID <= 0 {
+			continue
+		}
+		resolved[issue["id"].Int64()] = taskID
+		targetSet[taskID] = struct{}{}
+	}
+
+	if len(targetSet) == 0 {
+		return 0, resolved, fmt.Errorf("选中的验证问题没有关联可返工任务")
+	}
+	if len(targetSet) == 1 {
+		for taskID := range targetSet {
+			return taskID, resolved, nil
+		}
+	}
+
+	taskIDs := make([]int64, 0, len(targetSet))
+	for taskID := range targetSet {
+		taskIDs = append(taskIDs, taskID)
+	}
+	names := loadVerificationRepairTaskNames(ctx, taskIDs)
+	return 0, resolved, fmt.Errorf("选中的验证问题分属多个任务，请分别返工：%s", strings.Join(names, " / "))
+}
+
+func loadVerificationRepairTaskNames(ctx context.Context, taskIDs []int64) []string {
+	if len(taskIDs) == 0 {
+		return nil
+	}
+	rows, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
+		WhereIn("id", taskIDs).
+		WhereNull("deleted_at").
+		Fields("id, name").
+		All()
+	if err != nil {
+		return nil
+	}
+	nameByID := make(map[int64]string, len(rows))
+	for _, row := range rows {
+		nameByID[row["id"].Int64()] = strings.TrimSpace(row["name"].String())
+	}
+	names := make([]string, 0, len(taskIDs))
+	for _, taskID := range taskIDs {
+		if name := nameByID[taskID]; name != "" {
+			names = append(names, fmt.Sprintf("%s(%d)", name, taskID))
+		} else {
+			names = append(names, fmt.Sprintf("%d", taskID))
+		}
+	}
+	return names
 }
 
 func latestVerificationRunForWorkflow(ctx context.Context, workflowRunID int64) (g.Map, error) {

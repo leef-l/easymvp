@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
@@ -123,19 +124,19 @@ func (s *Service) HandleReworkWithSource(ctx context.Context, stageRunID int64, 
 			failedTask["result"].String(),
 			failedTask["name"].String(), failedTask["description"].String(), failedTask["name"].String(), failedTask["name"].String(),
 		),
-		"role_type":       "architect",
-		"role_level":      "max",
-		"execution_mode":  "chat",
-		"status":          domainTask.StatusPending,
-		"source_task_id":  failedTaskID,
-		"root_task_id":    rootTaskID,
-		"batch_no":        0, // 高优先级
-		"sort":            0,
-		"retry_count":     0,
-		"created_by":      scope.CreatedBy,
-		"dept_id":         scope.DeptID,
-		"created_at":      now,
-		"updated_at":      now,
+		"role_type":      "architect",
+		"role_level":     "max",
+		"execution_mode": "chat",
+		"status":         domainTask.StatusPending,
+		"source_task_id": failedTaskID,
+		"root_task_id":   rootTaskID,
+		"batch_no":       0, // 高优先级
+		"sort":           0,
+		"retry_count":    0,
+		"created_by":     scope.CreatedBy,
+		"dept_id":        scope.DeptID,
+		"created_at":     now,
+		"updated_at":     now,
 	})
 	if err != nil {
 		return fmt.Errorf("创建分析任务失败: %w", err)
@@ -354,10 +355,20 @@ func (s *Service) loadLatestAnalysisReply(ctx context.Context, analysisTask gdb.
 		return ""
 	}
 
+	for i := 0; i < 20; i++ {
+		if reply := loadLatestAnalysisReplyContent(ctx, conversationID); reply != "" {
+			return reply
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return ""
+}
+
+func loadLatestAnalysisReplyContent(ctx context.Context, conversationID int64) string {
 	reply, err := g.DB().Model("mvp_message").Ctx(ctx).
 		Where("conversation_id", conversationID).
 		Where("role", "assistant").
-		Where("status", "completed").
+		Where("content <> ''").
 		WhereNull("deleted_at").
 		OrderDesc("created_at").
 		OrderDesc("id").
@@ -391,18 +402,38 @@ func parseTaskPatch(content string, taskName string) (*taskPatch, error) {
 		return nil, fmt.Errorf("架构师输出为空")
 	}
 
-	if patch, err := parseTaskPatchPayload(content, taskName); err == nil {
-		return patch, nil
+	candidates := []string{content}
+	if normalized := normalizeEscapedPatchContent(content); normalized != "" && normalized != content {
+		candidates = append(candidates, normalized)
 	}
 
-	re := reworkJsonBlockRe
-	match := re.FindStringSubmatch(content)
-	if len(match) == 2 {
-		if patch, err := parseTaskPatchPayload(match[1], taskName); err == nil {
+	for _, candidate := range candidates {
+		if patch, err := parseTaskPatchPayload(candidate, taskName); err == nil {
 			return patch, nil
+		}
+		re := reworkJsonBlockRe
+		match := re.FindStringSubmatch(candidate)
+		if len(match) == 2 {
+			if patch, err := parseTaskPatchPayload(match[1], taskName); err == nil {
+				return patch, nil
+			}
 		}
 	}
 	return nil, fmt.Errorf("未解析到有效 JSON patch")
+}
+
+func normalizeEscapedPatchContent(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer(
+		`\r\n`, "\n",
+		`\n`, "\n",
+		`\t`, "\t",
+		`\"`, `"`,
+	)
+	return replacer.Replace(content)
 }
 
 func parseTaskPatchPayload(content string, taskName string) (*taskPatch, error) {

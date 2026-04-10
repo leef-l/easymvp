@@ -345,7 +345,7 @@ func (s *Service) executeRun(ctx context.Context, runID int64) error {
 	if len(issues) > 0 {
 		items := make([]g.Map, 0, len(issues))
 		for _, item := range issues {
-			items = append(items, s.newIssueMap(meta, item))
+			items = append(items, s.newIssueMap(ctx, meta, item))
 		}
 		if err := s.issueRepo.BatchCreate(ctx, items); err != nil {
 			return fmt.Errorf("写入验证问题失败: %w", err)
@@ -958,13 +958,17 @@ func (s *Service) buildStepEvidence(meta *runMeta, evidenceType string, step ver
 	}
 }
 
-func (s *Service) newIssueMap(meta *runMeta, item issueDraft) g.Map {
+func (s *Service) newIssueMap(ctx context.Context, meta *runMeta, item issueDraft) g.Map {
 	now := gtime.Now()
+	resolvedTaskID := item.DomainTaskID
+	if taskID, err := ResolveIssueTaskID(ctx, meta.WorkflowRunID, item.DomainTaskID, item.Title, item.Detail, item.ResourceRef); err == nil && taskID > 0 {
+		resolvedTaskID = taskID
+	}
 	return g.Map{
 		"verification_run_id": meta.RunID,
 		"workflow_run_id":     meta.WorkflowRunID,
 		"project_id":          meta.ProjectID,
-		"domain_task_id":      nullableInt64(item.DomainTaskID),
+		"domain_task_id":      nullableInt64(resolvedTaskID),
 		"issue_type":          item.IssueType,
 		"severity":            item.Severity,
 		"title":               item.Title,

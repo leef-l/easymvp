@@ -1062,6 +1062,10 @@ func (c *cWorkflow) ForceStage(ctx context.Context, req *v1.WorkflowForceStageRe
 				_ = stageSvc.FailStage(context.Background(), stageRunID, err.Error())
 				return nil, fmt.Errorf("重启返工阶段失败: %w", err)
 			}
+			if err := orchestrator.ActivateReworkStage(ctx, workflowRunID, stageRunID); err != nil {
+				_ = stageSvc.FailStage(context.Background(), stageRunID, err.Error())
+				return nil, fmt.Errorf("重启返工调度器失败: %w", err)
+			}
 		}
 	}
 
