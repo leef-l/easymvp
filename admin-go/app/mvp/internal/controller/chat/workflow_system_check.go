@@ -7,9 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gogf/gf/v2/frame/g"
-
 	v1 "easymvp/app/mvp/api/mvp/v1"
+	collabRepo "easymvp/app/mvp/internal/collab/repo"
 	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/regression"
 	"easymvp/app/mvp/internal/workflow/eventstream"
@@ -19,19 +18,11 @@ import (
 )
 
 var inspectWorkflowEventMetadataColumnsFn = func(ctx context.Context) error {
-	_, err := g.DB().Ctx(ctx).Model("mvp_workflow_event").
-		Fields("event_id,idempotency_key,attempt").
-		Limit(1).
-		All()
-	return err
+	return repo.NewWorkflowEventRepo().InspectMetadataColumns(ctx)
 }
 
 var inspectWorkflowEventLedgerTableFn = func(ctx context.Context) error {
-	_, err := g.DB().Ctx(ctx).Model("mvp_workflow_event_ledger").
-		Fields("scope,event_id,idempotency_key,status").
-		Limit(1).
-		All()
-	return err
+	return repo.NewWorkflowEventLedgerRepo().InspectDurableColumns(ctx)
 }
 
 // SystemCheck 系统配置检测
@@ -48,8 +39,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 		})
 	}
 
-	count, e := g.DB().Ctx(ctx).Model("ai_provider").
-		Where("status", 1).Where("base_url != ''").WhereNull("deleted_at").Count()
+	count, e := repo.NewAIProviderRepo().CountEnabledWithBaseURL(ctx)
 	if e != nil {
 		addItem("ai_provider", "AI 供应商", "/ai/provider", "error", "查询失败: "+e.Error())
 	} else if count == 0 {
@@ -58,8 +48,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 		addItem("ai_provider", "AI 供应商", "/ai/provider", "ok", fmt.Sprintf("已有 %d 个启用供应商", count))
 	}
 
-	count, e = g.DB().Ctx(ctx).Model("ai_plan").
-		Where("status", 1).Where("api_key != ''").WhereNull("deleted_at").Count()
+	count, e = repo.NewAIPlanRepo().CountEnabledWithAPIKey(ctx)
 	if e != nil {
 		addItem("ai_plan", "AI 套餐", "/ai/plan", "error", "查询失败: "+e.Error())
 	} else if count == 0 {
@@ -68,8 +57,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 		addItem("ai_plan", "AI 套餐", "/ai/plan", "ok", fmt.Sprintf("已有 %d 个启用套餐", count))
 	}
 
-	count, e = g.DB().Ctx(ctx).Model("ai_model").
-		Where("capability", "architect").Where("status", 1).WhereNull("deleted_at").Count()
+	count, e = repo.NewAIModelRepo().CountEnabledByCapability(ctx, "architect")
 	if e != nil {
 		addItem("ai_model_architect", "AI 模型（架构师）", "/ai/model", "error", "查询失败: "+e.Error())
 	} else if count == 0 {
@@ -78,9 +66,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 		addItem("ai_model_architect", "AI 模型（架构师）", "/ai/model", "ok", fmt.Sprintf("已有 %d 个架构师模型", count))
 	}
 
-	count, e = g.DB().Ctx(ctx).Model("ai_model").
-		WhereIn("capability", g.Slice{"implementer", "coding", "chat"}).
-		Where("status", 1).WhereNull("deleted_at").Count()
+	count, e = repo.NewAIModelRepo().CountEnabledByCapabilities(ctx, []string{"implementer", "coding", "chat"})
 	if e != nil {
 		addItem("ai_model_implementer", "AI 模型（实施员）", "/ai/model", "error", "查询失败: "+e.Error())
 	} else if count == 0 {
@@ -99,8 +85,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 			fmt.Sprintf("架构师预设 %d 条，实施员预设 %d 条", architectCount, implementerCount))
 	}
 
-	count, e = g.DB().Ctx(ctx).Model("ai_engine").
-		Where("status", 1).WhereNull("deleted_at").Count()
+	count, e = repo.NewAIEngineRepo().CountEnabled(ctx)
 	if e != nil {
 		addItem("ai_engine", "AI 执行引擎", "/ai/engine", "error", "查询失败: "+e.Error())
 	} else if count == 0 {
@@ -109,28 +94,26 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 		addItem("ai_engine", "AI 执行引擎", "/ai/engine", "ok", fmt.Sprintf("已有 %d 个启用引擎", count))
 	}
 
-	aiderCfg, e := g.DB().Ctx(ctx).Model("ai_engine_config").
-		Where("engine_code", "aider").WhereNull("deleted_at").One()
-	if e != nil || aiderCfg.IsEmpty() {
+	aiderCfg, e := repo.NewAIEngineConfigRepo().GetByCode(ctx, "aider", "workspace_root")
+	if e != nil || len(aiderCfg) == 0 {
 		addItem("ai_engine_config_aider", "Aider 引擎配置", "/ai/engine", "error", "未配置 Aider 引擎参数")
-	} else if aiderCfg["workspace_root"].String() == "" {
+	} else if strings.TrimSpace(mapString(aiderCfg, "workspace_root")) == "" {
 		addItem("ai_engine_config_aider", "Aider 引擎配置", "/ai/engine", "warning", "Aider 引擎未配置 workspace_root（工作区根目录）")
 	} else {
 		addItem("ai_engine_config_aider", "Aider 引擎配置", "/ai/engine", "ok",
-			"工作区根目录: "+aiderCfg["workspace_root"].String())
+			"工作区根目录: "+mapString(aiderCfg, "workspace_root"))
 	}
 
-	ohCfg, e := g.DB().Ctx(ctx).Model("ai_engine_config").
-		Where("engine_code", "openhands").WhereNull("deleted_at").One()
-	if e != nil || ohCfg.IsEmpty() {
+	ohCfg, e := repo.NewAIEngineConfigRepo().GetByCode(ctx, "openhands", "command_template")
+	if e != nil || len(ohCfg) == 0 {
 		addItem("ai_engine_config_openhands", "OpenHands 引擎配置", "/ai/engine", "warning", "未配置 OpenHands 引擎参数（非必须，仅使用 Aider 可忽略）")
-	} else if ohCfg["command_template"].String() == "" {
+	} else if strings.TrimSpace(mapString(ohCfg, "command_template")) == "" {
 		addItem("ai_engine_config_openhands", "OpenHands 引擎配置", "/ai/engine", "warning", "OpenHands 未配置 command_template（命令模板）")
 	} else {
 		addItem("ai_engine_config_openhands", "OpenHands 引擎配置", "/ai/engine", "ok", "命令模板已配置")
 	}
 
-	count, e = g.DB().Ctx(ctx).Model("system_role_ai_engine").Count()
+	count, e = repo.NewSystemRoleAIEngineRepo().CountAll(ctx)
 	if e != nil {
 		addItem("role_ai_engine", "角色引擎授权", "", "error", "查询失败: "+e.Error())
 	} else if count == 0 {
@@ -151,8 +134,8 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 
 	openHandsNeedsDocker := false
 	openHandsMessage := "OpenHands 当前可通过 HTTP 接口工作，未强制依赖 Docker。"
-	if !ohCfg.IsEmpty() {
-		commandTemplate := strings.TrimSpace(ohCfg["command_template"].String())
+	if len(ohCfg) > 0 {
+		commandTemplate := strings.TrimSpace(mapString(ohCfg, "command_template"))
 		if commandTemplate != "" {
 			lowerCommand := strings.ToLower(commandTemplate)
 			if strings.Contains(lowerCommand, "docker run") || strings.Contains(lowerCommand, " docker ") {
@@ -185,14 +168,11 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 		"watchdog.max_retries",
 		"scheduler.poll_interval",
 	}
-	count, e = g.DB().Ctx(ctx).Model("mvp_config").
-		WhereIn("config_key", requiredKeys).WhereNull("deleted_at").Count()
+	count, e = repo.NewConfigRepo().CountByKeys(ctx, requiredKeys)
 	if e != nil {
 		addItem("engine_config", "引擎核心配置", "/mvp/config", "error", "查询失败: "+e.Error())
 	} else {
-		schedulerCount, schedulerErr := g.DB().Ctx(ctx).Model("mvp_config").
-			WhereIn("config_key", []string{"scheduler.max_concurrent", "workflow.scheduler.max_concurrency"}).
-			WhereNull("deleted_at").Count()
+		schedulerCount, schedulerErr := repo.NewConfigRepo().CountByKeys(ctx, []string{"scheduler.max_concurrent", "workflow.scheduler.max_concurrency"})
 		if schedulerErr != nil {
 			addItem("engine_config", "引擎核心配置", "/mvp/config", "error", "查询调度并发配置失败: "+schedulerErr.Error())
 		} else if count < len(requiredKeys) || schedulerCount == 0 {
@@ -282,11 +262,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 	}
 	addItem("command_resource", "命令资源限制", "/mvp/config", commandResourceStatus, commandResourcePolicy.Summary())
 
-	categoryRecords, categoryErr := g.DB().Ctx(ctx).Model("mvp_project_category").
-		Where("status", 1).
-		WhereNull("deleted_at").
-		Fields("verification_profile_json, verification_gate_json").
-		All()
+	categoryRecords, categoryErr := repo.NewProjectCategoryRepo().ListAll(ctx, "verification_profile_json", "verification_gate_json")
 	if categoryErr != nil {
 		addItem("project_category_verification", "项目分类验证配置", "/mvp/project_category", "error", "查询失败: "+categoryErr.Error())
 	} else {
@@ -294,10 +270,10 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 		profileConfigured := 0
 		gateConfigured := 0
 		for _, row := range categoryRecords {
-			if strings.TrimSpace(row["verification_profile_json"].String()) != "" {
+			if strings.TrimSpace(mapString(row, "verification_profile_json")) != "" {
 				profileConfigured++
 			}
-			if strings.TrimSpace(row["verification_gate_json"].String()) != "" {
+			if strings.TrimSpace(mapString(row, "verification_gate_json")) != "" {
 				gateConfigured++
 			}
 		}
@@ -354,10 +330,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 		"delivery_ref",
 		"delivery_title",
 	}
-	_, columnErr := g.DB().Ctx(ctx).Model("mvp_task_workspace").
-		Fields(strings.Join(deliveryColumns, ",")).
-		Limit(1).
-		All()
+	columnErr := repo.NewTaskWorkspaceRepo().InspectColumns(ctx, deliveryColumns)
 	if columnErr != nil {
 		addItem("workspace_migration", "Workspace 交付 Migration", "", "warning",
 			"mvp_task_workspace 交付结果列尚未全部就绪，需执行最新 migration")
@@ -366,11 +339,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 			fmt.Sprintf("mvp_task_workspace 新列已就绪 %d/%d", len(deliveryColumns), len(deliveryColumns)))
 	}
 
-	deliveryRuleCount, deliveryRuleErr := g.DB().Ctx(ctx).Model("mvp_accept_rule").
-		Where("rule_code", "software.delivery_review_required").
-		WhereIn("project_type", []string{"software_dev", "coding"}).
-		WhereNull("deleted_at").
-		Count()
+	deliveryRuleCount, deliveryRuleErr := repo.NewAcceptRuleRepo().CountByCodeProjectTypes(ctx, "software.delivery_review_required", []string{"software_dev", "coding"})
 	if deliveryRuleErr != nil {
 		addItem("accept_delivery_rule", "验收交付审核规则", "", "warning", "无法检查 software.delivery_review_required 规则: "+deliveryRuleErr.Error())
 	} else if deliveryRuleCount < 2 {
@@ -403,7 +372,7 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 	feishuAppID := strings.TrimSpace(engine.GetConfigString(ctx, "workflow.collab.feishu_app_id", "workflow.collab.feishuAppId", ""))
 	feishuAppSecret := strings.TrimSpace(engine.GetConfigString(ctx, "workflow.collab.feishu_app_secret", "workflow.collab.feishuAppSecret", ""))
 	feishuEncryptKey := strings.TrimSpace(engine.GetConfigString(ctx, "workflow.collab.feishu_encrypt_key", "workflow.collab.feishuEncryptKey", ""))
-	feishuBindings, _ := g.DB().Model("mvp_user_collab_binding").Ctx(ctx).Where("platform", "feishu").WhereNull("deleted_at").Count()
+	feishuBindings, _ := collabRepo.NewBindingRepo().CountByPlatform(ctx, "feishu")
 	switch {
 	case feishuEnabled != 1:
 		addItem("feishu_collab", "飞书协作", "/mvp/workflow/feishu", "warning", "飞书协作未启用")

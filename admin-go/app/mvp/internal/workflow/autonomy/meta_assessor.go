@@ -7,8 +7,9 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/gconv"
 
-	"easymvp/utility/snowflake"
+	"easymvp/app/mvp/internal/workflow/repo"
 )
 
 // MetaAssessor 元认知评估器。
@@ -16,15 +17,21 @@ import (
 // 职责：定期扫描观测记录，计算系统指标，检测参数偏差。
 // 只读不改参数——发现 Drift 后交给 Tuner 处理。
 type MetaAssessor struct {
-	observer *MetaObserver
-	learner  *Learner
+	observer          *MetaObserver
+	learner           *Learner
+	observationRepo   *repo.ObservationRecordRepo
+	actionOutcomeRepo *repo.ActionOutcomeRepo
+	assessmentRepo    *repo.AssessmentResultRepo
 }
 
 // NewMetaAssessor 创建评估器。
 func NewMetaAssessor(observer *MetaObserver, learner *Learner) *MetaAssessor {
 	return &MetaAssessor{
-		observer: observer,
-		learner:  learner,
+		observer:          observer,
+		learner:           learner,
+		observationRepo:   repo.NewObservationRecordRepo(),
+		actionOutcomeRepo: repo.NewActionOutcomeRepo(),
+		assessmentRepo:    repo.NewAssessmentResultRepo(),
 	}
 }
 
@@ -137,31 +144,19 @@ func (a *MetaAssessor) Assess(ctx context.Context, projectID int64, periodStart,
 func (a *MetaAssessor) calcGateMetrics(ctx context.Context, projectID int64, periodStart, periodEnd *gtime.Time) (falsePositive, falseNegative float64) {
 	// 闸门误报：闸门阻断了，但人工批准放行（说明不该拦）
 	// 闸门漏报：未被闸门拦截，但最终失败（说明应该拦）
-	m := g.DB().Model("mvp_observation_record").Ctx(ctx).
-		WhereNull("deleted_at")
-	if projectID > 0 {
-		m = m.Where("project_id", projectID)
-	}
-	if periodStart != nil {
-		m = m.WhereGTE("created_at", periodStart)
-	}
-	if periodEnd != nil {
-		m = m.WhereLTE("created_at", periodEnd)
-	}
-
 	// 误报：decision_level=C 且 human_override=1 且 override 动作=approve
-	fpCount, fpErr := m.Clone().
-		Where("decision_level", "C").
-		Where("human_override", 1).
-		Where("outcome", "success"). // 人工放行后成功 → 误报
-		Count()
+	fpCount, fpErr := a.observationRepo.CountByFiltersInPeriod(ctx, projectID, periodStart, periodEnd, g.Map{
+		"decision_level": "C",
+		"human_override": 1,
+		"outcome":        "success",
+	})
 	if fpErr != nil {
 		g.Log().Warningf(ctx, "[MetaAssessor] 查询闸门误报数失败: %v", fpErr)
 	}
 
-	totalGateBlocked, gbErr := m.Clone().
-		Where("decision_level", "C").
-		Count()
+	totalGateBlocked, gbErr := a.observationRepo.CountByFiltersInPeriod(ctx, projectID, periodStart, periodEnd, g.Map{
+		"decision_level": "C",
+	})
 	if gbErr != nil {
 		g.Log().Warningf(ctx, "[MetaAssessor] 查询闸门阻断总数失败: %v", gbErr)
 	}
@@ -171,17 +166,17 @@ func (a *MetaAssessor) calcGateMetrics(ctx context.Context, projectID int64, per
 	}
 
 	// 漏报：decision_level=A 且 outcome=failure（自动执行但失败了）
-	fnCount, fnErr := m.Clone().
-		Where("decision_level", "A").
-		Where("outcome", "failure").
-		Count()
+	fnCount, fnErr := a.observationRepo.CountByFiltersInPeriod(ctx, projectID, periodStart, periodEnd, g.Map{
+		"decision_level": "A",
+		"outcome":        "failure",
+	})
 	if fnErr != nil {
 		g.Log().Warningf(ctx, "[MetaAssessor] 查询闸门漏报数失败: %v", fnErr)
 	}
 
-	totalAutoExec, aeErr := m.Clone().
-		Where("decision_level", "A").
-		Count()
+	totalAutoExec, aeErr := a.observationRepo.CountByFiltersInPeriod(ctx, projectID, periodStart, periodEnd, g.Map{
+		"decision_level": "A",
+	})
 	if aeErr != nil {
 		g.Log().Warningf(ctx, "[MetaAssessor] 查询自动执行总数失败: %v", aeErr)
 	}
@@ -195,24 +190,10 @@ func (a *MetaAssessor) calcGateMetrics(ctx context.Context, projectID int64, per
 
 // calcCostEfficiency 计算成本效率。
 func (a *MetaAssessor) calcCostEfficiency(ctx context.Context, projectID int64, periodStart, periodEnd *gtime.Time) float64 {
-	m := g.DB().Model("mvp_action_outcome").Ctx(ctx).
-		WhereNull("deleted_at")
-	if projectID > 0 {
-		m = m.Where("project_id", projectID)
-	}
-	if periodStart != nil {
-		m = m.WhereGTE("created_at", periodStart)
-	}
-	if periodEnd != nil {
-		m = m.WhereLTE("created_at", periodEnd)
-	}
-
-	// 平均效果得分：正值表示策略有效
-	record, err := m.Fields("AVG(effect_score) as avg_score, COUNT(*) as cnt").One()
-	if err != nil || record.IsEmpty() || record["cnt"].Int() == 0 {
+	avgScore, count, err := a.actionOutcomeRepo.GetAverageEffectScore(ctx, projectID, periodStart, periodEnd)
+	if err != nil || count == 0 {
 		return 0.5 // 无数据时返回中性值
 	}
-	avgScore := record["avg_score"].Float64()
 	// 将 [-1,1] 映射到 [0,1]
 	return (avgScore + 1) / 2
 }
@@ -283,15 +264,13 @@ func (a *MetaAssessor) detectDrifts(ctx context.Context, projectID int64, policy
 
 // save 持久化评估结果。
 func (a *MetaAssessor) save(ctx context.Context, result *AssessmentResult) error {
-	id := int64(snowflake.Generate())
 	driftsJSON, marshalErr := json.Marshal(result.Drifts)
 	if marshalErr != nil {
 		g.Log().Warningf(ctx, "[MetaAssessor] drifts 序列化失败: %v", marshalErr)
 		driftsJSON = []byte("[]")
 	}
 
-	_, err := g.DB().Model("mvp_assessment_result").Ctx(ctx).Insert(g.Map{
-		"id":                  id,
+	id, err := a.assessmentRepo.Create(ctx, g.Map{
 		"project_id":          result.ProjectID,
 		"period_start":        result.PeriodStart,
 		"period_end":          result.PeriodEnd,
@@ -314,38 +293,13 @@ func (a *MetaAssessor) save(ctx context.Context, result *AssessmentResult) error
 
 // GetLatest 获取最新的评估结果。
 func (a *MetaAssessor) GetLatest(ctx context.Context, projectID int64) (*AssessmentResult, error) {
-	record, err := g.DB().Model("mvp_assessment_result").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		OrderDesc("created_at").
-		One()
-	if err != nil || record.IsEmpty() {
+	record, err := a.assessmentRepo.GetLatestByProject(ctx, projectID)
+	if err != nil || record == nil {
 		return nil, err
 	}
 
-	result := &AssessmentResult{
-		ID:                record["id"].Int64(),
-		ProjectID:         record["project_id"].Int64(),
-		PeriodStart:       record["period_start"].GTime(),
-		PeriodEnd:         record["period_end"].GTime(),
-		SampleCount:       record["sample_count"].Int(),
-		PolicyAccuracy:    record["policy_accuracy"].Float64(),
-		GateFalsePositive: record["gate_false_positive"].Float64(),
-		GateFalseNegative: record["gate_false_negative"].Float64(),
-		HumanOverrideRate: record["human_override_rate"].Float64(),
-		MatchAccuracy:     record["match_accuracy"].Float64(),
-		CostEfficiency:    record["cost_efficiency"].Float64(),
-		Summary:           record["summary"].String(),
-	}
-
-	driftsStr := record["drifts"].String()
-	if driftsStr != "" && driftsStr != "null" {
-		if unmErr := json.Unmarshal([]byte(driftsStr), &result.Drifts); unmErr != nil {
-			g.Log().Warningf(ctx, "[MetaAssessor] drifts JSON 解析失败: %v", unmErr)
-		}
-	}
-
-	return result, nil
+	result := a.parseAssessmentRecord(ctx, record)
+	return &result, nil
 }
 
 // ListAssessments 查询评估历史。
@@ -353,39 +307,40 @@ func (a *MetaAssessor) ListAssessments(ctx context.Context, projectID int64, lim
 	if limit <= 0 {
 		limit = 20
 	}
-	records, err := g.DB().Model("mvp_assessment_result").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		OrderDesc("created_at").
-		Limit(limit).
-		All()
+	records, err := a.assessmentRepo.ListByProject(ctx, projectID, limit)
 	if err != nil {
 		return nil, err
 	}
 
 	var results []AssessmentResult
-	for _, r := range records {
-		ar := AssessmentResult{
-			ID:                r["id"].Int64(),
-			ProjectID:         r["project_id"].Int64(),
-			PeriodStart:       r["period_start"].GTime(),
-			PeriodEnd:         r["period_end"].GTime(),
-			SampleCount:       r["sample_count"].Int(),
-			PolicyAccuracy:    r["policy_accuracy"].Float64(),
-			GateFalsePositive: r["gate_false_positive"].Float64(),
-			GateFalseNegative: r["gate_false_negative"].Float64(),
-			HumanOverrideRate: r["human_override_rate"].Float64(),
-			MatchAccuracy:     r["match_accuracy"].Float64(),
-			CostEfficiency:    r["cost_efficiency"].Float64(),
-			Summary:           r["summary"].String(),
-		}
-		driftsStr := r["drifts"].String()
-		if driftsStr != "" && driftsStr != "null" {
-			if unmErr := json.Unmarshal([]byte(driftsStr), &ar.Drifts); unmErr != nil {
-				g.Log().Warningf(ctx, "[MetaAssessor] drifts JSON 解析失败: %v", unmErr)
-			}
-		}
-		results = append(results, ar)
+	for _, record := range records {
+		results = append(results, a.parseAssessmentRecord(ctx, record))
 	}
 	return results, nil
+}
+
+func (a *MetaAssessor) parseAssessmentRecord(ctx context.Context, record g.Map) AssessmentResult {
+	result := AssessmentResult{
+		ID:                gconv.Int64(record["id"]),
+		ProjectID:         gconv.Int64(record["project_id"]),
+		PeriodStart:       g.NewVar(record["period_start"]).GTime(),
+		PeriodEnd:         g.NewVar(record["period_end"]).GTime(),
+		SampleCount:       gconv.Int(record["sample_count"]),
+		PolicyAccuracy:    gconv.Float64(record["policy_accuracy"]),
+		GateFalsePositive: gconv.Float64(record["gate_false_positive"]),
+		GateFalseNegative: gconv.Float64(record["gate_false_negative"]),
+		HumanOverrideRate: gconv.Float64(record["human_override_rate"]),
+		MatchAccuracy:     gconv.Float64(record["match_accuracy"]),
+		CostEfficiency:    gconv.Float64(record["cost_efficiency"]),
+		Summary:           gconv.String(record["summary"]),
+	}
+
+	driftsStr := gconv.String(record["drifts"])
+	if driftsStr != "" && driftsStr != "null" {
+		if unmErr := json.Unmarshal([]byte(driftsStr), &result.Drifts); unmErr != nil {
+			g.Log().Warningf(ctx, "[MetaAssessor] drifts JSON 解析失败: %v", unmErr)
+		}
+	}
+
+	return result
 }

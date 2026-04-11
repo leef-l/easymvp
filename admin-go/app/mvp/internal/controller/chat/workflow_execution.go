@@ -3,8 +3,6 @@ package chat
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
@@ -12,11 +10,17 @@ import (
 
 	v1 "easymvp/app/mvp/api/mvp/v1"
 	"easymvp/app/mvp/internal/workflow/orchestrator"
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/utility/snowflake"
 )
 
 // ExecutionStatus 执行阶段实时状态
 func (c *cWorkflow) ExecutionStatus(ctx context.Context, req *v1.WorkflowExecutionStatusReq) (res *v1.WorkflowExecutionStatusRes, err error) {
+	var (
+		domainTaskRepo = repo.NewDomainTaskRepo()
+		stageRunRepo   = repo.NewStageRunRepo()
+	)
+
 	projectID := int64(req.ProjectID)
 	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
@@ -27,23 +31,14 @@ func (c *cWorkflow) ExecutionStatus(ctx context.Context, req *v1.WorkflowExecuti
 		ResourceLocks: []v1.ResourceLockItem{},
 	}
 
-	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		OrderDesc("run_no").
-		One()
-	if err != nil || wfRun.IsEmpty() {
+	wfRun, err := latestWorkflowRunForProject(ctx, projectID)
+	if err != nil {
 		return res, nil
 	}
 	wfRunID := wfRun["id"].Int64()
 	res.WorkflowRunID = snowflake.JsonInt64(wfRunID)
 
-	stageRun, stageErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
-		Where("workflow_run_id", wfRunID).
-		Where("stage_type", "execute").
-		WhereNull("deleted_at").
-		OrderDesc("stage_no").
-		One()
+	stageRun, stageErr := stageRunRepo.GetLatestByWorkflowAndType(ctx, wfRunID, "execute")
 	if stageErr != nil {
 		g.Log().Warningf(ctx, "[ExecutionStatus] 查询 stage_run 失败: wfRun=%d err=%v", wfRunID, stageErr)
 	}
@@ -52,19 +47,17 @@ func (c *cWorkflow) ExecutionStatus(ctx context.Context, req *v1.WorkflowExecuti
 		res.StageStatus = stageRun["status"].String()
 	}
 
-	tasks, taskErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("workflow_run_id", wfRunID).
-		WhereNull("deleted_at").
-		OrderAsc("batch_no").
-		OrderAsc("sort").
-		All()
+	taskMaps, taskErr := domainTaskRepo.ListByWorkflowOrdered(ctx, wfRunID)
 	if taskErr != nil {
 		g.Log().Warningf(ctx, "[ExecutionStatus] 查询领域任务失败: wfRun=%d err=%v", wfRunID, taskErr)
 	}
 
-	taskIDs := make([]int64, 0, len(tasks))
-	for _, t := range tasks {
-		taskIDs = append(taskIDs, t["id"].Int64())
+	taskIDs := make([]int64, 0, len(taskMaps))
+	tasks := make([]gdb.Record, 0, len(taskMaps))
+	for _, t := range taskMaps {
+		record := mapToDBRecord(t)
+		tasks = append(tasks, record)
+		taskIDs = append(taskIDs, record["id"].Int64())
 	}
 	workspaceMeta, wsErr := loadTaskWorkspaceMeta(ctx, taskIDs)
 	if wsErr != nil {
@@ -123,42 +116,30 @@ func (c *cWorkflow) ExecutionStatus(ctx context.Context, req *v1.WorkflowExecuti
 
 // DomainTasks 领域任务列表
 func (c *cWorkflow) DomainTasks(ctx context.Context, req *v1.WorkflowDomainTasksReq) (res *v1.WorkflowDomainTasksRes, err error) {
+	domainTaskRepo := repo.NewDomainTaskRepo()
+
 	projectID := int64(req.ProjectID)
 	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
 	}
 
-	wfRun, wfErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		OrderDesc("run_no").
-		One()
+	wfRun, wfErr := latestWorkflowRunForProject(ctx, projectID)
 	if wfErr != nil {
-		return nil, fmt.Errorf("查询工作流运行失败: %w", wfErr)
-	}
-	if wfRun.IsEmpty() {
 		return &v1.WorkflowDomainTasksRes{Tasks: []v1.DomainTaskItem{}}, nil
 	}
 
-	query := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("workflow_run_id", wfRun["id"].Int64()).
-		WhereNull("deleted_at")
-
-	if req.Status != "" {
-		query = query.Where("status", req.Status)
-	}
-	if req.BatchNo > 0 {
-		query = query.Where("batch_no", req.BatchNo)
-	}
-
-	tasks, err := query.Fields("id, name, description, status, role_type, role_level, batch_no, sort, execution_mode, affected_resources, started_at, completed_at, result, retry_count").OrderAsc("batch_no").OrderAsc("sort").All()
+	taskMaps, err := domainTaskRepo.ListByWorkflowFiltered(ctx, wfRun["id"].Int64(), req.Status, req.BatchNo,
+		"id", "name", "description", "status", "role_type", "role_level", "batch_no", "sort", "execution_mode", "affected_resources", "started_at", "completed_at", "result", "retry_count", "error_message")
 	if err != nil {
 		return nil, err
 	}
 
-	taskIDs := make([]int64, 0, len(tasks))
-	for _, t := range tasks {
-		taskIDs = append(taskIDs, t["id"].Int64())
+	taskIDs := make([]int64, 0, len(taskMaps))
+	tasks := make([]gdb.Record, 0, len(taskMaps))
+	for _, t := range taskMaps {
+		record := mapToDBRecord(t)
+		tasks = append(tasks, record)
+		taskIDs = append(taskIDs, record["id"].Int64())
 	}
 	workspaceMeta, wsErr := loadTaskWorkspaceMeta(ctx, taskIDs)
 	if wsErr != nil {
@@ -175,6 +156,8 @@ func (c *cWorkflow) DomainTasks(ctx context.Context, req *v1.WorkflowDomainTasks
 
 // ResourceLocks 资源锁列表
 func (c *cWorkflow) ResourceLocks(ctx context.Context, req *v1.WorkflowResourceLocksReq) (res *v1.WorkflowResourceLocksRes, err error) {
+	domainTaskRepo := repo.NewDomainTaskRepo()
+
 	projectID := int64(req.ProjectID)
 	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
@@ -197,13 +180,12 @@ func (c *cWorkflow) ResourceLocks(ctx context.Context, req *v1.WorkflowResourceL
 		taskIDs = append(taskIDs, tid)
 	}
 	taskNames := make(map[int64]string)
-	tasks, tErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		WhereIn("id", taskIDs).WhereNull("deleted_at").Fields("id, name").All()
+	taskMaps, tErr := domainTaskRepo.ListByIDs(ctx, taskIDs, "id", "name")
 	if tErr != nil {
 		g.Log().Warningf(ctx, "[ResourceLocks] 查询任务名称失败: %v", tErr)
 	}
-	for _, t := range tasks {
-		taskNames[t["id"].Int64()] = t["name"].String()
+	for _, t := range taskMaps {
+		taskNames[g.NewVar(t["id"]).Int64()] = g.NewVar(t["name"]).String()
 	}
 
 	for resource, taskID := range lockedRes {
@@ -240,7 +222,7 @@ func loadTaskWorkspaceMeta(ctx context.Context, taskIDs []int64) (map[int64]task
 		return result, nil
 	}
 
-	records, err := queryTaskWorkspaceMetaRecords(ctx, taskIDs)
+	records, err := repo.NewTaskWorkspaceRepo().ListMetaByTasks(ctx, taskIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -264,49 +246,6 @@ func loadTaskWorkspaceMeta(ctx context.Context, taskIDs []int64) (map[int64]task
 	}
 
 	return result, nil
-}
-
-func queryTaskWorkspaceMetaRecords(ctx context.Context, taskIDs []int64) (gdb.Result, error) {
-	records, err := g.DB().Model("mvp_task_workspace").Ctx(ctx).
-		WhereIn("task_id", taskIDs).
-		WhereNull("deleted_at").
-		Fields("id, task_id, status, cleanup_status, delivery_mode, delivery_status, sync_strategy, sync_status, risk_level, patch_ref, delivery_ref, delivery_title, diff_summary, updated_at").
-		All()
-	if err == nil || !isUnknownWorkspaceColumnErr(err) {
-		return records, err
-	}
-
-	if isWorkspaceDeliveryRefColumnErr(err) {
-		records, err = g.DB().Model("mvp_task_workspace").Ctx(ctx).
-			WhereIn("task_id", taskIDs).
-			WhereNull("deleted_at").
-			Fields("id, task_id, status, cleanup_status, delivery_mode, delivery_status, sync_strategy, sync_status, risk_level, patch_ref, diff_summary, updated_at").
-			All()
-		if err == nil || !isUnknownWorkspaceColumnErr(err) {
-			return records, err
-		}
-	}
-
-	return g.DB().Model("mvp_task_workspace").Ctx(ctx).
-		WhereIn("task_id", taskIDs).
-		WhereNull("deleted_at").
-		Fields("id, task_id, status, cleanup_status, diff_summary, updated_at").
-		All()
-}
-
-func isUnknownWorkspaceColumnErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(err.Error()), "unknown column")
-}
-
-func isWorkspaceDeliveryRefColumnErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "delivery_ref") || strings.Contains(msg, "delivery_title")
 }
 
 func buildDomainTaskItem(t gdb.Record, ws taskWorkspaceMeta) v1.DomainTaskItem {

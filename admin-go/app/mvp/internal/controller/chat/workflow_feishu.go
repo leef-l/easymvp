@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/gtime"
 
 	v1 "easymvp/app/mvp/api/mvp/v1"
 	"easymvp/app/mvp/internal/collab"
@@ -16,6 +15,7 @@ import (
 	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/middleware"
 	"easymvp/app/mvp/internal/workflow/orchestrator"
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/utility/snowflake"
 )
 
@@ -201,12 +201,7 @@ func (c *cWorkflow) GetBotMenu(ctx context.Context, req *v1.WorkflowGetBotMenuRe
 	defaults := defaultBotMenuItems()
 
 	// 从 mvp_config 读取自定义菜单
-	var configVal string
-	_ = g.DB().Model("mvp_config").Ctx(ctx).
-		Where("config_key", "workflow.collab.feishu_bot_menu").
-		WhereNull("deleted_at").
-		Fields("config_value").
-		Scan(&configVal)
+	configVal, _ := repo.NewConfigRepo().GetValueByKey(ctx, "workflow.collab.feishu_bot_menu")
 
 	if configVal == "" {
 		return &v1.WorkflowGetBotMenuRes{
@@ -435,43 +430,17 @@ func (c *cWorkflow) DeleteChatMenu(ctx context.Context, req *v1.WorkflowDeleteCh
 }
 
 func saveMvpConfig(ctx context.Context, key, value, configType, category, description string) error {
-	now := gtime.Now()
 	userID := middleware.GetUserID(ctx)
 	deptID := middleware.GetDeptID(ctx)
 
-	count, err := g.DB().Model("mvp_config").Ctx(ctx).
-		Where("config_key", key).
-		WhereNull("deleted_at").
-		Count()
-	if err != nil {
-		return err
-	}
-	if count > 0 {
-		_, err = g.DB().Model("mvp_config").Ctx(ctx).
-			Where("config_key", key).
-			WhereNull("deleted_at").
-			Update(g.Map{
-				"config_value": value,
-				"config_type":  configType,
-				"category":     category,
-				"description":  description,
-				"updated_at":   now,
-			})
-		return err
-	}
-	_, err = g.DB().Model("mvp_config").Ctx(ctx).Insert(g.Map{
-		"id":           snowflake.Generate(),
-		"config_key":   key,
+	return repo.NewConfigRepo().UpsertByKey(ctx, key, g.Map{
 		"config_value": value,
 		"config_type":  configType,
 		"category":     category,
 		"description":  description,
 		"created_by":   userID,
 		"dept_id":      deptID,
-		"created_at":   now,
-		"updated_at":   now,
 	})
-	return err
 }
 
 func mapToFeishuBindingDTO(m g.Map) v1.FeishuBindingDTO {

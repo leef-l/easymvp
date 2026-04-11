@@ -27,27 +27,19 @@ func (s *Sensor) Perceive(ctx context.Context, workflowRunID int64) (*Situation,
 	if workflowRunID == 0 {
 		return nil, nil
 	}
-	wf, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Fields("id, project_id, status, current_stage, started_at, tokens_consumed, replan_count").
-		Where("id", workflowRunID).
-		WhereNull("deleted_at").
-		One()
-	if err != nil || wf.IsEmpty() {
+	wf, err := repo.NewWorkflowRunRepo().GetByIDMap(ctx, workflowRunID, "id", "project_id", "status", "current_stage", "started_at", "tokens_consumed", "replan_count")
+	if err != nil || len(wf) == 0 {
 		return nil, err
 	}
 
-	projectID := wf["project_id"].Int64()
-	projectRow, projectErr := g.DB().Model("mvp_project").Ctx(ctx).
-		Fields("project_category, category_code").
-		Where("id", projectID).
-		WhereNull("deleted_at").
-		One()
+	projectID := gconv.Int64(wf["project_id"])
+	projectRow, projectErr := repo.NewProjectRepo().GetByID(ctx, projectID, "project_category", "category_code")
 	if projectErr != nil {
 		g.Log().Warningf(ctx, "[Sensor] 查询项目分类失败: projectID=%d err=%v", projectID, projectErr)
 	}
-	categoryCode := projectRow["category_code"].String()
+	categoryCode := gconv.String(projectRow["category_code"])
 	if categoryCode == "" {
-		categoryCode = projectRow["project_category"].String()
+		categoryCode = gconv.String(projectRow["project_category"])
 	}
 	projectFamily := ""
 	if categoryCode != "" {
@@ -58,11 +50,7 @@ func (s *Sensor) Perceive(ctx context.Context, workflowRunID int64) (*Situation,
 		}
 	}
 
-	tasks, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Fields("status, batch_no, retry_count, affected_resources, started_at, completed_at, heartbeat_at").
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		All()
+	tasks, err := repo.NewDomainTaskRepo().ListByWorkflowOrdered(ctx, workflowRunID, "status", "batch_no", "retry_count", "affected_resources", "started_at", "completed_at", "heartbeat_at")
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +59,7 @@ func (s *Sensor) Perceive(ctx context.Context, workflowRunID int64) (*Situation,
 	health := &HealthMetrics{}
 	resource := &ResourceMetrics{
 		MaxConcurrency: engine.GetSchedulerMaxConcurrency(ctx),
-		TokensConsumed: wf["tokens_consumed"].Int64(),
+		TokensConsumed: gconv.Int64(wf["tokens_consumed"]),
 	}
 	trend := &TrendMetrics{
 		FailureRateTrend: "stable",
@@ -88,19 +76,19 @@ func (s *Sensor) Perceive(ctx context.Context, workflowRunID int64) (*Situation,
 	consecutiveFailures := 0
 
 	for _, task := range tasks {
-		status := task["status"].String()
+		status := gconv.String(task["status"])
 		statusCount[status]++
 		progress.TotalTasks++
-		batchNo := task["batch_no"].Int()
+		batchNo := gconv.Int(task["batch_no"])
 		if batchNo > maxBatch {
 			maxBatch = batchNo
 		}
 		if status == "running" && batchNo > currentBatch {
 			currentBatch = batchNo
 		}
-		health.RetryCount += task["retry_count"].Int()
+		health.RetryCount += gconv.Int(task["retry_count"])
 
-		if task["affected_resources"].String() != "" && task["affected_resources"].String() != "[]" {
+		if gconv.String(task["affected_resources"]) != "" && gconv.String(task["affected_resources"]) != "[]" {
 			lockedResources++
 		}
 
@@ -108,14 +96,14 @@ func (s *Sensor) Perceive(ctx context.Context, workflowRunID int64) (*Situation,
 			consecutiveFailures++
 		}
 		if status == "completed" {
-			started := task["started_at"].GTime()
-			completed := task["completed_at"].GTime()
+			started := g.NewVar(task["started_at"]).GTime()
+			completed := g.NewVar(task["completed_at"]).GTime()
 			if started != nil && completed != nil && !started.IsZero() && !completed.IsZero() {
 				durations = append(durations, completed.Timestamp()-started.Timestamp())
 			}
 		}
 		if status == "running" {
-			hb := task["heartbeat_at"].GTime()
+			hb := g.NewVar(task["heartbeat_at"]).GTime()
 			if hb == nil || hb.IsZero() || now.Timestamp()-hb.Timestamp() > 300 {
 				health.StaleTaskCount++
 			}
@@ -135,11 +123,11 @@ func (s *Sensor) Perceive(ctx context.Context, workflowRunID int64) (*Situation,
 		batchTotal := 0
 		batchDone := 0
 		for _, task := range tasks {
-			if task["batch_no"].Int() != currentBatch {
+			if gconv.Int(task["batch_no"]) != currentBatch {
 				continue
 			}
 			batchTotal++
-			if task["status"].String() == "completed" {
+			if gconv.String(task["status"]) == "completed" {
 				batchDone++
 			}
 		}
@@ -156,7 +144,7 @@ func (s *Sensor) Perceive(ctx context.Context, workflowRunID int64) (*Situation,
 
 	health.ConsecutiveFailures = consecutiveFailures
 	health.EscalationCount = statusCount["escalated"]
-	health.ReplanCount = wf["replan_count"].Int()
+	health.ReplanCount = gconv.Int(wf["replan_count"])
 	if progress.CompletedTasks+progress.FailedTasks > 0 {
 		health.RecentFailureRate = float64(progress.FailedTasks) / float64(progress.CompletedTasks+progress.FailedTasks)
 	}
@@ -170,17 +158,12 @@ func (s *Sensor) Perceive(ctx context.Context, workflowRunID int64) (*Situation,
 		health.MedianTaskDuration = durations[len(durations)/2]
 	}
 
-	stageRuns, srErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
-		Fields("stage_type, stage_no").
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		OrderAsc("stage_no").
-		All()
+	stageRuns, srErr := repo.NewStageRunRepo().ListByWorkflowMaps(ctx, workflowRunID, "stage_type", "stage_no")
 	if srErr != nil {
 		g.Log().Warningf(ctx, "[Sensor] 查询阶段运行记录失败: wfRunID=%d err=%v", workflowRunID, srErr)
 	}
 	for _, sr := range stageRuns {
-		switch sr["stage_type"].String() {
+		switch gconv.String(sr["stage_type"]) {
 		case "rework":
 			health.ReworkRounds++
 		case "accept":
@@ -193,9 +176,9 @@ func (s *Sensor) Perceive(ctx context.Context, workflowRunID int64) (*Situation,
 		ProjectID:         projectID,
 		ProjectFamily:     projectFamily,
 		CategoryCode:      categoryCode,
-		ActiveStage:       wf["current_stage"].String(),
-		WorkflowStatus:    wf["status"].String(),
-		WorkflowStartedAt: wf["started_at"].GTime(),
+		ActiveStage:       gconv.String(wf["current_stage"]),
+		WorkflowStatus:    gconv.String(wf["status"]),
+		WorkflowStartedAt: g.NewVar(wf["started_at"]).GTime(),
 		SnapshotAt:        now,
 		Progress:          progress,
 		Health:            health,

@@ -8,7 +8,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"easymvp/app/mvp/internal/engine"
-	"easymvp/utility/snowflake"
+	"easymvp/app/mvp/internal/workflow/repo"
 )
 
 // Learner EMA（指数移动平均）学习器。
@@ -65,11 +65,7 @@ func (l *Learner) Update(ctx context.Context, metricKey string, projectID int64,
 	}
 
 	// 读取现有记录
-	record, err := g.DB().Model("mvp_learning_record").Ctx(ctx).
-		Where("metric_key", metricKey).
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		One()
+	record, err := repo.NewLearningRecordRepo().GetByMetric(ctx, metricKey, projectID)
 	if err != nil {
 		g.Log().Warningf(ctx, "[Learner] 读取学习记录失败: key=%s err=%v", metricKey, err)
 		return err
@@ -77,11 +73,9 @@ func (l *Learner) Update(ctx context.Context, metricKey string, projectID int64,
 
 	now := gtime.Now()
 
-	if record.IsEmpty() {
+	if len(record) == 0 {
 		// 首次记录
-		id := int64(snowflake.Generate())
-		_, err = g.DB().Model("mvp_learning_record").Ctx(ctx).Insert(g.Map{
-			"id":           id,
+		_, err = repo.NewLearningRecordRepo().Create(ctx, g.Map{
 			"metric_key":   metricKey,
 			"project_id":   projectID,
 			"ema_value":    rawValue,
@@ -95,9 +89,9 @@ func (l *Learner) Update(ctx context.Context, metricKey string, projectID int64,
 	}
 
 	// 更新 EMA
-	oldEMA := record["ema_value"].Float64()
-	sampleCount := record["sample_count"].Int() + 1
-	lastUpdated := record["last_updated"].GTime()
+	oldEMA := g.NewVar(record["ema_value"]).Float64()
+	sampleCount := g.NewVar(record["sample_count"]).Int() + 1
+	lastUpdated := g.NewVar(record["last_updated"]).GTime()
 
 	// 信号加权的 EMA：alpha 乘以信号权重
 	alpha := l.DefaultAlpha * signalWeight
@@ -117,38 +111,29 @@ func (l *Learner) Update(ctx context.Context, metricKey string, projectID int64,
 		}
 	}
 
-	_, err = g.DB().Model("mvp_learning_record").Ctx(ctx).
-		Where("metric_key", metricKey).
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		Update(g.Map{
-			"ema_value":    newEMA,
-			"raw_value":    rawValue,
-			"sample_count": sampleCount,
-			"last_updated": now,
-		})
-	return err
+	return repo.NewLearningRecordRepo().UpdateByMetric(ctx, metricKey, projectID, g.Map{
+		"ema_value":    newEMA,
+		"raw_value":    rawValue,
+		"sample_count": sampleCount,
+		"last_updated": now,
+	})
 }
 
 // Get 获取指标的当前 EMA 值。返回 nil 表示无记录。
 func (l *Learner) Get(ctx context.Context, metricKey string, projectID int64) *LearningRecord {
-	record, err := g.DB().Model("mvp_learning_record").Ctx(ctx).
-		Where("metric_key", metricKey).
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		One()
-	if err != nil || record.IsEmpty() {
+	record, err := repo.NewLearningRecordRepo().GetByMetric(ctx, metricKey, projectID)
+	if err != nil || len(record) == 0 {
 		return nil
 	}
 	return &LearningRecord{
-		ID:          record["id"].Int64(),
-		MetricKey:   record["metric_key"].String(),
-		ProjectID:   record["project_id"].Int64(),
-		EMAValue:    record["ema_value"].Float64(),
-		RawValue:    record["raw_value"].Float64(),
-		SampleCount: record["sample_count"].Int(),
-		LastUpdated: record["last_updated"].GTime(),
-		DecayFactor: record["decay_factor"].Float64(),
+		ID:          g.NewVar(record["id"]).Int64(),
+		MetricKey:   g.NewVar(record["metric_key"]).String(),
+		ProjectID:   g.NewVar(record["project_id"]).Int64(),
+		EMAValue:    g.NewVar(record["ema_value"]).Float64(),
+		RawValue:    g.NewVar(record["raw_value"]).Float64(),
+		SampleCount: g.NewVar(record["sample_count"]).Int(),
+		LastUpdated: g.NewVar(record["last_updated"]).GTime(),
+		DecayFactor: g.NewVar(record["decay_factor"]).Float64(),
 	}
 }
 
@@ -204,25 +189,21 @@ func (l *Learner) ClampAdjustment(currentValue, suggestedValue float64) float64 
 
 // ListByProject 查询项目的所有学习记录。
 func (l *Learner) ListByProject(ctx context.Context, projectID int64) ([]LearningRecord, error) {
-	records, err := g.DB().Model("mvp_learning_record").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		OrderAsc("metric_key").
-		All()
+	records, err := repo.NewLearningRecordRepo().ListByProject(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
 	var result []LearningRecord
 	for _, r := range records {
 		result = append(result, LearningRecord{
-			ID:          r["id"].Int64(),
-			MetricKey:   r["metric_key"].String(),
-			ProjectID:   r["project_id"].Int64(),
-			EMAValue:    r["ema_value"].Float64(),
-			RawValue:    r["raw_value"].Float64(),
-			SampleCount: r["sample_count"].Int(),
-			LastUpdated: r["last_updated"].GTime(),
-			DecayFactor: r["decay_factor"].Float64(),
+			ID:          g.NewVar(r["id"]).Int64(),
+			MetricKey:   g.NewVar(r["metric_key"]).String(),
+			ProjectID:   g.NewVar(r["project_id"]).Int64(),
+			EMAValue:    g.NewVar(r["ema_value"]).Float64(),
+			RawValue:    g.NewVar(r["raw_value"]).Float64(),
+			SampleCount: g.NewVar(r["sample_count"]).Int(),
+			LastUpdated: g.NewVar(r["last_updated"]).GTime(),
+			DecayFactor: g.NewVar(r["decay_factor"]).Float64(),
 		})
 	}
 	return result, nil

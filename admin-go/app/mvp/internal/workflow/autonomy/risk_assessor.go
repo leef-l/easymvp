@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/gogf/gf/v2/frame/g"
+
+	"easymvp/app/mvp/internal/workflow/repo"
 )
 
 // RiskAssessor 风险评估器，根据错误模式判断风险级别。
@@ -100,18 +102,14 @@ func (a *RiskAssessor) Assess(ctx context.Context, input *RiskInput) *RiskResult
 func (a *RiskAssessor) AssessBatch(ctx context.Context, workflowRunID int64, batchNo int) *RiskResult {
 	// 查批次任务统计
 	var total, failed int
-	tasks, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Where("batch_no", batchNo).
-		WhereNull("deleted_at").
-		All()
-	if err != nil || tasks.IsEmpty() {
+	tasks, err := repo.NewDomainTaskRepo().ListByWorkflowAndBatch(ctx, workflowRunID, batchNo)
+	if err != nil || len(tasks) == 0 {
 		return &RiskResult{Level: RiskTransient, Confidence: 0.3, Reason: "无法获取批次任务", Action: "retry"}
 	}
 
 	total = len(tasks)
 	for _, t := range tasks {
-		s := t["status"].String()
+		s := t.Status
 		if s == "failed" || s == "escalated" {
 			failed++
 		}

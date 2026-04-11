@@ -110,6 +110,15 @@ func (r *BindingRepo) List(ctx context.Context, platform string) ([]g.Map, error
 	return result, nil
 }
 
+// CountByPlatform 统计平台绑定数量。
+func (r *BindingRepo) CountByPlatform(ctx context.Context, platform string) (int, error) {
+	model := r.model(ctx).WhereNull("deleted_at")
+	if platform != "" {
+		model = model.Where("platform", platform)
+	}
+	return model.Count()
+}
+
 // Rebind 重绑用户平台标识，确保同平台下 user_id/platform_user_id 只有一条有效记录。
 func (r *BindingRepo) Rebind(ctx context.Context, data g.Map) (int64, error) {
 	id := int64(snowflake.Generate())

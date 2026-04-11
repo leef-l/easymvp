@@ -72,16 +72,16 @@ func (s *WorkflowService) CreateRun(ctx context.Context, projectID int64) (int64
 
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		// 1. 获取下一个 run_no
-		runNo, err := s.wfRepo.NextRunNo(ctx, projectID)
+		runNo, err := s.wfRepo.NextRunNoInTx(ctx, tx, projectID)
 		if err != nil {
 			return fmt.Errorf("获取 run_no 失败: %w", err)
 		}
 
 		// 2. 获取项目归属字段
-		scope := repo.GetProjectScopeByProject(ctx, projectID)
+		scope := repo.GetProjectScopeByProjectInTx(ctx, tx, projectID)
 
 		// 3. 创建 workflow_run
-		_, err = tx.Model("mvp_workflow_run").Ctx(ctx).Insert(g.Map{
+		err = s.wfRepo.CreateInTx(ctx, tx, g.Map{
 			"id":            wfRunID,
 			"project_id":    projectID,
 			"run_no":        runNo,
@@ -97,7 +97,7 @@ func (s *WorkflowService) CreateRun(ctx context.Context, projectID int64) (int64
 		}
 
 		// 4. 创建 design stage_run
-		_, err = tx.Model("mvp_stage_run").Ctx(ctx).Insert(g.Map{
+		err = s.stageRepo.CreateInTx(ctx, tx, g.Map{
 			"id":              stageRunID,
 			"workflow_run_id": wfRunID,
 			"stage_type":      consts.StageTypeDesign,
@@ -113,10 +113,10 @@ func (s *WorkflowService) CreateRun(ctx context.Context, projectID int64) (int64
 		}
 
 		// 4. 回写 current_stage_run_id
-		_, err = tx.Model("mvp_workflow_run").Ctx(ctx).
-			Where("id", wfRunID).
-			Update(g.Map{"current_stage_run_id": stageRunID, "updated_at": now})
-		if err != nil {
+		if err := s.wfRepo.UpdateInTx(ctx, tx, wfRunID, g.Map{
+			"current_stage_run_id": stageRunID,
+			"updated_at":           now,
+		}); err != nil {
 			return fmt.Errorf("更新 current_stage_run_id 失败: %w", err)
 		}
 
@@ -143,65 +143,73 @@ func (s *WorkflowService) CreateRun(ctx context.Context, projectID int64) (int64
 // StartDesign 启动设计阶段（workflow 已是 designing，启动 stage_run）。
 func (s *WorkflowService) StartDesign(ctx context.Context, workflowRunID int64) error {
 	now := gtime.Now()
+	projectRepo := repo.NewProjectRepo()
 
 	// 查 project_id（runtime 需要真实 projectID，不能传 0）
-	projectID, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("id", workflowRunID).Value("project_id")
-	if err != nil || projectID.Int64() == 0 {
+	wfRun, err := s.wfRepo.GetByIDMap(ctx, workflowRunID, "project_id")
+	if err != nil {
 		return fmt.Errorf("查询 workflow_run(%d) 的 project_id 失败: %v", workflowRunID, err)
+	}
+	projectID := g.NewVar(wfRun["project_id"]).Int64()
+	if projectID == 0 {
+		return fmt.Errorf("查询 workflow_run(%d) 的 project_id 失败: project_id 为空", workflowRunID)
 	}
 
 	// workflow_run 已在 CreateRun 中设为 designing，补 started_at（CAS 校验）
-	wfResult, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("id", workflowRunID).
-		Where("status", consts.WorkflowRunStatusDesigning).
-		Update(g.Map{
-			"started_at": now,
-			"updated_at": now,
-		})
+	wfRows, err := s.wfRepo.UpdateFieldsIfStatuses(ctx, workflowRunID, []string{consts.WorkflowRunStatusDesigning}, g.Map{
+		"started_at": now,
+		"updated_at": now,
+	})
 	if err != nil {
 		return fmt.Errorf("启动 workflow_run 失败: %w", err)
 	}
-	if rows, _ := wfResult.RowsAffected(); rows == 0 {
+	if wfRows == 0 {
 		return fmt.Errorf("workflow_run(%d) 不在 designing 状态，无法启动设计阶段", workflowRunID)
 	}
 
 	// design stage_run: pending → running（CAS 校验）
-	stageResult, err := g.DB().Model("mvp_stage_run").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Where("stage_type", consts.StageTypeDesign).
-		Where("status", consts.StageStatusPending).
-		Update(g.Map{
-			"status":     consts.StageStatusRunning,
-			"started_at": now,
-			"updated_at": now,
-		})
+	stageRun, stageErr := s.stageRepo.GetLatestByWorkflowTypeStatuses(ctx, workflowRunID, consts.StageTypeDesign, []string{consts.StageStatusPending}, "id")
+	if stageErr != nil || stageRun == nil {
+		return fmt.Errorf("workflow_run(%d) 的 design stage_run 不在 pending 状态", workflowRunID)
+	}
+	stageRows, err := s.stageRepo.UpdateFieldsIfStatus(ctx, stageRun["id"].Int64(), consts.StageStatusPending, g.Map{
+		"status":     consts.StageStatusRunning,
+		"started_at": now,
+		"updated_at": now,
+	})
 	if err != nil {
 		return fmt.Errorf("启动 design stage_run 失败: %w", err)
 	}
-	if rows, _ := stageResult.RowsAffected(); rows == 0 {
+	if stageRows == 0 {
 		return fmt.Errorf("workflow_run(%d) 的 design stage_run 不在 pending 状态", workflowRunID)
 	}
 
-	// 创建运行时（传真实 projectID，与 Resume 行为一致）
-	s.runtimeMgr.Create(workflowRunID, projectID.Int64())
+	if syncErr := projectRepo.UpdateFields(ctx, projectID, g.Map{
+		"status":     consts.WorkflowRunStatusDesigning,
+		"updated_at": now,
+	}); syncErr != nil {
+		g.Log().Warningf(ctx, "[WorkflowService] StartDesign 同步 project status 失败: projectID=%d err=%v", projectID, syncErr)
+	}
 
-	g.Log().Infof(ctx, "[WorkflowService] StartDesign workflowRunID=%d projectID=%d", workflowRunID, projectID.Int64())
+	// 创建运行时（传真实 projectID，与 Resume 行为一致）
+	s.runtimeMgr.Create(workflowRunID, projectID)
+
+	g.Log().Infof(ctx, "[WorkflowService] StartDesign workflowRunID=%d projectID=%d", workflowRunID, projectID)
 	return nil
 }
 
 // Pause 暂停工作流（从任何活跃阶段状态暂停）。
 func (s *WorkflowService) Pause(ctx context.Context, workflowRunID int64, reason string) error {
 	now := gtime.Now()
+	projectRepo := repo.NewProjectRepo()
 
 	// 查当前状态
-	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("id", workflowRunID).WhereNull("deleted_at").One()
-	if err != nil || wfRun.IsEmpty() {
+	wfRun, err := s.wfRepo.GetByIDMap(ctx, workflowRunID, "status", "project_id")
+	if err != nil || len(wfRun) == 0 {
 		return fmt.Errorf("workflow_run(%d) 不存在", workflowRunID)
 	}
 
-	currentStatus := wfRun["status"].String()
+	currentStatus := g.NewVar(wfRun["status"]).String()
 	activeStatuses := map[string]bool{
 		consts.WorkflowRunStatusDesigning: true,
 		consts.WorkflowRunStatusReviewing: true,
@@ -232,11 +240,13 @@ func (s *WorkflowService) Pause(ctx context.Context, workflowRunID int64, reason
 	}
 
 	// 同步 mvp_project.status
-	projectID := wfRun["project_id"].Int64()
+	projectID := g.NewVar(wfRun["project_id"]).Int64()
 	if projectID > 0 {
-		if _, syncErr := g.DB().Model("mvp_project").Ctx(ctx).
-			Where("id", projectID).
-			Update(g.Map{"status": consts.WorkflowRunStatusPaused, "pause_reason": reason, "updated_at": now}); syncErr != nil {
+		if syncErr := projectRepo.UpdateFields(ctx, projectID, g.Map{
+			"status":       consts.WorkflowRunStatusPaused,
+			"pause_reason": reason,
+			"updated_at":   now,
+		}); syncErr != nil {
 			g.Log().Errorf(ctx, "[WorkflowService] Pause 同步 project status 失败: projectID=%d err=%v", projectID, syncErr)
 		}
 	}
@@ -256,19 +266,21 @@ func (s *WorkflowService) Pause(ctx context.Context, workflowRunID int64, reason
 // Resume 恢复工作流（恢复到暂停前的阶段状态）。
 func (s *WorkflowService) Resume(ctx context.Context, workflowRunID int64) error {
 	now := gtime.Now()
+	projectRepo := repo.NewProjectRepo()
 
 	// 查暂停前状态
-	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("id", workflowRunID).Where("status", consts.WorkflowRunStatusPaused).
-		WhereNull("deleted_at").One()
-	if err != nil || wfRun.IsEmpty() {
+	wfRun, err := s.wfRepo.GetByIDMap(ctx, workflowRunID, "status", "status_before_pause", "current_stage", "project_id")
+	if err != nil || len(wfRun) == 0 {
+		return fmt.Errorf("工作流不在暂停状态，无法恢复")
+	}
+	if g.NewVar(wfRun["status"]).String() != consts.WorkflowRunStatusPaused {
 		return fmt.Errorf("工作流不在暂停状态，无法恢复")
 	}
 
 	// 恢复到暂停前的状态，若无记录则根据 current_stage 推断
-	resumeStatus := wfRun["status_before_pause"].String()
+	resumeStatus := g.NewVar(wfRun["status_before_pause"]).String()
 	if resumeStatus == "" {
-		currentStage := wfRun["current_stage"].String()
+		currentStage := g.NewVar(wfRun["current_stage"]).String()
 		resumeStatus = StageTypeToWorkflowStatus(currentStage)
 	}
 	if resumeStatus == "" {
@@ -288,14 +300,16 @@ func (s *WorkflowService) Resume(ctx context.Context, workflowRunID int64) error
 	}
 
 	// 重建 runtime context（Pause 时已 Cancel）
-	projectID := wfRun["project_id"].Int64()
+	projectID := g.NewVar(wfRun["project_id"]).Int64()
 	s.runtimeMgr.Create(workflowRunID, projectID)
 
 	// 同步 mvp_project.status
 	if projectID > 0 {
-		if _, syncErr := g.DB().Model("mvp_project").Ctx(ctx).
-			Where("id", projectID).
-			Update(g.Map{"status": resumeStatus, "pause_reason": nil, "updated_at": now}); syncErr != nil {
+		if syncErr := projectRepo.UpdateFields(ctx, projectID, g.Map{
+			"status":       resumeStatus,
+			"pause_reason": nil,
+			"updated_at":   now,
+		}); syncErr != nil {
 			g.Log().Errorf(ctx, "[WorkflowService] Resume 同步 project status 失败: projectID=%d err=%v", projectID, syncErr)
 		}
 	}
@@ -320,14 +334,18 @@ func (s *WorkflowService) Resume(ctx context.Context, workflowRunID int64) error
 // Cancel 取消工作流（从任何非终态都可取消）。
 func (s *WorkflowService) Cancel(ctx context.Context, workflowRunID int64, reason string) error {
 	now := gtime.Now()
+	var (
+		domainTaskRepo = repo.NewDomainTaskRepo()
+		projectRepo    = repo.NewProjectRepo()
+		stageTaskRepo  = repo.NewStageTaskRepo()
+	)
 
-	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("id", workflowRunID).WhereNull("deleted_at").One()
-	if err != nil || wfRun.IsEmpty() {
+	wfRun, err := s.wfRepo.GetByIDMap(ctx, workflowRunID, "status", "project_id")
+	if err != nil || len(wfRun) == 0 {
 		return fmt.Errorf("workflow_run(%d) 不存在", workflowRunID)
 	}
 
-	currentStatus := wfRun["status"].String()
+	currentStatus := g.NewVar(wfRun["status"]).String()
 	terminalStatuses := map[string]bool{
 		consts.WorkflowRunStatusCompleted: true,
 		consts.WorkflowRunStatusCanceled:  true,
@@ -338,32 +356,25 @@ func (s *WorkflowService) Cancel(ctx context.Context, workflowRunID int64, reaso
 
 	cancelReason := buildWorkflowCancelReason(reason)
 
-	activeStageRunVars, stageRunErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		WhereIn("status", g.Slice{consts.StageStatusPending, consts.StageStatusRunning}).
-		WhereNull("deleted_at").
-		Fields("id").
-		Array()
+	activeStageRuns, stageRunErr := s.stageRepo.ListByWorkflowStatuses(ctx, workflowRunID, []string{
+		consts.StageStatusPending,
+		consts.StageStatusRunning,
+	}, "id")
 	if stageRunErr != nil {
 		g.Log().Warningf(ctx, "[WorkflowService] Cancel 查询活跃 stage_run 失败: workflowRunID=%d err=%v", workflowRunID, stageRunErr)
 	}
-	activeStageRunIDs := make([]int64, 0, len(activeStageRunVars))
-	for _, item := range activeStageRunVars {
-		activeStageRunIDs = append(activeStageRunIDs, item.Int64())
+	activeStageRunIDs := make([]int64, 0, len(activeStageRuns))
+	for _, item := range activeStageRuns {
+		activeStageRunIDs = append(activeStageRunIDs, g.NewVar(item["id"]).Int64())
 	}
 
-	runningTaskVars, runningTaskErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Where("status", consts.TaskStatusRunning).
-		WhereNull("deleted_at").
-		Fields("id").
-		Array()
+	runningTasks, runningTaskErr := domainTaskRepo.ListByWorkflowAndStatuses(ctx, workflowRunID, []string{consts.TaskStatusRunning}, "id")
 	if runningTaskErr != nil {
 		g.Log().Warningf(ctx, "[WorkflowService] Cancel 查询运行中任务失败: workflowRunID=%d err=%v", workflowRunID, runningTaskErr)
 	}
-	runningTaskIDs := make([]int64, 0, len(runningTaskVars))
-	for _, item := range runningTaskVars {
-		runningTaskIDs = append(runningTaskIDs, item.Int64())
+	runningTaskIDs := make([]int64, 0, len(runningTasks))
+	for _, item := range runningTasks {
+		runningTaskIDs = append(runningTaskIDs, g.NewVar(item["id"]).Int64())
 	}
 
 	rows, err := s.wfRepo.UpdateStatus(ctx, workflowRunID, currentStatus, consts.WorkflowRunStatusCanceled, g.Map{
@@ -379,36 +390,35 @@ func (s *WorkflowService) Cancel(ctx context.Context, workflowRunID int64, reaso
 	}
 
 	if len(activeStageRunIDs) > 0 {
-		if _, upErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
-			WhereIn("id", activeStageRunIDs).
-			Update(g.Map{
-				"status":        consts.StageStatusFailed,
-				"error_message": cancelReason,
-				"finished_at":   now,
-				"updated_at":    now,
-			}); upErr != nil {
+		if upErr := s.stageRepo.UpdateByIDs(ctx, activeStageRunIDs, g.Map{
+			"status":        consts.StageStatusFailed,
+			"error_message": cancelReason,
+			"finished_at":   now,
+			"updated_at":    now,
+		}); upErr != nil {
 			g.Log().Warningf(ctx, "[WorkflowService] Cancel 更新 stage_run 终态失败: workflowRunID=%d err=%v", workflowRunID, upErr)
 		}
 
-		if _, upErr := g.DB().Model("mvp_stage_task").Ctx(ctx).
-			WhereIn("stage_run_id", activeStageRunIDs).
-			WhereIn("status", g.Slice{consts.StageStatusPending, consts.StageStatusRunning}).
-			WhereNull("deleted_at").
-			Update(g.Map{
-				"status":        consts.StageStatusFailed,
-				"error_message": cancelReason,
-				"completed_at":  now,
-				"updated_at":    now,
-			}); upErr != nil {
+		if upErr := stageTaskRepo.UpdateByStageRunsStatuses(ctx, activeStageRunIDs, []string{
+			consts.StageStatusPending,
+			consts.StageStatusRunning,
+		}, g.Map{
+			"status":        consts.StageStatusFailed,
+			"error_message": cancelReason,
+			"completed_at":  now,
+			"updated_at":    now,
+		}); upErr != nil {
 			g.Log().Warningf(ctx, "[WorkflowService] Cancel 更新 stage_task 终态失败: workflowRunID=%d err=%v", workflowRunID, upErr)
 		}
 	}
 
-	projectID := wfRun["project_id"].Int64()
+	projectID := g.NewVar(wfRun["project_id"]).Int64()
 	if projectID > 0 {
-		if _, syncErr := g.DB().Model("mvp_project").Ctx(ctx).
-			Where("id", projectID).
-			Update(g.Map{"status": consts.WorkflowRunStatusCanceled, "pause_reason": nil, "updated_at": now}); syncErr != nil {
+		if syncErr := projectRepo.UpdateFields(ctx, projectID, g.Map{
+			"status":       consts.WorkflowRunStatusCanceled,
+			"pause_reason": nil,
+			"updated_at":   now,
+		}); syncErr != nil {
 			g.Log().Errorf(ctx, "[WorkflowService] Cancel 同步 project status 失败: projectID=%d err=%v", projectID, syncErr)
 		}
 	}
@@ -418,19 +428,18 @@ func (s *WorkflowService) Cancel(ctx context.Context, workflowRunID int64, reaso
 	}
 
 	if len(runningTaskIDs) > 0 {
-		if _, upErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
-			WhereIn("id", runningTaskIDs).
-			WhereIn("status", g.Slice{consts.TaskStatusPending, consts.TaskStatusRunning}).
-			WhereNull("deleted_at").
-			Update(g.Map{
-				"status":           consts.TaskStatusFailed,
-				"result":           cancelReason,
-				"error_message":    cancelReason,
-				"completed_at":     now,
-				"heartbeat_at":     nil,
-				"locked_resources": nil,
-				"updated_at":       now,
-			}); upErr != nil {
+		if upErr := domainTaskRepo.UpdateByIDsStatuses(ctx, runningTaskIDs, []string{
+			consts.TaskStatusPending,
+			consts.TaskStatusRunning,
+		}, g.Map{
+			"status":           consts.TaskStatusFailed,
+			"result":           cancelReason,
+			"error_message":    cancelReason,
+			"completed_at":     now,
+			"heartbeat_at":     nil,
+			"locked_resources": nil,
+			"updated_at":       now,
+		}); upErr != nil {
 			g.Log().Warningf(ctx, "[WorkflowService] Cancel 更新运行中任务终态失败: workflowRunID=%d err=%v", workflowRunID, upErr)
 		}
 	}

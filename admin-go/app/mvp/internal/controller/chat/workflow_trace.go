@@ -10,12 +10,24 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	v1 "easymvp/app/mvp/api/mvp/v1"
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/app/mvp/internal/workspace"
 	"easymvp/utility/snowflake"
 )
 
 // ProjectTrace 项目级轨迹总览。
 func (c *cWorkflow) ProjectTrace(ctx context.Context, req *v1.WorkflowProjectTraceReq) (res *v1.WorkflowProjectTraceRes, err error) {
+	var (
+		acceptIssueRepo     = repo.NewAcceptIssueRepo()
+		acceptRunRepo       = repo.NewAcceptRunRepo()
+		decisionActionRepo  = repo.NewDecisionActionRepo()
+		domainTaskRepo      = repo.NewDomainTaskRepo()
+		humanCheckpointRepo = repo.NewHumanCheckpointRepo()
+		reviewIssueRepo     = repo.NewReviewIssueRepo()
+		stageRunRepo        = repo.NewStageRunRepo()
+		workflowEventRepo   = repo.NewWorkflowEventRepo()
+	)
+
 	projectID := int64(req.ProjectID)
 	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
@@ -52,91 +64,45 @@ func (c *cWorkflow) ProjectTrace(ctx context.Context, req *v1.WorkflowProjectTra
 	}
 
 	if currentStageRunID := wfRun["current_stage_run_id"].Int64(); currentStageRunID > 0 {
-		stageType, stageErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
-			Where("id", currentStageRunID).
-			WhereNull("deleted_at").
-			Value("stage_type")
-		if stageErr == nil {
-			res.CurrentStage = stageType.String()
+		stageRecord, stageErr := stageRunRepo.GetByIDMap(ctx, currentStageRunID, "stage_type")
+		if stageErr == nil && len(stageRecord) > 0 {
+			res.CurrentStage = g.NewVar(stageRecord["stage_type"]).String()
 		}
 	}
 
 	if res.CurrentStage == "" {
-		stageRecord, stageErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
-			Where("workflow_run_id", workflowRunID).
-			WhereNull("deleted_at").
-			OrderDesc("stage_no").
-			Fields("stage_type").
-			One()
+		stageRecord, stageErr := stageRunRepo.GetLatestByWorkflow(ctx, workflowRunID, "stage_type")
 		if stageErr == nil && !stageRecord.IsEmpty() {
 			res.CurrentStage = stageRecord["stage_type"].String()
 		}
 	}
 
-	res.TotalEvents, _ = g.DB().Model("mvp_workflow_event").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Count()
-	res.TotalTasks, _ = g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		Count()
-	res.TotalStages, _ = g.DB().Model("mvp_stage_run").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		Count()
-	res.ReworkRounds, _ = g.DB().Model("mvp_stage_run").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Where("stage_type", "rework").
-		WhereNull("deleted_at").
-		Count()
-	res.OpenReviewIssues, _ = g.DB().Model("mvp_review_issue").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Where("status", "open").
-		WhereNull("deleted_at").
-		Count()
-	res.PendingCheckpoints, _ = g.DB().Model("mvp_human_checkpoint").Ctx(ctx).
-		Where("project_id", projectID).
-		Where("status", "open").
-		WhereNull("deleted_at").
-		Count()
-	res.PendingActions, _ = g.DB().Model("mvp_decision_action").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereIn("action_status", g.Slice{"pending", "waiting_human"}).
-		WhereNull("deleted_at").
-		Count()
+	res.TotalEvents, _ = workflowEventRepo.CountByWorkflow(ctx, workflowRunID)
+	res.TotalTasks, _ = domainTaskRepo.CountByWorkflow(ctx, workflowRunID)
+	res.TotalStages, _ = stageRunRepo.CountByWorkflow(ctx, workflowRunID)
+	res.ReworkRounds, _ = stageRunRepo.CountByWorkflowAndType(ctx, workflowRunID, "rework")
+	res.OpenReviewIssues, _ = reviewIssueRepo.CountOpenByWorkflow(ctx, workflowRunID)
+	res.PendingCheckpoints, _ = humanCheckpointRepo.CountOpenByProject(ctx, projectID)
+	res.PendingActions, _ = decisionActionRepo.CountPendingByProject(ctx, projectID)
 
-	latestAcceptRun, acceptErr := g.DB().Model("mvp_accept_run").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		OrderDesc("accept_round").
-		Fields("id, decision, score").
-		One()
-	if acceptErr == nil && !latestAcceptRun.IsEmpty() {
-		res.AcceptDecision = latestAcceptRun["decision"].String()
-		res.AcceptScore = latestAcceptRun["score"].Float64()
-		res.OpenAcceptIssues, _ = g.DB().Model("mvp_accept_issue").Ctx(ctx).
-			Where("accept_run_id", latestAcceptRun["id"].Int64()).
-			Where("status", "open").
-			WhereNull("deleted_at").
-			Count()
+	latestAcceptRun, acceptErr := acceptRunRepo.GetLatestByWorkflow(ctx, workflowRunID)
+	if acceptErr == nil && len(latestAcceptRun) > 0 {
+		res.AcceptDecision = g.NewVar(latestAcceptRun["decision"]).String()
+		res.AcceptScore = g.NewVar(latestAcceptRun["score"]).Float64()
+		res.OpenAcceptIssues, _ = acceptIssueRepo.CountOpenByAcceptRun(ctx, g.NewVar(latestAcceptRun["id"]).Int64())
 	}
 
-	stageRecords, stageErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		OrderAsc("stage_no").
-		Fields("id, stage_type, stage_no, status, started_at, finished_at, error_message").
-		All()
+	stageRecords, stageErr := stageRunRepo.ListByWorkflowMaps(ctx, workflowRunID, "id", "stage_type", "stage_no", "status", "started_at", "finished_at", "error_message")
 	if stageErr == nil {
 		for _, record := range stageRecords {
 			res.Stages = append(res.Stages, v1.ProjectTraceStageItem{
-				ID:         snowflake.JsonInt64(record["id"].Int64()),
-				StageType:  record["stage_type"].String(),
-				StageNo:    record["stage_no"].Int(),
-				Status:     record["status"].String(),
-				StartedAt:  normalizeDBUTCGTime(record["started_at"].GTime()),
-				FinishedAt: normalizeDBUTCGTime(record["finished_at"].GTime()),
-				Error:      record["error_message"].String(),
+				ID:         snowflake.JsonInt64(g.NewVar(record["id"]).Int64()),
+				StageType:  g.NewVar(record["stage_type"]).String(),
+				StageNo:    g.NewVar(record["stage_no"]).Int(),
+				Status:     g.NewVar(record["status"]).String(),
+				StartedAt:  normalizeDBUTCGTime(g.NewVar(record["started_at"]).GTime()),
+				FinishedAt: normalizeDBUTCGTime(g.NewVar(record["finished_at"]).GTime()),
+				Error:      g.NewVar(record["error_message"]).String(),
 			})
 		}
 	}
@@ -150,15 +116,11 @@ func (c *cWorkflow) ProjectTrace(ctx context.Context, req *v1.WorkflowProjectTra
 		res.ManualSyncTasks = wsGroups.manualSyncTasks
 	}
 
-	eventRecords, eventErr := g.DB().Model("mvp_workflow_event").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		OrderDesc("created_at").
-		Limit(12).
-		All()
+	eventRecords, eventErr := workflowEventRepo.ListRecentByWorkflow(ctx, workflowRunID, 12)
 	if eventErr == nil {
 		res.RecentEvents = make([]v1.TimelineEvent, 0, len(eventRecords))
 		for _, record := range eventRecords {
-			res.RecentEvents = append(res.RecentEvents, buildTimelineEvent(record))
+			res.RecentEvents = append(res.RecentEvents, buildTimelineEvent(mapToDBRecord(record)))
 		}
 	}
 
@@ -180,11 +142,7 @@ func loadProjectTraceWorkspaceSummary(ctx context.Context, workflowRunID int64) 
 		syncStatuses:  map[string]int{},
 	}
 
-	records, err := g.DB().Model("mvp_task_workspace").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		Fields("delivery_mode, delivery_status, sync_status, risk_level").
-		All()
+	records, err := repo.NewTaskWorkspaceRepo().ListWorkspaceSummaryByWorkflow(ctx, workflowRunID)
 	if err != nil {
 		if !strings.Contains(strings.ToLower(err.Error()), "unknown column") {
 			return result, err
@@ -193,22 +151,22 @@ func loadProjectTraceWorkspaceSummary(ctx context.Context, workflowRunID int64) 
 	}
 
 	for _, record := range records {
-		deliveryStatus := record["delivery_status"].String()
-		if deliveryMode := record["delivery_mode"].String(); deliveryMode != "" {
+		deliveryStatus := g.NewVar(record["delivery_status"]).String()
+		if deliveryMode := g.NewVar(record["delivery_mode"]).String(); deliveryMode != "" {
 			result.deliveryModes[deliveryMode]++
 			if deliveryMode == "pr" && deliveryStatus == "ready" {
 				result.prDraftTasks++
 			}
 		}
-		if syncStatus := record["sync_status"].String(); syncStatus != "" {
+		if syncStatus := g.NewVar(record["sync_status"]).String(); syncStatus != "" {
 			result.syncStatuses[syncStatus]++
 			if syncStatus == "pending" && deliveryStatus == "ready" {
 				result.manualSyncTasks++
 			}
 		}
-		riskLevel := record["risk_level"].String()
-		deliveryMode := record["delivery_mode"].String()
-		syncStatus := record["sync_status"].String()
+		riskLevel := g.NewVar(record["risk_level"]).String()
+		deliveryMode := g.NewVar(record["delivery_mode"]).String()
+		syncStatus := g.NewVar(record["sync_status"]).String()
 		if riskLevel == "high" {
 			result.highRiskTasks++
 		}
@@ -221,6 +179,8 @@ func loadProjectTraceWorkspaceSummary(ctx context.Context, workflowRunID int64) 
 
 // DeliveryReviews 交付闸门明细。
 func (c *cWorkflow) DeliveryReviews(ctx context.Context, req *v1.WorkflowDeliveryReviewsReq) (res *v1.WorkflowDeliveryReviewsRes, err error) {
+	domainTaskRepo := repo.NewDomainTaskRepo()
+
 	projectID := int64(req.ProjectID)
 	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
@@ -232,13 +192,7 @@ func (c *cWorkflow) DeliveryReviews(ctx context.Context, req *v1.WorkflowDeliver
 	}
 	workflowRunID := wfRun["id"].Int64()
 
-	taskRecords, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		Fields("id, name, status, role_type, execution_mode, batch_no, sort").
-		OrderAsc("batch_no").
-		OrderAsc("sort").
-		All()
+	taskRecords, err := domainTaskRepo.ListByWorkflowOrdered(ctx, workflowRunID, "id", "name", "status", "role_type", "execution_mode", "batch_no", "sort")
 	if err != nil {
 		return nil, fmt.Errorf("查询任务列表失败: %w", err)
 	}
@@ -248,7 +202,7 @@ func (c *cWorkflow) DeliveryReviews(ctx context.Context, req *v1.WorkflowDeliver
 
 	taskIDs := make([]int64, 0, len(taskRecords))
 	for _, record := range taskRecords {
-		taskIDs = append(taskIDs, record["id"].Int64())
+		taskIDs = append(taskIDs, g.NewVar(record["id"]).Int64())
 	}
 	workspaceMeta, wsErr := loadTaskWorkspaceMeta(ctx, taskIDs)
 	if wsErr != nil {
@@ -260,7 +214,7 @@ func (c *cWorkflow) DeliveryReviews(ctx context.Context, req *v1.WorkflowDeliver
 
 	items := make([]v1.DeliveryReviewItem, 0)
 	for _, record := range taskRecords {
-		taskID := record["id"].Int64()
+		taskID := g.NewVar(record["id"]).Int64()
 		ws := workspaceMeta[taskID]
 		reasons := buildDeliveryReviewReasons(ws)
 		if len(reasons) == 0 {
@@ -270,11 +224,11 @@ func (c *cWorkflow) DeliveryReviews(ctx context.Context, req *v1.WorkflowDeliver
 			WorkspaceID:    snowflake.JsonInt64(ws.WorkspaceID),
 			TaskID:         snowflake.JsonInt64(taskID),
 			WorkflowRunID:  snowflake.JsonInt64(workflowRunID),
-			TaskName:       record["name"].String(),
-			TaskStatus:     record["status"].String(),
-			RoleType:       record["role_type"].String(),
-			ExecutionMode:  record["execution_mode"].String(),
-			BatchNo:        record["batch_no"].Int(),
+			TaskName:       g.NewVar(record["name"]).String(),
+			TaskStatus:     g.NewVar(record["status"]).String(),
+			RoleType:       g.NewVar(record["role_type"]).String(),
+			ExecutionMode:  g.NewVar(record["execution_mode"]).String(),
+			BatchNo:        g.NewVar(record["batch_no"]).Int(),
 			DeliveryMode:   ws.DeliveryMode,
 			DeliveryStatus: ws.DeliveryStatus,
 			SyncStrategy:   ws.SyncStrategy,
@@ -304,6 +258,8 @@ func (c *cWorkflow) DeliveryReviews(ctx context.Context, req *v1.WorkflowDeliver
 
 // DeliveryApply 人工确认并回写交付结果。
 func (c *cWorkflow) DeliveryApply(ctx context.Context, req *v1.WorkflowDeliveryApplyReq) (res *v1.WorkflowDeliveryApplyRes, err error) {
+	taskWorkspaceRepo := repo.NewTaskWorkspaceRepo()
+
 	projectID := int64(req.ProjectID)
 	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
@@ -317,19 +273,7 @@ func (c *cWorkflow) DeliveryApply(ctx context.Context, req *v1.WorkflowDeliveryA
 
 	taskIDs := normalizeDeliveryApplyTaskIDs(req.TaskIDs)
 
-	query := g.DB().Model("mvp_task_workspace w").Ctx(ctx).
-		InnerJoin("mvp_domain_task t", "t.id = w.task_id").
-		Where("w.workflow_run_id", workflowRunID).
-		WhereNull("w.deleted_at").
-		WhereNull("t.deleted_at").
-		Where("w.delivery_status", workspace.DeliveryStatusReady).
-		WhereIn("w.sync_status", g.Slice{workspace.SyncStatusPending, workspace.SyncStatusFailed}).
-		Fields("w.id, w.task_id, w.sync_status, w.delivery_status, t.name, t.batch_no, t.sort")
-	if len(taskIDs) > 0 {
-		query = query.WhereIn("w.task_id", taskIDs)
-	}
-
-	records, err := query.OrderAsc("t.batch_no").OrderAsc("t.sort").All()
+	records, err := taskWorkspaceRepo.ListReadyPendingSyncByWorkflow(ctx, workflowRunID, taskIDs)
 	if err != nil {
 		return nil, fmt.Errorf("查询待回写交付失败: %w", err)
 	}
@@ -344,13 +288,13 @@ func (c *cWorkflow) DeliveryApply(ctx context.Context, req *v1.WorkflowDeliveryA
 		failedCount  int
 	)
 	for _, record := range records {
-		taskID := record["task_id"].Int64()
+		taskID := g.NewVar(record["task_id"]).Int64()
 		item := v1.DeliveryApplyItem{
-			WorkspaceID:    snowflake.JsonInt64(record["id"].Int64()),
+			WorkspaceID:    snowflake.JsonInt64(g.NewVar(record["id"]).Int64()),
 			TaskID:         snowflake.JsonInt64(taskID),
-			TaskName:       record["name"].String(),
-			DeliveryStatus: record["delivery_status"].String(),
-			SyncStatus:     record["sync_status"].String(),
+			TaskName:       g.NewVar(record["name"]).String(),
+			DeliveryStatus: g.NewVar(record["delivery_status"]).String(),
+			SyncStatus:     g.NewVar(record["sync_status"]).String(),
 			Status:         "applied",
 		}
 
@@ -427,34 +371,40 @@ func deliveryReviewRiskRank(riskLevel string) int {
 
 // TaskReplay 任务执行回放。
 func (c *cWorkflow) TaskReplay(ctx context.Context, req *v1.WorkflowTaskReplayReq) (res *v1.WorkflowTaskReplayRes, err error) {
+	var (
+		acceptEvidenceRepo = repo.NewAcceptEvidenceRepo()
+		acceptIssueRepo    = repo.NewAcceptIssueRepo()
+		decisionActionRepo = repo.NewDecisionActionRepo()
+		domainTaskRepo     = repo.NewDomainTaskRepo()
+		handoffRecordRepo  = repo.NewHandoffRecordRepo()
+		stageRunRepo       = repo.NewStageRunRepo()
+		taskLogRepo        = repo.NewTaskLogRepo()
+		taskWorkspaceRepo  = repo.NewTaskWorkspaceRepo()
+		workflowEventRepo  = repo.NewWorkflowEventRepo()
+		workflowRunRepo    = repo.NewWorkflowRunRepo()
+	)
+
 	projectID := int64(req.ProjectID)
 	taskID := int64(req.TaskID)
 	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
 	}
 
-	taskRecord, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("id", taskID).
-		WhereNull("deleted_at").
-		Fields("id, workflow_run_id, stage_run_id, name, description, status, role_type, role_level, batch_no, sort, execution_mode, affected_resources, started_at, completed_at, result, retry_count, error_message").
-		One()
+	taskRecordMap, err := domainTaskRepo.GetByIDMap(ctx, taskID, "id", "workflow_run_id", "stage_run_id", "name", "description", "status", "role_type", "role_level", "batch_no", "sort", "execution_mode", "affected_resources", "started_at", "completed_at", "result", "retry_count", "error_message")
 	if err != nil {
 		return nil, fmt.Errorf("查询任务失败: %w", err)
 	}
-	if taskRecord.IsEmpty() {
+	if len(taskRecordMap) == 0 {
 		return nil, fmt.Errorf("任务不存在: %d", taskID)
 	}
+	taskRecord := mapToDBRecord(taskRecordMap)
 
 	workflowRunID := taskRecord["workflow_run_id"].Int64()
-	owned, ownErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("id", workflowRunID).
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		Count()
+	runRecord, ownErr := workflowRunRepo.GetByIDMap(ctx, workflowRunID, "project_id")
 	if ownErr != nil {
 		return nil, fmt.Errorf("校验任务归属失败: %w", ownErr)
 	}
-	if owned == 0 {
+	if len(runRecord) == 0 || g.NewVar(runRecord["project_id"]).Int64() != projectID {
 		return nil, fmt.Errorf("任务 %d 不属于项目 %d", taskID, projectID)
 	}
 
@@ -476,140 +426,106 @@ func (c *cWorkflow) TaskReplay(ctx context.Context, req *v1.WorkflowTaskReplayRe
 
 	if stageRunID := taskRecord["stage_run_id"].Int64(); stageRunID > 0 {
 		res.StageRunID = snowflake.JsonInt64(stageRunID)
-		stageType, stageErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
-			Where("id", stageRunID).
-			WhereNull("deleted_at").
-			Value("stage_type")
-		if stageErr == nil {
-			res.StageType = stageType.String()
+		stageRecord, stageErr := stageRunRepo.GetByIDMap(ctx, stageRunID, "stage_type")
+		if stageErr == nil && len(stageRecord) > 0 {
+			res.StageType = g.NewVar(stageRecord["stage_type"]).String()
 		}
 	}
 
-	logRecords, logErr := g.DB().Model("mvp_task_log").Ctx(ctx).
-		Where("task_id", taskID).
-		WhereNull("deleted_at").
-		OrderAsc("created_at").
-		All()
+	logRecords, logErr := taskLogRepo.ListByTask(ctx, taskID)
 	if logErr == nil {
 		for _, record := range logRecords {
 			res.Logs = append(res.Logs, v1.TaskReplayLogItem{
-				ID:         snowflake.JsonInt64(record["id"].Int64()),
-				Action:     record["action"].String(),
-				FromStatus: record["from_status"].String(),
-				ToStatus:   record["to_status"].String(),
-				Message:    record["message"].String(),
-				Operator:   record["operator"].String(),
-				CreatedAt:  normalizeDBUTCGTime(record["created_at"].GTime()),
+				ID:         snowflake.JsonInt64(g.NewVar(record["id"]).Int64()),
+				Action:     g.NewVar(record["action"]).String(),
+				FromStatus: g.NewVar(record["from_status"]).String(),
+				ToStatus:   g.NewVar(record["to_status"]).String(),
+				Message:    g.NewVar(record["message"]).String(),
+				Operator:   g.NewVar(record["operator"]).String(),
+				CreatedAt:  normalizeDBUTCGTime(g.NewVar(record["created_at"]).GTime()),
 			})
 		}
 	}
 
-	eventRecords, eventErr := g.DB().Model("mvp_workflow_event").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Where("entity_type", "domain_task").
-		Where("entity_id", taskID).
-		OrderAsc("created_at").
-		All()
+	eventRecords, eventErr := workflowEventRepo.ListByWorkflowAndEntity(ctx, workflowRunID, "domain_task", taskID)
 	if eventErr == nil {
 		for _, record := range eventRecords {
-			res.Events = append(res.Events, buildTimelineEvent(record))
+			res.Events = append(res.Events, buildTimelineEvent(mapToDBRecord(record)))
 		}
 	}
 
-	issueRecords, issueErr := g.DB().Model("mvp_accept_issue").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Where("domain_task_id", taskID).
-		WhereNull("deleted_at").
-		OrderDesc("created_at").
-		All()
+	issueRecords, issueErr := acceptIssueRepo.ListByWorkflowAndTask(ctx, workflowRunID, taskID)
 	if issueErr == nil {
 		for _, issue := range issueRecords {
 			res.Issues = append(res.Issues, v1.AcceptIssueItem{
-				ID:              snowflake.JsonInt64(issue["id"].Int64()),
-				IssueType:       issue["issue_type"].String(),
-				RuleCode:        issue["rule_code"].String(),
-				Severity:        issue["severity"].String(),
-				Title:           issue["title"].String(),
-				Detail:          issue["detail"].String(),
-				ExpectedValue:   issue["expected_value"].String(),
-				ActualValue:     issue["actual_value"].String(),
-				SuggestedAction: issue["suggested_action"].String(),
-				DomainTaskID:    snowflake.JsonInt64(issue["domain_task_id"].Int64()),
-				ResourceRef:     issue["resource_ref"].String(),
-				Status:          issue["status"].String(),
-				CreatedAt:       normalizeDBUTCGTime(issue["created_at"].GTime()),
+				ID:              snowflake.JsonInt64(g.NewVar(issue["id"]).Int64()),
+				IssueType:       g.NewVar(issue["issue_type"]).String(),
+				RuleCode:        g.NewVar(issue["rule_code"]).String(),
+				Severity:        g.NewVar(issue["severity"]).String(),
+				Title:           g.NewVar(issue["title"]).String(),
+				Detail:          g.NewVar(issue["detail"]).String(),
+				ExpectedValue:   g.NewVar(issue["expected_value"]).String(),
+				ActualValue:     g.NewVar(issue["actual_value"]).String(),
+				SuggestedAction: g.NewVar(issue["suggested_action"]).String(),
+				DomainTaskID:    snowflake.JsonInt64(g.NewVar(issue["domain_task_id"]).Int64()),
+				ResourceRef:     g.NewVar(issue["resource_ref"]).String(),
+				Status:          g.NewVar(issue["status"]).String(),
+				CreatedAt:       normalizeDBUTCGTime(g.NewVar(issue["created_at"]).GTime()),
 			})
 		}
 	}
 
-	workspaceID := int64(0)
-	workspaceRecord, workspaceErr := g.DB().Model("mvp_task_workspace").Ctx(ctx).
-		Where("task_id", taskID).
-		WhereNull("deleted_at").
-		Fields("id").
-		OrderDesc("created_at").
-		One()
-	if workspaceErr == nil && !workspaceRecord.IsEmpty() {
-		workspaceID = workspaceRecord["id"].Int64()
+	workspaceID, workspaceErr := taskWorkspaceRepo.GetLatestIDByTask(ctx, taskID)
+	if workspaceErr != nil {
+		workspaceID = 0
 	}
 
-	evidenceQuery := g.DB().Model("mvp_accept_evidence").Ctx(ctx).
-		WhereNull("deleted_at")
-	if workspaceID > 0 {
-		evidenceQuery = evidenceQuery.Where(
-			"(source_type = ? AND source_id = ?) OR (source_type = ? AND source_id = ?)",
-			"domain_task", taskID, "workspace", workspaceID,
-		)
-	} else {
-		evidenceQuery = evidenceQuery.Where("source_type", "domain_task").Where("source_id", taskID)
-	}
-	evidenceRecords, evidenceErr := evidenceQuery.OrderDesc("created_at").All()
+	evidenceRecords, evidenceErr := acceptEvidenceRepo.ListByTaskSources(ctx, taskID, workspaceID)
 	if evidenceErr == nil {
 		for _, record := range evidenceRecords {
 			res.Evidence = append(res.Evidence, v1.AcceptEvidenceItem{
-				ID:           snowflake.JsonInt64(record["id"].Int64()),
-				EvidenceType: record["evidence_type"].String(),
-				SourceType:   record["source_type"].String(),
-				SourceID:     snowflake.JsonInt64(record["source_id"].Int64()),
-				ContentRef:   record["content_ref"].String(),
-				Summary:      record["summary"].String(),
-				CreatedAt:    normalizeDBUTCGTime(record["created_at"].GTime()),
+				ID:           snowflake.JsonInt64(g.NewVar(record["id"]).Int64()),
+				EvidenceType: g.NewVar(record["evidence_type"]).String(),
+				SourceType:   g.NewVar(record["source_type"]).String(),
+				SourceID:     snowflake.JsonInt64(g.NewVar(record["source_id"]).Int64()),
+				ContentRef:   g.NewVar(record["content_ref"]).String(),
+				Summary:      g.NewVar(record["summary"]).String(),
+				CreatedAt:    normalizeDBUTCGTime(g.NewVar(record["created_at"]).GTime()),
 			})
 		}
 	}
 
-	handoffRecords, handoffErr := g.DB().Model("mvp_handoff_record").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Where("(from_task_id = ? OR to_task_id = ?)", taskID, taskID).
-		OrderAsc("created_at").
-		All()
+	handoffRecords, handoffErr := handoffRecordRepo.ListByWorkflowAndTask(ctx, workflowRunID, taskID)
 	if handoffErr == nil {
 		for _, record := range handoffRecords {
 			res.Handoffs = append(res.Handoffs, v1.TaskReplayHandoffItem{
-				ID:          snowflake.JsonInt64(record["id"].Int64()),
-				HandoffType: record["handoff_type"].String(),
-				FromTaskID:  snowflake.JsonInt64(record["from_task_id"].Int64()),
-				ToTaskID:    snowflake.JsonInt64(record["to_task_id"].Int64()),
-				Reason:      record["reason"].String(),
-				Payload:     record["payload"].String(),
-				CreatedAt:   normalizeDBUTCGTime(record["created_at"].GTime()),
+				ID:          snowflake.JsonInt64(g.NewVar(record["id"]).Int64()),
+				HandoffType: g.NewVar(record["handoff_type"]).String(),
+				FromTaskID:  snowflake.JsonInt64(g.NewVar(record["from_task_id"]).Int64()),
+				ToTaskID:    snowflake.JsonInt64(g.NewVar(record["to_task_id"]).Int64()),
+				Reason:      g.NewVar(record["reason"]).String(),
+				Payload:     g.NewVar(record["payload"]).String(),
+				CreatedAt:   normalizeDBUTCGTime(g.NewVar(record["created_at"]).GTime()),
 			})
 		}
 	}
 
-	actionRecords, actionErr := g.DB().Model("mvp_decision_action").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Where("domain_task_id", taskID).
-		WhereNull("deleted_at").
-		OrderDesc("created_at").
-		All()
+	actionRecords, actionErr := decisionActionRepo.ListByWorkflowAndTask(ctx, workflowRunID, taskID)
 	if actionErr == nil {
 		for _, record := range actionRecords {
-			res.Actions = append(res.Actions, mapToDecisionActionDTO(record.Map()))
+			res.Actions = append(res.Actions, mapToDecisionActionDTO(record))
 		}
 	}
 
 	return res, nil
+}
+
+func mapToDBRecord(data g.Map) gdb.Record {
+	record := make(gdb.Record, len(data))
+	for key, value := range data {
+		record[key] = g.NewVar(value)
+	}
+	return record
 }
 
 func buildTimelineEvent(record gdb.Record) v1.TimelineEvent {

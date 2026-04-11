@@ -25,12 +25,11 @@ func NewReporter(reportRepo *repo.ProjectReportRepo) *Reporter {
 // GenerateStageReport 生成阶段报告。在阶段完成时自动调用。
 func (r *Reporter) GenerateStageReport(ctx context.Context, workflowRunID int64, stageType string) error {
 	// 查 workflow_run 获取 projectID
-	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("id", workflowRunID).WhereNull("deleted_at").One()
-	if err != nil || wfRun.IsEmpty() {
+	wfRun, err := repo.NewWorkflowRunRepo().GetByIDMap(ctx, workflowRunID, "project_id")
+	if err != nil || len(wfRun) == 0 {
 		return fmt.Errorf("workflow_run(%d) 不存在", workflowRunID)
 	}
-	projectID := wfRun["project_id"].Int64()
+	projectID := g.NewVar(wfRun["project_id"]).Int64()
 
 	// 收集指标
 	metrics := r.collectStageMetrics(ctx, workflowRunID, stageType)
@@ -73,12 +72,7 @@ func (r *Reporter) collectStageMetrics(ctx context.Context, workflowRunID int64,
 	var b strings.Builder
 
 	// 阶段运行信息
-	stageRun, err := g.DB().Model("mvp_stage_run").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Where("stage_type", stageType).
-		WhereNull("deleted_at").
-		OrderDesc("stage_no").
-		One()
+	stageRun, err := repo.NewStageRunRepo().GetLatestByWorkflowAndType(ctx, workflowRunID, stageType, "status", "started_at", "finished_at")
 	if err == nil && !stageRun.IsEmpty() {
 		b.WriteString(fmt.Sprintf("阶段状态: %s\n", stageRun["status"].String()))
 		if !stageRun["started_at"].IsEmpty() {
@@ -106,19 +100,20 @@ func (r *Reporter) collectStageMetrics(ctx context.Context, workflowRunID int64,
 
 func (r *Reporter) collectExecuteMetrics(ctx context.Context, workflowRunID int64, b *strings.Builder) {
 	// 任务统计
-	tasks, tasksErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		Fields("status").All()
+	tasks, tasksErr := repo.NewDomainTaskRepo().ListStatusRowsByWorkflow(ctx, workflowRunID)
 	if tasksErr != nil {
 		g.Log().Warningf(ctx, "[Reporter] 查询任务统计失败: wfRunID=%d err=%v", workflowRunID, tasksErr)
 	}
 
 	counts := make(map[string]int)
 	for _, t := range tasks {
-		counts[t["status"].String()]++
+		counts[g.NewVar(t["status"]).String()] += g.NewVar(t["count"]).Int()
 	}
-	b.WriteString(fmt.Sprintf("总任务数: %d\n", len(tasks)))
+	totalTasks := 0
+	for _, count := range counts {
+		totalTasks += count
+	}
+	b.WriteString(fmt.Sprintf("总任务数: %d\n", totalTasks))
 	for status, count := range counts {
 		b.WriteString(fmt.Sprintf("  %s: %d\n", status, count))
 	}
@@ -126,11 +121,7 @@ func (r *Reporter) collectExecuteMetrics(ctx context.Context, workflowRunID int6
 
 func (r *Reporter) collectAcceptMetrics(ctx context.Context, workflowRunID int64, b *strings.Builder) {
 	// 验收轮次和结果
-	runs, runsErr := g.DB().Model("mvp_accept_run").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		OrderAsc("accept_round").
-		Fields("accept_round, status, decision, score").All()
+	runs, runsErr := repo.NewAcceptRunRepo().ListByWorkflow(ctx, workflowRunID, "accept_round", "status", "decision", "score")
 	if runsErr != nil {
 		g.Log().Warningf(ctx, "[Reporter] 查询验收轮次失败: wfRunID=%d err=%v", workflowRunID, runsErr)
 	}
@@ -138,37 +129,28 @@ func (r *Reporter) collectAcceptMetrics(ctx context.Context, workflowRunID int64
 	b.WriteString(fmt.Sprintf("验收轮次: %d\n", len(runs)))
 	for _, run := range runs {
 		b.WriteString(fmt.Sprintf("  第%d轮: %s (评分: %s, 决策: %s)\n",
-			run["accept_round"].Int(), run["status"].String(),
-			run["score"].String(), run["decision"].String()))
+			g.NewVar(run["accept_round"]).Int(), g.NewVar(run["status"]).String(),
+			g.NewVar(run["score"]).String(), g.NewVar(run["decision"]).String()))
 	}
 
 	// 问题统计
-	issues, issErr := g.DB().Model("mvp_accept_issue").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		Fields("severity, COUNT(*) as cnt").
-		Group("severity").All()
+	issues, issErr := repo.NewAcceptIssueRepo().CountGroupBySeverityByWorkflow(ctx, workflowRunID)
 	if issErr != nil {
 		g.Log().Warningf(ctx, "[Reporter] 查询验收问题失败: wfRunID=%d err=%v", workflowRunID, issErr)
 	}
 	for _, issue := range issues {
-		b.WriteString(fmt.Sprintf("  %s 问题: %d 个\n", issue["severity"].String(), issue["cnt"].Int()))
+		b.WriteString(fmt.Sprintf("  %s 问题: %d 个\n", g.NewVar(issue["severity"]).String(), g.NewVar(issue["cnt"]).Int()))
 	}
 }
 
 func (r *Reporter) collectReworkMetrics(ctx context.Context, workflowRunID int64, b *strings.Builder) {
-	count, cntErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Where("stage_type", "rework").
-		WhereNull("deleted_at").Count()
+	count, cntErr := repo.NewStageRunRepo().CountByWorkflowAndType(ctx, workflowRunID, "rework")
 	if cntErr != nil {
 		g.Log().Warningf(ctx, "[Reporter] 查询返工轮次失败: wfRunID=%d err=%v", workflowRunID, cntErr)
 	}
 	b.WriteString(fmt.Sprintf("返工轮次: %d\n", count))
 
-	handoffs, hoErr := g.DB().Model("mvp_handoff_record").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Count()
+	handoffs, hoErr := repo.NewHandoffRecordRepo().CountByWorkflow(ctx, workflowRunID)
 	if hoErr != nil {
 		g.Log().Warningf(ctx, "[Reporter] 查询交接记录失败: wfRunID=%d err=%v", workflowRunID, hoErr)
 	}
@@ -176,16 +158,12 @@ func (r *Reporter) collectReworkMetrics(ctx context.Context, workflowRunID int64
 }
 
 func (r *Reporter) collectReviewMetrics(ctx context.Context, workflowRunID int64, b *strings.Builder) {
-	issues, revIssErr := g.DB().Model("mvp_review_issue").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		Fields("severity, COUNT(*) as cnt").
-		Group("severity").All()
+	issues, revIssErr := repo.NewReviewIssueRepo().CountGroupBySeverityByWorkflow(ctx, workflowRunID)
 	if revIssErr != nil {
 		g.Log().Warningf(ctx, "[Reporter] 查询审核问题失败: wfRunID=%d err=%v", workflowRunID, revIssErr)
 	}
 	for _, issue := range issues {
-		b.WriteString(fmt.Sprintf("  %s: %d 个\n", issue["severity"].String(), issue["cnt"].Int()))
+		b.WriteString(fmt.Sprintf("  %s: %d 个\n", g.NewVar(issue["severity"]).String(), g.NewVar(issue["cnt"]).Int()))
 	}
 }
 

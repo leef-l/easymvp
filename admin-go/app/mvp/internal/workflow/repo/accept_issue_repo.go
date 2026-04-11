@@ -79,3 +79,40 @@ func (r *AcceptIssueRepo) CountBlockersByAcceptRun(ctx context.Context, acceptRu
 		Count()
 	return count, err
 }
+
+// CountOpenByAcceptRun 统计某次验收中的 open 问题数。
+func (r *AcceptIssueRepo) CountOpenByAcceptRun(ctx context.Context, acceptRunID int64) (int, error) {
+	return g.DB().Model(r.table()).Ctx(ctx).
+		Where("accept_run_id", acceptRunID).
+		Where("status", "open").
+		WhereNull("deleted_at").
+		Count()
+}
+
+// ListByWorkflowAndTask 按工作流和任务查询验收问题列表。
+func (r *AcceptIssueRepo) ListByWorkflowAndTask(ctx context.Context, workflowRunID, taskID int64) ([]g.Map, error) {
+	records, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		Where("domain_task_id", taskID).
+		WhereNull("deleted_at").
+		OrderDesc("created_at").
+		All()
+	if err != nil {
+		return nil, err
+	}
+	return records.List(), nil
+}
+
+// CountGroupBySeverityByWorkflow 按严重级别统计工作流下的验收问题。
+func (r *AcceptIssueRepo) CountGroupBySeverityByWorkflow(ctx context.Context, workflowRunID int64) ([]g.Map, error) {
+	records, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at").
+		Fields("severity, COUNT(*) as cnt").
+		Group("severity").
+		All()
+	if err != nil {
+		return nil, err
+	}
+	return records.List(), nil
+}

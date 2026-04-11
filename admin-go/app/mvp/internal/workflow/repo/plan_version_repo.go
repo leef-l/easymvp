@@ -7,6 +7,7 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	"easymvp/app/mvp/internal/model/entity"
 	"easymvp/utility/snowflake"
@@ -25,6 +26,12 @@ func (r *PlanVersionRepo) Create(ctx context.Context, data g.Map) (int64, error)
 	data["id"] = id
 	_, err := g.DB().Model(r.table()).Ctx(ctx).Insert(data)
 	return int64(id), err
+}
+
+// Insert 使用给定数据插入方案版本，不自动生成 ID。
+func (r *PlanVersionRepo) Insert(ctx context.Context, data g.Map) error {
+	_, err := g.DB().Model(r.table()).Ctx(ctx).Insert(data)
+	return err
 }
 
 // GetByID 按 ID 查询。
@@ -125,6 +132,48 @@ func (r *PlanVersionRepo) GetLatestByProjectStatusAndReviewStatus(ctx context.Co
 	return record, nil
 }
 
+// UpdateFields 按 ID 更新方案版本字段。
+func (r *PlanVersionRepo) UpdateFields(ctx context.Context, planVersionID int64, data g.Map) error {
+	_, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("id", planVersionID).
+		WhereNull("deleted_at").
+		Data(data).
+		Update()
+	return err
+}
+
+// UpdateFieldsIfReviewStatus 在 review_status 命中时更新方案版本字段。
+func (r *PlanVersionRepo) UpdateFieldsIfReviewStatus(ctx context.Context, planVersionID int64, reviewStatus string, data g.Map) (int64, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("id", planVersionID).
+		WhereNull("deleted_at")
+	if reviewStatus != "" {
+		model = model.Where("review_status", reviewStatus)
+	}
+	result, err := model.Data(data).Update()
+	if err != nil {
+		return 0, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows, nil
+}
+
+// UpdateFieldsIfStatuses 在状态命中集合时更新方案版本字段。
+func (r *PlanVersionRepo) UpdateFieldsIfStatuses(ctx context.Context, planVersionID int64, statuses []string, data g.Map) (int64, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("id", planVersionID).
+		WhereNull("deleted_at")
+	if len(statuses) > 0 {
+		model = model.WhereIn("status", statuses)
+	}
+	result, err := model.Data(data).Update()
+	if err != nil {
+		return 0, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows, nil
+}
+
 // UpdateByIDs 批量更新给定方案版本。
 func (r *PlanVersionRepo) UpdateByIDs(ctx context.Context, ids []int64, data g.Map) error {
 	if len(ids) == 0 {
@@ -164,5 +213,102 @@ func (r *PlanVersionRepo) RestoreRejectedForManualApprove(ctx context.Context, p
 			Data(g.Map{"blueprint_status": "confirmed"}).
 			Update()
 		return err
+	})
+}
+
+// ActivateForForceStage 激活指定方案版本并同步废弃其他草稿/激活版本及蓝图状态。
+func (r *PlanVersionRepo) ActivateForForceStage(ctx context.Context, projectID, workflowRunID, planVersionID int64, targetStage string) error {
+	now := gtime.Now()
+
+	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		otherPlanVersions, err := tx.Model(r.table()).Ctx(ctx).
+			Where("project_id", projectID).
+			WhereIn("status", g.Slice{"draft", "active"}).
+			Where("id <>", planVersionID).
+			WhereNull("deleted_at").
+			Fields("id").
+			Array()
+		if err != nil {
+			return gerror.Wrap(err, "查询其他方案版本失败")
+		}
+
+		record, err := tx.Model(r.table()).Ctx(ctx).
+			Where("id", planVersionID).
+			Where("project_id", projectID).
+			WhereIn("status", g.Slice{"draft", "active"}).
+			WhereNull("deleted_at").
+			Fields("id, status").
+			One()
+		if err != nil {
+			return gerror.Wrap(err, "查询方案版本失败")
+		}
+		if record.IsEmpty() {
+			return gerror.Newf("方案版本 %d 不存在或不可用于强制切换", planVersionID)
+		}
+
+		if len(otherPlanVersions) > 0 {
+			otherIDs := make([]int64, 0, len(otherPlanVersions))
+			for _, item := range otherPlanVersions {
+				otherIDs = append(otherIDs, item.Int64())
+			}
+			if _, err := tx.Model(r.table()).Ctx(ctx).
+				WhereIn("id", otherIDs).
+				Update(g.Map{"status": "superseded", "updated_at": now}); err != nil {
+				return gerror.Wrap(err, "废弃其他方案版本失败")
+			}
+			if _, err := tx.Model("mvp_task_blueprint").Ctx(ctx).
+				WhereIn("plan_version_id", otherIDs).
+				WhereNull("deleted_at").
+				Update(g.Map{"blueprint_status": "superseded", "updated_at": now}); err != nil {
+				return gerror.Wrap(err, "废弃其他版本蓝图失败")
+			}
+		}
+
+		if _, err := tx.Model("mvp_task_blueprint").Ctx(ctx).
+			Where("plan_version_id", planVersionID).
+			Where("blueprint_status", "draft").
+			Update(g.Map{"blueprint_status": "confirmed", "updated_at": now}); err != nil {
+			return gerror.Wrap(err, "确认任务蓝图失败")
+		}
+
+		planUpdate := g.Map{
+			"status":     "active",
+			"updated_at": now,
+		}
+		switch targetStage {
+		case "review":
+			planUpdate["review_status"] = "pending"
+			planUpdate["approved_at"] = nil
+			planUpdate["rejected_at"] = nil
+		case "execute":
+			planUpdate["review_status"] = "approved"
+			planUpdate["approved_at"] = now
+			planUpdate["rejected_at"] = nil
+		}
+
+		if _, err := tx.Model(r.table()).Ctx(ctx).
+			Where("id", planVersionID).
+			Update(planUpdate); err != nil {
+			return gerror.Wrap(err, "更新方案版本状态失败")
+		}
+
+		confirmedCount, err := tx.Model("mvp_task_blueprint").Ctx(ctx).
+			Where("plan_version_id", planVersionID).
+			Where("blueprint_status", "confirmed").
+			WhereNull("deleted_at").
+			Count()
+		if err != nil {
+			return gerror.Wrap(err, "查询确认蓝图失败")
+		}
+		if confirmedCount == 0 {
+			return gerror.Newf("方案版本 %d 没有可执行的确认蓝图", planVersionID)
+		}
+
+		if _, err := tx.Model("mvp_workflow_run").Ctx(ctx).
+			Where("id", workflowRunID).
+			Update(g.Map{"active_plan_version_id": planVersionID, "updated_at": now}); err != nil {
+			return gerror.Wrap(err, "回写 active_plan_version_id 失败")
+		}
+		return nil
 	})
 }

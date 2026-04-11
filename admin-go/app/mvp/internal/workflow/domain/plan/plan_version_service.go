@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/gconv"
 
 	"easymvp/app/mvp/internal/consts"
 	"easymvp/app/mvp/internal/engine"
@@ -23,14 +24,27 @@ type ReviewTrigger func(ctx context.Context, projectID, planVersionID int64) err
 
 // PlanVersionService 计划版本服务。
 type PlanVersionService struct {
-	planRepo      *repo.PlanVersionRepo
-	blueprintRepo *repo.BlueprintRepo
-	reviewTrigger ReviewTrigger
+	planRepo        *repo.PlanVersionRepo
+	blueprintRepo   *repo.BlueprintRepo
+	projectRepo     *repo.ProjectRepo
+	workflowRunRepo *repo.WorkflowRunRepo
+	reviewTrigger   ReviewTrigger
 }
 
 // NewPlanVersionService 创建计划版本服务。
 func NewPlanVersionService(pr *repo.PlanVersionRepo, br *repo.BlueprintRepo) *PlanVersionService {
-	return &PlanVersionService{planRepo: pr, blueprintRepo: br}
+	if pr == nil {
+		pr = repo.NewPlanVersionRepo()
+	}
+	if br == nil {
+		br = repo.NewBlueprintRepo()
+	}
+	return &PlanVersionService{
+		planRepo:        pr,
+		blueprintRepo:   br,
+		projectRepo:     repo.NewProjectRepo(),
+		workflowRunRepo: repo.NewWorkflowRunRepo(),
+	}
 }
 
 // SetReviewTrigger 注册审核触发回调。
@@ -66,7 +80,7 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 	now := time.Now()
 	var versionNo int
 
-	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+	err := g.DB().Transaction(ctx, func(ctx context.Context, _ gdb.TX) error {
 		// 1. 获取下一个 version_no
 		var err error
 		versionNo, err = s.planRepo.NextVersionNo(ctx, projectID)
@@ -83,7 +97,7 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 		scope := repo.GetProjectScopeByProject(ctx, projectID)
 
 		// 4. 创建 plan_version
-		_, err = tx.Model("mvp_plan_version").Ctx(ctx).Insert(g.Map{
+		err = s.planRepo.Insert(ctx, g.Map{
 			"id":                     pvID,
 			"project_id":             projectID,
 			"workflow_run_id":        workflowRunID,
@@ -110,7 +124,7 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 			if jsonErr != nil {
 				return fmt.Errorf("序列化 affected_resources 失败: task=%s err=%w", task.Name, jsonErr)
 			}
-			_, err = tx.Model("mvp_task_blueprint").Ctx(ctx).Insert(g.Map{
+			err = s.blueprintRepo.Insert(ctx, g.Map{
 				"id":                 blueprintIDs[i],
 				"plan_version_id":    pvID,
 				"name":               task.Name,
@@ -147,9 +161,7 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 				if depJSONErr != nil {
 					return fmt.Errorf("序列化依赖ID失败: task=%s err=%w", task.Name, depJSONErr)
 				}
-				if _, err := tx.Model("mvp_task_blueprint").Ctx(ctx).
-					Where("id", blueprintIDs[i]).
-					Update(g.Map{"depends_on_blueprint_ids": string(depJSON)}); err != nil {
+				if err := s.blueprintRepo.UpdateFields(ctx, blueprintIDs[i], g.Map{"depends_on_blueprint_ids": string(depJSON)}); err != nil {
 					return fmt.Errorf("回写蓝图依赖失败: %w", err)
 				}
 			}
@@ -157,14 +169,14 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 
 		// 6. 更新 workflow_run 的 active_plan_version_id（CAS：仅 designing/reviewing 状态可更新）
 		if workflowRunID > 0 {
-			wfResult, err := tx.Model("mvp_workflow_run").Ctx(ctx).
-				Where("id", workflowRunID).
-				WhereIn("status", g.Slice{consts.WorkflowRunStatusDesigning, consts.WorkflowRunStatusReviewing}).
-				Update(g.Map{"active_plan_version_id": pvID, "updated_at": now})
+			wfRows, err := s.workflowRunRepo.UpdateFieldsIfStatuses(ctx, workflowRunID, []string{
+				consts.WorkflowRunStatusDesigning,
+				consts.WorkflowRunStatusReviewing,
+			}, g.Map{"active_plan_version_id": pvID, "updated_at": now})
 			if err != nil {
 				return fmt.Errorf("更新 active_plan_version_id 失败: %w", err)
 			}
-			if rows, _ := wfResult.RowsAffected(); rows == 0 {
+			if wfRows == 0 {
 				// workflow_run 不在 designing/reviewing 状态，跳过关联但不回滚蓝图创建
 				g.Log().Warningf(ctx, "[PlanVersionService] workflow_run(%d) 不在可关联状态，跳过 active_plan_version_id 更新", workflowRunID)
 			}
@@ -192,31 +204,23 @@ func (s *PlanVersionService) ApplyTaskPatchesFromArchitectReply(
 		return 0, 0, fmt.Errorf("没有可回写的 task_patches")
 	}
 
-	pv, err := g.DB().Model("mvp_plan_version").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereIn("status", g.Slice{consts.PlanVersionStatusDraft, consts.PlanVersionStatusActive}).
-		WhereNull("deleted_at").
-		OrderDesc("version_no").
-		One()
+	pv, err := s.planRepo.GetLatestByProjectStatuses(ctx, projectID, []string{consts.PlanVersionStatusDraft, consts.PlanVersionStatusActive}, "id")
 	if err != nil {
 		return 0, 0, fmt.Errorf("查询当前方案版本失败: %w", err)
 	}
-	if pv.IsEmpty() {
+	if pv == nil {
 		return 0, 0, fmt.Errorf("项目 %d 没有可修订的方案版本", projectID)
 	}
 
-	pvID := pv["id"].Int64()
+	pvID := gconv.Int64(pv["id"])
 	now := time.Now()
 	patchedCount := 0
 	resolvedRoleLevels := make(map[string]string, len(patches))
 
-	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		blueprints, bpErr := tx.Model("mvp_task_blueprint").Ctx(ctx).
-			Where("plan_version_id", pvID).
-			WhereIn("blueprint_status", g.Slice{consts.BlueprintStatusDraft, consts.BlueprintStatusConfirmed}).
-			WhereNull("deleted_at").
-			OrderAsc("sort").
-			All()
+	err = g.DB().Transaction(ctx, func(ctx context.Context, _ gdb.TX) error {
+		blueprints, bpErr := s.blueprintRepo.ListByPlanVersionStatuses(ctx, pvID,
+			[]string{consts.BlueprintStatusDraft, consts.BlueprintStatusConfirmed},
+			"id", "name", "role_type", "role_level")
 		if bpErr != nil {
 			return fmt.Errorf("查询蓝图失败: %w", bpErr)
 		}
@@ -227,10 +231,11 @@ func (s *PlanVersionService) ApplyTaskPatchesFromArchitectReply(
 		byID := make(map[int64]gdb.Record, len(blueprints))
 		byName := make(map[string]gdb.Record, len(blueprints))
 		for _, bp := range blueprints {
-			byID[bp["id"].Int64()] = bp
-			name := strings.TrimSpace(bp["name"].String())
+			record := mapToRecord(bp)
+			byID[record["id"].Int64()] = record
+			name := strings.TrimSpace(record["name"].String())
 			if name != "" {
-				byName[name] = bp
+				byName[name] = record
 			}
 		}
 
@@ -260,9 +265,7 @@ func (s *PlanVersionService) ApplyTaskPatchesFromArchitectReply(
 			}
 			updateData["updated_at"] = now
 
-			if _, upErr := tx.Model("mvp_task_blueprint").Ctx(ctx).
-				Where("id", target["id"].Int64()).
-				Update(updateData); upErr != nil {
+			if upErr := s.blueprintRepo.UpdateFields(ctx, target["id"].Int64(), updateData); upErr != nil {
 				return fmt.Errorf("更新蓝图 %d 失败: %w", target["id"].Int64(), upErr)
 			}
 			patchedCount++
@@ -272,14 +275,12 @@ func (s *PlanVersionService) ApplyTaskPatchesFromArchitectReply(
 			return fmt.Errorf("task_patches 未产生实际变更")
 		}
 
-		if _, upErr := tx.Model("mvp_plan_version").Ctx(ctx).
-			Where("id", pvID).
-			Update(g.Map{
-				"workflow_run_id":        workflowRunID,
-				"source_conversation_id": conversationID,
-				"source_message_id":      messageID,
-				"updated_at":             now,
-			}); upErr != nil {
+		if upErr := s.planRepo.UpdateFields(ctx, pvID, g.Map{
+			"workflow_run_id":        workflowRunID,
+			"source_conversation_id": conversationID,
+			"source_message_id":      messageID,
+			"updated_at":             now,
+		}); upErr != nil {
 			return fmt.Errorf("更新方案版本来源失败: %w", upErr)
 		}
 
@@ -363,6 +364,14 @@ func buildBlueprintPatchUpdateData(byName map[string]gdb.Record, patch *engine.A
 	return updateData, nil
 }
 
+func mapToRecord(data g.Map) gdb.Record {
+	record := make(gdb.Record, len(data))
+	for key, value := range data {
+		record[key] = g.NewVar(value)
+	}
+	return record
+}
+
 func resolveBlueprintRoleLevel(ctx context.Context, projectID int64, roleType string, requestedLevel string, cache map[string]string) string {
 	roleType = defaultRoleType(roleType)
 	requestedLevel = defaultRoleLevel(requestedLevel)
@@ -407,40 +416,30 @@ func (s *PlanVersionService) SupersedePreviousVersions(ctx context.Context, proj
 func (s *PlanVersionService) doSupersede(ctx context.Context, projectID int64, exceptVersionID int64) error {
 	now := gtime.Now()
 
-	// 单次 UPDATE 直接按状态条件更新，无需先查 ID 列表
-	pvQuery := g.DB().Model("mvp_plan_version").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereIn("status", g.Slice{consts.PlanVersionStatusDraft, consts.PlanVersionStatusActive}).
-		WhereNull("deleted_at")
-	if exceptVersionID > 0 {
-		pvQuery = pvQuery.WhereNot("id", exceptVersionID)
-	}
-
 	// 先查出受影响的 ID 列表（供蓝图级联更新使用）
-	oldIDs, err := pvQuery.Clone().Fields("id").Array()
-	if err != nil || len(oldIDs) == 0 {
+	records, err := s.planRepo.ListByProjectStatuses(ctx, projectID, []string{consts.PlanVersionStatusDraft, consts.PlanVersionStatusActive}, "id")
+	if err != nil || len(records) == 0 {
 		return err
 	}
-	idList := make([]int64, 0, len(oldIDs))
-	for _, v := range oldIDs {
-		idList = append(idList, v.Int64())
+	idList := make([]int64, 0, len(records))
+	for _, record := range records {
+		id := record["id"].Int64()
+		if exceptVersionID > 0 && id == exceptVersionID {
+			continue
+		}
+		idList = append(idList, id)
+	}
+	if len(idList) == 0 {
+		return nil
 	}
 
 	// plan_version 状态更新（CAS：仅更新 draft/active 状态的记录）
-	_, err = g.DB().Model("mvp_plan_version").Ctx(ctx).
-		WhereIn("id", idList).
-		WhereIn("status", g.Slice{consts.PlanVersionStatusDraft, consts.PlanVersionStatusActive}).
-		Update(g.Map{"status": consts.PlanVersionStatusSuperseded, "updated_at": now})
-	if err != nil {
+	if err = s.planRepo.UpdateByIDs(ctx, idList, g.Map{"status": consts.PlanVersionStatusSuperseded, "updated_at": now}); err != nil {
 		return err
 	}
 
 	// 级联更新蓝图状态
-	_, err = g.DB().Model("mvp_task_blueprint").Ctx(ctx).
-		WhereIn("plan_version_id", idList).
-		WhereNot("blueprint_status", consts.BlueprintStatusSuperseded).
-		Update(g.Map{"blueprint_status": consts.BlueprintStatusSuperseded, "updated_at": now})
-	return err
+	return s.blueprintRepo.UpdateByPlanVersionIDs(ctx, idList, g.Map{"blueprint_status": consts.BlueprintStatusSuperseded, "updated_at": now})
 }
 
 // SubmitForReview 提交当前草稿版本进入审核。
@@ -450,22 +449,14 @@ func (s *PlanVersionService) SubmitForReview(ctx context.Context, projectID int6
 	now := gtime.Now()
 
 	// 1. 找最新的 draft plan_version
-	pv, err := g.DB().Model("mvp_plan_version").Ctx(ctx).
-		Where("project_id", projectID).
-		Where("status", consts.PlanVersionStatusDraft).
-		WhereNull("deleted_at").
-		OrderDesc("version_no").
-		One()
-	if err != nil || pv.IsEmpty() {
+	pv, err := s.planRepo.GetLatestByProjectStatuses(ctx, projectID, []string{consts.PlanVersionStatusDraft}, "id")
+	if err != nil || pv == nil {
 		return fmt.Errorf("没有待确认的方案版本")
 	}
-	pvID := pv["id"].Int64()
+	pvID := gconv.Int64(pv["id"])
 
 	// 2. 检查蓝图数
-	bpCount, bpCountErr := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
-		Where("plan_version_id", pvID).
-		WhereNull("deleted_at").
-		Count()
+	bpCount, bpCountErr := s.blueprintRepo.CountByPlanVersion(ctx, pvID)
 	if bpCountErr != nil {
 		return fmt.Errorf("查询蓝图数失败: %w", bpCountErr)
 	}
@@ -474,40 +465,38 @@ func (s *PlanVersionService) SubmitForReview(ctx context.Context, projectID int6
 	}
 
 	// 3. 事务内完成所有状态迁移
-	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+	err = g.DB().Transaction(ctx, func(ctx context.Context, _ gdb.TX) error {
 		// plan_version: draft → active（CAS）
-		pvResult, err := tx.Model("mvp_plan_version").Ctx(ctx).
-			Where("id", pvID).
-			Where("status", consts.PlanVersionStatusDraft).
-			Update(g.Map{"status": consts.PlanVersionStatusActive, "updated_at": now})
+		pvRows, err := s.planRepo.UpdateFieldsIfStatuses(ctx, pvID, []string{consts.PlanVersionStatusDraft}, g.Map{
+			"status":     consts.PlanVersionStatusActive,
+			"updated_at": now,
+		})
 		if err != nil {
 			return fmt.Errorf("更新 plan_version 状态失败: %w", err)
 		}
-		if rows, _ := pvResult.RowsAffected(); rows == 0 {
+		if pvRows == 0 {
 			return fmt.Errorf("plan_version(%d) 已不在 draft 状态，无法提交审核", pvID)
 		}
 
 		// blueprints: draft → confirmed
-		bpResult, err := tx.Model("mvp_task_blueprint").Ctx(ctx).
-			Where("plan_version_id", pvID).
-			Where("blueprint_status", consts.BlueprintStatusDraft).
-			Update(g.Map{"blueprint_status": consts.BlueprintStatusConfirmed, "updated_at": now})
+		bpRows, err := s.blueprintRepo.UpdateByPlanVersionStatuses(ctx, pvID, []string{consts.BlueprintStatusDraft}, g.Map{
+			"blueprint_status": consts.BlueprintStatusConfirmed,
+			"updated_at":       now,
+		})
 		if err != nil {
 			return fmt.Errorf("确认蓝图状态失败: %w", err)
 		}
-		if rows, _ := bpResult.RowsAffected(); rows == 0 {
+		if bpRows == 0 {
 			return fmt.Errorf("plan_version(%d) 下没有 draft 蓝图可确认", pvID)
 		}
 
 		// project status → reviewing
-		projResult, err := tx.Model("mvp_project").Ctx(ctx).
-			Where("id", projectID).
-			Update(g.Map{"status": "reviewing", "pause_reason": nil, "updated_at": now})
-		if err != nil {
+		if err := s.projectRepo.UpdateFields(ctx, projectID, g.Map{
+			"status":       "reviewing",
+			"pause_reason": nil,
+			"updated_at":   now,
+		}); err != nil {
 			return fmt.Errorf("更新项目状态失败: %w", err)
-		}
-		if rows, _ := projResult.RowsAffected(); rows == 0 {
-			return fmt.Errorf("项目(%d) 不存在或状态更新失败", projectID)
 		}
 
 		return nil
@@ -523,19 +512,19 @@ func (s *PlanVersionService) SubmitForReview(ctx context.Context, projectID int6
 		if triggerErr := s.reviewTrigger(ctx, projectID, pvID); triggerErr != nil {
 			g.Log().Errorf(ctx, "[PlanVersionService] 触发审核失败，回滚状态: projectID=%d pvID=%d err=%v", projectID, pvID, triggerErr)
 			// 回滚：active → draft, confirmed → draft, reviewing → designing
-			if _, rbErr := g.DB().Model("mvp_plan_version").Ctx(ctx).
-				Where("id", pvID).Where("status", consts.PlanVersionStatusActive).
-				Update(g.Map{"status": consts.PlanVersionStatusDraft, "updated_at": gtime.Now()}); rbErr != nil {
-				g.Log().Errorf(ctx, "[PlanVersionService] 回滚 plan_version 失败: pv=%d err=%v", pvID, rbErr)
+			if err := s.planRepo.UpdateFields(ctx, pvID, g.Map{"status": consts.PlanVersionStatusDraft, "updated_at": gtime.Now()}); err != nil {
+				g.Log().Errorf(ctx, "[PlanVersionService] 回滚 plan_version 失败: pv=%d err=%v", pvID, err)
 			}
-			if _, rbErr := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
-				Where("plan_version_id", pvID).Where("blueprint_status", consts.BlueprintStatusConfirmed).
-				Update(g.Map{"blueprint_status": consts.BlueprintStatusDraft, "updated_at": gtime.Now()}); rbErr != nil {
+			if rbErr := s.blueprintRepo.UpdateStatusByPlanVersion(ctx, pvID, consts.BlueprintStatusConfirmed, g.Map{
+				"blueprint_status": consts.BlueprintStatusDraft,
+				"updated_at":       gtime.Now(),
+			}); rbErr != nil {
 				g.Log().Errorf(ctx, "[PlanVersionService] 回滚 blueprints 失败: pv=%d err=%v", pvID, rbErr)
 			}
-			if _, rbErr := g.DB().Model("mvp_project").Ctx(ctx).
-				Where("id", projectID).Where("status", "reviewing").
-				Update(g.Map{"status": "designing", "updated_at": gtime.Now()}); rbErr != nil {
+			if _, rbErr := s.projectRepo.UpdateFieldsIfStatuses(ctx, projectID, []string{"reviewing"}, g.Map{
+				"status":     "designing",
+				"updated_at": gtime.Now(),
+			}); rbErr != nil {
 				g.Log().Errorf(ctx, "[PlanVersionService] 回滚 project 失败: project=%d err=%v", projectID, rbErr)
 			}
 			return fmt.Errorf("提交审核失败: %w", triggerErr)
@@ -551,32 +540,23 @@ func (s *PlanVersionService) SubmitForReviewAsync(ctx context.Context, projectID
 	now := gtime.Now()
 
 	// 防重复提交：检查项目是否已在审核中
-	projectStatus, psErr := g.DB().Model("mvp_project").Ctx(ctx).
-		Where("id", projectID).WhereNull("deleted_at").Value("status")
+	project, psErr := s.projectRepo.GetByID(ctx, projectID, "status")
 	if psErr != nil {
 		return fmt.Errorf("查询项目状态失败: %w", psErr)
 	}
-	if projectStatus.String() == "reviewing" {
+	if gconv.String(project["status"]) == "reviewing" {
 		return fmt.Errorf("方案已在审核中，请勿重复提交")
 	}
 
 	// 1. 找最新的 draft plan_version
-	pv, err := g.DB().Model("mvp_plan_version").Ctx(ctx).
-		Where("project_id", projectID).
-		Where("status", consts.PlanVersionStatusDraft).
-		WhereNull("deleted_at").
-		OrderDesc("version_no").
-		One()
-	if err != nil || pv.IsEmpty() {
+	pv, err := s.planRepo.GetLatestByProjectStatuses(ctx, projectID, []string{consts.PlanVersionStatusDraft}, "id")
+	if err != nil || pv == nil {
 		return fmt.Errorf("没有待确认的方案版本")
 	}
-	pvID := pv["id"].Int64()
+	pvID := gconv.Int64(pv["id"])
 
 	// 2. 检查蓝图数
-	bpCount, bpCountErr := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
-		Where("plan_version_id", pvID).
-		WhereNull("deleted_at").
-		Count()
+	bpCount, bpCountErr := s.blueprintRepo.CountByPlanVersion(ctx, pvID)
 	if bpCountErr != nil {
 		return fmt.Errorf("查询蓝图数失败: %w", bpCountErr)
 	}
@@ -585,37 +565,35 @@ func (s *PlanVersionService) SubmitForReviewAsync(ctx context.Context, projectID
 	}
 
 	// 3. 事务内完成所有状态迁移（同步，快速）
-	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		pvResult, err := tx.Model("mvp_plan_version").Ctx(ctx).
-			Where("id", pvID).
-			Where("status", consts.PlanVersionStatusDraft).
-			Update(g.Map{"status": consts.PlanVersionStatusActive, "updated_at": now})
+	err = g.DB().Transaction(ctx, func(ctx context.Context, _ gdb.TX) error {
+		pvRows, err := s.planRepo.UpdateFieldsIfStatuses(ctx, pvID, []string{consts.PlanVersionStatusDraft}, g.Map{
+			"status":     consts.PlanVersionStatusActive,
+			"updated_at": now,
+		})
 		if err != nil {
 			return fmt.Errorf("更新 plan_version 状态失败: %w", err)
 		}
-		if rows, _ := pvResult.RowsAffected(); rows == 0 {
+		if pvRows == 0 {
 			return fmt.Errorf("plan_version(%d) 已不在 draft 状态，无法提交审核", pvID)
 		}
 
-		bpResult, err := tx.Model("mvp_task_blueprint").Ctx(ctx).
-			Where("plan_version_id", pvID).
-			Where("blueprint_status", consts.BlueprintStatusDraft).
-			Update(g.Map{"blueprint_status": consts.BlueprintStatusConfirmed, "updated_at": now})
+		bpRows, err := s.blueprintRepo.UpdateByPlanVersionStatuses(ctx, pvID, []string{consts.BlueprintStatusDraft}, g.Map{
+			"blueprint_status": consts.BlueprintStatusConfirmed,
+			"updated_at":       now,
+		})
 		if err != nil {
 			return fmt.Errorf("确认蓝图状态失败: %w", err)
 		}
-		if rows, _ := bpResult.RowsAffected(); rows == 0 {
+		if bpRows == 0 {
 			return fmt.Errorf("plan_version(%d) 下没有 draft 蓝图可确认", pvID)
 		}
 
-		projResult, err := tx.Model("mvp_project").Ctx(ctx).
-			Where("id", projectID).
-			Update(g.Map{"status": "reviewing", "pause_reason": nil, "updated_at": now})
-		if err != nil {
+		if err := s.projectRepo.UpdateFields(ctx, projectID, g.Map{
+			"status":       "reviewing",
+			"pause_reason": nil,
+			"updated_at":   now,
+		}); err != nil {
 			return fmt.Errorf("更新项目状态失败: %w", err)
-		}
-		if rows, _ := projResult.RowsAffected(); rows == 0 {
-			return fmt.Errorf("项目(%d) 不存在或状态更新失败", projectID)
 		}
 
 		return nil
@@ -639,40 +617,34 @@ func (s *PlanVersionService) SubmitForReviewAsync(ctx context.Context, projectID
 			if triggerErr := s.reviewTrigger(bgCtx, projectID, pvID); triggerErr != nil {
 				g.Log().Errorf(bgCtx, "[PlanVersionService] 异步审核失败，回滚状态: projectID=%d pvID=%d err=%v", projectID, pvID, triggerErr)
 				rollbackNow := gtime.Now()
-				if _, rbErr := g.DB().Model("mvp_plan_version").Ctx(bgCtx).
-					Where("id", pvID).Where("status", consts.PlanVersionStatusActive).
-					Update(g.Map{"status": consts.PlanVersionStatusDraft, "updated_at": rollbackNow}); rbErr != nil {
-					g.Log().Errorf(bgCtx, "[PlanVersionService] 异步回滚 plan_version 失败: pv=%d err=%v", pvID, rbErr)
+				if err := s.planRepo.UpdateFields(bgCtx, pvID, g.Map{"status": consts.PlanVersionStatusDraft, "updated_at": rollbackNow}); err != nil {
+					g.Log().Errorf(bgCtx, "[PlanVersionService] 异步回滚 plan_version 失败: pv=%d err=%v", pvID, err)
 				}
-				if _, rbErr := g.DB().Model("mvp_task_blueprint").Ctx(bgCtx).
-					Where("plan_version_id", pvID).Where("blueprint_status", consts.BlueprintStatusConfirmed).
-					Update(g.Map{"blueprint_status": consts.BlueprintStatusDraft, "updated_at": rollbackNow}); rbErr != nil {
+				if rbErr := s.blueprintRepo.UpdateStatusByPlanVersion(bgCtx, pvID, consts.BlueprintStatusConfirmed, g.Map{
+					"blueprint_status": consts.BlueprintStatusDraft,
+					"updated_at":       rollbackNow,
+				}); rbErr != nil {
 					g.Log().Errorf(bgCtx, "[PlanVersionService] 异步回滚 blueprints 失败: pv=%d err=%v", pvID, rbErr)
 				}
 
 				// 查找关联的 workflow_run 并回退状态
-				wfRun, wfErr := g.DB().Model("mvp_workflow_run").Ctx(bgCtx).
-					Where("project_id", projectID).
-					WhereIn("status", g.Slice{"reviewing", "failed"}).
-					WhereNull("deleted_at").
-					OrderDesc("id").
-					Fields("id").
-					One()
+				wfRun, wfErr := s.workflowRunRepo.GetLatestByProjectStatuses(bgCtx, projectID, []string{"reviewing", "failed"}, "id")
 				if wfErr != nil {
 					g.Log().Errorf(bgCtx, "[PlanVersionService] 异步回滚查询 workflow_run 失败: project=%d err=%v", projectID, wfErr)
-				} else if !wfRun.IsEmpty() {
-					if _, rbErr := g.DB().Model("mvp_workflow_run").Ctx(bgCtx).
-						Where("id", wfRun["id"].Int64()).
-						WhereIn("status", g.Slice{"reviewing", "failed"}).
-						Update(g.Map{"status": "designing", "current_stage": "design", "updated_at": rollbackNow}); rbErr != nil {
-						g.Log().Errorf(bgCtx, "[PlanVersionService] 异步回滚 workflow_run 失败: wfRun=%d err=%v", wfRun["id"].Int64(), rbErr)
+				} else if wfRun != nil {
+					if _, rbErr := s.workflowRunRepo.UpdateFieldsIfStatuses(bgCtx, gconv.Int64(wfRun["id"]), []string{"reviewing", "failed"}, g.Map{
+						"status":        "designing",
+						"current_stage": "design",
+						"updated_at":    rollbackNow,
+					}); rbErr != nil {
+						g.Log().Errorf(bgCtx, "[PlanVersionService] 异步回滚 workflow_run 失败: wfRun=%d err=%v", gconv.Int64(wfRun["id"]), rbErr)
 					}
 				}
 
-				if _, rbErr := g.DB().Model("mvp_project").Ctx(bgCtx).
-					Where("id", projectID).
-					WhereIn("status", g.Slice{"reviewing", "failed"}).
-					Update(g.Map{"status": "designing", "updated_at": rollbackNow}); rbErr != nil {
+				if _, rbErr := s.projectRepo.UpdateFieldsIfStatuses(bgCtx, projectID, []string{"reviewing", "failed"}, g.Map{
+					"status":     "designing",
+					"updated_at": rollbackNow,
+				}); rbErr != nil {
 					g.Log().Errorf(bgCtx, "[PlanVersionService] 异步回滚 project 失败: project=%d err=%v", projectID, rbErr)
 				}
 			}
@@ -684,37 +656,28 @@ func (s *PlanVersionService) SubmitForReviewAsync(ctx context.Context, projectID
 // Approve 通过计划版本。
 func (s *PlanVersionService) Approve(ctx context.Context, planVersionID int64) error {
 	now := gtime.Now()
-	_, err := g.DB().Model("mvp_plan_version").Ctx(ctx).
-		Where("id", planVersionID).
-		Where("review_status", consts.PlanReviewStatusPending).
-		Update(g.Map{
-			"review_status": consts.PlanReviewStatusApproved,
-			"approved_at":   now,
-			"updated_at":    now,
-		})
+	_, err := s.planRepo.UpdateFieldsIfReviewStatus(ctx, planVersionID, consts.PlanReviewStatusPending, g.Map{
+		"review_status": consts.PlanReviewStatusApproved,
+		"approved_at":   now,
+		"updated_at":    now,
+	})
 	return err
 }
 
 // Reject 驳回计划版本。
 func (s *PlanVersionService) Reject(ctx context.Context, planVersionID int64) error {
 	now := gtime.Now()
-	_, err := g.DB().Model("mvp_plan_version").Ctx(ctx).
-		Where("id", planVersionID).
-		Where("review_status", consts.PlanReviewStatusPending).
-		Update(g.Map{
-			"review_status": consts.PlanReviewStatusRejected,
-			"rejected_at":   now,
-			"updated_at":    now,
-		})
+	_, err := s.planRepo.UpdateFieldsIfReviewStatus(ctx, planVersionID, consts.PlanReviewStatusPending, g.Map{
+		"review_status": consts.PlanReviewStatusRejected,
+		"rejected_at":   now,
+		"updated_at":    now,
+	})
 	return err
 }
 
 // GetBlueprintCount 获取版本下的蓝图数量。
 func (s *PlanVersionService) GetBlueprintCount(ctx context.Context, planVersionID int64) int {
-	count, err := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
-		Where("plan_version_id", planVersionID).
-		WhereNull("deleted_at").
-		Count()
+	count, err := s.blueprintRepo.CountByPlanVersion(ctx, planVersionID)
 	if err != nil {
 		g.Log().Warningf(ctx, "[PlanVersion] 查询蓝图数失败: pvID=%d err=%v", planVersionID, err)
 	}

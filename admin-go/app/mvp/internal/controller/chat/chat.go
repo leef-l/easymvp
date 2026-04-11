@@ -11,6 +11,7 @@ import (
 	v1 "easymvp/app/mvp/api/mvp/v1"
 	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/middleware"
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/utility/snowflake"
 )
 
@@ -20,14 +21,16 @@ type cChat struct{}
 
 // Send 发送消息
 func (c *cChat) Send(ctx context.Context, req *v1.ChatSendReq) (res *v1.ChatSendRes, err error) {
+	conversationRepo := repo.NewConversationRepo()
+
 	userID := middleware.GetUserID(ctx)
 	deptID := middleware.GetDeptID(ctx)
 
-	conv, convErr := g.DB().Ctx(ctx).Model("mvp_conversation").Where("id", req.ConversationID).WhereNull("deleted_at").One()
-	if convErr != nil || conv.IsEmpty() {
+	conv, convErr := conversationRepo.GetByID(ctx, int64(req.ConversationID), "id", "created_by")
+	if convErr != nil || len(conv) == 0 {
 		return nil, fmt.Errorf("对话不存在")
 	}
-	if conv["created_by"].Int64() != userID && userID != 1 {
+	if mapToDBRecord(conv)["created_by"].Int64() != userID && userID != 1 {
 		return nil, fmt.Errorf("无权操作该对话")
 	}
 
@@ -44,6 +47,12 @@ func (c *cChat) Send(ctx context.Context, req *v1.ChatSendReq) (res *v1.ChatSend
 
 // SSE 流式输出端点
 func (c *cChat) SSE(ctx context.Context, req *v1.ChatSSEReq) (res *v1.ChatSSERes, err error) {
+	var (
+		conversationRepo = repo.NewConversationRepo()
+		messageChunkRepo = repo.NewMessageChunkRepo()
+		messageRepo      = repo.NewMessageRepo()
+	)
+
 	r := g.RequestFromCtx(ctx)
 	messageID := int64(req.MessageID)
 
@@ -54,19 +63,20 @@ func (c *cChat) SSE(ctx context.Context, req *v1.ChatSSEReq) (res *v1.ChatSSERes
 	r.Response.Header().Set("Access-Control-Allow-Origin", "*")
 
 	// 1. 先检查消息状态，如果已完成直接返回全部内容
-	msg, msgErr := g.DB().Ctx(ctx).Model("mvp_message").Where("id", messageID).WhereNull("deleted_at").One()
-	if msgErr != nil || msg.IsEmpty() {
+	msg, msgErr := messageRepo.GetByID(ctx, messageID, "id", "conversation_id", "content", "status")
+	if msgErr != nil || len(msg) == 0 {
 		writeSSEEvent(r, "error", `{"error":"消息不存在"}`)
 		writeSSEEvent(r, "done", `{"done":true}`)
 		r.Response.Flush()
 		return nil, nil
 	}
+	msgRecord := mapToDBRecord(msg)
 
 	userID := middleware.GetUserID(ctx)
 	if userID != 1 {
-		convID := msg["conversation_id"].Int64()
-		conv, convErr := g.DB().Ctx(ctx).Model("mvp_conversation").Where("id", convID).WhereNull("deleted_at").One()
-		if convErr != nil || conv.IsEmpty() || conv["created_by"].Int64() != userID {
+		convID := msgRecord["conversation_id"].Int64()
+		conv, convErr := conversationRepo.GetByID(ctx, convID, "id", "created_by")
+		if convErr != nil || len(conv) == 0 || mapToDBRecord(conv)["created_by"].Int64() != userID {
 			writeSSEEvent(r, "error", `{"error":"无权访问"}`)
 			writeSSEEvent(r, "done", `{"done":true}`)
 			r.Response.Flush()
@@ -74,26 +84,24 @@ func (c *cChat) SSE(ctx context.Context, req *v1.ChatSSEReq) (res *v1.ChatSSERes
 		}
 	}
 
-	status := msg["status"].String()
+	status := msgRecord["status"].String()
 
 	if status == "completed" || status == "failed" {
 		// 消息已完成，发送全部内容
-		writeSSEEvent(r, "full", fmt.Sprintf(`{"content":%q,"status":"%s"}`, msg["content"].String(), status))
+		writeSSEEvent(r, "full", fmt.Sprintf(`{"content":%q,"status":"%s"}`, msgRecord["content"].String(), status))
 		writeSSEEvent(r, "done", `{"done":true}`)
 		r.Response.Flush()
 		return nil, nil
 	}
 
 	// 2. 消息正在 streaming，先发送已有的 chunks
-	chunks, chunkErr := g.DB().Ctx(ctx).Model("mvp_message_chunk").
-		Where("message_id", messageID).
-		Order("chunk_index ASC").
-		All()
+	chunks, chunkErr := messageChunkRepo.ListByMessage(ctx, messageID)
 	if chunkErr != nil {
 		g.Log().Warningf(ctx, "[SSE] 查询 chunks 失败: msg=%d err=%v", messageID, chunkErr)
 	}
 	for _, chunk := range chunks {
-		writeSSEEvent(r, "chunk", fmt.Sprintf(`{"content":%q,"index":%d}`, chunk["content"].String(), chunk["chunk_index"].Int()))
+		record := mapToDBRecord(chunk)
+		writeSSEEvent(r, "chunk", fmt.Sprintf(`{"content":%q,"index":%d}`, record["content"].String(), record["chunk_index"].Int()))
 	}
 	r.Response.Flush()
 
@@ -125,35 +133,35 @@ func (c *cChat) SSE(ctx context.Context, req *v1.ChatSSEReq) (res *v1.ChatSSERes
 
 // History 获取对话历史
 func (c *cChat) History(ctx context.Context, req *v1.ChatHistoryReq) (res *v1.ChatHistoryRes, err error) {
+	var (
+		conversationRepo = repo.NewConversationRepo()
+		messageRepo      = repo.NewMessageRepo()
+	)
+
 	userID := middleware.GetUserID(ctx)
 	if userID != 1 {
-		conv, convErr := g.DB().Ctx(ctx).Model("mvp_conversation").Where("id", req.ConversationID).WhereNull("deleted_at").One()
-		if convErr != nil || conv.IsEmpty() || conv["created_by"].Int64() != userID {
+		conv, convErr := conversationRepo.GetByID(ctx, int64(req.ConversationID), "id", "created_by")
+		if convErr != nil || len(conv) == 0 || mapToDBRecord(conv)["created_by"].Int64() != userID {
 			return nil, fmt.Errorf("无权访问该对话")
 		}
 	}
 
-	records, err := g.DB().Ctx(ctx).Model("mvp_message m").
-		LeftJoin("ai_model am", "am.id = m.model_id").
-		Fields("m.id, m.role, m.message_type, m.content, m.status, m.created_at, am.name as model_name").
-		Where("m.conversation_id", req.ConversationID).
-		Where("m.deleted_at IS NULL").
-		Order("m.created_at ASC").
-		All()
+	records, err := messageRepo.ListHistoryByConversation(ctx, int64(req.ConversationID))
 	if err != nil {
 		return nil, err
 	}
 
 	list := make([]*v1.ChatMessageOutput, 0, len(records))
 	for _, r := range records {
+		record := mapToDBRecord(r)
 		list = append(list, &v1.ChatMessageOutput{
-			ID:          snowflake.JsonInt64(r["id"].Int64()),
-			Role:        r["role"].String(),
-			MessageType: r["message_type"].String(),
-			Content:     r["content"].String(),
-			Status:      r["status"].String(),
-			ModelName:   r["model_name"].String(),
-			CreatedAt:   gtime.New(r["created_at"]).String(),
+			ID:          snowflake.JsonInt64(record["id"].Int64()),
+			Role:        record["role"].String(),
+			MessageType: record["message_type"].String(),
+			Content:     record["content"].String(),
+			Status:      record["status"].String(),
+			ModelName:   record["model_name"].String(),
+			CreatedAt:   gtime.New(record["created_at"]).String(),
 		})
 	}
 

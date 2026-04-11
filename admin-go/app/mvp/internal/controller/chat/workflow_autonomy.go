@@ -86,48 +86,36 @@ func (c *cWorkflow) TriggerReplan(ctx context.Context, req *v1.WorkflowTriggerRe
 		return nil, err
 	}
 
-	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereIn("status", g.Slice{"executing", "reworking", "accepting", "paused"}).
-		WhereNull("deleted_at").
-		OrderDesc("created_at").One()
-	if err != nil || wfRun.IsEmpty() {
+	workflowRunRepo := repo.NewWorkflowRunRepo()
+	wfRun, err := workflowRunRepo.GetLatestByProjectStatuses(ctx, projectID, []string{"executing", "reworking", "accepting", "paused"}, "id")
+	if err != nil || len(wfRun) == 0 {
 		return nil, fmt.Errorf("无活跃的工作流运行")
 	}
 
-	projRole, prErr := g.DB().Model("mvp_project_role").Ctx(ctx).
-		Where("project_id", projectID).
-		Where("role_type", "architect").
-		WhereNull("deleted_at").One()
-	if prErr != nil {
-		return nil, fmt.Errorf("查询架构师角色失败: %w", prErr)
+	projRole, roleErr := repo.GetProjectRole(ctx, projectID, "architect")
+	if roleErr != nil {
+		return nil, fmt.Errorf("查询架构师角色失败: %w", roleErr)
 	}
 	if projRole.IsEmpty() || projRole["model_id"].Int64() == 0 {
 		return nil, fmt.Errorf("项目未配置架构师(architect)角色或模型，无法执行重规划。请先在项目角色中配置架构师。")
 	}
-	modelRow, mrErr := g.DB().Model("ai_model m").Ctx(ctx).
-		LeftJoin("ai_plan p", "p.id = m.plan_id").
-		Where("m.id", projRole["model_id"].Int64()).
-		Where("m.deleted_at IS NULL").
-		Fields("m.model_code, p.api_key").One()
-	if mrErr != nil {
-		return nil, fmt.Errorf("查询架构师模型失败: %w", mrErr)
+
+	modelRow, modelErr := repo.NewAIModelRepo().GetWithPlanByID(ctx, projRole["model_id"].Int64(), "m.model_code", "p.api_key")
+	if modelErr != nil {
+		return nil, fmt.Errorf("查询架构师模型失败: %w", modelErr)
 	}
-	if modelRow.IsEmpty() {
+	if len(modelRow) == 0 {
 		return nil, fmt.Errorf("架构师角色关联的 AI 模型(ID=%d)不存在或已删除", projRole["model_id"].Int64())
 	}
-	if modelRow["api_key"].String() == "" {
-		return nil, fmt.Errorf("架构师角色关联的 AI 模型(%s)没有配置 API Key，无法调用", modelRow["model_code"].String())
+	if g.NewVar(modelRow["api_key"]).String() == "" {
+		return nil, fmt.Errorf("架构师角色关联的 AI 模型(%s)没有配置 API Key，无法调用", g.NewVar(modelRow["model_code"]).String())
 	}
 
 	decisionRepo := repo.NewAutonomyDecisionRepo()
 	replanner := autonomy.NewReplanner(decisionRepo)
 
-	failedTasks, ftErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("workflow_run_id", wfRun["id"].Int64()).
-		WhereIn("status", g.Slice{"failed", "escalated"}).
-		WhereNull("deleted_at").
-		Fields("id, name, result, retry_count").All()
+	workflowRunID := g.NewVar(wfRun["id"]).Int64()
+	failedTasks, ftErr := repo.NewDomainTaskRepo().ListByWorkflowAndStatuses(ctx, workflowRunID, []string{"failed", "escalated"}, "id", "name", "result", "retry_count")
 	if ftErr != nil {
 		g.Log().Warningf(ctx, "[TriggerReplan] 查询失败任务列表失败: %v", ftErr)
 	}
@@ -135,21 +123,21 @@ func (c *cWorkflow) TriggerReplan(ctx context.Context, req *v1.WorkflowTriggerRe
 	var failed []autonomy.FailedTaskInfo
 	for _, t := range failedTasks {
 		failed = append(failed, autonomy.FailedTaskInfo{
-			TaskID:       t["id"].Int64(),
-			TaskName:     t["name"].String(),
-			ErrorMessage: t["result"].String(),
-			RetryCount:   t["retry_count"].Int(),
+			TaskID:       g.NewVar(t["id"]).Int64(),
+			TaskName:     g.NewVar(t["name"]).String(),
+			ErrorMessage: g.NewVar(t["result"]).String(),
+			RetryCount:   g.NewVar(t["retry_count"]).Int(),
 		})
 	}
 
 	input := &autonomy.ReplanInput{
-		WorkflowRunID: wfRun["id"].Int64(),
+		WorkflowRunID: workflowRunID,
 		ProjectID:     projectID,
 		TriggerSource: "manual",
 		FailedTasks:   failed,
 	}
 
-	wfRunID := wfRun["id"].Int64()
+	wfRunID := workflowRunID
 
 	go func() {
 		bgCtx := context.Background()
@@ -230,10 +218,7 @@ func (c *cWorkflow) TriggerReport(ctx context.Context, req *v1.WorkflowTriggerRe
 		return nil, err
 	}
 
-	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		OrderDesc("created_at").One()
+	wfRun, err := repo.NewWorkflowRunRepo().GetLatestByProject(ctx, projectID)
 	if err != nil || wfRun.IsEmpty() {
 		return nil, fmt.Errorf("无工作流运行记录")
 	}
@@ -259,26 +244,13 @@ func (c *cWorkflow) AutonomyMode(ctx context.Context, req *v1.WorkflowAutonomyMo
 
 // SetAutonomyMode 设置自治模式（写入 mvp_config）
 func (c *cWorkflow) SetAutonomyMode(ctx context.Context, req *v1.WorkflowSetAutonomyModeReq) (res *v1.WorkflowSetAutonomyModeRes, err error) {
-	count, cntErr := g.DB().Ctx(ctx).Model("mvp_config").
-		Where("config_key", "autonomy.mode").
-		WhereNull("deleted_at").Count()
-	if cntErr != nil {
-		return nil, fmt.Errorf("查询自治模式配置失败: %w", cntErr)
-	}
-	if count > 0 {
-		_, err = g.DB().Ctx(ctx).Model("mvp_config").
-			Where("config_key", "autonomy.mode").
-			Update(g.Map{"config_value": req.Mode})
-	} else {
-		_, err = g.DB().Ctx(ctx).Model("mvp_config").Insert(g.Map{
-			"config_key":   "autonomy.mode",
-			"config_value": req.Mode,
-			"category":     "autonomy",
-			"description":  "自治模式：suggest=建议型 auto=全自动",
-		})
-	}
-	if err != nil {
-		return nil, err
+	if err := repo.NewConfigRepo().UpsertByKey(ctx, "autonomy.mode", g.Map{
+		"config_value": req.Mode,
+		"config_type":  "string",
+		"category":     "autonomy",
+		"description":  "自治模式：suggest=建议型 auto=全自动",
+	}); err != nil {
+		return nil, fmt.Errorf("写入自治模式配置失败: %w", err)
 	}
 	return &v1.WorkflowSetAutonomyModeRes{}, nil
 }
@@ -397,16 +369,14 @@ func (c *cWorkflow) AutonomyReject(ctx context.Context, req *v1.WorkflowAutonomy
 }
 
 func autonomyActionProjectID(ctx context.Context, actionID int64) (int64, error) {
-	val, err := g.DB().Model("mvp_decision_action").Ctx(ctx).
-		Where("id", actionID).WhereNull("deleted_at").
-		Value("project_id")
+	projectID, err := repo.NewDecisionActionRepo().GetProjectIDByID(ctx, actionID)
 	if err != nil {
 		return 0, fmt.Errorf("查询决策记录失败: %w", err)
 	}
-	if val.Int64() == 0 {
+	if projectID == 0 {
 		return 0, fmt.Errorf("决策记录不存在: %d", actionID)
 	}
-	return val.Int64(), nil
+	return projectID, nil
 }
 
 // AutonomyActions 查询项目全量决策记录。

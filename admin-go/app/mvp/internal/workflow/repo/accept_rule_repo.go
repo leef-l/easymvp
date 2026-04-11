@@ -40,6 +40,17 @@ func (r *AcceptRuleRepo) GetByCode(ctx context.Context, projectType, ruleCode st
 	return record.Map(), nil
 }
 
+// CountByCodeProjectTypes 统计给定规则编码和项目类型集合命中的规则数量。
+func (r *AcceptRuleRepo) CountByCodeProjectTypes(ctx context.Context, ruleCode string, projectTypes []string) (int, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("rule_code", ruleCode).
+		WhereNull("deleted_at")
+	if len(projectTypes) > 0 {
+		model = model.WhereIn("project_type", projectTypes)
+	}
+	return model.Count()
+}
+
 // ListByProjectTypeWithFallback 先按 categoryCode 精确匹配规则，若无结果则按 familyCode 回退。
 func (r *AcceptRuleRepo) ListByProjectTypeWithFallback(ctx context.Context, categoryCode, familyCode string) ([]g.Map, error) {
 	// 先按 category_code 精确匹配

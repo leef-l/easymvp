@@ -3,12 +3,12 @@ package autonomy
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/gconv"
 
-	"easymvp/utility/snowflake"
+	"easymvp/app/mvp/internal/workflow/repo"
 )
 
 // Actuator 策略效果跟踪器。
@@ -17,39 +17,41 @@ import (
 //  1. 记录策略执行前的态势快照
 //  2. 在延迟窗口后评估策略的实际效果
 //  3. 为学习闭环（Phase D）积累数据
-type Actuator struct{}
+type Actuator struct {
+	outcomeRepo *repo.ActionOutcomeRepo
+}
 
 // NewActuator 创建效果跟踪器。
 func NewActuator() *Actuator {
-	return &Actuator{}
+	return &Actuator{
+		outcomeRepo: repo.NewActionOutcomeRepo(),
+	}
 }
 
 // ActionOutcome 策略执行效果记录。
 type ActionOutcome struct {
-	ID             int64                  `json:"id"`
-	ActionID       int64                  `json:"actionId"`
-	WorkflowRunID  int64                  `json:"workflowRunId"`
-	ProjectID      int64                  `json:"projectId"`
-	StrategyName   string                 `json:"strategyName"`
-	ActionType     string                 `json:"actionType"`
-	DecisionLevel  string                 `json:"decisionLevel"`
-	SitBefore      map[string]interface{} `json:"sitBefore"`      // 执行前态势摘要
-	SitAfter       map[string]interface{} `json:"sitAfter"`       // 执行后态势摘要
-	Effective      string                 `json:"effective"`      // positive / negative / neutral / unknown
-	EffectScore    float64                `json:"effectScore"`    // -1 ~ 1
-	EvalDelayMs    int64                  `json:"evalDelayMs"`    // 评估延迟（毫秒）
-	CreatedBy      int64                  `json:"createdBy"`
-	DeptID         int64                  `json:"deptId"`
-	CreatedAt      *gtime.Time            `json:"createdAt"`
+	ID            int64                  `json:"id"`
+	ActionID      int64                  `json:"actionId"`
+	WorkflowRunID int64                  `json:"workflowRunId"`
+	ProjectID     int64                  `json:"projectId"`
+	StrategyName  string                 `json:"strategyName"`
+	ActionType    string                 `json:"actionType"`
+	DecisionLevel string                 `json:"decisionLevel"`
+	SitBefore     map[string]interface{} `json:"sitBefore"`   // 执行前态势摘要
+	SitAfter      map[string]interface{} `json:"sitAfter"`    // 执行后态势摘要
+	Effective     string                 `json:"effective"`   // positive / negative / neutral / unknown
+	EffectScore   float64                `json:"effectScore"` // -1 ~ 1
+	EvalDelayMs   int64                  `json:"evalDelayMs"` // 评估延迟（毫秒）
+	CreatedBy     int64                  `json:"createdBy"`
+	DeptID        int64                  `json:"deptId"`
+	CreatedAt     *gtime.Time            `json:"createdAt"`
 }
 
 // RecordBefore 策略执行前记录态势快照，返回 outcome ID 供后续关联。
 func (a *Actuator) RecordBefore(ctx context.Context, actionID, wfRunID, projectID int64, strategyName, actionType, decisionLevel string, sit *Situation, createdBy, deptID int64) int64 {
-	id := int64(snowflake.Generate())
 	sitSummary := a.summarizeSituation(sit)
 
-	_, err := g.DB().Model("mvp_action_outcome").Ctx(ctx).Insert(g.Map{
-		"id":              id,
+	id, err := a.outcomeRepo.Create(ctx, g.Map{
 		"action_id":       actionID,
 		"workflow_run_id": wfRunID,
 		"project_id":      projectID,
@@ -78,24 +80,24 @@ func (a *Actuator) EvaluateAfter(ctx context.Context, outcomeID int64, sitAfter 
 	}
 
 	// 读取执行前记录
-	record, err := g.DB().Model("mvp_action_outcome").Ctx(ctx).Where("id", outcomeID).WhereNull("deleted_at").One()
-	if err != nil || record.IsEmpty() {
+	record, err := a.outcomeRepo.GetByID(ctx, outcomeID, "sit_before", "created_at")
+	if err != nil || record == nil {
 		g.Log().Warningf(ctx, "[Actuator] EvaluateAfter 未找到记录: id=%d", outcomeID)
 		return
 	}
 
 	sitAfterSummary := a.summarizeSituation(sitAfter)
-	effective, score := a.compareOutcome(record.GMap().MapStrAny(), sitAfter)
+	effective, score := a.compareOutcome(record, sitAfter)
 
 	var evalDelay int64
-	if ct := record["created_at"].GTime(); ct != nil {
+	if ct := g.NewVar(record["created_at"]).GTime(); ct != nil {
 		evalDelay = gtime.Now().TimestampMilli() - ct.TimestampMilli()
 	}
 
-	_, err = g.DB().Model("mvp_action_outcome").Ctx(ctx).Where("id", outcomeID).Update(g.Map{
-		"sit_after":    sitAfterSummary,
-		"effective":    effective,
-		"effect_score": score,
+	err = a.outcomeRepo.UpdateFields(ctx, outcomeID, g.Map{
+		"sit_after":     sitAfterSummary,
+		"effective":     effective,
+		"effect_score":  score,
 		"eval_delay_ms": evalDelay,
 	})
 	if err != nil {
@@ -110,7 +112,7 @@ func (a *Actuator) compareOutcome(beforeRecord map[string]interface{}, sitAfter 
 	}
 
 	// 从 before 记录提取关键指标
-	beforeJSON := parseJSONMap(fmt.Sprintf("%v", beforeRecord["sit_before"]))
+	beforeJSON := parseJSONMap(gconv.String(beforeRecord["sit_before"]))
 	beforeFailureRate, _ := beforeJSON["failureRate"].(float64)
 	beforeConsecutive, _ := beforeJSON["consecutiveFailures"].(float64)
 
@@ -152,12 +154,12 @@ func (a *Actuator) summarizeSituation(sit *Situation) string {
 		return "{}"
 	}
 	m := g.Map{
-		"completionRate": 0.0,
-		"failureRate":    0.0,
+		"completionRate":      0.0,
+		"failureRate":         0.0,
 		"consecutiveFailures": 0,
-		"retryCount":     0,
-		"reworkRounds":   0,
-		"tokensConsumed": int64(0),
+		"retryCount":          0,
+		"reworkRounds":        0,
+		"tokensConsumed":      int64(0),
 	}
 	if sit.Progress != nil {
 		m["completionRate"] = sit.Progress.CompletionRate

@@ -2,14 +2,14 @@ package autonomy
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/gconv"
 
 	"easymvp/app/mvp/internal/engine"
-	"easymvp/utility/snowflake"
+	"easymvp/app/mvp/internal/workflow/repo"
 )
 
 // MetaTuner 元认知校准器。
@@ -21,12 +21,18 @@ import (
 //   - 激进方向（放宽限制）编译期固定 AutoApplicable=false
 //   - 宪法保护参数永远不可修改
 type MetaTuner struct {
-	learner *Learner
+	learner    *Learner
+	tuneRepo   *repo.TuneRecommendationRepo
+	configRepo *repo.ConfigRepo
 }
 
 // NewMetaTuner 创建校准器。
 func NewMetaTuner(learner *Learner) *MetaTuner {
-	return &MetaTuner{learner: learner}
+	return &MetaTuner{
+		learner:    learner,
+		tuneRepo:   repo.NewTuneRecommendationRepo(),
+		configRepo: repo.NewConfigRepo(),
+	}
 }
 
 // IsAutoTuneEnabled 自动校准开关。
@@ -43,7 +49,7 @@ type TuneRecommendation struct {
 	Parameter      string      `json:"parameter"`
 	CurrentValue   string      `json:"currentValue"`
 	SuggestedValue string      `json:"suggestedValue"`
-	Direction      string      `json:"direction"`      // conservative / aggressive
+	Direction      string      `json:"direction"` // conservative / aggressive
 	Reasoning      string      `json:"reasoning"`
 	Confidence     float64     `json:"confidence"`
 	AutoApplicable bool        `json:"autoApplicable"` // aggressive 时编译期固定 false
@@ -135,11 +141,9 @@ func (t *MetaTuner) SaveAndApply(ctx context.Context, recommendations []TuneReco
 
 	for i := range recommendations {
 		rec := &recommendations[i]
-		rec.ID = int64(snowflake.Generate())
 
 		// 持久化
-		_, err := g.DB().Model("mvp_tune_recommendation").Ctx(ctx).Insert(g.Map{
-			"id":              rec.ID,
+		recID, err := t.tuneRepo.Create(ctx, g.Map{
 			"assessment_id":   rec.AssessmentID,
 			"project_id":      rec.ProjectID,
 			"parameter":       rec.Parameter,
@@ -157,6 +161,7 @@ func (t *MetaTuner) SaveAndApply(ctx context.Context, recommendations []TuneReco
 			g.Log().Warningf(ctx, "[MetaTuner] 保存建议失败: param=%s err=%v", rec.Parameter, err)
 			continue
 		}
+		rec.ID = recID
 
 		// 自动应用保守方向（如果开关开启）
 		if autoTuneEnabled && rec.AutoApplicable && rec.Direction == "conservative" {
@@ -173,66 +178,65 @@ func (t *MetaTuner) SaveAndApply(ctx context.Context, recommendations []TuneReco
 
 // ApplyRecommendation 手动应用一条建议。
 func (t *MetaTuner) ApplyRecommendation(ctx context.Context, recommendationID, appliedBy int64) error {
-	record, err := g.DB().Model("mvp_tune_recommendation").Ctx(ctx).
-		Where("id", recommendationID).
-		WhereNull("deleted_at").
-		One()
-	if err != nil || record.IsEmpty() {
+	record, err := t.tuneRepo.GetByID(ctx, recommendationID)
+	if err != nil || record == nil {
 		return fmt.Errorf("建议不存在: %d", recommendationID)
 	}
 
-	if record["status"].String() != "pending" {
-		return fmt.Errorf("建议状态不允许应用: %s", record["status"].String())
+	status := gconv.String(record["status"])
+	if status != "pending" {
+		return fmt.Errorf("建议状态不允许应用: %s", status)
 	}
 
 	// 宪法保护二次校验
-	param := record["parameter"].String()
+	param := gconv.String(record["parameter"])
 	if constitutionProtectedParams[param] {
 		return fmt.Errorf("宪法保护参数不可修改: %s", param)
 	}
 
 	rec := &TuneRecommendation{
-		ID:             record["id"].Int64(),
+		ID:             gconv.Int64(record["id"]),
 		Parameter:      param,
-		SuggestedValue: record["suggested_value"].String(),
+		SuggestedValue: gconv.String(record["suggested_value"]),
 	}
 	if err := t.applyRecommendation(ctx, rec); err != nil {
 		return err
 	}
 
-	_, err = g.DB().Model("mvp_tune_recommendation").Ctx(ctx).
-		Where("id", recommendationID).
-		Update(g.Map{
-			"status":     "applied",
-			"applied_at": gtime.Now(),
-			"applied_by": appliedBy,
-		})
-	return err
+	rows, err := t.tuneRepo.UpdateStatusIfCurrent(ctx, recommendationID, "pending", "applied", g.Map{
+		"applied_at": gtime.Now(),
+		"applied_by": appliedBy,
+	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("建议状态不允许应用: %d", recommendationID)
+	}
+	return nil
 }
 
 // RejectRecommendation 驳回一条建议。
 func (t *MetaTuner) RejectRecommendation(ctx context.Context, recommendationID int64) error {
-	_, err := g.DB().Model("mvp_tune_recommendation").Ctx(ctx).
-		Where("id", recommendationID).
-		Where("status", "pending").
-		Update(g.Map{"status": "rejected"})
-	return err
+	rows, err := t.tuneRepo.UpdateStatusIfCurrent(ctx, recommendationID, "pending", "rejected", nil)
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("建议状态不允许驳回: %d", recommendationID)
+	}
+	return nil
 }
 
 // ListPending 查询待处理的建议。
 func (t *MetaTuner) ListPending(ctx context.Context, projectID int64) ([]TuneRecommendation, error) {
-	m := g.DB().Model("mvp_tune_recommendation").Ctx(ctx).
-		Where("status", "pending").
-		WhereNull("deleted_at").
-		OrderDesc("created_at")
-	if projectID > 0 {
-		m = m.Where("project_id", projectID)
-	}
-	records, err := m.Fields("id, assessment_id, project_id, parameter, current_value, suggested_value, direction, reasoning, risk_level, status, confidence, auto_applicable").Limit(50).All()
+	records, err := t.tuneRepo.ListByProjectStatus(ctx, projectID, "pending", 50,
+		"id", "assessment_id", "project_id", "parameter", "current_value", "suggested_value",
+		"direction", "reasoning", "risk_level", "status", "confidence", "auto_applicable")
 	if err != nil {
 		return nil, err
 	}
-	return t.parseRecommendations(records.List()), nil
+	return t.parseRecommendations(records), nil
 }
 
 // ListAll 查询所有建议（支持状态过滤）。
@@ -240,21 +244,13 @@ func (t *MetaTuner) ListAll(ctx context.Context, projectID int64, status string,
 	if limit <= 0 {
 		limit = 50
 	}
-	m := g.DB().Model("mvp_tune_recommendation").Ctx(ctx).
-		WhereNull("deleted_at").
-		OrderDesc("created_at").
-		Limit(limit)
-	if projectID > 0 {
-		m = m.Where("project_id", projectID)
-	}
-	if status != "" {
-		m = m.Where("status", status)
-	}
-	records, err := m.Fields("id, assessment_id, project_id, parameter, current_value, suggested_value, direction, reasoning, risk_level, status, confidence, auto_applicable").All()
+	records, err := t.tuneRepo.ListByProjectStatus(ctx, projectID, status, limit,
+		"id", "assessment_id", "project_id", "parameter", "current_value", "suggested_value",
+		"direction", "reasoning", "risk_level", "status", "confidence", "auto_applicable")
 	if err != nil {
 		return nil, err
 	}
-	return t.parseRecommendations(records.List()), nil
+	return t.parseRecommendations(records), nil
 }
 
 // applyRecommendation 实际应用配置变更。
@@ -264,19 +260,11 @@ func (t *MetaTuner) applyRecommendation(ctx context.Context, rec *TuneRecommenda
 		return fmt.Errorf("宪法保护参数: %s", rec.Parameter)
 	}
 
-	// 更新 mvp_config 表
-	result, err := g.DB().Model("mvp_config").Ctx(ctx).
-		Where("config_key", rec.Parameter).
-		Update(g.Map{
-			"config_value": rec.SuggestedValue,
-			"updated_at":   gtime.Now(),
-		})
+	rows, err := t.configRepo.UpdateValueByKey(ctx, rec.Parameter, rec.SuggestedValue)
 	if err != nil {
 		return err
 	}
-
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	if rows == 0 {
 		return fmt.Errorf("配置项不存在: %s", rec.Parameter)
 	}
 
@@ -304,36 +292,19 @@ func (t *MetaTuner) parseRecommendations(records []g.Map) []TuneRecommendation {
 	var results []TuneRecommendation
 	for _, r := range records {
 		rec := TuneRecommendation{
-			ID:             mapInt64(r, "id"),
-			AssessmentID:   mapInt64(r, "assessment_id"),
-			ProjectID:      mapInt64(r, "project_id"),
-			Parameter:      mapString(r, "parameter"),
-			CurrentValue:   mapString(r, "current_value"),
-			SuggestedValue: mapString(r, "suggested_value"),
-			Direction:      mapString(r, "direction"),
-			Reasoning:      mapString(r, "reasoning"),
-			RiskLevel:      mapString(r, "risk_level"),
-			Status:         mapString(r, "status"),
+			ID:             gconv.Int64(r["id"]),
+			AssessmentID:   gconv.Int64(r["assessment_id"]),
+			ProjectID:      gconv.Int64(r["project_id"]),
+			Parameter:      gconv.String(r["parameter"]),
+			CurrentValue:   gconv.String(r["current_value"]),
+			SuggestedValue: gconv.String(r["suggested_value"]),
+			Direction:      gconv.String(r["direction"]),
+			Reasoning:      gconv.String(r["reasoning"]),
+			RiskLevel:      gconv.String(r["risk_level"]),
+			Status:         gconv.String(r["status"]),
 		}
-
-		if v, ok := r["confidence"]; ok && v != nil {
-			rec.Confidence, _ = v.(json.Number).Float64()
-			if rec.Confidence == 0 {
-				// fallback
-				switch n := v.(type) {
-				case float64:
-					rec.Confidence = n
-				}
-			}
-		}
-		if v, ok := r["auto_applicable"]; ok && v != nil {
-			switch n := v.(type) {
-			case int64:
-				rec.AutoApplicable = n == 1
-			case float64:
-				rec.AutoApplicable = n == 1
-			}
-		}
+		rec.Confidence = gconv.Float64(r["confidence"])
+		rec.AutoApplicable = gconv.Int(r["auto_applicable"]) == 1
 		results = append(results, rec)
 	}
 	return results

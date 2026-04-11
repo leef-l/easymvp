@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"strings"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -70,6 +71,15 @@ func (r *HumanCheckpointRepo) ListOpen(ctx context.Context, projectID int64) ([]
 	return result, nil
 }
 
+// CountOpenByProject 统计项目下 open 节点数。
+func (r *HumanCheckpointRepo) CountOpenByProject(ctx context.Context, projectID int64) (int, error) {
+	return g.DB().Model(r.table()).Ctx(ctx).
+		Where("project_id", projectID).
+		Where("status", "open").
+		WhereNull("deleted_at").
+		Count()
+}
+
 // ListByWorkflow 按工作流查询。
 func (r *HumanCheckpointRepo) ListByWorkflow(ctx context.Context, workflowRunID int64) ([]g.Map, error) {
 	records, err := g.DB().Model(r.table()).Ctx(ctx).
@@ -85,4 +95,43 @@ func (r *HumanCheckpointRepo) ListByWorkflow(ctx context.Context, workflowRunID 
 		result = append(result, rec.Map())
 	}
 	return result, nil
+}
+
+// ListByProjectStatus 查询项目下指定状态的人工检查点。
+func (r *HumanCheckpointRepo) ListByProjectStatus(ctx context.Context, projectID int64, status string, limit int, fields ...string) ([]g.Map, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at").
+		OrderDesc("created_at")
+	if status != "" {
+		model = model.Where("status", status)
+	}
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	if limit > 0 {
+		model = model.Limit(limit)
+	}
+	records, err := model.All()
+	if err != nil {
+		return nil, err
+	}
+	return records.List(), nil
+}
+
+// UpdateStatusByProject 批量更新项目下指定状态的检查点。
+func (r *HumanCheckpointRepo) UpdateStatusByProject(ctx context.Context, projectID int64, fromStatus string, data g.Map) (int64, error) {
+	data["updated_at"] = gtime.Now()
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at")
+	if fromStatus != "" {
+		model = model.Where("status", fromStatus)
+	}
+	result, err := model.Data(data).Update()
+	if err != nil {
+		return 0, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows, nil
 }

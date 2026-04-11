@@ -13,6 +13,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	"easymvp/app/mvp/internal/engine"
+	"easymvp/app/mvp/internal/workflow/repo"
 )
 
 // BotPlatform 平台回调接口，屏蔽飞书/钉钉/企业微信的差异。
@@ -163,10 +164,9 @@ func dispatchIntent(
 	case "chat":
 		// 先检查是否有活跃对话会话
 		if convID, ok := getBotSession(platformName, openID); ok {
-			conv, _ := g.DB().Ctx(ctx).Model("mvp_conversation").
-				Where("id", convID).WhereNull("deleted_at").One()
-			if !conv.IsEmpty() {
-				projectID := conv["project_id"].Int64()
+			conv, _ := repo.NewConversationRepo().GetByID(ctx, convID, "project_id")
+			if len(conv) > 0 {
+				projectID := g.NewVar(conv["project_id"]).Int64()
 				chatEng := engine.NewChatEngine()
 				replyMsgID, err := chatEng.SendFeishuMessage(ctx, convID, projectID, rawText, systemUserID, deptID)
 				if err == nil {

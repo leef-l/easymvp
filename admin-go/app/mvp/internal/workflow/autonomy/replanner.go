@@ -144,27 +144,21 @@ func resolveProjectModel(ctx context.Context, projectID int64, roleType string) 
 	}
 
 	modelID := role["model_id"].Int64()
-	model, err := g.DB().Model("ai_model m").Ctx(ctx).
-		LeftJoin("ai_plan p", "p.id = m.plan_id").
-		LeftJoin("ai_provider pv", "pv.id = m.provider_id").
-		Fields("m.model_code, pv.provider_type, pv.supported_protocols, pv.base_url, p.api_key, p.api_secret").
-		Where("m.id", modelID).
-		Where("m.deleted_at IS NULL").
-		One()
+	model, err := repo.NewAIModelRepo().GetProviderConfigByID(ctx, modelID)
 	if err != nil {
 		return nil, fmt.Errorf("查询模型信息失败: %w", err)
 	}
-	if model.IsEmpty() {
+	if len(model) == 0 {
 		return nil, fmt.Errorf("AI 模型 %d 不存在", modelID)
 	}
 
 	return &replanModelInfo{
-		ModelCode:          model["model_code"].String(),
-		ProviderType:       model["provider_type"].String(),
-		SupportedProtocols: provider.DecodeSupportedProtocols(model["supported_protocols"].String(), model["provider_type"].String()),
-		BaseURL:            model["base_url"].String(),
-		APIKey:             model["api_key"].String(),
-		APISecret:          model["api_secret"].String(),
+		ModelCode:          g.NewVar(model["model_code"]).String(),
+		ProviderType:       g.NewVar(model["provider_type"]).String(),
+		SupportedProtocols: provider.DecodeSupportedProtocols(g.NewVar(model["supported_protocols"]).String(), g.NewVar(model["provider_type"]).String()),
+		BaseURL:            g.NewVar(model["base_url"]).String(),
+		APIKey:             g.NewVar(model["api_key"]).String(),
+		APISecret:          g.NewVar(model["api_secret"]).String(),
 	}, nil
 }
 

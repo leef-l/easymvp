@@ -39,3 +39,21 @@ func (r *AcceptEvidenceRepo) ListByAcceptRun(ctx context.Context, acceptRunID in
 	}
 	return records.List(), nil
 }
+
+// ListByTaskSources 查询和任务/工作空间关联的验收证据。
+func (r *AcceptEvidenceRepo) ListByTaskSources(ctx context.Context, taskID, workspaceID int64) ([]g.Map, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).WhereNull("deleted_at")
+	if workspaceID > 0 {
+		model = model.Where(
+			"(source_type = ? AND source_id = ?) OR (source_type = ? AND source_id = ?)",
+			"domain_task", taskID, "workspace", workspaceID,
+		)
+	} else {
+		model = model.Where("source_type", "domain_task").Where("source_id", taskID)
+	}
+	records, err := model.OrderDesc("created_at").All()
+	if err != nil {
+		return nil, err
+	}
+	return records.List(), nil
+}

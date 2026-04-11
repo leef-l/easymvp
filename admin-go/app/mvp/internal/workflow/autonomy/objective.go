@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/gconv"
 
 	"easymvp/app/mvp/internal/engine"
+	"easymvp/app/mvp/internal/workflow/repo"
 )
 
 // ProjectObjective 项目目标约束。
@@ -50,16 +51,13 @@ func (s *ObjectiveService) Load(ctx context.Context, projectID int64) (*ProjectO
 	if projectID == 0 {
 		return obj, nil
 	}
-	val, err := g.DB().Model("mvp_project").Ctx(ctx).
-		Where("id", projectID).
-		WhereNull("deleted_at").
-		Value("objective_json")
-	if err != nil || val.IsEmpty() {
+	project, err := repo.NewProjectRepo().GetByID(ctx, projectID, "objective_json")
+	if err != nil || len(project) == 0 {
 		return obj, err
 	}
 
 	var override ProjectObjective
-	if err = json.Unmarshal([]byte(val.String()), &override); err != nil {
+	if err = json.Unmarshal([]byte(gconv.String(project["objective_json"])), &override); err != nil {
 		return obj, nil
 	}
 	s.mergeObjective(obj, &override)

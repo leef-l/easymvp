@@ -95,3 +95,11 @@ func (r *AutonomyDecisionRepo) CountByType(ctx context.Context, workflowRunID in
 		WhereNull("deleted_at").
 		Count()
 }
+
+// CountByProject 统计项目下自治决策数量。
+func (r *AutonomyDecisionRepo) CountByProject(ctx context.Context, projectID int64) (int, error) {
+	return g.DB().Model(r.table()).Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at").
+		Count()
+}

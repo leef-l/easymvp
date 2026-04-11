@@ -10,7 +10,7 @@ import (
 
 	"easymvp/app/mvp/internal/consts"
 	"easymvp/app/mvp/internal/engine"
-	"easymvp/utility/snowflake"
+	"easymvp/app/mvp/internal/workflow/repo"
 )
 
 // MetaObserver 元认知观测器。
@@ -71,8 +71,6 @@ func (o *MetaObserver) Record(ctx context.Context, input *ObservationInput) {
 
 // doRecord 实际写入逻辑。
 func (o *MetaObserver) doRecord(ctx context.Context, input *ObservationInput) {
-	id := int64(snowflake.Generate())
-
 	inputJSON, err := json.Marshal(input.InputSnapshot)
 	if err != nil {
 		g.Log().Warningf(ctx, "[MetaObserver] inputSnapshot 序列化失败: %v", err)
@@ -106,26 +104,25 @@ func (o *MetaObserver) doRecord(ctx context.Context, input *ObservationInput) {
 		humanOverride = 1
 	}
 
-	_, err = g.DB().Model("mvp_observation_record").Ctx(ctx).Insert(g.Map{
-		"id":                  id,
-		"decision_action_id":  input.DecisionActionID,
-		"workflow_run_id":     input.WorkflowRunID,
-		"project_id":          input.ProjectID,
-		"decision_type":       input.DecisionType,
-		"trigger_source":      input.TriggerSource,
-		"decision_level":      input.DecisionLevel,
-		"action_type":         input.ActionType,
-		"input_snapshot":      string(inputJSON),
-		"output_snapshot":     string(outputJSON),
-		"meta_snapshot":       string(metaJSON),
-		"outcome":             outcome,
-		"effect_score":        input.EffectScore,
-		"human_override":      humanOverride,
-		"override_reason":     input.OverrideReason,
-		"signal_weight":       weight,
-		"created_by":          input.CreatedBy,
-		"dept_id":             input.DeptID,
-		"created_at":          gtime.Now(),
+	_, err = repo.NewObservationRecordRepo().Create(ctx, g.Map{
+		"decision_action_id": input.DecisionActionID,
+		"workflow_run_id":    input.WorkflowRunID,
+		"project_id":         input.ProjectID,
+		"decision_type":      input.DecisionType,
+		"trigger_source":     input.TriggerSource,
+		"decision_level":     input.DecisionLevel,
+		"action_type":        input.ActionType,
+		"input_snapshot":     string(inputJSON),
+		"output_snapshot":    string(outputJSON),
+		"meta_snapshot":      string(metaJSON),
+		"outcome":            outcome,
+		"effect_score":       input.EffectScore,
+		"human_override":     humanOverride,
+		"override_reason":    input.OverrideReason,
+		"signal_weight":      weight,
+		"created_by":         input.CreatedBy,
+		"dept_id":            input.DeptID,
+		"created_at":         gtime.Now(),
 	})
 	if err != nil {
 		g.Log().Warningf(ctx, "[MetaObserver] 观测记录写入失败: %v", err)
@@ -134,12 +131,10 @@ func (o *MetaObserver) doRecord(ctx context.Context, input *ObservationInput) {
 
 // UpdateOutcome 回填观测结果（决策执行完成后调用）。
 func (o *MetaObserver) UpdateOutcome(ctx context.Context, decisionActionID int64, outcome string, effectScore float64) {
-	_, err := g.DB().Model("mvp_observation_record").Ctx(ctx).
-		Where("decision_action_id", decisionActionID).
-		Update(g.Map{
-			"outcome":      outcome,
-			"effect_score": effectScore,
-		})
+	err := repo.NewObservationRecordRepo().UpdateByDecisionAction(ctx, decisionActionID, g.Map{
+		"outcome":      outcome,
+		"effect_score": effectScore,
+	})
 	if err != nil {
 		g.Log().Warningf(ctx, "[MetaObserver] 回填观测结果失败: actionID=%d err=%v", decisionActionID, err)
 	}
@@ -160,14 +155,12 @@ func (o *MetaObserver) UpdateHumanOverride(ctx context.Context, decisionActionID
 		weight = 1.0
 	}
 
-	_, err := g.DB().Model("mvp_observation_record").Ctx(ctx).
-		Where("decision_action_id", decisionActionID).
-		Update(g.Map{
-			"human_override":  1,
-			"override_reason": reason,
-			"outcome":         outcome,
-			"signal_weight":   weight,
-		})
+	err := repo.NewObservationRecordRepo().UpdateByDecisionAction(ctx, decisionActionID, g.Map{
+		"human_override":  1,
+		"override_reason": reason,
+		"outcome":         outcome,
+		"signal_weight":   weight,
+	})
 	if err != nil {
 		g.Log().Warningf(ctx, "[MetaObserver] 记录人工干预失败: actionID=%d err=%v", decisionActionID, err)
 	}
@@ -201,16 +194,7 @@ func (o *MetaObserver) ListByProject(ctx context.Context, projectID int64, limit
 	if limit <= 0 {
 		limit = 100
 	}
-	records, err := g.DB().Model("mvp_observation_record").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		OrderDesc("created_at").
-		Limit(limit).
-		All()
-	if err != nil {
-		return nil, err
-	}
-	return records.List(), nil
+	return repo.NewObservationRecordRepo().ListByProject(ctx, projectID, limit)
 }
 
 // CountByOutcome 按结果分组统计（供 Assessor 使用）。
@@ -221,24 +205,13 @@ func (o *MetaObserver) CountByOutcome(ctx context.Context, projectID int64, peri
 		"neutral": 0,
 		"pending": 0,
 	}
-	m := g.DB().Model("mvp_observation_record").Ctx(ctx).
-		WhereNull("deleted_at")
-	if projectID > 0 {
-		m = m.Where("project_id", projectID)
-	}
-	if periodStart != nil {
-		m = m.WhereGTE("created_at", periodStart)
-	}
-	if periodEnd != nil {
-		m = m.WhereLTE("created_at", periodEnd)
-	}
-	records, err := m.Fields("outcome, COUNT(*) as cnt").Group("outcome").All()
+	records, err := repo.NewObservationRecordRepo().CountGroupByFieldInPeriod(ctx, projectID, "outcome", periodStart, periodEnd)
 	if err != nil {
 		return result, err
 	}
 	for _, r := range records {
-		outcome := r["outcome"].String()
-		cnt := r["cnt"].Int()
+		outcome := g.NewVar(r["outcome"]).String()
+		cnt := g.NewVar(r["cnt"]).Int()
 		result[outcome] = cnt
 	}
 	return result, nil

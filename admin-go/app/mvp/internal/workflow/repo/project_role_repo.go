@@ -270,16 +270,9 @@ func loadModelRolePrompt(ctx context.Context, modelID int64) string {
 	if modelID == 0 {
 		return ""
 	}
-	modelRec, err := g.DB().Model("ai_model").Ctx(ctx).
-		Fields("role_prompt").
-		Where("id", modelID).
-		WhereNull("deleted_at").
-		One()
+	rolePrompt, err := NewAIModelRepo().GetRolePromptByID(ctx, modelID)
 	if err != nil {
 		g.Log().Warningf(ctx, "[ProjectRoleRepo] 加载模型 role_prompt 失败: model=%d err=%v", modelID, err)
 	}
-	if modelRec.IsEmpty() {
-		return ""
-	}
-	return modelRec["role_prompt"].String()
+	return rolePrompt
 }

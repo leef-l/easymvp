@@ -70,6 +70,13 @@ func Init() {
 		stageRepo := repo.NewStageRunRepo()
 		planRepo := repo.NewPlanVersionRepo()
 		bpRepo := repo.NewBlueprintRepo()
+		loadProjectID := func(ctx context.Context, workflowRunID int64) int64 {
+			record, err := wfRepo.GetByIDMap(ctx, workflowRunID, "project_id")
+			if err != nil {
+				return 0
+			}
+			return g.NewVar(record["project_id"]).Int64()
+		}
 
 		// 服务
 		workflowSvc = NewWorkflowService(runtimeMgr, eventPublisher, wfRepo, stageRepo)
@@ -150,10 +157,9 @@ func Init() {
 				return stageSvc.completeWorkflow(ctx, workflowRunID)
 			}
 			if decisionCenter.IsEnabled(ctx) {
-				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id") //nolint: errcheck — best-effort for autonomy decision
 				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
 					WorkflowRunID: workflowRunID,
-					ProjectID:     projectID.Int64(),
+					ProjectID:     loadProjectID(ctx, workflowRunID),
 					TriggerSource: consts.TriggerAcceptPassed,
 				})
 				if resp.Handled {
@@ -174,18 +180,14 @@ func Init() {
 
 		// 注册 rework 完成后推回 execute 的回调
 		reworkStageSvc.SetExecuteTrigger(func(ctx context.Context, workflowRunID, planVersionID int64) error {
-			wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-				Where("id", workflowRunID).
-				WhereNull("deleted_at").
-				Fields("status").
-				One()
+			wfRun, err := wfRepo.GetByIDMap(ctx, workflowRunID, "status")
 			if err != nil {
 				return fmt.Errorf("查询 workflow_run 失败: %w", err)
 			}
-			if wfRun.IsEmpty() {
+			if len(wfRun) == 0 {
 				return fmt.Errorf("workflow_run(%d) 不存在", workflowRunID)
 			}
-			if wfRun["status"].String() != consts.WorkflowRunStatusReworking {
+			if g.NewVar(wfRun["status"]).String() != consts.WorkflowRunStatusReworking {
 				g.Log().Warningf(ctx, "[Registry] rework 完成时 workflow_run(%d) 已不在 reworking 状态，跳过回流 execute", workflowRunID)
 				return nil
 			}
@@ -219,10 +221,9 @@ func Init() {
 			if failedTaskID == 0 {
 				// 决策点 6: accept.manual_review
 				if decisionCenter.IsEnabled(ctx) {
-					projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id") //nolint: errcheck — best-effort for autonomy decision
 					resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
 						WorkflowRunID:  workflowRunID,
-						ProjectID:      projectID.Int64(),
+						ProjectID:      loadProjectID(ctx, workflowRunID),
 						TriggerSource:  consts.TriggerAcceptManualReview,
 						TriggerContext: map[string]interface{}{"accept_run_id": acceptRunID},
 					})
@@ -238,10 +239,9 @@ func Init() {
 			}
 			// 决策��� 5: accept.failed
 			if decisionCenter.IsEnabled(ctx) {
-				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id") //nolint: errcheck — best-effort for autonomy decision
 				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
 					WorkflowRunID: workflowRunID,
-					ProjectID:     projectID.Int64(),
+					ProjectID:     loadProjectID(ctx, workflowRunID),
 					DomainTaskID:  failedTaskID,
 					TriggerSource: consts.TriggerAcceptFailed,
 					TriggerContext: map[string]interface{}{
@@ -265,10 +265,9 @@ func Init() {
 			g.Log().Infof(ctx, "[Registry] rework 完成，恢复验收状态: workflowRunID=%d", workflowRunID)
 
 			if decisionCenter.IsEnabled(ctx) {
-				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id") //nolint: errcheck — best-effort for autonomy decision
 				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
 					WorkflowRunID: workflowRunID,
-					ProjectID:     projectID.Int64(),
+					ProjectID:     loadProjectID(ctx, workflowRunID),
 					TriggerSource: consts.TriggerReworkCompleted,
 				})
 				if shouldDeferToDecisionCenterRework(resp) {
@@ -340,16 +339,12 @@ func Init() {
 		})
 
 		taskScheduler.SetFailureCallback(func(ctx context.Context, workflowRunID, taskID int64, errMsg string) bool {
-			taskRecord, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-				Where("id", taskID).
-				WhereNull("deleted_at").
-				Fields("status, retry_count").
-				One()
+			taskRecord, err := taskRepo.GetByIDMap(ctx, taskID, "status", "retry_count")
 			if err != nil {
 				g.Log().Warningf(ctx, "[Registry] 查询失败任务失败: task=%d err=%v", taskID, err)
 				return false
 			}
-			if taskRecord.IsEmpty() || taskRecord["status"].String() != domainTask.StatusFailed {
+			if len(taskRecord) == 0 || g.NewVar(taskRecord["status"]).String() != domainTask.StatusFailed {
 				return true
 			}
 
@@ -359,7 +354,7 @@ func Init() {
 				strings.Contains(normalizedErr, "affected_resources 存在歧义")
 
 			maxRetries := engine.GetConfigInt(ctx, "watchdog.max_retries", "engine.watchdog.maxRetries", 3)
-			nextRetry := taskRecord["retry_count"].Int() + 1
+			nextRetry := g.NewVar(taskRecord["retry_count"]).Int() + 1
 			if !immediateEscalate && nextRetry < maxRetries {
 				g.Log().Infof(ctx, "[Registry] 任务失败后即时重试: task=%d retry=%d/%d", taskID, nextRetry, maxRetries)
 				emitTaskRetryDue(ctx, workflowRunID, taskID, nextRetry, maxRetries, normalizedErr)
@@ -375,19 +370,19 @@ func Init() {
 		domainWatchdog = watchdogV2.New()
 		domainWatchdog.SetScheduler(taskScheduler)
 		domainWatchdog.SetRetryFn(func(ctx context.Context, taskID int64) error {
-			wfRunID, wfErr := g.DB().Model("mvp_domain_task").Ctx(ctx).Where("id", taskID).Value("workflow_run_id")
+			taskRecord, wfErr := taskRepo.GetByIDMap(ctx, taskID, "workflow_run_id")
 			if wfErr != nil {
 				return fmt.Errorf("查询 domain_task workflow_run_id 失败: %w", wfErr)
 			}
-			if wfRunID.Int64() == 0 {
+			wfRunID := g.NewVar(taskRecord["workflow_run_id"]).Int64()
+			if wfRunID == 0 {
 				return nil
 			}
 			// 自治中台包裹
 			if decisionCenter.IsEnabled(ctx) {
-				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", wfRunID.Int64()).Value("project_id") //nolint: errcheck — best-effort for autonomy
 				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
-					WorkflowRunID:  wfRunID.Int64(),
-					ProjectID:      projectID.Int64(),
+					WorkflowRunID:  wfRunID,
+					ProjectID:      loadProjectID(ctx, wfRunID),
 					DomainTaskID:   taskID,
 					TriggerSource:  consts.TriggerTaskFailed,
 					TriggerContext: map[string]interface{}{"task_id": taskID},
@@ -397,17 +392,16 @@ func Init() {
 				}
 				// 降级到原逻辑
 			}
-			emitSchedulerWakeup(ctx, wfRunID.Int64(), "watchdog.retry", map[string]interface{}{
+			emitSchedulerWakeup(ctx, wfRunID, "watchdog.retry", map[string]interface{}{
 				"task_id": taskID,
 			})
 			return nil
 		})
 		domainWatchdog.SetEscalateFn(func(ctx context.Context, workflowRunID, taskID int64) error {
 			if decisionCenter.IsEnabled(ctx) {
-				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id") //nolint: errcheck — best-effort for autonomy decision
 				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
 					WorkflowRunID:  workflowRunID,
-					ProjectID:      projectID.Int64(),
+					ProjectID:      loadProjectID(ctx, workflowRunID),
 					DomainTaskID:   taskID,
 					TriggerSource:  consts.TriggerTaskRetryExhausted,
 					TriggerContext: map[string]interface{}{"task_id": taskID},
@@ -434,10 +428,9 @@ func Init() {
 		domainWatchdog.SetCircuitBreaker(circuitBreaker)
 		domainWatchdog.SetPauseFn(func(ctx context.Context, workflowRunID int64, reason string) error {
 			if decisionCenter.IsEnabled(ctx) {
-				projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).Value("project_id") //nolint: errcheck — best-effort for autonomy decision
 				resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
 					WorkflowRunID:  workflowRunID,
-					ProjectID:      projectID.Int64(),
+					ProjectID:      loadProjectID(ctx, workflowRunID),
 					TriggerSource:  consts.TriggerCircuitBreak,
 					TriggerContext: map[string]interface{}{"reason": reason},
 				})
@@ -463,21 +456,17 @@ func Init() {
 				}
 			}
 			// 降级到原逻辑
-			failedTasks, ftErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
-				Where("workflow_run_id", workflowRunID).
-				WhereIn("status", g.Slice{"failed", "escalated"}).
-				WhereNull("deleted_at").
-				Fields("id, name, result, retry_count").All()
+			failedTasks, ftErr := taskRepo.ListByWorkflowAndStatuses(ctx, workflowRunID, []string{"failed", "escalated"}, "id", "name", "result", "retry_count")
 			if ftErr != nil {
 				g.Log().Warningf(ctx, "[Registry] 查询失败任务列表失败: wfRunID=%d err=%v", workflowRunID, ftErr)
 			}
 			var failed []autonomy.FailedTaskInfo
 			for _, t := range failedTasks {
 				failed = append(failed, autonomy.FailedTaskInfo{
-					TaskID:       t["id"].Int64(),
-					TaskName:     t["name"].String(),
-					ErrorMessage: t["result"].String(),
-					RetryCount:   t["retry_count"].Int(),
+					TaskID:       g.NewVar(t["id"]).Int64(),
+					TaskName:     g.NewVar(t["name"]).String(),
+					ErrorMessage: g.NewVar(t["result"]).String(),
+					RetryCount:   g.NewVar(t["retry_count"]).Int(),
 				})
 			}
 			rec, err := replanner.Evaluate(ctx, &autonomy.ReplanInput{
@@ -613,10 +602,7 @@ func Init() {
 			}
 			g.Log().Infof(ctx, "[DecisionCenter] switch_executor: task=%d → %s", req.DomainTaskID, engineType)
 			// 更新任务的执行模式
-			_, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-				Where("id", req.DomainTaskID).
-				Update(g.Map{"execution_mode": engineType})
-			if err != nil {
+			if err := taskRepo.UpdateFields(ctx, req.DomainTaskID, g.Map{"execution_mode": engineType}); err != nil {
 				return fmt.Errorf("更新执行模式失败: %w", err)
 			}
 			// 唤醒调度器重新执行
@@ -703,10 +689,8 @@ func startMetaAssessmentLoop(assessor *autonomy.MetaAssessor, tuner *autonomy.Me
 			g.Log().Info(ctx, "[MetaAssessment] 开始定时评估...")
 
 			// 扫描有观测记录的项目
-			projectIDs, err := g.DB().Model("mvp_observation_record").Ctx(ctx).
-				WhereNull("deleted_at").
-				Fields("DISTINCT project_id").
-				All()
+			observationRepo := repo.NewObservationRecordRepo()
+			projectIDs, err := observationRepo.ListDistinctProjectIDs(ctx)
 			if err != nil {
 				g.Log().Warningf(ctx, "[MetaAssessment] 查询项目列表失败: %v", err)
 				return
@@ -715,12 +699,7 @@ func startMetaAssessmentLoop(assessor *autonomy.MetaAssessor, tuner *autonomy.Me
 			now := gtime.Now()
 			periodStart := gtime.New(now.AddDate(0, 0, -7))
 
-			for _, row := range projectIDs {
-				pid := row["project_id"].Int64()
-				if pid == 0 {
-					continue
-				}
-
+			for _, pid := range projectIDs {
 				result, err := assessor.Assess(ctx, pid, periodStart, now)
 				if err != nil {
 					g.Log().Warningf(ctx, "[MetaAssessment] 评估失败: project=%d err=%v", pid, err)
@@ -796,46 +775,48 @@ func GetReviewStageService() *reviewStage.Service {
 
 // triggerReviewStage 触发审核阶段：完成当前 design stage，创建 review stage，运行审核。
 func triggerReviewStage(ctx context.Context, projectID, planVersionID int64) error {
+	var (
+		stageRunRepo    = repo.NewStageRunRepo()
+		workflowRunRepo = repo.NewWorkflowRunRepo()
+	)
+
 	// 查活跃的 workflow_run
-	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereIn("status", g.Slice{consts.WorkflowRunStatusDesigning, consts.WorkflowRunStatusReviewing, consts.WorkflowRunStatusExecuting, consts.WorkflowRunStatusReworking}).
-		WhereNull("deleted_at").
-		OrderDesc("run_no").
-		One()
-	if err != nil || wfRun.IsEmpty() {
+	wfRun, err := workflowRunRepo.GetLatestByProjectStatuses(ctx, projectID, []string{
+		consts.WorkflowRunStatusDesigning,
+		consts.WorkflowRunStatusReviewing,
+		consts.WorkflowRunStatusExecuting,
+		consts.WorkflowRunStatusReworking,
+	}, "id", "current_stage_run_id")
+	if err != nil || wfRun == nil {
 		return fmt.Errorf("未找到活跃的 workflow_run: projectID=%d", projectID)
 	}
-	workflowRunID := wfRun["id"].Int64()
-	currentStageRunID := wfRun["current_stage_run_id"].Int64()
+	workflowRunID := g.NewVar(wfRun["id"]).Int64()
+	currentStageRunID := g.NewVar(wfRun["current_stage_run_id"]).Int64()
 
 	// 完成 design stage。若当前 design stage 已被人工清理或重建，允许跳过旧实例，避免审核链路被陈旧 stage_run 卡死。
 	if currentStageRunID > 0 {
-		stageRun, stageErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
-			Where("id", currentStageRunID).
-			Fields("stage_type, status, deleted_at").
-			One()
+		stageRun, stageErr := stageRunRepo.GetByIDMap(ctx, currentStageRunID, "stage_type", "status", "deleted_at")
 		if stageErr != nil {
 			return fmt.Errorf("查询 design stage 失败，无法进入审核: %w", stageErr)
 		}
 
 		switch {
-		case stageRun.IsEmpty():
+		case len(stageRun) == 0:
 			g.Log().Warningf(ctx, "[triggerReviewStage] design stage_run(%d) 不存在，继续进入 review", currentStageRunID)
-		case stageRun["stage_type"].String() != consts.StageTypeDesign:
+		case g.NewVar(stageRun["stage_type"]).String() != consts.StageTypeDesign:
 			g.Log().Warningf(ctx, "[triggerReviewStage] 当前 stage_run(%d) 不是 design，而是 %s，继续进入 review",
-				currentStageRunID, stageRun["stage_type"].String())
-		case !stageRun["deleted_at"].IsEmpty():
+				currentStageRunID, g.NewVar(stageRun["stage_type"]).String())
+		case !g.NewVar(stageRun["deleted_at"]).IsEmpty():
 			g.Log().Warningf(ctx, "[triggerReviewStage] design stage_run(%d) 已被软删除，继续进入 review", currentStageRunID)
-		case stageRun["status"].String() == consts.StageStatusCompleted:
+		case g.NewVar(stageRun["status"]).String() == consts.StageStatusCompleted:
 			// 已完成则直接进入审核
-		case stageRun["status"].String() == consts.StageStatusRunning:
+		case g.NewVar(stageRun["status"]).String() == consts.StageStatusRunning:
 			if err := stageSvc.CompleteStage(ctx, currentStageRunID); err != nil {
 				return fmt.Errorf("完成 design stage 失败，无法进入审核: %w", err)
 			}
 		default:
 			return fmt.Errorf("design stage_run(%d) 状态异常(%s)，无法进入审核",
-				currentStageRunID, stageRun["status"].String())
+				currentStageRunID, g.NewVar(stageRun["status"]).String())
 		}
 	}
 
@@ -844,10 +825,11 @@ func triggerReviewStage(ctx context.Context, projectID, planVersionID int64) err
 	if err != nil {
 		// 回滚 design stage: completed → running（否则下次提审会因 CompleteStage 报错永久卡住）
 		if currentStageRunID > 0 {
-			_, rollbackErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
-				Where("id", currentStageRunID).
-				Where("status", consts.StageStatusCompleted).
-				Update(g.Map{"status": consts.StageStatusRunning, "finished_at": nil, "updated_at": gtime.Now()})
+			_, rollbackErr := stageRunRepo.UpdateFieldsIfStatus(ctx, currentStageRunID, consts.StageStatusCompleted, g.Map{
+				"status":      consts.StageStatusRunning,
+				"finished_at": nil,
+				"updated_at":  gtime.Now(),
+			})
 			if rollbackErr != nil {
 				g.Log().Errorf(ctx, "[triggerReviewStage] 回滚 design stage 失败: %v", rollbackErr)
 			}
@@ -898,14 +880,11 @@ func PrepareTaskSchedulerForStage(ctx context.Context, workflowRunID int64, stag
 	switch stageType {
 	case consts.StageTypeExecute:
 		if stageRunID == 0 {
-			val, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-				Where("id", workflowRunID).
-				WhereNull("deleted_at").
-				Value("current_stage_run_id")
+			record, err := repo.NewWorkflowRunRepo().GetByIDMap(ctx, workflowRunID, "current_stage_run_id")
 			if err != nil {
 				return fmt.Errorf("查询 execute stage_run 失败: %w", err)
 			}
-			stageRunID = val.Int64()
+			stageRunID = g.NewVar(record["current_stage_run_id"]).Int64()
 		}
 		if stageRunID == 0 {
 			return fmt.Errorf("workflow_run(%d) 当前 execute stage_run 为空", workflowRunID)

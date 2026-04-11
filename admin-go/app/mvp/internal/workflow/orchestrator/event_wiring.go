@@ -19,6 +19,7 @@ import (
 	domainTask "easymvp/app/mvp/internal/workflow/domain/task"
 	"easymvp/app/mvp/internal/workflow/event"
 	"easymvp/app/mvp/internal/workflow/eventstream"
+	"easymvp/app/mvp/internal/workflow/repo"
 )
 
 var (
@@ -283,6 +284,7 @@ func handleSchedulerWakeupEvent(ctx context.Context, evt event.Event) error {
 }
 
 func handleTaskRetryDueEvent(ctx context.Context, evt event.Event) error {
+	taskRepo := repo.NewDomainTaskRepo()
 	var (
 		payload = normalizeEventPayload(evt.Payload)
 		taskID  = resolveTaskIDFromEvent(evt, payload)
@@ -298,24 +300,10 @@ func handleTaskRetryDueEvent(ctx context.Context, evt event.Event) error {
 		attempt = 1
 	}
 
-	result, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("id", taskID).
-		Where("status", domainTask.StatusFailed).
-		Update(g.Map{
-			"status":           domainTask.StatusPending,
-			"retry_count":      attempt,
-			"result":           nil,
-			"error_message":    nil,
-			"started_at":       nil,
-			"completed_at":     nil,
-			"heartbeat_at":     nil,
-			"locked_resources": nil,
-			"updated_at":       gtime.Now(),
-		})
+	rows, err := taskRepo.ResetForRetry(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("更新任务为 pending 失败: %w", err)
 	}
-	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return nil
 	}
@@ -342,23 +330,22 @@ func handleTaskRetryDueEvent(ctx context.Context, evt event.Event) error {
 }
 
 func handleTaskEscalateDueEvent(ctx context.Context, evt event.Event) error {
+	var (
+		taskRepo = repo.NewDomainTaskRepo()
+		wfRepo   = repo.NewWorkflowRunRepo()
+	)
 	payload := normalizeEventPayload(evt.Payload)
 	taskID := resolveTaskIDFromEvent(evt, payload)
 	if taskID == 0 {
 		return fmt.Errorf("task.escalate_due 缺少 task_id")
 	}
 
-	result, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("id", taskID).
-		Where("status", domainTask.StatusFailed).
-		Update(g.Map{
-			"status":     domainTask.StatusEscalated,
-			"updated_at": gtime.Now(),
-		})
+	rows, err := taskRepo.UpdateStatus(ctx, taskID, domainTask.StatusFailed, domainTask.StatusEscalated, g.Map{
+		"updated_at": gtime.Now(),
+	})
 	if err != nil {
 		return fmt.Errorf("更新任务为 escalated 失败: %w", err)
 	}
-	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return nil
 	}
@@ -377,10 +364,10 @@ func handleTaskEscalateDueEvent(ctx context.Context, evt event.Event) error {
 	})
 
 	if decisionCenter != nil && decisionCenter.IsEnabled(ctx) {
-		projectID, _ := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", evt.WorkflowRunID).Value("project_id") //nolint: errcheck
+		projectRecord, _ := wfRepo.GetByIDMap(ctx, evt.WorkflowRunID, "project_id") //nolint: errcheck
 		resp := decisionCenter.Decide(ctx, &autonomy.DecisionRequest{
 			WorkflowRunID:  evt.WorkflowRunID,
-			ProjectID:      projectID.Int64(),
+			ProjectID:      g.NewVar(projectRecord["project_id"]).Int64(),
 			DomainTaskID:   taskID,
 			TriggerSource:  consts.TriggerTaskRetryExhausted,
 			TriggerContext: map[string]interface{}{"task_id": taskID, "reason": reason},

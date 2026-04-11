@@ -32,8 +32,11 @@ func DefaultCircuitBreakerConfig() *CircuitBreakerConfig {
 
 // CircuitBreaker 熔断器：检测项目级异常，触发保护性暂停。
 type CircuitBreaker struct {
-	config       *CircuitBreakerConfig
-	decisionRepo *repo.AutonomyDecisionRepo
+	config         *CircuitBreakerConfig
+	decisionRepo   *repo.AutonomyDecisionRepo
+	domainTaskRepo *repo.DomainTaskRepo
+	stageRunRepo   *repo.StageRunRepo
+	acceptRunRepo  *repo.AcceptRunRepo
 }
 
 // NewCircuitBreaker 创建熔断器。
@@ -41,7 +44,13 @@ func NewCircuitBreaker(decisionRepo *repo.AutonomyDecisionRepo, config *CircuitB
 	if config == nil {
 		config = DefaultCircuitBreakerConfig()
 	}
-	return &CircuitBreaker{config: config, decisionRepo: decisionRepo}
+	return &CircuitBreaker{
+		config:         config,
+		decisionRepo:   decisionRepo,
+		domainTaskRepo: repo.NewDomainTaskRepo(),
+		stageRunRepo:   repo.NewStageRunRepo(),
+		acceptRunRepo:  repo.NewAcceptRunRepo(),
+	}
 }
 
 // Check 检查项目���否应该触发熔断。
@@ -130,62 +139,44 @@ func (cb *CircuitBreaker) RecordBreak(ctx context.Context, workflowRunID, projec
 
 // countConsecutiveFailures 统计最近连续失败任务数。
 func (cb *CircuitBreaker) countConsecutiveFailures(ctx context.Context, workflowRunID int64) int {
-	tasks, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		OrderDesc("updated_at").
-		Limit(20).
-		Fields("status").
-		All()
-	if err != nil || tasks.IsEmpty() {
+	tasks, err := cb.domainTaskRepo.ListRecentByWorkflow(ctx, workflowRunID, 20, "status")
+	if err != nil || len(tasks) == 0 {
 		return 0
 	}
 
 	count := 0
 	for _, t := range tasks {
-		s := t["status"].String()
+		s := mapString(t, "status")
 		if s == "failed" || s == "escalated" {
 			count++
 		} else if s == "completed" {
 			break // 遇到成功的就中断
 		}
-		// running/pending 跳过��影响计数
+		// running/pending 跳过，不影响计数
 	}
 	return count
 }
 
 // currentBatchFailureRate 计算当前活跃批次的失败率。
 func (cb *CircuitBreaker) currentBatchFailureRate(ctx context.Context, workflowRunID int64) float64 {
-	// 获取当前活跃批次号
-	batchRecord, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		WhereIn("status", g.Slice{"running", "failed", "escalated", "completed"}).
-		WhereNull("deleted_at").
-		Fields("batch_no").
-		Group("batch_no").
-		OrderDesc("batch_no").
-		One()
-	if err != nil || batchRecord.IsEmpty() {
-		return 0
-	}
-	batchNo := batchRecord["batch_no"].Int()
-
-	// 统计该批次的完成和失败
-	tasks, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Where("batch_no", batchNo).
-		WhereIn("status", g.Slice{"completed", "failed", "escalated"}).
-		WhereNull("deleted_at").
-		Fields("status").
-		All()
-	if err != nil || tasks.IsEmpty() {
+	batchNo, err := cb.domainTaskRepo.GetLatestBatchNoByWorkflowStatuses(ctx, workflowRunID, []string{"running", "failed", "escalated", "completed"})
+	if err != nil || batchNo <= 0 {
 		return 0
 	}
 
-	total := len(tasks)
+	tasks, err := cb.domainTaskRepo.ListByWorkflowAndBatch(ctx, workflowRunID, batchNo)
+	if err != nil || len(tasks) == 0 {
+		return 0
+	}
+
+	total := 0
 	failed := 0
 	for _, t := range tasks {
-		s := t["status"].String()
+		s := t.Status
+		if s != "completed" && s != "failed" && s != "escalated" {
+			continue
+		}
+		total++
 		if s == "failed" || s == "escalated" {
 			failed++
 		}
@@ -198,11 +189,7 @@ func (cb *CircuitBreaker) currentBatchFailureRate(ctx context.Context, workflowR
 
 // countReworkRounds 统计 rework 阶段轮次。
 func (cb *CircuitBreaker) countReworkRounds(ctx context.Context, workflowRunID int64) int {
-	count, err := g.DB().Model("mvp_stage_run").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Where("stage_type", "rework").
-		WhereNull("deleted_at").
-		Count()
+	count, err := cb.stageRunRepo.CountByWorkflowAndType(ctx, workflowRunID, "rework")
 	if err != nil {
 		return 0
 	}
@@ -211,11 +198,7 @@ func (cb *CircuitBreaker) countReworkRounds(ctx context.Context, workflowRunID i
 
 // countAcceptRounds 统计验收不通过轮次。
 func (cb *CircuitBreaker) countAcceptRounds(ctx context.Context, workflowRunID int64) int {
-	count, err := g.DB().Model("mvp_accept_run").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Where("decision", "failed").
-		WhereNull("deleted_at").
-		Count()
+	count, err := cb.acceptRunRepo.CountByWorkflowDecision(ctx, workflowRunID, "failed")
 	if err != nil {
 		return 0
 	}

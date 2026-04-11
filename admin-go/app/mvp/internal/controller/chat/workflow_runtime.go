@@ -14,6 +14,7 @@ import (
 	v1 "easymvp/app/mvp/api/mvp/v1"
 	"easymvp/app/mvp/internal/middleware"
 	"easymvp/app/mvp/internal/workflow/autonomy"
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/utility/snowflake"
 )
 
@@ -66,39 +67,16 @@ func loadLatestWorkflowRuns(ctx context.Context, projectIDs []int64) (map[int64]
 		return result, nil
 	}
 
-	var latestIDs []projectRuntimeLatestID
-	if err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		WhereIn("project_id", projectIDs).
-		WhereNull("deleted_at").
-		Fields("project_id, MAX(id) AS id").
-		Group("project_id").
-		Scan(&latestIDs); err != nil {
-		return nil, err
-	}
-	if len(latestIDs) == 0 {
-		return result, nil
-	}
-
-	runIDs := make([]int64, 0, len(latestIDs))
-	for _, item := range latestIDs {
-		if item.ID > 0 {
-			runIDs = append(runIDs, item.ID)
-		}
-	}
-	if len(runIDs) == 0 {
-		return result, nil
-	}
-
-	runs, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		WhereIn("id", runIDs).
-		WhereNull("deleted_at").
-		Fields("id, project_id, current_stage, status").
-		All()
+	records, err := repo.NewWorkflowRunRepo().ListLatestByProjects(ctx, projectIDs, "wr.id", "wr.project_id", "wr.current_stage", "wr.status")
 	if err != nil {
 		return nil, err
 	}
-	for _, run := range runs {
-		result[run["project_id"].Int64()] = run
+	if len(records) == 0 {
+		return result, nil
+	}
+	for _, run := range records {
+		record := mapToDBRecord(run)
+		result[record["project_id"].Int64()] = record
 	}
 	return result, nil
 }
@@ -109,45 +87,22 @@ func loadLatestSituationSnapshots(ctx context.Context, workflowRunIDs []int64) (
 		return result, nil
 	}
 
-	var latestIDs []workflowRuntimeSnapshotLatestID
-	if err := g.DB().Model("mvp_situation_snapshot").Ctx(ctx).
-		WhereIn("workflow_run_id", workflowRunIDs).
-		WhereNull("deleted_at").
-		Fields("workflow_run_id, MAX(id) AS id").
-		Group("workflow_run_id").
-		Scan(&latestIDs); err != nil {
-		return nil, err
-	}
-	if len(latestIDs) == 0 {
-		return result, nil
-	}
-
-	snapshotIDs := make([]int64, 0, len(latestIDs))
-	for _, item := range latestIDs {
-		if item.ID > 0 {
-			snapshotIDs = append(snapshotIDs, item.ID)
-		}
-	}
-	if len(snapshotIDs) == 0 {
-		return result, nil
-	}
-
-	snapshots, err := g.DB().Model("mvp_situation_snapshot").Ctx(ctx).
-		WhereIn("id", snapshotIDs).
-		WhereNull("deleted_at").
-		Fields("id, workflow_run_id, snapshot_data, created_at").
-		All()
+	snapshots, err := repo.NewSituationSnapshotRepo().ListLatestByWorkflowRunIDs(ctx, workflowRunIDs, "ss.id", "ss.workflow_run_id", "ss.snapshot_data", "ss.created_at")
 	if err != nil {
 		return nil, err
 	}
+	if len(snapshots) == 0 {
+		return result, nil
+	}
 
 	for _, item := range snapshots {
+		record := mapToDBRecord(item)
 		var sit autonomy.Situation
-		if err := json.Unmarshal([]byte(item["snapshot_data"].String()), &sit); err != nil {
+		if err := json.Unmarshal([]byte(record["snapshot_data"].String()), &sit); err != nil {
 			continue
 		}
-		result[item["workflow_run_id"].Int64()] = &projectRuntimeSnapshot{
-			CreatedAt: item["created_at"].GTime(),
+		result[record["workflow_run_id"].Int64()] = &projectRuntimeSnapshot{
+			CreatedAt: record["created_at"].GTime(),
 			Situation: sit,
 		}
 	}
@@ -160,23 +115,21 @@ func loadTaskStats(ctx context.Context, workflowRunIDs []int64) (map[int64]proje
 		return result, nil
 	}
 
-	var rows []projectRuntimeTaskStat
-	if err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		WhereIn("workflow_run_id", workflowRunIDs).
-		WhereNull("deleted_at").
-		Fields(`
-			workflow_run_id,
-			COUNT(*) AS total_tasks,
-			SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_tasks,
-			SUM(CASE WHEN status IN ('failed', 'escalated') THEN 1 ELSE 0 END) AS failed_tasks,
-			SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_tasks`).
-		Group("workflow_run_id").
-		Scan(&rows); err != nil {
+	rows, err := repo.NewDomainTaskRepo().ListStatRowsByWorkflowRunIDs(ctx, workflowRunIDs)
+	if err != nil {
 		return nil, err
 	}
 
 	for _, row := range rows {
-		result[row.WorkflowRunID] = row
+		record := mapToDBRecord(row)
+		workflowRunID := record["workflow_run_id"].Int64()
+		result[workflowRunID] = projectRuntimeTaskStat{
+			WorkflowRunID:  workflowRunID,
+			TotalTasks:     record["total_tasks"].Int(),
+			CompletedTasks: record["completed_tasks"].Int(),
+			FailedTasks:    record["failed_tasks"].Int(),
+			RunningTasks:   record["running_tasks"].Int(),
+		}
 	}
 	return result, nil
 }
@@ -187,38 +140,37 @@ func loadTaskActivityStats(ctx context.Context, workflowRunIDs []int64) (map[int
 		return result, nil
 	}
 
-	var rows []projectRuntimeTaskActivityRow
-	if err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		WhereIn("workflow_run_id", workflowRunIDs).
-		WhereNull("deleted_at").
-		Fields("workflow_run_id, status, batch_no, heartbeat_at, started_at, completed_at, updated_at").
-		Scan(&rows); err != nil {
+	rows, err := repo.NewDomainTaskRepo().ListByWorkflowRunIDs(ctx, workflowRunIDs, "workflow_run_id", "status", "batch_no", "heartbeat_at", "started_at", "completed_at", "updated_at")
+	if err != nil {
 		return nil, err
 	}
 
 	for _, row := range rows {
-		stat := result[row.WorkflowRunID]
-		heartbeatAt := normalizeDBUTCGTime(row.HeartbeatAt)
-		completedAt := normalizeDBUTCGTime(row.CompletedAt)
-		startedAt := normalizeDBUTCGTime(row.StartedAt)
-		updatedAt := normalizeDBUTCGTime(row.UpdatedAt)
+		record := mapToDBRecord(row)
+		workflowRunID := record["workflow_run_id"].Int64()
+		stat := result[workflowRunID]
+		heartbeatAt := normalizeDBUTCGTime(record["heartbeat_at"].GTime())
+		completedAt := normalizeDBUTCGTime(record["completed_at"].GTime())
+		startedAt := normalizeDBUTCGTime(record["started_at"].GTime())
+		updatedAt := normalizeDBUTCGTime(record["updated_at"].GTime())
 
 		stat.LastActiveAt = latestNonNilTime(stat.LastActiveAt, heartbeatAt, completedAt, startedAt, updatedAt)
-		if row.Status != "running" {
-			result[row.WorkflowRunID] = stat
+		if record["status"].String() != "running" {
+			result[workflowRunID] = stat
 			continue
 		}
 
 		lastRunningAt := latestNonNilTime(heartbeatAt, startedAt, updatedAt)
 		if isRecentGTime(lastRunningAt, projectRuntimeTaskActiveWindow) {
 			stat.ActiveRunningTasks++
-			if stat.ActiveBatch == 0 || (row.BatchNo > 0 && row.BatchNo < stat.ActiveBatch) {
-				stat.ActiveBatch = row.BatchNo
+			batchNo := record["batch_no"].Int()
+			if stat.ActiveBatch == 0 || (batchNo > 0 && batchNo < stat.ActiveBatch) {
+				stat.ActiveBatch = batchNo
 			}
 		} else {
 			stat.StalledTaskCount++
 		}
-		result[row.WorkflowRunID] = stat
+		result[workflowRunID] = stat
 	}
 
 	return result, nil
@@ -313,14 +265,14 @@ func (c *cWorkflow) ProjectStatus(ctx context.Context, req *v1.WorkflowProjectSt
 		return nil, err
 	}
 
-	project, err := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).WhereNull("deleted_at").One()
+	projectMap, err := repo.NewProjectRepo().GetByID(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	if project.IsEmpty() {
+	if len(projectMap) == 0 {
 		return nil, fmt.Errorf("项目不存在")
 	}
-	return projectStatusV2(ctx, project)
+	return projectStatusV2(ctx, mapToDBRecord(projectMap))
 }
 
 // projectStatusV2 V2 引擎的项目状态聚合。
@@ -378,23 +330,19 @@ func projectStatusV2(ctx context.Context, project gdb.Record) (*v1.WorkflowProje
 		Status string `json:"status"`
 		Count  int    `json:"count"`
 	}
-	var counts []statusCount
-	if scanErr := g.DB().Ctx(ctx).Model("mvp_task_blueprint AS bp").
-		InnerJoin("mvp_plan_version AS pv", "pv.id = bp.plan_version_id").
-		Where("pv.project_id", projectID).
-		WhereIn("pv.status", g.Slice{"draft", "active"}).
-		WhereNull("bp.deleted_at").
-		Fields("bp.blueprint_status AS status, COUNT(*) AS count").
-		Group("bp.blueprint_status").
-		Scan(&counts); scanErr != nil {
+	blueprintCounts, scanErr := repo.NewBlueprintRepo().CountStatusesByProjectDraftAndActive(ctx, projectID)
+	if scanErr != nil {
 		g.Log().Warningf(ctx, "[ProjectStatus] 蓝图统计查询失败: project=%d err=%v", projectID, scanErr)
 	}
 
 	statusCounts := make(map[string]int)
 	bpTotal := 0
-	for _, sc := range counts {
-		statusCounts[sc.Status] = sc.Count
-		bpTotal += sc.Count
+	for _, sc := range blueprintCounts {
+		record := mapToDBRecord(sc)
+		status := record["status"].String()
+		count := record["count"].Int()
+		statusCounts[status] = count
+		bpTotal += count
 	}
 
 	if totalTasks > 0 {
@@ -443,20 +391,15 @@ func (c *cWorkflow) BatchProjectStats(ctx context.Context, req *v1.WorkflowBatch
 		ids = append(ids, int64(id))
 	}
 
-	scopedQuery := middleware.ApplyDataScope(ctx,
-		g.DB().Model("mvp_project").Ctx(ctx).
-			WhereIn("id", ids).
-			WhereNull("deleted_at").
-			Fields("id"),
-		"created_by", "dept_id",
-	)
-	allowedRecords, err := scopedQuery.All()
+	allowedRecords, err := repo.NewProjectRepo().ListByIDsWithScope(ctx, ids, func(model *gdb.Model) *gdb.Model {
+		return middleware.ApplyDataScope(ctx, model, "created_by", "dept_id")
+	}, "id")
 	if err != nil {
 		return nil, fmt.Errorf("权限过滤查询失败: %w", err)
 	}
 	allowedIDs := make(map[int64]bool, len(allowedRecords))
 	for _, p := range allowedRecords {
-		allowedIDs[p["id"].Int64()] = true
+		allowedIDs[mapToDBRecord(p)["id"].Int64()] = true
 	}
 	filtered := ids[:0]
 	for _, id := range ids {

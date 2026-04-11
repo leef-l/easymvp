@@ -7,6 +7,7 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	"easymvp/app/mvp/internal/model/entity"
 	"easymvp/utility/snowflake"
@@ -31,12 +32,30 @@ func (r *WorkflowRunRepo) NextRunNo(ctx context.Context, projectID int64) (int, 
 	return int(val) + 1, nil
 }
 
+// NextRunNoInTx 在事务中获取项目下一个 run_no。
+func (r *WorkflowRunRepo) NextRunNoInTx(ctx context.Context, tx gdb.TX, projectID int64) (int, error) {
+	val, err := tx.Model(r.table()).Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at").
+		Max("run_no")
+	if err != nil {
+		return 0, err
+	}
+	return int(val) + 1, nil
+}
+
 // Create 创建工作流运行记录。
 func (r *WorkflowRunRepo) Create(ctx context.Context, data g.Map) (int64, error) {
 	id := snowflake.Generate()
 	data["id"] = id
 	_, err := g.DB().Model(r.table()).Ctx(ctx).Insert(data)
 	return int64(id), err
+}
+
+// CreateInTx 在事务中创建工作流运行记录。
+func (r *WorkflowRunRepo) CreateInTx(ctx context.Context, tx gdb.TX, data g.Map) error {
+	_, err := tx.Model(r.table()).Ctx(ctx).Insert(data)
+	return err
 }
 
 // GetByID 按 ID 查询。
@@ -49,6 +68,21 @@ func (r *WorkflowRunRepo) GetByID(ctx context.Context, id int64) (*entity.MvpWor
 // GetByIDMap 按 ID 查询工作流运行；可选字段列表用于减少读取范围。
 func (r *WorkflowRunRepo) GetByIDMap(ctx context.Context, id int64, fields ...string) (g.Map, error) {
 	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("id", id).
+		WhereNull("deleted_at")
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	record, err := model.One()
+	if err != nil || record.IsEmpty() {
+		return nil, err
+	}
+	return record.Map(), nil
+}
+
+// GetByIDMapInTx 按 ID 在事务中查询工作流运行。
+func (r *WorkflowRunRepo) GetByIDMapInTx(ctx context.Context, tx gdb.TX, id int64, fields ...string) (g.Map, error) {
+	model := tx.Model(r.table()).Ctx(ctx).
 		Where("id", id).
 		WhereNull("deleted_at")
 	if len(fields) > 0 {
@@ -75,6 +109,87 @@ func (r *WorkflowRunRepo) GetLatestByProject(ctx context.Context, projectID int6
 	return record, nil
 }
 
+// ListByProject 查询项目下的工作流运行列表。
+func (r *WorkflowRunRepo) ListByProject(ctx context.Context, projectID int64, fields ...string) ([]g.Map, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at").
+		OrderDesc("run_no")
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	records, err := model.All()
+	if err != nil {
+		return nil, err
+	}
+	return records.List(), nil
+}
+
+// ListByStatuses 查询命中状态集合的工作流运行。
+func (r *WorkflowRunRepo) ListByStatuses(ctx context.Context, statuses []string, fields ...string) ([]g.Map, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		WhereNull("deleted_at")
+	if len(statuses) > 0 {
+		model = model.WhereIn("status", statuses)
+	}
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	records, err := model.OrderAsc("created_at").All()
+	if err != nil {
+		return nil, err
+	}
+	return records.List(), nil
+}
+
+// ListLatestByProjects 查询项目集合下各自最新一条工作流运行。
+func (r *WorkflowRunRepo) ListLatestByProjects(ctx context.Context, projectIDs []int64, fields ...string) ([]g.Map, error) {
+	if len(projectIDs) == 0 {
+		return nil, nil
+	}
+
+	type latestWorkflowRunID struct {
+		ProjectID int64 `orm:"project_id"`
+		ID        int64 `orm:"id"`
+	}
+
+	var latestIDs []latestWorkflowRunID
+	if err := g.DB().Model(r.table()).Ctx(ctx).
+		WhereIn("project_id", projectIDs).
+		WhereNull("deleted_at").
+		Fields("project_id, MAX(id) AS id").
+		Group("project_id").
+		Scan(&latestIDs); err != nil {
+		return nil, err
+	}
+	if len(latestIDs) == 0 {
+		return nil, nil
+	}
+
+	runIDs := make([]int64, 0, len(latestIDs))
+	for _, item := range latestIDs {
+		if item.ID > 0 {
+			runIDs = append(runIDs, item.ID)
+		}
+	}
+	if len(runIDs) == 0 {
+		return nil, nil
+	}
+
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		WhereIn("id", runIDs).
+		WhereNull("deleted_at")
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+
+	records, err := model.OrderDesc("run_no").All()
+	if err != nil {
+		return nil, err
+	}
+	return records.List(), nil
+}
+
 // UpdateFields 按 ID 更新字段。
 func (r *WorkflowRunRepo) UpdateFields(ctx context.Context, id int64, data g.Map) error {
 	_, err := g.DB().Model(r.table()).Ctx(ctx).
@@ -83,6 +198,57 @@ func (r *WorkflowRunRepo) UpdateFields(ctx context.Context, id int64, data g.Map
 		Data(data).
 		Update()
 	return err
+}
+
+// UpdateFieldsIfStatuses 在当前状态命中集合时更新工作流字段。
+func (r *WorkflowRunRepo) UpdateFieldsIfStatuses(ctx context.Context, id int64, statuses []string, data g.Map) (int64, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("id", id).
+		WhereNull("deleted_at")
+	if len(statuses) > 0 {
+		model = model.WhereIn("status", statuses)
+	}
+	result, err := model.Data(data).Update()
+	if err != nil {
+		return 0, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows, nil
+}
+
+// UpdateFieldsIfStatusInTx 在事务中仅当当前状态命中时更新工作流字段。
+func (r *WorkflowRunRepo) UpdateFieldsIfStatusInTx(ctx context.Context, tx gdb.TX, id int64, status string, data g.Map) (int64, error) {
+	model := tx.Model(r.table()).Ctx(ctx).
+		Where("id", id).
+		WhereNull("deleted_at")
+	if status != "" {
+		model = model.Where("status", status)
+	}
+	result, err := model.Data(data).Update()
+	if err != nil {
+		return 0, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows, nil
+}
+
+// UpdateCompletedFinishedAt 在 completed 且 finished_at 为空时回写完成时间。
+func (r *WorkflowRunRepo) UpdateCompletedFinishedAt(ctx context.Context, id int64, finishedAt *gtime.Time) (int64, error) {
+	result, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("id", id).
+		Where("status", "completed").
+		WhereNull("finished_at").
+		WhereNull("deleted_at").
+		Data(g.Map{
+			"finished_at": finishedAt,
+			"updated_at":  finishedAt,
+		}).
+		Update()
+	if err != nil {
+		return 0, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows, nil
 }
 
 // GetLatestByProjectExcludingStatuses 查询项目下最近一条不在给定状态集合内的工作流。
@@ -134,6 +300,24 @@ func (r *WorkflowRunRepo) GetLatestByProjectStatuses(ctx context.Context, projec
 	return record.Map(), nil
 }
 
+// GetLatestByProjectReviewStatus 查询项目下最近一条命中审核状态的工作流。
+func (r *WorkflowRunRepo) GetLatestByProjectReviewStatus(ctx context.Context, projectID int64, reviewStatus string, fields ...string) (g.Map, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("project_id", projectID).
+		WhereNull("deleted_at")
+	if reviewStatus != "" {
+		model = model.Where("review_status", reviewStatus)
+	}
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	record, err := model.OrderDesc("run_no").OrderDesc("created_at").One()
+	if err != nil || record.IsEmpty() {
+		return nil, err
+	}
+	return record.Map(), nil
+}
+
 // UpdateStatus CAS 更新状态。
 func (r *WorkflowRunRepo) UpdateStatus(ctx context.Context, id int64, from, to string, extra g.Map) (int64, error) {
 	data := g.Map{"status": to}
@@ -155,6 +339,10 @@ func (r *WorkflowRunRepo) UpdateStatus(ctx context.Context, id int64, from, to s
 
 // UpdateInTx 事务内更新。
 func (r *WorkflowRunRepo) UpdateInTx(ctx context.Context, tx gdb.TX, id int64, data g.Map) error {
-	_, err := tx.Model(r.table()).Ctx(ctx).Where("id", id).Data(data).Update()
+	_, err := tx.Model(r.table()).Ctx(ctx).
+		Where("id", id).
+		WhereNull("deleted_at").
+		Data(data).
+		Update()
 	return err
 }

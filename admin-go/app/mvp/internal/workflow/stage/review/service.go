@@ -10,13 +10,13 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/gconv"
 
 	"easymvp/app/mvp/internal/consts"
 	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/workflow/qualitygate"
 	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/app/mvp/internal/workflow/resourcepath"
-	"easymvp/utility/snowflake"
 )
 
 // StageCompleter 阶段完成回调接口（避免循环依赖 orchestrator）。
@@ -33,6 +33,12 @@ type ExecuteTriggerFn func(ctx context.Context, workflowRunID, planVersionID int
 type Service struct {
 	stageCompleter   StageCompleter
 	issueRepo        *repo.ReviewIssueRepo
+	stageRunRepo     *repo.StageRunRepo
+	stageTaskRepo    *repo.StageTaskRepo
+	workflowRunRepo  *repo.WorkflowRunRepo
+	projectRepo      *repo.ProjectRepo
+	blueprintRepo    *repo.BlueprintRepo
+	planVersionRepo  *repo.PlanVersionRepo
 	designRollbackFn DesignRollbackFn
 	executeTriggerFn ExecuteTriggerFn
 }
@@ -45,7 +51,19 @@ type reviewConclusion struct {
 
 // NewService 创建审核阶段服务。
 func NewService(sc StageCompleter, ir *repo.ReviewIssueRepo) *Service {
-	return &Service{stageCompleter: sc, issueRepo: ir}
+	if ir == nil {
+		ir = repo.NewReviewIssueRepo()
+	}
+	return &Service{
+		stageCompleter:  sc,
+		issueRepo:       ir,
+		stageRunRepo:    repo.NewStageRunRepo(),
+		stageTaskRepo:   repo.NewStageTaskRepo(),
+		workflowRunRepo: repo.NewWorkflowRunRepo(),
+		projectRepo:     repo.NewProjectRepo(),
+		blueprintRepo:   repo.NewBlueprintRepo(),
+		planVersionRepo: repo.NewPlanVersionRepo(),
+	}
 }
 
 // stage_task 类型常量
@@ -63,32 +81,27 @@ func (s *Service) RunReview(ctx context.Context, stageRunID int64, planVersionID
 	g.Log().Infof(ctx, "[ReviewStage] RunReview start stageRunID=%d planVersionID=%d", stageRunID, planVersionID)
 
 	// 查 stage_run 获取 workflow_run_id
-	stageRun, err := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).WhereNull("deleted_at").One()
-	if err != nil || stageRun.IsEmpty() {
+	stageRun, err := s.stageRunRepo.GetByIDMap(ctx, stageRunID, "workflow_run_id")
+	if err != nil || stageRun == nil {
 		return fmt.Errorf("stage_run(%d) 不存在", stageRunID)
 	}
-	workflowRunID := stageRun["workflow_run_id"].Int64()
+	workflowRunID := gconv.Int64(stageRun["workflow_run_id"])
 
 	// 查 workflow_run 获取 project_id
-	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).Where("id", workflowRunID).WhereNull("deleted_at").One()
-	if err != nil || wfRun.IsEmpty() {
+	wfRun, err := s.workflowRunRepo.GetByIDMap(ctx, workflowRunID, "project_id")
+	if err != nil || wfRun == nil {
 		return fmt.Errorf("workflow_run(%d) 不存在", workflowRunID)
 	}
-	projectID := wfRun["project_id"].Int64()
+	projectID := gconv.Int64(wfRun["project_id"])
 
 	// 获取项目信息
-	project, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).WhereNull("deleted_at").One()
-	if err != nil || project.IsEmpty() {
+	project, err := s.projectRepo.GetByID(ctx, projectID, "work_dir", "project_category", "category_code")
+	if err != nil || project == nil {
 		return fmt.Errorf("项目(%d) 不存在", projectID)
 	}
 
 	// 获取蓝图列表（代替旧的 draft tasks）
-	blueprints, err := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
-		Where("plan_version_id", planVersionID).
-		Where("blueprint_status", consts.BlueprintStatusConfirmed).
-		WhereNull("deleted_at").
-		OrderAsc("sort").
-		All()
+	blueprints, err := s.blueprintRepo.ListByPlanVersionStatus(ctx, planVersionID, consts.BlueprintStatusConfirmed)
 	if err != nil {
 		return fmt.Errorf("查询蓝图失败: %w", err)
 	}
@@ -130,18 +143,17 @@ type precheckResult struct {
 }
 
 // runPrecheck 系统预检（零 AI 消耗）。
-func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, planVersionID, projectID int64, project gdb.Record, blueprints gdb.Result) (*precheckResult, error) {
+func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, planVersionID, projectID int64, project g.Map, blueprints gdb.Result) (*precheckResult, error) {
 	stageTaskID := s.createStageTask(ctx, stageRunID, TaskTypePrecheck, "system")
 	now := time.Now()
 
 	// 标记开始
-	if _, stErr := g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).
-		Update(g.Map{"status": "running", "started_at": now, "updated_at": now}); stErr != nil {
+	if stErr := s.stageTaskRepo.UpdateFields(ctx, stageTaskID, g.Map{"status": "running", "started_at": now, "updated_at": now}); stErr != nil {
 		g.Log().Warningf(ctx, "[ReviewStage] precheck stage_task 标记 running 失败: id=%d err=%v", stageTaskID, stErr)
 	}
 
-	workDir := project["work_dir"].String()
-	projectCategory := project["project_category"].String()
+	workDir := gconv.String(project["work_dir"])
+	projectCategory := gconv.String(project["project_category"])
 	family := engine.GetCategoryFamily(projectCategory)
 
 	result := &precheckResult{}
@@ -247,9 +259,7 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 				s.createIssue(ctx, workflowRunID, stageRunID, planVersionID, bpID, "warning", "missing_role", "precheck", name,
 					fmt.Sprintf("项目未配置 %s/%s 角色，蓝图可能无法执行", roleType, roleLevel))
 			} else if resolvedLevel != roleLevel {
-				if _, upErr := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
-					Where("id", bpID).
-					Update(g.Map{"role_level": resolvedLevel, "updated_at": gtime.Now()}); upErr != nil {
+				if upErr := s.blueprintRepo.UpdateFields(ctx, bpID, g.Map{"role_level": resolvedLevel, "updated_at": gtime.Now()}); upErr != nil {
 					g.Log().Warningf(ctx, "[ReviewStage] 自动升档 role_level 失败: bp=%d %s/%s->%s err=%v",
 						bpID, roleType, roleLevel, resolvedLevel, upErr)
 				} else {
@@ -259,7 +269,7 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 			}
 		}
 	}
-	signals := qualitygate.DetectProjectSignals(workDir, string(family), project["category_code"].String())
+	signals := qualitygate.DetectProjectSignals(workDir, string(family), gconv.String(project["category_code"]))
 	if requiresBrowserPlan {
 		signals.HasFrontendApp = true
 	}
@@ -275,8 +285,7 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 	if result.HasErrors {
 		status = "failed"
 	}
-	if _, stErr := g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).
-		Update(g.Map{"status": status, "completed_at": time.Now(), "updated_at": time.Now()}); stErr != nil {
+	if stErr := s.stageTaskRepo.UpdateFields(ctx, stageTaskID, g.Map{"status": status, "completed_at": time.Now(), "updated_at": time.Now()}); stErr != nil {
 		g.Log().Warningf(ctx, "[ReviewStage] precheck stage_task 完成更新失败: id=%d err=%v", stageTaskID, stErr)
 	}
 
@@ -304,8 +313,7 @@ func (s *Service) warnMissingStandardProjectRoles(ctx context.Context, workflowR
 func (s *Service) runAuditorReview(ctx context.Context, stageRunID, workflowRunID, planVersionID, projectID int64, blueprints gdb.Result) (bool, error) {
 	stageTaskID := s.createStageTask(ctx, stageRunID, TaskTypeAuditorReview, "auditor")
 	now := time.Now()
-	if _, stErr := g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).
-		Update(g.Map{"status": "running", "started_at": now, "updated_at": now}); stErr != nil {
+	if stErr := s.stageTaskRepo.UpdateFields(ctx, stageTaskID, g.Map{"status": "running", "started_at": now, "updated_at": now}); stErr != nil {
 		g.Log().Warningf(ctx, "[ReviewStage] auditor stage_task 标记 running 失败: id=%d err=%v", stageTaskID, stErr)
 	}
 
@@ -350,7 +358,7 @@ func (s *Service) runAuditorReview(ctx context.Context, stageRunID, workflowRunI
 	if errMsg != "" {
 		updateData["error_message"] = errMsg
 	}
-	if _, stErr := g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).Update(updateData); stErr != nil {
+	if stErr := s.stageTaskRepo.UpdateFields(ctx, stageTaskID, updateData); stErr != nil {
 		g.Log().Warningf(ctx, "[ReviewStage] auditor stage_task 完成更新失败: id=%d err=%v", stageTaskID, stErr)
 	}
 
@@ -364,8 +372,7 @@ func (s *Service) runAuditorReview(ctx context.Context, stageRunID, workflowRunI
 func (s *Service) runCoordinatorOptimize(ctx context.Context, stageRunID, workflowRunID, planVersionID, projectID int64, blueprints gdb.Result) error {
 	stageTaskID := s.createStageTask(ctx, stageRunID, TaskTypeCoordinatorOptimize, "coordinator")
 	now := time.Now()
-	if _, stErr := g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).
-		Update(g.Map{"status": "running", "started_at": now, "updated_at": now}); stErr != nil {
+	if stErr := s.stageTaskRepo.UpdateFields(ctx, stageTaskID, g.Map{"status": "running", "started_at": now, "updated_at": now}); stErr != nil {
 		g.Log().Warningf(ctx, "[ReviewStage] coordinator stage_task 标记 running 失败: id=%d err=%v", stageTaskID, stErr)
 	}
 
@@ -401,7 +408,7 @@ func (s *Service) runCoordinatorOptimize(ctx context.Context, stageRunID, workfl
 	if errMsg != "" {
 		updateData["error_message"] = errMsg
 	}
-	if _, stErr := g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).Update(updateData); stErr != nil {
+	if stErr := s.stageTaskRepo.UpdateFields(ctx, stageTaskID, updateData); stErr != nil {
 		g.Log().Warningf(ctx, "[ReviewStage] coordinator stage_task 完成更新失败: id=%d err=%v", stageTaskID, stErr)
 	}
 	return err
@@ -413,20 +420,18 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 	now := gtime.Now()
 
 	// 统计问题
-	stageRun, srErr := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).WhereNull("deleted_at").One()
-	if srErr != nil || stageRun.IsEmpty() {
+	stageRun, srErr := s.stageRunRepo.GetByIDMap(ctx, stageRunID, "workflow_run_id")
+	if srErr != nil || stageRun == nil {
 		g.Log().Errorf(ctx, "[ReviewService] concludeReview 查询 stage_run 失败: stageRun=%d err=%v", stageRunID, srErr)
 		return fmt.Errorf("查询 stage_run(%d) 失败: %v", stageRunID, srErr)
 	}
-	workflowRunID := stageRun["workflow_run_id"].Int64()
+	workflowRunID := gconv.Int64(stageRun["workflow_run_id"])
 
-	errorCount, ecErr := g.DB().Model("mvp_review_issue").Ctx(ctx).
-		Where("stage_run_id", stageRunID).Where("severity", "error").Where("status", "open").Count()
+	errorCount, ecErr := s.issueRepo.CountOpenByStageRunAndSeverity(ctx, stageRunID, "error")
 	if ecErr != nil {
 		g.Log().Warningf(ctx, "[ReviewService] 查询 error 数失败: stageRun=%d err=%v", stageRunID, ecErr)
 	}
-	warningCount, wcErr := g.DB().Model("mvp_review_issue").Ctx(ctx).
-		Where("stage_run_id", stageRunID).Where("severity", "warning").Where("status", "open").Count()
+	warningCount, wcErr := s.issueRepo.CountOpenByStageRunAndSeverity(ctx, stageRunID, "warning")
 	if wcErr != nil {
 		g.Log().Warningf(ctx, "[ReviewService] 查询 warning 数失败: stageRun=%d err=%v", stageRunID, wcErr)
 	}
@@ -447,32 +452,34 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 		outputJSON = []byte("{}")
 	}
 
-	if _, stErr := g.DB().Model("mvp_stage_task").Ctx(ctx).Where("id", stageTaskID).
-		Update(g.Map{
-			"status":         "completed",
-			"started_at":     now,
-			"completed_at":   now,
-			"output_payload": string(outputJSON),
-			"updated_at":     now,
-		}); stErr != nil {
+	if stErr := s.stageTaskRepo.UpdateFields(ctx, stageTaskID, g.Map{
+		"status":         "completed",
+		"started_at":     now,
+		"completed_at":   now,
+		"output_payload": string(outputJSON),
+		"updated_at":     now,
+	}); stErr != nil {
 		g.Log().Errorf(ctx, "[ReviewService] 更新 stage_task 状态失败: stageTask=%d err=%v", stageTaskID, stErr)
 	}
 
 	if conclusion.passed {
 		// 审核通过：更新 plan_version review_status
-		if _, pvErr := g.DB().Model("mvp_plan_version").Ctx(ctx).
-			Where("id", planVersionID).
-			Update(g.Map{"review_status": consts.PlanReviewStatusApproved, "approved_at": now, "updated_at": now}); pvErr != nil {
+		if pvErr := s.planVersionRepo.UpdateFields(ctx, planVersionID, g.Map{
+			"review_status": consts.PlanReviewStatusApproved,
+			"approved_at":   now,
+			"updated_at":    now,
+		}); pvErr != nil {
 			g.Log().Errorf(ctx, "[ReviewStage] 更新 plan_version 审核状态失败: pvID=%d err=%v", planVersionID, pvErr)
 		}
 
 		// 完成 review stage
 		if err := s.stageCompleter.CompleteStage(ctx, stageRunID); err != nil {
 			g.Log().Errorf(ctx, "[ReviewStage] CompleteStage 失败，回滚 review_status: %v", err)
-			if _, rbErr := g.DB().Model("mvp_plan_version").Ctx(ctx).
-				Where("id", planVersionID).
-				Where("review_status", consts.PlanReviewStatusApproved).
-				Update(g.Map{"review_status": consts.PlanReviewStatusPending, "approved_at": nil, "updated_at": gtime.Now()}); rbErr != nil {
+			if _, rbErr := s.planVersionRepo.UpdateFieldsIfReviewStatus(ctx, planVersionID, consts.PlanReviewStatusApproved, g.Map{
+				"review_status": consts.PlanReviewStatusPending,
+				"approved_at":   nil,
+				"updated_at":    gtime.Now(),
+			}); rbErr != nil {
 				g.Log().Errorf(ctx, "[ReviewStage] 回滚 plan_version 也失败: pv=%d err=%v", planVersionID, rbErr)
 			}
 			return fmt.Errorf("完成审核阶段失败: %w", err)
@@ -485,18 +492,20 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 				g.Log().Errorf(ctx, "[ReviewStage] 推进执行阶段失败，回滚审核状态: %v", err)
 
 				// 回滚 plan_version review_status → pending（CAS：仅回滚已通过的）
-				if _, rbErr := g.DB().Model("mvp_plan_version").Ctx(ctx).
-					Where("id", planVersionID).
-					Where("review_status", consts.PlanReviewStatusApproved).
-					Update(g.Map{"review_status": consts.PlanReviewStatusPending, "approved_at": nil, "updated_at": gtime.Now()}); rbErr != nil {
+				if _, rbErr := s.planVersionRepo.UpdateFieldsIfReviewStatus(ctx, planVersionID, consts.PlanReviewStatusApproved, g.Map{
+					"review_status": consts.PlanReviewStatusPending,
+					"approved_at":   nil,
+					"updated_at":    gtime.Now(),
+				}); rbErr != nil {
 					g.Log().Errorf(ctx, "[ReviewStage] 回滚 plan_version 失败: pv=%d err=%v", planVersionID, rbErr)
 				}
 
 				// 回滚 review stage: completed → running（CAS 防并发）
-				if _, rbErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
-					Where("id", stageRunID).
-					Where("status", consts.StageStatusCompleted).
-					Update(g.Map{"status": consts.StageStatusRunning, "finished_at": nil, "updated_at": gtime.Now()}); rbErr != nil {
+				if _, rbErr := s.stageRunRepo.UpdateFieldsIfStatus(ctx, stageRunID, consts.StageStatusCompleted, g.Map{
+					"status":      consts.StageStatusRunning,
+					"finished_at": nil,
+					"updated_at":  gtime.Now(),
+				}); rbErr != nil {
 					g.Log().Errorf(ctx, "[ReviewStage] 回滚 stage_run 失败: stage=%d err=%v", stageRunID, rbErr)
 				}
 
@@ -507,18 +516,16 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 					"current_stage_run_id": stageRunID,
 					"updated_at":           gtime.Now(),
 				}
-				if _, rbErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-					Where("id", workflowRunID).
-					WhereIn("status", g.Slice{consts.WorkflowRunStatusExecuting, consts.WorkflowRunStatusFailed}).
-					Update(wfRollback); rbErr != nil {
+				if _, rbErr := s.workflowRunRepo.UpdateFieldsIfStatuses(ctx, workflowRunID, []string{consts.WorkflowRunStatusExecuting, consts.WorkflowRunStatusFailed}, wfRollback); rbErr != nil {
 					g.Log().Errorf(ctx, "[ReviewStage] 回滚 workflow_run 失败: wfRun=%d err=%v", workflowRunID, rbErr)
 				}
 
 				// 同步 mvp_project.status 回 reviewing（CAS：仅回滚 executing 状态的项目）
-				if _, rbErr := g.DB().Model("mvp_project").Ctx(ctx).
-					Where("id", projectID).
-					WhereIn("status", g.Slice{consts.WorkflowRunStatusExecuting, consts.WorkflowRunStatusFailed}).
-					Update(g.Map{"status": consts.WorkflowRunStatusReviewing, "pause_reason": nil, "updated_at": gtime.Now()}); rbErr != nil {
+				if _, rbErr := s.projectRepo.UpdateFieldsIfStatuses(ctx, projectID, []string{consts.WorkflowRunStatusExecuting, consts.WorkflowRunStatusFailed}, g.Map{
+					"status":       consts.WorkflowRunStatusReviewing,
+					"pause_reason": nil,
+					"updated_at":   gtime.Now(),
+				}); rbErr != nil {
 					g.Log().Errorf(ctx, "[ReviewStage] 回滚 project 状态失败: project=%d err=%v", projectID, rbErr)
 				}
 
@@ -539,22 +546,20 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 		g.Log().Infof(ctx, "[ReviewStage] 审核通过 planVersionID=%d errors=%d warnings=%d", planVersionID, errorCount, warningCount)
 	} else {
 		// 审核不通过：回退 plan_version + blueprints + workflow + project
-		if _, pvErr := g.DB().Model("mvp_plan_version").Ctx(ctx).
-			Where("id", planVersionID).
-			Update(g.Map{
-				"status":        "draft",
-				"review_status": consts.PlanReviewStatusRejected,
-				"rejected_at":   now,
-				"updated_at":    now,
-			}); pvErr != nil {
+		if pvErr := s.planVersionRepo.UpdateFields(ctx, planVersionID, g.Map{
+			"status":        "draft",
+			"review_status": consts.PlanReviewStatusRejected,
+			"rejected_at":   now,
+			"updated_at":    now,
+		}); pvErr != nil {
 			g.Log().Errorf(ctx, "[ReviewStage] 驳回更新 plan_version 失败: pvID=%d err=%v", planVersionID, pvErr)
 		}
 
 		// 蓝图回退 confirmed → draft（让用户可以重新编辑）
-		if _, bpErr := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
-			Where("plan_version_id", planVersionID).
-			Where("blueprint_status", consts.BlueprintStatusConfirmed).
-			Update(g.Map{"blueprint_status": consts.BlueprintStatusDraft, "updated_at": now}); bpErr != nil {
+		if bpErr := s.blueprintRepo.UpdateStatusByPlanVersion(ctx, planVersionID, consts.BlueprintStatusConfirmed, g.Map{
+			"blueprint_status": consts.BlueprintStatusDraft,
+			"updated_at":       now,
+		}); bpErr != nil {
 			g.Log().Errorf(ctx, "[ReviewStage] 蓝图回退失败: pvID=%d err=%v", planVersionID, bpErr)
 		}
 
@@ -573,19 +578,14 @@ func (s *Service) concludeReview(ctx context.Context, stageRunID, planVersionID,
 
 		// fallback：如果 designRollbackFn 失败或未注册，直接更新 workflow_run + project 状态
 		if !designRollbackOK {
-			if _, wfErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-				Where("id", workflowRunID).
-				WhereIn("status", g.Slice{"reviewing", "failed"}).
-				Update(g.Map{
-					"status":        "designing",
-					"current_stage": "design",
-					"updated_at":    now,
-				}); wfErr != nil {
+			if _, wfErr := s.workflowRunRepo.UpdateFieldsIfStatuses(ctx, workflowRunID, []string{"reviewing", "failed"}, g.Map{
+				"status":        "designing",
+				"current_stage": "design",
+				"updated_at":    now,
+			}); wfErr != nil {
 				g.Log().Errorf(ctx, "[ReviewStage] fallback 回退 workflow_run 失败: wfRun=%d err=%v", workflowRunID, wfErr)
 			}
-			if _, pErr := g.DB().Model("mvp_project").Ctx(ctx).
-				Where("id", projectID).
-				Update(g.Map{"status": "designing", "updated_at": now}); pErr != nil {
+			if pErr := s.projectRepo.UpdateFields(ctx, projectID, g.Map{"status": "designing", "updated_at": now}); pErr != nil {
 				g.Log().Errorf(ctx, "[ReviewStage] fallback 回退 project 失败: project=%d err=%v", projectID, pErr)
 			}
 		}
@@ -639,22 +639,12 @@ func (s *Service) SetExecuteTriggerFn(fn ExecuteTriggerFn) {
 // buildRejectNotification 构建审核驳回通知消息。
 func (s *Service) buildRejectNotification(ctx context.Context, stageRunID int64, summary string) string {
 	// 查所有 error 和 warning 级别的 issue
-	errors, errQry := g.DB().Model("mvp_review_issue").Ctx(ctx).
-		Where("stage_run_id", stageRunID).
-		Where("severity", "error").
-		Where("status", "open").
-		OrderDesc("created_at").
-		All()
+	errors, errQry := s.issueRepo.ListOpenByStageRunAndSeverity(ctx, stageRunID, "error", "task_name", "message")
 	if errQry != nil {
 		g.Log().Warningf(ctx, "[ReviewService] 查询 error issues 失败: stageRun=%d err=%v", stageRunID, errQry)
 	}
 
-	warnings, warnQry := g.DB().Model("mvp_review_issue").Ctx(ctx).
-		Where("stage_run_id", stageRunID).
-		Where("severity", "warning").
-		Where("status", "open").
-		OrderDesc("created_at").
-		All()
+	warnings, warnQry := s.issueRepo.ListOpenByStageRunAndSeverity(ctx, stageRunID, "warning", "task_name", "message")
 	if warnQry != nil {
 		g.Log().Warningf(ctx, "[ReviewService] 查询 warning issues 失败: stageRun=%d err=%v", stageRunID, warnQry)
 	}
@@ -666,10 +656,10 @@ func (s *Service) buildRejectNotification(ctx context.Context, stageRunID int64,
 		msg += "### 错误（必须修复）\n"
 		for i, issue := range errors {
 			taskRef := ""
-			if tn := issue["task_name"].String(); tn != "" {
+			if tn := gconv.String(issue["task_name"]); tn != "" {
 				taskRef = fmt.Sprintf("[%s] ", tn)
 			}
-			msg += fmt.Sprintf("%d. %s%s\n", i+1, taskRef, issue["message"].String())
+			msg += fmt.Sprintf("%d. %s%s\n", i+1, taskRef, gconv.String(issue["message"]))
 		}
 		msg += "\n"
 	}
@@ -678,24 +668,21 @@ func (s *Service) buildRejectNotification(ctx context.Context, stageRunID int64,
 		msg += "### 警告（当前会阻塞执行，必须修复）\n"
 		for i, issue := range warnings {
 			taskRef := ""
-			if tn := issue["task_name"].String(); tn != "" {
+			if tn := gconv.String(issue["task_name"]); tn != "" {
 				taskRef = fmt.Sprintf("[%s] ", tn)
 			}
-			msg += fmt.Sprintf("%d. %s%s\n", i+1, taskRef, issue["message"].String())
+			msg += fmt.Sprintf("%d. %s%s\n", i+1, taskRef, gconv.String(issue["message"]))
 		}
 		msg += "\n"
 	}
 
 	// 查审计员的 suggestions（从 stage_task output_payload 中提取）
-	auditorTask, atErr := g.DB().Model("mvp_stage_task").Ctx(ctx).
-		Where("stage_run_id", stageRunID).
-		Where("task_type", TaskTypeAuditorReview).
-		One()
+	auditorTask, atErr := s.stageTaskRepo.GetByStageRunAndTaskType(ctx, stageRunID, TaskTypeAuditorReview, "output_payload")
 	if atErr != nil {
 		g.Log().Warningf(ctx, "[ReviewService] 查询 auditor stage_task 失败: stageRun=%d err=%v", stageRunID, atErr)
 	}
-	if !auditorTask.IsEmpty() {
-		payload := auditorTask["output_payload"].String()
+	if auditorTask != nil {
+		payload := gconv.String(auditorTask["output_payload"])
 		if payload != "" {
 			var auditorOutput struct {
 				Suggestions string `json:"suggestions"`
@@ -715,17 +702,16 @@ func (s *Service) buildRejectNotification(ctx context.Context, stageRunID int64,
 
 // createStageTask 创建阶段子任务记录。
 func (s *Service) createStageTask(ctx context.Context, stageRunID int64, taskType, roleType string) int64 {
-	id := int64(snowflake.Generate())
 	now := time.Now()
-	if _, err := g.DB().Model("mvp_stage_task").Ctx(ctx).Insert(g.Map{
-		"id":           id,
+	id, err := s.stageTaskRepo.Create(ctx, g.Map{
 		"stage_run_id": stageRunID,
 		"task_type":    taskType,
 		"role_type":    roleType,
 		"status":       "pending",
 		"created_at":   now,
 		"updated_at":   now,
-	}); err != nil {
+	})
+	if err != nil {
 		g.Log().Errorf(ctx, "[ReviewService] 创建阶段子任务失败: stageRun=%d type=%s err=%v", stageRunID, taskType, err)
 	}
 	return id
@@ -735,7 +721,6 @@ func (s *Service) createStageTask(ctx context.Context, stageRunID int64, taskTyp
 func (s *Service) createIssue(ctx context.Context, workflowRunID, stageRunID, planVersionID, blueprintID int64, severity, issueCode, sourceRole, taskName, message string) {
 	now := time.Now()
 	data := g.Map{
-		"id":              int64(snowflake.Generate()),
 		"workflow_run_id": workflowRunID,
 		"stage_run_id":    stageRunID,
 		"plan_version_id": planVersionID,
@@ -752,7 +737,7 @@ func (s *Service) createIssue(ctx context.Context, workflowRunID, stageRunID, pl
 	if blueprintID > 0 {
 		data["blueprint_id"] = blueprintID
 	}
-	if _, err := g.DB().Model("mvp_review_issue").Ctx(ctx).Insert(data); err != nil {
+	if _, err := s.issueRepo.Create(ctx, data); err != nil {
 		g.Log().Errorf(ctx, "[ReviewService] 创建审核问题失败: wfRun=%d severity=%s err=%v", workflowRunID, severity, err)
 	}
 }

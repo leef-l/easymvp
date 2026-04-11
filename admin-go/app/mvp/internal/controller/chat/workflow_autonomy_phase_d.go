@@ -11,6 +11,7 @@ import (
 	v1 "easymvp/app/mvp/api/mvp/v1"
 	"easymvp/app/mvp/internal/middleware"
 	"easymvp/app/mvp/internal/workflow/orchestrator"
+	"easymvp/app/mvp/internal/workflow/repo"
 )
 
 // MetaObservations 查询决策观测记录。
@@ -25,16 +26,11 @@ func (c *cWorkflow) MetaObservations(ctx context.Context, req *v1.WorkflowMetaOb
 		limit = 100
 	}
 
-	records, err := g.DB().Model("mvp_observation_record").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		OrderDesc("created_at").
-		Limit(limit).
-		All()
+	records, err := repo.NewObservationRecordRepo().ListByProject(ctx, projectID, limit)
 	if err != nil {
 		return nil, err
 	}
-	return &v1.WorkflowMetaObservationsRes{Observations: records.List()}, nil
+	return &v1.WorkflowMetaObservationsRes{Observations: records}, nil
 }
 
 // MetaObservationStats 查询观测统计。
@@ -45,42 +41,37 @@ func (c *cWorkflow) MetaObservationStats(ctx context.Context, req *v1.WorkflowMe
 	}
 
 	// 总数
-	total, err := g.DB().Model("mvp_observation_record").Ctx(ctx).
-		Where("project_id", projectID).WhereNull("deleted_at").Count()
+	observationRepo := repo.NewObservationRecordRepo()
+
+	total, err := observationRepo.CountByProject(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
 
 	// 按 outcome 分组
-	outcomeRecords, err := g.DB().Model("mvp_observation_record").Ctx(ctx).
-		Where("project_id", projectID).WhereNull("deleted_at").
-		Fields("outcome, COUNT(*) as cnt").Group("outcome").All()
+	outcomeRecords, err := observationRepo.CountGroupByField(ctx, projectID, "outcome")
 	if err != nil {
 		return nil, err
 	}
 
 	outcomeDist := g.Map{}
 	for _, r := range outcomeRecords {
-		outcomeDist[r["outcome"].String()] = r["cnt"].Int()
+		outcomeDist[mapString(r, "outcome")] = mapInt(r, "cnt")
 	}
 
 	// 按 decision_level 分��
-	levelRecords, err := g.DB().Model("mvp_observation_record").Ctx(ctx).
-		Where("project_id", projectID).WhereNull("deleted_at").
-		Fields("decision_level, COUNT(*) as cnt").Group("decision_level").All()
+	levelRecords, err := observationRepo.CountGroupByField(ctx, projectID, "decision_level")
 	if err != nil {
 		return nil, err
 	}
 
 	levelDist := g.Map{}
 	for _, r := range levelRecords {
-		levelDist[r["decision_level"].String()] = r["cnt"].Int()
+		levelDist[mapString(r, "decision_level")] = mapInt(r, "cnt")
 	}
 
 	// 人工干预率
-	overrideCount, err := g.DB().Model("mvp_observation_record").Ctx(ctx).
-		Where("project_id", projectID).WhereNull("deleted_at").
-		Where("human_override", 1).Count()
+	overrideCount, err := observationRepo.CountHumanOverrideByProject(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +83,7 @@ func (c *cWorkflow) MetaObservationStats(ctx context.Context, req *v1.WorkflowMe
 
 	return &v1.WorkflowMetaObservationStatsRes{
 		Stats: g.Map{
-			"total":             total,
+			"total":               total,
 			"outcomeDistribution": outcomeDist,
 			"levelDistribution":   levelDist,
 			"humanOverrideCount":  overrideCount,
@@ -217,11 +208,7 @@ func (c *cWorkflow) MetaLearning(ctx context.Context, req *v1.WorkflowMetaLearni
 		return nil, err
 	}
 
-	records, err := g.DB().Model("mvp_learning_record").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		OrderAsc("metric_key").
-		All()
+	records, err := repo.NewLearningRecordRepo().ListByProject(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -229,14 +216,14 @@ func (c *cWorkflow) MetaLearning(ctx context.Context, req *v1.WorkflowMetaLearni
 	var list []g.Map
 	for _, r := range records {
 		item := g.Map{
-			"id":          r["id"].String(),
-			"metricKey":   r["metric_key"].String(),
-			"projectId":   r["project_id"].String(),
-			"emaValue":    r["ema_value"].Float64(),
-			"rawValue":    r["raw_value"].Float64(),
-			"sampleCount": r["sample_count"].Int(),
-			"lastUpdated": r["last_updated"].String(),
-			"decayFactor": r["decay_factor"].Float64(),
+			"id":          mapString(r, "id"),
+			"metricKey":   mapString(r, "metric_key"),
+			"projectId":   mapString(r, "project_id"),
+			"emaValue":    g.NewVar(r["ema_value"]).Float64(),
+			"rawValue":    g.NewVar(r["raw_value"]).Float64(),
+			"sampleCount": mapInt(r, "sample_count"),
+			"lastUpdated": mapString(r, "last_updated"),
+			"decayFactor": g.NewVar(r["decay_factor"]).Float64(),
 		}
 		list = append(list, item)
 	}

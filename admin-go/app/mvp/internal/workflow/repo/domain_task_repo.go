@@ -34,6 +34,21 @@ func (r *DomainTaskRepo) GetByID(ctx context.Context, id int64) (*entity.MvpDoma
 	return &ent, err
 }
 
+// GetByIDMap 按 ID 查询任务记录；可选字段列表用于减少读取范围。
+func (r *DomainTaskRepo) GetByIDMap(ctx context.Context, taskID int64, fields ...string) (g.Map, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("id", taskID).
+		WhereNull("deleted_at")
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	record, err := model.One()
+	if err != nil || record.IsEmpty() {
+		return nil, err
+	}
+	return record.Map(), nil
+}
+
 // GetByWorkflowAndID 查询指定工作流下的任务记录。
 func (r *DomainTaskRepo) GetByWorkflowAndID(ctx context.Context, workflowRunID, taskID int64, fields ...string) (g.Map, error) {
 	model := g.DB().Model(r.table()).Ctx(ctx).
@@ -79,6 +94,119 @@ func (r *DomainTaskRepo) ListByWorkflowAndBatch(ctx context.Context, workflowRun
 	return list, err
 }
 
+// ListByWorkflowOrdered 查询工作流下的任务列表，按 batch_no/sort 升序。
+func (r *DomainTaskRepo) ListByWorkflowOrdered(ctx context.Context, workflowRunID int64, fields ...string) ([]g.Map, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at").
+		OrderAsc("batch_no").
+		OrderAsc("sort")
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	records, err := model.All()
+	if err != nil {
+		return nil, err
+	}
+	return records.List(), nil
+}
+
+// ListRecentByWorkflow 查询工作流下最近更新的任务列表。
+func (r *DomainTaskRepo) ListRecentByWorkflow(ctx context.Context, workflowRunID int64, limit int, fields ...string) ([]g.Map, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at").
+		OrderDesc("updated_at")
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	if limit > 0 {
+		model = model.Limit(limit)
+	}
+	records, err := model.All()
+	if err != nil {
+		return nil, err
+	}
+	return records.List(), nil
+}
+
+// ListByWorkflowFiltered 查询工作流下的任务列表，支持状态/批次过滤并按 batch_no/sort 升序。
+func (r *DomainTaskRepo) ListByWorkflowFiltered(ctx context.Context, workflowRunID int64, status string, batchNo int, fields ...string) ([]g.Map, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at").
+		OrderAsc("batch_no").
+		OrderAsc("sort")
+	if status != "" {
+		model = model.Where("status", status)
+	}
+	if batchNo > 0 {
+		model = model.Where("batch_no", batchNo)
+	}
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	records, err := model.All()
+	if err != nil {
+		return nil, err
+	}
+	return records.List(), nil
+}
+
+// ListByWorkflowRunIDs 查询工作流集合下的任务列表。
+func (r *DomainTaskRepo) ListByWorkflowRunIDs(ctx context.Context, workflowRunIDs []int64, fields ...string) ([]g.Map, error) {
+	if len(workflowRunIDs) == 0 {
+		return nil, nil
+	}
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		WhereIn("workflow_run_id", workflowRunIDs).
+		WhereNull("deleted_at")
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	records, err := model.All()
+	if err != nil {
+		return nil, err
+	}
+	return records.List(), nil
+}
+
+// ListStatRowsByWorkflowRunIDs 查询工作流集合下的任务聚合统计。
+func (r *DomainTaskRepo) ListStatRowsByWorkflowRunIDs(ctx context.Context, workflowRunIDs []int64) ([]g.Map, error) {
+	if len(workflowRunIDs) == 0 {
+		return nil, nil
+	}
+	records, err := g.DB().Model(r.table()).Ctx(ctx).
+		WhereIn("workflow_run_id", workflowRunIDs).
+		WhereNull("deleted_at").
+		Fields(`
+			workflow_run_id,
+			COUNT(*) AS total_tasks,
+			SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_tasks,
+			SUM(CASE WHEN status IN ('failed', 'escalated') THEN 1 ELSE 0 END) AS failed_tasks,
+			SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_tasks`).
+		Group("workflow_run_id").
+		All()
+	if err != nil {
+		return nil, err
+	}
+	return records.List(), nil
+}
+
+// ListStatusRowsByWorkflow 统计工作流下任务状态分布。
+func (r *DomainTaskRepo) ListStatusRowsByWorkflow(ctx context.Context, workflowRunID int64) ([]g.Map, error) {
+	records, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at").
+		Fields("status, COUNT(*) as count").
+		Group("status").
+		All()
+	if err != nil {
+		return nil, err
+	}
+	return records.List(), nil
+}
+
 // UpdateStatus CAS 更新状态。
 func (r *DomainTaskRepo) UpdateStatus(ctx context.Context, id int64, from, to string, extra g.Map) (int64, error) {
 	data := g.Map{"status": to}
@@ -105,6 +233,21 @@ func (r *DomainTaskRepo) UpdateFields(ctx context.Context, taskID int64, data g.
 		WhereNull("deleted_at").
 		Data(data).
 		Update()
+	return err
+}
+
+// UpdateByIDsStatuses 按任务 ID 集合和状态集合批量更新任务。
+func (r *DomainTaskRepo) UpdateByIDsStatuses(ctx context.Context, taskIDs []int64, statuses []string, data g.Map) error {
+	if len(taskIDs) == 0 {
+		return nil
+	}
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		WhereIn("id", taskIDs).
+		WhereNull("deleted_at")
+	if len(statuses) > 0 {
+		model = model.WhereIn("status", statuses)
+	}
+	_, err := model.Data(data).Update()
 	return err
 }
 
@@ -176,6 +319,29 @@ func (r *DomainTaskRepo) ListByIDs(ctx context.Context, taskIDs []int64, fields 
 		return nil, err
 	}
 	return records.List(), nil
+}
+
+// GetLatestBatchNoByWorkflowStatuses 查询指定状态集合下最新批次号。
+func (r *DomainTaskRepo) GetLatestBatchNoByWorkflowStatuses(ctx context.Context, workflowRunID int64, statuses []string) (int, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at")
+	if len(statuses) > 0 {
+		model = model.WhereIn("status", statuses)
+	}
+	value, err := model.Max("batch_no")
+	if err != nil {
+		return 0, err
+	}
+	return int(value), nil
+}
+
+// CountByWorkflow 统计工作流下任务数。
+func (r *DomainTaskRepo) CountByWorkflow(ctx context.Context, workflowRunID int64) (int, error) {
+	return g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at").
+		Count()
 }
 
 // ResetForRetry 将失败任务重置为 pending 并增加重试次数。

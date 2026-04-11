@@ -10,6 +10,7 @@ import (
 
 	v1 "easymvp/app/mvp/api/mvp/v1"
 	"easymvp/app/mvp/internal/workflow/orchestrator"
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/utility/snowflake"
 )
 
@@ -96,6 +97,11 @@ func buildStageHistoryItem(record gdb.Record) v1.StageHistoryItem {
 
 // Timeline 工作流事件时间线
 func (c *cWorkflow) Timeline(ctx context.Context, req *v1.WorkflowTimelineReq) (res *v1.WorkflowTimelineRes, err error) {
+	var (
+		workflowEventRepo = repo.NewWorkflowEventRepo()
+		workflowRunRepo   = repo.NewWorkflowRunRepo()
+	)
+
 	projectID := int64(req.ProjectID)
 	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
@@ -106,33 +112,24 @@ func (c *cWorkflow) Timeline(ctx context.Context, req *v1.WorkflowTimelineReq) (
 		limit = 50
 	}
 
-	wfRuns, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		Fields("id").
-		OrderDesc("run_no").
-		All()
+	wfRuns, err := workflowRunRepo.ListByProject(ctx, projectID, "id")
 	if err != nil || len(wfRuns) == 0 {
 		return &v1.WorkflowTimelineRes{Events: []v1.TimelineEvent{}}, nil
 	}
 
 	wfRunIDs := make([]int64, 0, len(wfRuns))
 	for _, r := range wfRuns {
-		wfRunIDs = append(wfRunIDs, r["id"].Int64())
+		wfRunIDs = append(wfRunIDs, mapToDBRecord(r)["id"].Int64())
 	}
 
-	events, err := g.DB().Model("mvp_workflow_event").Ctx(ctx).
-		WhereIn("workflow_run_id", wfRunIDs).
-		OrderDesc("created_at").
-		Limit(limit).
-		All()
+	events, err := workflowEventRepo.ListByWorkflowIDs(ctx, wfRunIDs, limit)
 	if err != nil {
 		return nil, err
 	}
 
 	list := make([]v1.TimelineEvent, 0, len(events))
 	for _, e := range events {
-		list = append(list, buildTimelineEvent(e))
+		list = append(list, buildTimelineEvent(mapToDBRecord(e)))
 	}
 
 	return &v1.WorkflowTimelineRes{Events: list}, nil
@@ -140,26 +137,24 @@ func (c *cWorkflow) Timeline(ctx context.Context, req *v1.WorkflowTimelineReq) (
 
 // ReworkStatus 返工阶段状态
 func (c *cWorkflow) ReworkStatus(ctx context.Context, req *v1.WorkflowReworkStatusReq) (res *v1.WorkflowReworkStatusRes, err error) {
+	var (
+		domainTaskRepo    = repo.NewDomainTaskRepo()
+		handoffRecordRepo = repo.NewHandoffRecordRepo()
+		stageRunRepo      = repo.NewStageRunRepo()
+	)
+
 	projectID := int64(req.ProjectID)
 	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
 	}
 
-	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		OrderDesc("run_no").
-		One()
-	if err != nil || wfRun.IsEmpty() {
+	wfRun, err := latestWorkflowRunForProject(ctx, projectID)
+	if err != nil {
 		return &v1.WorkflowReworkStatusRes{HasRework: false, History: []v1.ReworkRoundInfo{}}, nil
 	}
 	wfRunID := wfRun["id"].Int64()
 
-	handoffs, err := g.DB().Model("mvp_handoff_record").Ctx(ctx).
-		Where("workflow_run_id", wfRunID).
-		Where("handoff_type", "failure_escalation").
-		OrderAsc("created_at").
-		All()
+	handoffs, err := handoffRecordRepo.ListByWorkflowAndType(ctx, wfRunID, "failure_escalation")
 	if err != nil {
 		return nil, err
 	}
@@ -168,12 +163,7 @@ func (c *cWorkflow) ReworkStatus(ctx context.Context, req *v1.WorkflowReworkStat
 	}
 
 	var currentStage *v1.ReworkStageInfo
-	reworkStage, rsErr := g.DB().Model("mvp_stage_run").Ctx(ctx).
-		Where("workflow_run_id", wfRunID).
-		Where("stage_type", "rework").
-		WhereNull("deleted_at").
-		OrderDesc("stage_no").
-		One()
+	reworkStage, rsErr := stageRunRepo.GetLatestByWorkflowAndType(ctx, wfRunID, "rework")
 	if rsErr != nil {
 		g.Log().Warningf(ctx, "[ReworkStatus] 查询 rework stage 失败: %v", rsErr)
 	}
@@ -187,18 +177,18 @@ func (c *cWorkflow) ReworkStatus(ctx context.Context, req *v1.WorkflowReworkStat
 
 	history := make([]v1.ReworkRoundInfo, 0, len(handoffs))
 	for i, h := range handoffs {
-		fromTaskID := h["from_task_id"].Int64()
-		toTaskID := h["to_task_id"].Int64()
+		record := mapToDBRecord(h)
+		fromTaskID := record["from_task_id"].Int64()
+		toTaskID := record["to_task_id"].Int64()
 
-		failedTask, ftErr2 := g.DB().Model("mvp_domain_task").Ctx(ctx).
-			Where("id", fromTaskID).WhereNull("deleted_at").Fields("name, result").One()
+		failedTask, ftErr2 := domainTaskRepo.GetByIDMap(ctx, fromTaskID, "name", "result")
 		if ftErr2 != nil {
 			g.Log().Warningf(ctx, "[ReworkStatus] 查询失败任务详情失败: taskID=%d err=%v", fromTaskID, ftErr2)
 		}
 		failedName := ""
-		failedReason := h["reason"].String()
-		if !failedTask.IsEmpty() {
-			failedName = failedTask["name"].String()
+		failedReason := record["reason"].String()
+		if len(failedTask) > 0 {
+			failedName = mapToDBRecord(failedTask)["name"].String()
 		}
 
 		var analysisID *snowflake.JsonInt64
@@ -206,13 +196,12 @@ func (c *cWorkflow) ReworkStatus(ctx context.Context, req *v1.WorkflowReworkStat
 		if toTaskID > 0 {
 			v := snowflake.JsonInt64(toTaskID)
 			analysisID = &v
-			analysisTask, atErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
-				Where("id", toTaskID).WhereNull("deleted_at").Fields("result").One()
+			analysisTask, atErr := domainTaskRepo.GetByIDMap(ctx, toTaskID, "result")
 			if atErr != nil {
 				g.Log().Warningf(ctx, "[ReworkStatus] 查询分析任务结果失败: taskID=%d err=%v", toTaskID, atErr)
 			}
-			if !analysisTask.IsEmpty() {
-				analysisResult = analysisTask["result"].String()
+			if len(analysisTask) > 0 {
+				analysisResult = mapToDBRecord(analysisTask)["result"].String()
 			}
 		}
 
@@ -223,8 +212,8 @@ func (c *cWorkflow) ReworkStatus(ctx context.Context, req *v1.WorkflowReworkStat
 			FailedReason:   failedReason,
 			AnalysisTaskID: analysisID,
 			AnalysisResult: analysisResult,
-			HandoffType:    h["handoff_type"].String(),
-			CreatedAt:      normalizeDBUTCGTime(h["created_at"].GTime()),
+			HandoffType:    record["handoff_type"].String(),
+			CreatedAt:      normalizeDBUTCGTime(record["created_at"].GTime()),
 		})
 	}
 
@@ -238,33 +227,26 @@ func (c *cWorkflow) ReworkStatus(ctx context.Context, req *v1.WorkflowReworkStat
 
 // StageHistory 工作流阶段历史
 func (c *cWorkflow) StageHistory(ctx context.Context, req *v1.WorkflowStageHistoryReq) (res *v1.WorkflowStageHistoryRes, err error) {
+	stageRunRepo := repo.NewStageRunRepo()
+
 	projectID := int64(req.ProjectID)
 	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
 	}
 
-	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		OrderDesc("run_no").
-		One()
-	if err != nil || wfRun.IsEmpty() {
+	wfRun, err := latestWorkflowRunForProject(ctx, projectID)
+	if err != nil {
 		return &v1.WorkflowStageHistoryRes{Stages: []v1.StageHistoryItem{}}, nil
 	}
 
-	stages, err := g.DB().Model("mvp_stage_run").Ctx(ctx).
-		Where("workflow_run_id", wfRun["id"].Int64()).
-		WhereNull("deleted_at").
-		Fields("id, stage_type, stage_no, status, started_at, finished_at, error_message").
-		OrderAsc("stage_no").
-		All()
+	stages, err := stageRunRepo.ListByWorkflowMaps(ctx, wfRun["id"].Int64(), "id", "stage_type", "stage_no", "status", "started_at", "finished_at", "error_message")
 	if err != nil {
 		return nil, err
 	}
 
 	list := make([]v1.StageHistoryItem, 0, len(stages))
 	for _, s := range stages {
-		list = append(list, buildStageHistoryItem(s))
+		list = append(list, buildStageHistoryItem(mapToDBRecord(s)))
 	}
 
 	return &v1.WorkflowStageHistoryRes{Stages: list}, nil

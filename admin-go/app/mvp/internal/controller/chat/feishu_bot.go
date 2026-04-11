@@ -15,6 +15,7 @@ import (
 	collabRepo "easymvp/app/mvp/internal/collab/repo"
 	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/workflow/orchestrator"
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/utility/provider"
 )
 
@@ -229,14 +230,9 @@ func parseIntentWithAI(ctx context.Context, userText string, systemUserID int64)
 func loadBotModel(ctx context.Context, systemUserID int64) (*engine.ModelInfo, error) {
 	// 先尝试找用户最近项目的架构师模型
 	if systemUserID > 0 {
-		project, _ := g.DB().Ctx(ctx).Model("mvp_project p").
-			Where("p.created_by", systemUserID).
-			WhereNull("p.deleted_at").
-			Fields("p.id").
-			OrderDesc("p.created_at").
-			One()
-		if !project.IsEmpty() {
-			role, roleErr := engine.ResolveProjectRole(ctx, project["id"].Int64(), "architect")
+		project, _ := repo.NewProjectRepo().GetLatestByCreator(ctx, systemUserID, "id")
+		if len(project) > 0 {
+			role, roleErr := engine.ResolveProjectRole(ctx, g.NewVar(project["id"]).Int64(), "architect")
 			modelID := int64(0)
 			if roleErr == nil && role != nil {
 				modelID = role["model_id"].Int64()
@@ -249,20 +245,12 @@ func loadBotModel(ctx context.Context, systemUserID int64) (*engine.ModelInfo, e
 	}
 
 	// 降级：取全局第一个可用模型（ai_model join ai_plan join ai_provider，按 sort 排序）
-	record, err := g.DB().Ctx(ctx).Model("ai_model m").
-		LeftJoin("ai_plan p", "p.id = m.plan_id AND p.deleted_at IS NULL").
-		LeftJoin("ai_provider pv", "pv.id = m.provider_id AND pv.deleted_at IS NULL AND pv.status = 1").
-		Fields("m.id").
-		Where("m.deleted_at IS NULL").
-		Where("m.status", 1).
-		Where("p.api_key != ''").
-		OrderAsc("m.sort").
-		One()
-	if err != nil || record.IsEmpty() {
+	record, err := repo.NewAIModelRepo().GetFirstEnabledWithCredentials(ctx, "m.id")
+	if err != nil || len(record) == 0 {
 		return nil, fmt.Errorf("系统未配置任何可用的 AI 模型")
 	}
 
-	return engine.GetModelInfoByID(ctx, record["id"].Int64())
+	return engine.GetModelInfoByID(ctx, g.NewVar(record["id"]).Int64())
 }
 
 // ─── 指令处理器 ───────────────────────────────────────────────────────────────
@@ -290,13 +278,9 @@ func handleBotCreateProject(ctx context.Context, projectName, category string, s
 	extraTip := ""
 	if openID != "" {
 		var convID int64
-		val, _ := g.DB().Ctx(ctx).Model("mvp_conversation").
-			Where("project_id", projectID).
-			WhereNull("deleted_at").
-			OrderAsc("created_at").
-			Value("id")
-		if val != nil {
-			convID = val.Int64()
+		conv, _ := repo.NewConversationRepo().GetFirstByProject(ctx, projectID, "id")
+		if len(conv) > 0 {
+			convID = g.NewVar(conv["id"]).Int64()
 		}
 		if convID > 0 {
 			setBotSession(platform, openID, convID)
@@ -334,25 +318,22 @@ func handleBotListProjects(ctx context.Context, systemUserID int64, reply func(s
 		Status string `json:"status"`
 	}
 	var rows []projectRow
-	query := g.DB().Ctx(ctx).Model("mvp_project").
-		WhereNull("deleted_at").
-		Fields("id, name, status").
-		OrderDesc("created_at").
-		Limit(8)
-	switch {
-	case scope.All:
-	case len(scope.DeptIDs) == 0 && scope.IncludeSelf:
-		query = query.Where("created_by", systemUserID)
-	case len(scope.DeptIDs) == 0:
-		query = query.Where("id", -1)
-	case scope.IncludeSelf:
-		query = query.Where("(created_by = ? OR dept_id IN (?))", systemUserID, scope.DeptIDs)
-	default:
-		query = query.WhereIn("dept_id", scope.DeptIDs)
-	}
-	if err := query.Scan(&rows); err != nil {
+	projectRecords, err := repo.NewProjectRepo().ListRecentByScope(ctx, repo.ProjectScopeFilter{
+		All:         scope.All,
+		IncludeSelf: scope.IncludeSelf,
+		UserID:      systemUserID,
+		DeptIDs:     scope.DeptIDs,
+	}, 8, "id", "name", "status")
+	if err != nil {
 		reply(fmt.Sprintf("❌ 查询失败：%v", err))
 		return
+	}
+	for _, record := range projectRecords {
+		rows = append(rows, projectRow{
+			ID:     g.NewVar(record["id"]).Int64(),
+			Name:   mapString(record, "name"),
+			Status: mapString(record, "status"),
+		})
 	}
 
 	if len(rows) == 0 {
@@ -407,50 +388,32 @@ func handleBotProjectStatus(ctx context.Context, projectName string, systemUserI
 		wfRun, wfErr := latestWorkflowRunForProject(ctx, projectID)
 		if wfErr == nil && !wfRun.IsEmpty() {
 			status = wfRun["status"].String()
-			type sc struct {
-				Status string
-				Count  int
-			}
-			var counts []sc
-			_ = g.DB().Ctx(ctx).Model("mvp_domain_task").
-				Where("workflow_run_id", wfRun["id"].Int64()).
-				WhereNull("deleted_at").
-				Fields("status, COUNT(*) as count").
-				Group("status").
-				Scan(&counts)
+			counts, _ := repo.NewDomainTaskRepo().ListStatusRowsByWorkflow(ctx, wfRun["id"].Int64())
 			for _, c := range counts {
-				total += c.Count
-				switch c.Status {
+				count := mapInt(c, "count")
+				total += count
+				switch mapString(c, "status") {
 				case "completed":
-					done += c.Count
+					done += count
 				case "running":
-					running += c.Count
+					running += count
 				case "failed", "escalated":
-					failed += c.Count
+					failed += count
 				}
 			}
 		}
 	} else {
-		type sc struct {
-			Status string
-			Count  int
-		}
-		var counts []sc
-		_ = g.DB().Ctx(ctx).Model("mvp_task").
-			Where("project_id", projectID).
-			WhereNull("deleted_at").
-			Fields("status, COUNT(*) as count").
-			Group("status").
-			Scan(&counts)
+		counts, _ := repo.NewTaskRepo().CountStatusRowsByProject(ctx, projectID)
 		for _, c := range counts {
-			total += c.Count
-			switch c.Status {
+			count := mapInt(c, "count")
+			total += count
+			switch mapString(c, "status") {
 			case "completed":
-				done += c.Count
+				done += count
 			case "running":
-				running += c.Count
+				running += count
 			case "failed":
-				failed += c.Count
+				failed += count
 			}
 		}
 	}
@@ -503,22 +466,16 @@ func handleBotPauseProject(ctx context.Context, projectName string, systemUserID
 		return
 	}
 	if isWorkflowV2Project(project) {
-		wfRun, qErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-			Where("project_id", project["id"].Int64()).
-			WhereNotIn("status", g.Slice{"completed", "canceled", "paused"}).
-			WhereNull("deleted_at").
-			OrderDesc("run_no").
-			OrderDesc("created_at").
-			One()
+		wfRun, qErr := repo.NewWorkflowRunRepo().GetLatestByProjectExcludingStatuses(ctx, project["id"].Int64(), []string{"completed", "canceled", "paused"}, "id")
 		if qErr != nil {
 			reply(fmt.Sprintf("❌ 查询工作流失败：%v", qErr))
 			return
 		}
-		if wfRun.IsEmpty() {
+		if len(wfRun) == 0 {
 			reply(fmt.Sprintf("❌ 项目「%s」当前没有可暂停的工作流", project["name"].String()))
 			return
 		}
-		if err := orchestrator.GetWorkflowService().Pause(ctx, wfRun["id"].Int64(), "飞书机器人指令暂停"); err != nil {
+		if err := orchestrator.GetWorkflowService().Pause(ctx, g.NewVar(wfRun["id"]).Int64(), "飞书机器人指令暂停"); err != nil {
 			reply(fmt.Sprintf("❌ 暂停失败：%v", err))
 			return
 		}
@@ -546,22 +503,16 @@ func handleBotResumeProject(ctx context.Context, projectName string, systemUserI
 		return
 	}
 	if isWorkflowV2Project(project) {
-		wfRun, qErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-			Where("project_id", project["id"].Int64()).
-			Where("status", "paused").
-			WhereNull("deleted_at").
-			OrderDesc("run_no").
-			OrderDesc("created_at").
-			One()
+		wfRun, qErr := repo.NewWorkflowRunRepo().GetLatestByProjectStatuses(ctx, project["id"].Int64(), []string{"paused"}, "id")
 		if qErr != nil {
 			reply(fmt.Sprintf("❌ 查询暂停工作流失败：%v", qErr))
 			return
 		}
-		if wfRun.IsEmpty() {
+		if len(wfRun) == 0 {
 			reply(fmt.Sprintf("❌ 项目「%s」当前没有暂停的工作流", project["name"].String()))
 			return
 		}
-		if err := orchestrator.GetWorkflowService().Resume(ctx, wfRun["id"].Int64()); err != nil {
+		if err := orchestrator.GetWorkflowService().Resume(ctx, g.NewVar(wfRun["id"]).Int64()); err != nil {
 			reply(fmt.Sprintf("❌ 恢复失败：%v", err))
 			return
 		}
@@ -589,29 +540,23 @@ func handleBotCancelProject(ctx context.Context, projectName string, systemUserI
 		return
 	}
 
-	wfRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("project_id", project["id"].Int64()).
-		WhereNotIn("status", g.Slice{"completed", "canceled"}).
-		WhereNull("deleted_at").
-		OrderDesc("run_no").
-		OrderDesc("created_at").
-		One()
+	wfRun, err := repo.NewWorkflowRunRepo().GetLatestByProjectExcludingStatuses(ctx, project["id"].Int64(), []string{"completed", "canceled"}, "id")
 	if err != nil {
 		reply(fmt.Sprintf("❌ 查询工作流失败：%v", err))
 		return
 	}
-	if wfRun.IsEmpty() {
+	if len(wfRun) == 0 {
 		reply(fmt.Sprintf("❌ 项目「%s」当前没有可取消的工作流", project["name"].String()))
 		return
 	}
 
 	reason := "机器人人工取消"
-	if err := orchestrator.GetWorkflowService().Cancel(ctx, wfRun["id"].Int64(), reason); err != nil {
+	workflowRunID := g.NewVar(wfRun["id"]).Int64()
+	if err := orchestrator.GetWorkflowService().Cancel(ctx, workflowRunID, reason); err != nil {
 		reply(fmt.Sprintf("❌ 取消工作流失败：%v", err))
 		return
 	}
 
-	workflowRunID := wfRun["id"].Int64()
 	recordWorkflowEvent(ctx, workflowRunID, "workflow", "workflow.canceled", &workflowRunID, nil, map[string]interface{}{
 		"project_id": project["id"].Int64(),
 		"reason":     reason,
@@ -711,9 +656,7 @@ func handleBotForceStage(ctx context.Context, projectName, targetStage, taskIDSt
 			return
 		}
 	case "design":
-		if _, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-			Where("id", workflowRunID).
-			Update(g.Map{"active_plan_version_id": nil, "updated_at": gtime.Now()}); err != nil {
+		if err := repo.NewWorkflowRunRepo().UpdateFields(ctx, workflowRunID, g.Map{"active_plan_version_id": nil, "updated_at": gtime.Now()}); err != nil {
 			g.Log().Warningf(ctx, "[BotForceStage] 清空 active_plan_version_id 失败: workflowRunID=%d err=%v", workflowRunID, err)
 		}
 	case "accept":
@@ -998,23 +941,13 @@ func resolveBotProjectScope(ctx context.Context, userID int64) (*botProjectScope
 		return scope, nil
 	}
 
-	user, err := g.DB().Ctx(ctx).Model("system_users").
-		Fields("dept_id").
-		Where("id", userID).
-		WhereNull("deleted_at").
-		One()
+	scopeRepo := repo.NewSystemScopeRepo()
+	currentDeptID, err := scopeRepo.GetUserDeptID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	currentDeptID := user["dept_id"].Int64()
 
-	roles, err := g.DB().Ctx(ctx).Model("system_user_role AS ur").
-		LeftJoin("system_role AS r", "r.id = ur.role_id").
-		Fields("r.id, r.is_admin, r.data_scope").
-		Where("ur.user_id", userID).
-		Where("r.status", 1).
-		Where("r.deleted_at IS NULL").
-		All()
+	roles, err := scopeRepo.ListRoleScopesByUser(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -1026,11 +959,11 @@ func resolveBotProjectScope(ctx context.Context, userID int64) (*botProjectScope
 	deptSet := make(map[int64]struct{})
 	customRoleIDs := make([]int64, 0)
 	for _, role := range roles {
-		if role["is_admin"].Int() == 1 || role["data_scope"].Int() == 1 {
+		if g.NewVar(role["is_admin"]).Int() == 1 || g.NewVar(role["data_scope"]).Int() == 1 {
 			scope.All = true
 			return scope, nil
 		}
-		switch role["data_scope"].Int() {
+		switch g.NewVar(role["data_scope"]).Int() {
 		case 2:
 			for _, deptID := range loadBotDeptSubtreeIDs(ctx, currentDeptID) {
 				deptSet[deptID] = struct{}{}
@@ -1042,23 +975,17 @@ func resolveBotProjectScope(ctx context.Context, userID int64) (*botProjectScope
 		case 4:
 			scope.IncludeSelf = true
 		case 5:
-			customRoleIDs = append(customRoleIDs, role["id"].Int64())
+			customRoleIDs = append(customRoleIDs, g.NewVar(role["id"]).Int64())
 		}
 	}
 
 	if len(customRoleIDs) > 0 {
-		customDepts, deptErr := g.DB().Ctx(ctx).Model("system_role_dept").
-			Fields("DISTINCT dept_id").
-			WhereIn("role_id", customRoleIDs).
-			All()
+		customDepts, deptErr := scopeRepo.ListDeptIDsByRoleIDs(ctx, customRoleIDs)
 		if deptErr != nil {
 			return nil, deptErr
 		}
-		for _, dept := range customDepts {
-			deptID := dept["dept_id"].Int64()
-			if deptID > 0 {
-				deptSet[deptID] = struct{}{}
-			}
+		for _, deptID := range customDepts {
+			deptSet[deptID] = struct{}{}
 		}
 	}
 
@@ -1073,17 +1000,12 @@ func loadBotDeptSubtreeIDs(ctx context.Context, rootDeptID int64) []int64 {
 		return nil
 	}
 	result := []int64{rootDeptID}
-	children, err := g.DB().Ctx(ctx).Model("system_dept").
-		Fields("id").
-		Where("parent_id", rootDeptID).
-		Where("status", 1).
-		WhereNull("deleted_at").
-		All()
+	children, err := repo.NewSystemScopeRepo().ListChildDeptIDs(ctx, rootDeptID)
 	if err != nil || len(children) == 0 {
 		return result
 	}
-	for _, child := range children {
-		result = append(result, loadBotDeptSubtreeIDs(ctx, child["id"].Int64())...)
+	for _, childID := range children {
+		result = append(result, loadBotDeptSubtreeIDs(ctx, childID)...)
 	}
 	return result
 }
@@ -1095,41 +1017,19 @@ func findProjectByKeyword(ctx context.Context, keyword string, userID int64) (gd
 		return nil, err
 	}
 
-	m := g.DB().Ctx(ctx).Model("mvp_project").
-		WhereNull("deleted_at").
-		Fields("id, name, status, pause_reason, engine_version")
-
-	switch {
-	case scope.All:
-	case len(scope.DeptIDs) == 0 && scope.IncludeSelf:
-		m = m.Where("created_by", userID)
-	case len(scope.DeptIDs) == 0:
-		m = m.Where("id", -1)
-	case scope.IncludeSelf:
-		m = m.Where("(created_by = ? OR dept_id IN (?))", userID, scope.DeptIDs)
-	default:
-		m = m.WhereIn("dept_id", scope.DeptIDs)
-	}
-
-	var numID int64
-	if _, err := fmt.Sscanf(keyword, "%d", &numID); err == nil && numID > 0 {
-		record, err := m.Where("id", numID).One()
-		if err != nil {
-			return nil, err
-		}
-		if !record.IsEmpty() {
-			return record, nil
-		}
-	}
-
-	record, err := m.WhereLike("name", "%"+keyword+"%").OrderDesc("created_at").One()
+	record, err := repo.NewProjectRepo().FindByKeywordWithScope(ctx, keyword, repo.ProjectScopeFilter{
+		All:         scope.All,
+		IncludeSelf: scope.IncludeSelf,
+		UserID:      userID,
+		DeptIDs:     scope.DeptIDs,
+	}, "id", "name", "status", "pause_reason", "engine_version")
 	if err != nil {
 		return nil, err
 	}
-	if record.IsEmpty() {
+	if len(record) == 0 {
 		return nil, nil
 	}
-	return record, nil
+	return mapToDBRecord(record), nil
 }
 
 // extractFeishuText 从飞书消息 content JSON 中提取文本。
@@ -1179,13 +1079,12 @@ func handleBotConfirmPlan(ctx context.Context, openID, platform string, systemUs
 		reply("❌ 当前没有活跃的项目对话，请先创建项目")
 		return
 	}
-	conv, err := g.DB().Ctx(ctx).Model("mvp_conversation").
-		Where("id", convID).WhereNull("deleted_at").One()
-	if err != nil || conv.IsEmpty() {
+	conv, err := repo.NewConversationRepo().GetByID(ctx, convID, "project_id")
+	if err != nil || len(conv) == 0 {
 		reply("❌ 对话不存在")
 		return
 	}
-	projectID := conv["project_id"].Int64()
+	projectID := g.NewVar(conv["project_id"]).Int64()
 	if err := engine.GetScheduler().ConfirmPlan(ctx, projectID); err != nil {
 		reply(fmt.Sprintf("❌ 确认方案失败：%v", err))
 		return
@@ -1198,13 +1097,11 @@ func handleBotConfirmPlan(ctx context.Context, openID, platform string, systemUs
 func waitForAIReply(ctx context.Context, replyMsgID int64, timeout time.Duration) string {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		record, err := g.DB().Model("mvp_message").Ctx(ctx).
-			Where("id", replyMsgID).
-			Fields("content, status").One()
-		if err == nil && !record.IsEmpty() {
-			status := record["status"].String()
+		record, err := repo.NewMessageRepo().GetByID(ctx, replyMsgID, "content", "status")
+		if err == nil && len(record) > 0 {
+			status := mapString(record, "status")
 			if status == "completed" || status == "done" {
-				return record["content"].String()
+				return mapString(record, "content")
 			}
 			if status == "failed" {
 				return ""
@@ -1240,22 +1137,26 @@ func handleBotListTasks(ctx context.Context, projectName string, systemUserID in
 			reply(fmt.Sprintf("❌ 查询工作流失败：%v", wfErr))
 			return
 		}
-		_ = g.DB().Ctx(ctx).Model("mvp_domain_task").
-			Where("workflow_run_id", wfRun["id"].Int64()).
-			WhereNull("deleted_at").
-			Fields("id, name, status").
-			OrderAsc("batch_no").
-			OrderAsc("sort").
-			Limit(20).
-			Scan(&tasks)
+		records, _ := repo.NewDomainTaskRepo().ListByWorkflowOrdered(ctx, wfRun["id"].Int64(), "id", "name", "status")
+		for i, record := range records {
+			if i >= 20 {
+				break
+			}
+			tasks = append(tasks, taskRow{
+				ID:     g.NewVar(record["id"]).Int64(),
+				Name:   mapString(record, "name"),
+				Status: mapString(record, "status"),
+			})
+		}
 	} else {
-		_ = g.DB().Ctx(ctx).Model("mvp_task").
-			Where("project_id", projectID).
-			WhereNull("deleted_at").
-			Fields("id, name, status").
-			OrderAsc("batch_no").
-			Limit(20).
-			Scan(&tasks)
+		records, _ := repo.NewTaskRepo().ListByProject(ctx, projectID, 20, "id", "name", "status")
+		for _, record := range records {
+			tasks = append(tasks, taskRow{
+				ID:     g.NewVar(record["id"]).Int64(),
+				Name:   mapString(record, "name"),
+				Status: mapString(record, "status"),
+			})
+		}
 	}
 
 	if len(tasks) == 0 {
@@ -1306,22 +1207,16 @@ func handleBotRetryTask(ctx context.Context, projectName, taskIDStr string, syst
 			var taskID int64
 			fmt.Sscanf(taskIDStr, "%d", &taskID)
 			if taskID > 0 {
-				result, err := g.DB().Ctx(ctx).Model("mvp_domain_task").
-					Where("id", taskID).
-					Where("workflow_run_id", wfRun["id"].Int64()).
-					WhereIn("status", g.Slice{"failed", "escalated"}).
-					Update(g.Map{
-						"status":        "pending",
-						"retry_count":   gdb.Raw("retry_count + 1"),
-						"result":        nil,
-						"error_message": nil,
-						"updated_at":    gdb.Raw("NOW()"),
-					})
+				taskRecord, getErr := repo.NewDomainTaskRepo().GetByWorkflowAndID(ctx, wfRun["id"].Int64(), taskID, "id")
+				if getErr != nil || len(taskRecord) == 0 {
+					reply(fmt.Sprintf("❌ 任务 %d 不属于当前工作流", taskID))
+					return
+				}
+				rows, err := repo.NewDomainTaskRepo().ResetForRetry(ctx, taskID)
 				if err != nil {
 					reply(fmt.Sprintf("❌ 重试任务 %d 失败：%v", taskID, err))
 					return
 				}
-				rows, _ := result.RowsAffected()
 				if rows == 0 {
 					reply(fmt.Sprintf("❌ 任务 %d 当前不在 failed/escalated 状态", taskID))
 					return
@@ -1331,35 +1226,19 @@ func handleBotRetryTask(ctx context.Context, projectName, taskIDStr string, syst
 			}
 		}
 
-		type taskIDRow struct{ ID int64 }
-		var rows []taskIDRow
-		_ = g.DB().Ctx(ctx).Model("mvp_domain_task").
-			Where("workflow_run_id", wfRun["id"].Int64()).
-			WhereIn("status", g.Slice{"failed", "escalated"}).
-			WhereNull("deleted_at").
-			Fields("id").
-			Scan(&rows)
+		rows, _ := repo.NewDomainTaskRepo().ListByWorkflowAndStatuses(ctx, wfRun["id"].Int64(), []string{"failed", "escalated"}, "id")
 		if len(rows) == 0 {
 			reply(fmt.Sprintf("✅ 项目「%s」没有失败的 V2 任务", project["name"].String()))
 			return
 		}
 		errCount := 0
 		for _, r := range rows {
-			result, err := g.DB().Ctx(ctx).Model("mvp_domain_task").
-				Where("id", r.ID).
-				WhereIn("status", g.Slice{"failed", "escalated"}).
-				Update(g.Map{
-					"status":        "pending",
-					"retry_count":   gdb.Raw("retry_count + 1"),
-					"result":        nil,
-					"error_message": nil,
-					"updated_at":    gdb.Raw("NOW()"),
-				})
+			rowsAffected, err := repo.NewDomainTaskRepo().ResetForRetry(ctx, g.NewVar(r["id"]).Int64())
 			if err != nil {
 				errCount++
 				continue
 			}
-			if affected, _ := result.RowsAffected(); affected == 0 {
+			if rowsAffected == 0 {
 				errCount++
 			}
 		}
@@ -1381,25 +1260,18 @@ func handleBotRetryTask(ctx context.Context, projectName, taskIDStr string, syst
 		}
 	}
 
-	type taskIDRow struct{ ID int64 }
-	var rows []taskIDRow
-	_ = g.DB().Ctx(ctx).Model("mvp_task").
-		Where("project_id", projectID).
-		Where("status", "failed").
-		WhereNull("deleted_at").
-		Fields("id").
-		Scan(&rows)
-	if len(rows) == 0 {
+	taskIDs, _ := repo.NewTaskRepo().ListIDsByProjectStatus(ctx, projectID, "failed")
+	if len(taskIDs) == 0 {
 		reply(fmt.Sprintf("✅ 项目「%s」没有失败的任务", project["name"].String()))
 		return
 	}
 	errCount := 0
-	for _, r := range rows {
-		if err := engine.GetScheduler().RetryTask(projectID, r.ID); err != nil {
+	for _, taskID := range taskIDs {
+		if err := engine.GetScheduler().RetryTask(projectID, taskID); err != nil {
 			errCount++
 		}
 	}
-	reply(fmt.Sprintf("🔄 已重试 %d 个失败任务（失败 %d 个）", len(rows)-errCount, errCount))
+	reply(fmt.Sprintf("🔄 已重试 %d 个失败任务（失败 %d 个）", len(taskIDs)-errCount, errCount))
 }
 
 func handleBotSkipTask(ctx context.Context, projectName, taskIDStr string, systemUserID int64, reply func(string)) {
@@ -1428,21 +1300,16 @@ func handleBotSkipTask(ctx context.Context, projectName, taskIDStr string, syste
 			reply(fmt.Sprintf("❌ 查询工作流失败：%v", wfErr))
 			return
 		}
-		result, err := g.DB().Ctx(ctx).Model("mvp_domain_task").
-			Where("id", taskID).
-			Where("workflow_run_id", wfRun["id"].Int64()).
-			WhereIn("status", g.Slice{"pending", "failed", "escalated"}).
-			Update(g.Map{
-				"status":       "completed",
-				"result":       "skipped",
-				"completed_at": gdb.Raw("NOW()"),
-				"updated_at":   gdb.Raw("NOW()"),
-			})
+		taskRecord, getErr := repo.NewDomainTaskRepo().GetByWorkflowAndID(ctx, wfRun["id"].Int64(), taskID, "id")
+		if getErr != nil || len(taskRecord) == 0 {
+			reply("❌ 任务不属于当前工作流")
+			return
+		}
+		rows, err := repo.NewDomainTaskRepo().CompleteAsSkipped(ctx, taskID, gtime.Now())
 		if err != nil {
 			reply(fmt.Sprintf("❌ 跳过任务失败：%v", err))
 			return
 		}
-		rows, _ := result.RowsAffected()
 		if rows == 0 {
 			reply("❌ 任务当前不在可跳过状态")
 			return
@@ -1454,10 +1321,10 @@ func handleBotSkipTask(ctx context.Context, projectName, taskIDStr string, syste
 		return
 	}
 
-	taskRecord, _ := g.DB().Ctx(ctx).Model("mvp_task").Where("id", taskID).WhereNull("deleted_at").Fields("project_id").One()
+	taskRecord, _ := repo.NewTaskRepo().GetByID(ctx, taskID, "project_id")
 	var skipProjectID int64
-	if !taskRecord.IsEmpty() {
-		skipProjectID = taskRecord["project_id"].Int64()
+	if len(taskRecord) > 0 {
+		skipProjectID = g.NewVar(taskRecord["project_id"]).Int64()
 	}
 	if err := engine.GetScheduler().SkipTask(ctx, skipProjectID, taskID, "飞书机器人指令跳过"); err != nil {
 		reply(fmt.Sprintf("❌ 跳过任务失败：%v", err))
@@ -1481,22 +1348,14 @@ func handleBotReviewStatus(ctx context.Context, projectName string, systemUserID
 	projectID := project["id"].Int64()
 
 	// 查最新的 workflow_run
-	run, _ := g.DB().Ctx(ctx).Model("mvp_workflow_run").
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		Fields("id, status, review_status, created_at").
-		OrderDesc("created_at").One()
-
+	run, _ := repo.NewWorkflowRunRepo().GetLatestByProject(ctx, projectID)
 	if run.IsEmpty() {
 		reply(fmt.Sprintf("📭 项目「%s」暂无工作流记录，请先确认方案", project["name"].String()))
 		return
 	}
 
 	// 查审核问题数量
-	issueCount, _ := g.DB().Ctx(ctx).Model("mvp_review_issue").
-		Where("workflow_run_id", run["id"].Int64()).
-		WhereNull("deleted_at").
-		Count()
+	issueCount, _ := repo.NewReviewIssueRepo().CountOpenByWorkflow(ctx, run["id"].Int64())
 
 	lines := []string{
 		fmt.Sprintf("🔍 %s 审核状态", project["name"].String()),
@@ -1523,19 +1382,13 @@ func handleBotApproveReview(ctx context.Context, projectName string, systemUserI
 	}
 	projectID := project["id"].Int64()
 
-	run, _ := g.DB().Ctx(ctx).Model("mvp_workflow_run").
-		Where("project_id", projectID).
-		Where("review_status", "waiting").
-		WhereNull("deleted_at").
-		OrderDesc("created_at").One()
-	if run.IsEmpty() {
+	run, _ := repo.NewWorkflowRunRepo().GetLatestByProjectReviewStatus(ctx, projectID, "waiting", "id")
+	if len(run) == 0 {
 		reply(fmt.Sprintf("❌ 项目「%s」当前没有等待审核的工作流", project["name"].String()))
 		return
 	}
 
-	_, err = g.DB().Ctx(ctx).Model("mvp_workflow_run").
-		Where("id", run["id"].Int64()).
-		Update(g.Map{"review_status": "approved", "reviewed_by": systemUserID})
+	err = repo.NewWorkflowRunRepo().UpdateFields(ctx, g.NewVar(run["id"]).Int64(), g.Map{"review_status": "approved", "reviewed_by": systemUserID})
 	if err != nil {
 		reply(fmt.Sprintf("❌ 审核操作失败：%v", err))
 		return
@@ -1555,19 +1408,13 @@ func handleBotRejectReview(ctx context.Context, projectName string, systemUserID
 	}
 	projectID := project["id"].Int64()
 
-	run, _ := g.DB().Ctx(ctx).Model("mvp_workflow_run").
-		Where("project_id", projectID).
-		Where("review_status", "waiting").
-		WhereNull("deleted_at").
-		OrderDesc("created_at").One()
-	if run.IsEmpty() {
+	run, _ := repo.NewWorkflowRunRepo().GetLatestByProjectReviewStatus(ctx, projectID, "waiting", "id")
+	if len(run) == 0 {
 		reply(fmt.Sprintf("❌ 项目「%s」当前没有等待审核的工作流", project["name"].String()))
 		return
 	}
 
-	_, err = g.DB().Ctx(ctx).Model("mvp_workflow_run").
-		Where("id", run["id"].Int64()).
-		Update(g.Map{"review_status": "rejected", "reviewed_by": systemUserID})
+	err = repo.NewWorkflowRunRepo().UpdateFields(ctx, g.NewVar(run["id"]).Int64(), g.Map{"review_status": "rejected", "reviewed_by": systemUserID})
 	if err != nil {
 		reply(fmt.Sprintf("❌ 审核操作失败：%v", err))
 		return
@@ -1589,13 +1436,8 @@ func handleBotAcceptStatus(ctx context.Context, projectName string, systemUserID
 	}
 	projectID := project["id"].Int64()
 
-	run, _ := g.DB().Ctx(ctx).Model("mvp_accept_run").
-		Where("project_id", projectID).
-		WhereNull("deleted_at").
-		Fields("id, status, passed_count, failed_count, created_at").
-		OrderDesc("created_at").One()
-
-	if run.IsEmpty() {
+	run, _ := repo.NewAcceptRunRepo().GetLatestByProject(ctx, projectID, "id", "status", "passed_count", "failed_count", "created_at")
+	if len(run) == 0 {
 		reply(fmt.Sprintf("📭 项目「%s」暂无验收记录", project["name"].String()))
 		return
 	}
@@ -1603,10 +1445,10 @@ func handleBotAcceptStatus(ctx context.Context, projectName string, systemUserID
 	lines := []string{
 		fmt.Sprintf("🎯 %s 验收状态", project["name"].String()),
 		"───────────────",
-		fmt.Sprintf("验收状态：%s", run["status"].String()),
-		fmt.Sprintf("通过：%d  失败：%d", run["passed_count"].Int(), run["failed_count"].Int()),
+		fmt.Sprintf("验收状态：%s", mapString(run, "status")),
+		fmt.Sprintf("通过：%d  失败：%d", mapInt(run, "passed_count"), mapInt(run, "failed_count")),
 	}
-	if run["status"].String() == "pending_human" {
+	if mapString(run, "status") == "pending_human" {
 		lines = append(lines, "\n💡 发送「验收通过 "+project["name"].String()+"」或「验收驳回 "+project["name"].String()+"」")
 	}
 	reply(strings.Join(lines, "\n"))
@@ -1624,19 +1466,13 @@ func handleBotApproveAccept(ctx context.Context, projectName string, systemUserI
 	}
 	projectID := project["id"].Int64()
 
-	run, _ := g.DB().Ctx(ctx).Model("mvp_accept_run").
-		Where("project_id", projectID).
-		Where("status", "pending_human").
-		WhereNull("deleted_at").
-		OrderDesc("created_at").One()
-	if run.IsEmpty() {
+	run, _ := repo.NewAcceptRunRepo().GetLatestByProjectStatus(ctx, projectID, "pending_human", "id")
+	if len(run) == 0 {
 		reply(fmt.Sprintf("❌ 项目「%s」当前没有待人工验收的记录", project["name"].String()))
 		return
 	}
 
-	_, err = g.DB().Ctx(ctx).Model("mvp_accept_run").
-		Where("id", run["id"].Int64()).
-		Update(g.Map{"status": "passed", "reviewed_by": systemUserID})
+	err = repo.NewAcceptRunRepo().UpdateFields(ctx, g.NewVar(run["id"]).Int64(), g.Map{"status": "passed", "reviewed_by": systemUserID})
 	if err != nil {
 		reply(fmt.Sprintf("❌ 验收操作失败：%v", err))
 		return
@@ -1656,19 +1492,13 @@ func handleBotRejectAccept(ctx context.Context, projectName string, systemUserID
 	}
 	projectID := project["id"].Int64()
 
-	run, _ := g.DB().Ctx(ctx).Model("mvp_accept_run").
-		Where("project_id", projectID).
-		Where("status", "pending_human").
-		WhereNull("deleted_at").
-		OrderDesc("created_at").One()
-	if run.IsEmpty() {
+	run, _ := repo.NewAcceptRunRepo().GetLatestByProjectStatus(ctx, projectID, "pending_human", "id")
+	if len(run) == 0 {
 		reply(fmt.Sprintf("❌ 项目「%s」当前没有待人工验收的记录", project["name"].String()))
 		return
 	}
 
-	_, err = g.DB().Ctx(ctx).Model("mvp_accept_run").
-		Where("id", run["id"].Int64()).
-		Update(g.Map{"status": "rework", "reviewed_by": systemUserID})
+	err = repo.NewAcceptRunRepo().UpdateFields(ctx, g.NewVar(run["id"]).Int64(), g.Map{"status": "rework", "reviewed_by": systemUserID})
 	if err != nil {
 		reply(fmt.Sprintf("❌ 验收操作失败：%v", err))
 		return
@@ -1795,24 +1625,23 @@ func handleBotAutonomyStatus(ctx context.Context, projectName string, systemUser
 	projectID := project["id"].Int64()
 
 	// 查待审检查点
+	checkpointRecords, _ := repo.NewHumanCheckpointRepo().ListByProjectStatus(ctx, projectID, "pending", 5, "id", "check_type", "description")
 	type cpRow struct {
-		ID          int64  `json:"id"`
-		CheckType   string `json:"check_type"`
-		Description string `json:"description"`
+		ID          int64
+		CheckType   string
+		Description string
 	}
-	var checkpoints []cpRow
-	_ = g.DB().Ctx(ctx).Model("mvp_human_checkpoint").
-		Where("project_id", projectID).
-		Where("status", "pending").
-		WhereNull("deleted_at").
-		Fields("id, check_type, description").
-		Limit(5).
-		Scan(&checkpoints)
+	checkpoints := make([]cpRow, 0, len(checkpointRecords))
+	for _, checkpoint := range checkpointRecords {
+		checkpoints = append(checkpoints, cpRow{
+			ID:          g.NewVar(checkpoint["id"]).Int64(),
+			CheckType:   mapString(checkpoint, "check_type"),
+			Description: mapString(checkpoint, "description"),
+		})
+	}
 
 	// 查最新自治决策
-	decisionCount, _ := g.DB().Ctx(ctx).Model("mvp_autonomy_decision").
-		Where("project_id", projectID).
-		WhereNull("deleted_at").Count()
+	decisionCount, _ := repo.NewAutonomyDecisionRepo().CountByProject(ctx, projectID)
 
 	lines := []string{
 		fmt.Sprintf("🤖 %s 自治状态", project["name"].String()),
@@ -1841,16 +1670,11 @@ func handleBotApproveCheckpoint(ctx context.Context, projectName string, systemU
 	}
 	projectID := project["id"].Int64()
 
-	result, err := g.DB().Ctx(ctx).Model("mvp_human_checkpoint").
-		Where("project_id", projectID).
-		Where("status", "pending").
-		WhereNull("deleted_at").
-		Update(g.Map{"status": "approved", "reviewed_by": systemUserID})
+	n, err := repo.NewHumanCheckpointRepo().UpdateStatusByProject(ctx, projectID, "pending", g.Map{"status": "approved", "reviewed_by": systemUserID})
 	if err != nil {
 		reply(fmt.Sprintf("❌ 操作失败：%v", err))
 		return
 	}
-	n, _ := result.RowsAffected()
 	if n == 0 {
 		reply(fmt.Sprintf("❌ 项目「%s」没有待审的检查点", project["name"].String()))
 		return
@@ -1870,16 +1694,11 @@ func handleBotRejectCheckpoint(ctx context.Context, projectName string, systemUs
 	}
 	projectID := project["id"].Int64()
 
-	result, err := g.DB().Ctx(ctx).Model("mvp_human_checkpoint").
-		Where("project_id", projectID).
-		Where("status", "pending").
-		WhereNull("deleted_at").
-		Update(g.Map{"status": "rejected", "reviewed_by": systemUserID})
+	n, err := repo.NewHumanCheckpointRepo().UpdateStatusByProject(ctx, projectID, "pending", g.Map{"status": "rejected", "reviewed_by": systemUserID})
 	if err != nil {
 		reply(fmt.Sprintf("❌ 操作失败：%v", err))
 		return
 	}
-	n, _ := result.RowsAffected()
 	if n == 0 {
 		reply(fmt.Sprintf("❌ 项目「%s」没有待审的检查点", project["name"].String()))
 		return

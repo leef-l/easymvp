@@ -271,99 +271,7 @@ func preparePlanVersionForForceStage(ctx context.Context, projectID, workflowRun
 }
 
 func activatePlanVersionForForceStage(ctx context.Context, projectID, workflowRunID, planVersionID int64, targetStage string) error {
-	now := gtime.Now()
-
-	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		otherPlanVersions, err := tx.Model("mvp_plan_version").Ctx(ctx).
-			Where("project_id", projectID).
-			WhereIn("status", g.Slice{"draft", "active"}).
-			Where("id <>", planVersionID).
-			WhereNull("deleted_at").
-			Fields("id").
-			Array()
-		if err != nil {
-			return fmt.Errorf("查询其他方案版本失败: %w", err)
-		}
-
-		record, err := tx.Model("mvp_plan_version").Ctx(ctx).
-			Where("id", planVersionID).
-			Where("project_id", projectID).
-			WhereIn("status", g.Slice{"draft", "active"}).
-			WhereNull("deleted_at").
-			Fields("id, status").
-			One()
-		if err != nil {
-			return fmt.Errorf("查询方案版本失败: %w", err)
-		}
-		if record.IsEmpty() {
-			return fmt.Errorf("方案版本 %d 不存在或不可用于强制切换", planVersionID)
-		}
-
-		if len(otherPlanVersions) > 0 {
-			otherIDs := make([]int64, 0, len(otherPlanVersions))
-			for _, item := range otherPlanVersions {
-				otherIDs = append(otherIDs, item.Int64())
-			}
-			if _, err := tx.Model("mvp_plan_version").Ctx(ctx).
-				WhereIn("id", otherIDs).
-				Update(g.Map{"status": "superseded", "updated_at": now}); err != nil {
-				return fmt.Errorf("废弃其他方案版本失败: %w", err)
-			}
-			if _, err := tx.Model("mvp_task_blueprint").Ctx(ctx).
-				WhereIn("plan_version_id", otherIDs).
-				WhereNull("deleted_at").
-				Update(g.Map{"blueprint_status": "superseded", "updated_at": now}); err != nil {
-				return fmt.Errorf("废弃其他版本蓝图失败: %w", err)
-			}
-		}
-
-		if _, err := tx.Model("mvp_task_blueprint").Ctx(ctx).
-			Where("plan_version_id", planVersionID).
-			Where("blueprint_status", "draft").
-			Update(g.Map{"blueprint_status": "confirmed", "updated_at": now}); err != nil {
-			return fmt.Errorf("确认任务蓝图失败: %w", err)
-		}
-
-		planUpdate := g.Map{
-			"status":     "active",
-			"updated_at": now,
-		}
-		switch targetStage {
-		case "review":
-			planUpdate["review_status"] = "pending"
-			planUpdate["approved_at"] = nil
-			planUpdate["rejected_at"] = nil
-		case "execute":
-			planUpdate["review_status"] = "approved"
-			planUpdate["approved_at"] = now
-			planUpdate["rejected_at"] = nil
-		}
-
-		if _, err := tx.Model("mvp_plan_version").Ctx(ctx).
-			Where("id", planVersionID).
-			Update(planUpdate); err != nil {
-			return fmt.Errorf("更新方案版本状态失败: %w", err)
-		}
-
-		confirmedCount, err := tx.Model("mvp_task_blueprint").Ctx(ctx).
-			Where("plan_version_id", planVersionID).
-			Where("blueprint_status", "confirmed").
-			WhereNull("deleted_at").
-			Count()
-		if err != nil {
-			return fmt.Errorf("查询确认蓝图失败: %w", err)
-		}
-		if confirmedCount == 0 {
-			return fmt.Errorf("方案版本 %d 没有可执行的确认蓝图", planVersionID)
-		}
-
-		if _, err := tx.Model("mvp_workflow_run").Ctx(ctx).
-			Where("id", workflowRunID).
-			Update(g.Map{"active_plan_version_id": planVersionID, "updated_at": now}); err != nil {
-			return fmt.Errorf("回写 active_plan_version_id 失败: %w", err)
-		}
-		return nil
-	})
+	return repo.NewPlanVersionRepo().ActivateForForceStage(ctx, projectID, workflowRunID, planVersionID, targetStage)
 }
 
 func reopenWorkflowForTaskRestart(ctx context.Context, workflowRunID, taskID int64) error {
@@ -1073,32 +981,28 @@ func (c *cWorkflow) UpdateDomainTask(ctx context.Context, req *v1.WorkflowUpdate
 // ParseTasks 手动解析架构师回复中的任务清单（托底机制）
 // dryRun=true 时仅检查不创建，dryRun=false 时实际创建草案任务
 func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksReq) (res *v1.WorkflowParseTasksRes, err error) {
+	var (
+		conversationRepo = repo.NewConversationRepo()
+		messageRepo      = repo.NewMessageRepo()
+		projectRepo      = repo.NewProjectRepo()
+	)
+
 	projectID := int64(req.ProjectID)
 	if err := checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
 	}
 
 	// 查找该项目的架构师对话
-	conv, err := g.DB().Ctx(ctx).Model("mvp_conversation").
-		Where("project_id", projectID).
-		Where("role_type", "architect").
-		Where("task_id IS NULL OR task_id = 0").
-		WhereNull("deleted_at").
-		One()
-	if err != nil || conv.IsEmpty() {
+	conv, err := conversationRepo.GetArchitectProjectConversation(ctx, projectID, "id")
+	if err != nil || len(conv) == 0 {
 		return &v1.WorkflowParseTasksRes{HasTasks: false, TaskCount: 0}, nil
 	}
+	convRecord := mapToDBRecord(conv)
 
 	// 收集对话中所有 completed 的 assistant 回复（任务可能分散在多轮"继续"对话中）
-	convID := conv["id"].Int64()
+	convID := convRecord["id"].Int64()
 
-	allMsgs, err := g.DB().Ctx(ctx).Model("mvp_message").
-		Where("conversation_id", convID).
-		Where("role", "assistant").
-		Where("status", "completed").
-		WhereNull("deleted_at").
-		OrderAsc("created_at").
-		All()
+	allMsgs, err := messageRepo.ListByConversationRoleStatus(ctx, convID, "assistant", "completed", "id", "content")
 	if err != nil || len(allMsgs) == 0 {
 		return &v1.WorkflowParseTasksRes{HasTasks: false, TaskCount: 0}, nil
 	}
@@ -1107,7 +1011,8 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 	var allReplies strings.Builder
 	var lastMsgID int64
 	for i, m := range allMsgs {
-		content := m["content"].String()
+		record := mapToDBRecord(m)
+		content := record["content"].String()
 		if strings.TrimSpace(content) == "" {
 			continue
 		}
@@ -1115,7 +1020,7 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 			allReplies.WriteString("\n\n---\n\n")
 		}
 		allReplies.WriteString(content)
-		lastMsgID = m["id"].Int64()
+		lastMsgID = record["id"].Int64()
 	}
 	aiReply := allReplies.String()
 	_ = lastMsgID
@@ -1132,27 +1037,21 @@ func (c *cWorkflow) ParseTasks(ctx context.Context, req *v1.WorkflowParseTasksRe
 	}
 
 	// V2 主路径：先正则快速提取，失败则异步走 AI 二次提取
-	projectRecord, projErr := repo.NewProjectRepo().GetByID(ctx, projectID, "project_category", "name", "description")
+	projectRecord, projErr := projectRepo.GetByID(ctx, projectID, "project_category", "name", "description")
 	if projErr != nil {
 		g.Log().Warningf(ctx, "[ParseTasks] 查询项目信息失败: projectID=%d err=%v", projectID, projErr)
 	}
 	projectCategory := g.NewVar(projectRecord["project_category"]).String()
 	projectName := g.NewVar(projectRecord["name"]).String()
 	projectDesc := g.NewVar(projectRecord["description"]).String()
-	latestUserMsg, userMsgErr := g.DB().Ctx(ctx).Model("mvp_message").
-		Where("conversation_id", convID).
-		Where("role", "user").
-		Where("status", "completed").
-		WhereNull("deleted_at").
-		OrderDesc("created_at").
-		One()
+	latestUserMsg, userMsgErr := messageRepo.GetLatestByConversationRoleStatus(ctx, convID, "user", "completed", "content")
 	if userMsgErr != nil {
 		g.Log().Warningf(ctx, "[ParseTasks] 查询最近用户消息失败: convID=%d err=%v", convID, userMsgErr)
 	}
 	extractionInput := buildTaskExtractionInput(
 		projectName,
 		projectDesc,
-		latestUserMsg["content"].String(),
+		g.NewVar(latestUserMsg["content"]).String(),
 		aiReply,
 	)
 

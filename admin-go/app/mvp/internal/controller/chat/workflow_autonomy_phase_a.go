@@ -50,12 +50,9 @@ func (c *cWorkflow) SaveObjective(ctx context.Context, req *v1.WorkflowSaveObjec
 	if mErr != nil {
 		return nil, fmt.Errorf("序列化目标配置失败: %w", mErr)
 	}
-	_, err = g.DB().Model("mvp_project").Ctx(ctx).
-		Where("id", projectID).
-		WhereNull("deleted_at").
-		Update(g.Map{
-			"objective_json": string(payload),
-		})
+	err = repo.NewProjectRepo().UpdateFields(ctx, projectID, g.Map{
+		"objective_json": string(payload),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -65,14 +62,12 @@ func (c *cWorkflow) SaveObjective(ctx context.Context, req *v1.WorkflowSaveObjec
 // Situation 查询当前工作流态势。
 func (c *cWorkflow) Situation(ctx context.Context, req *v1.WorkflowSituationReq) (res *v1.WorkflowSituationRes, err error) {
 	workflowRunID := int64(req.WorkflowRunID)
-	projectID, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("id", workflowRunID).
-		WhereNull("deleted_at").
-		Value("project_id")
+	workflowRun, err := repo.NewWorkflowRunRepo().GetByIDMap(ctx, workflowRunID, "project_id")
 	if err != nil {
 		return nil, err
 	}
-	if err = checkProjectOwnership(ctx, projectID.Int64()); err != nil {
+	projectID := g.NewVar(workflowRun["project_id"]).Int64()
+	if err = checkProjectOwnership(ctx, projectID); err != nil {
 		return nil, err
 	}
 	sensor := autonomy.NewSensor(repo.NewSituationSnapshotRepo())

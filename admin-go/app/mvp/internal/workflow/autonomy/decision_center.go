@@ -186,10 +186,10 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 
 		dc.emitEvent(ctx, event.EventAutonomyGateBlocked, event.EntityDecisionAction,
 			req.WorkflowRunID, 0, g.Map{
-				"trigger_source":      req.TriggerSource,
-				"blocked_gates":       gateResult.BlockedGates,
-				"original_action":     originalActionType,
-				"fallback_action":     resp.ActionType,
+				"trigger_source":  req.TriggerSource,
+				"blocked_gates":   gateResult.BlockedGates,
+				"original_action": originalActionType,
+				"fallback_action": resp.ActionType,
 			})
 	}
 
@@ -234,33 +234,33 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 	}
 
 	actionData := g.Map{
-		"workflow_run_id":  req.WorkflowRunID,
-		"project_id":       req.ProjectID,
-		"stage_run_id":     req.StageRunID,
-		"domain_task_id":   req.DomainTaskID,
-		"decision_type":    decisionType,
-		"decision_level":   resp.DecisionLevel,
-		"trigger_source":   req.TriggerSource,
-		"trigger_context":  string(triggerJSON),
-		"matched_rule_id":  matchedRuleID,
-		"action_type":      resp.ActionType,
-		"auto_executable":  resp.AutoExecutable,
-		"human_required":   resp.HumanRequired,
-		"action_status":    consts.ActionStatusPending,
-		"created_by":       createdBy,
-		"dept_id":          deptID,
-		"created_at":       gtime.Now(),
-		"updated_at":       gtime.Now(),
+		"workflow_run_id": req.WorkflowRunID,
+		"project_id":      req.ProjectID,
+		"stage_run_id":    req.StageRunID,
+		"domain_task_id":  req.DomainTaskID,
+		"decision_type":   decisionType,
+		"decision_level":  resp.DecisionLevel,
+		"trigger_source":  req.TriggerSource,
+		"trigger_context": string(triggerJSON),
+		"matched_rule_id": matchedRuleID,
+		"action_type":     resp.ActionType,
+		"auto_executable": resp.AutoExecutable,
+		"human_required":  resp.HumanRequired,
+		"action_status":   consts.ActionStatusPending,
+		"created_by":      createdBy,
+		"dept_id":         deptID,
+		"created_at":      gtime.Now(),
+		"updated_at":      gtime.Now(),
 	}
 	if recommendationJSON != "" {
 		actionData["recommendation"] = recommendationJSON
 	} else if plan != nil {
 		// Planner 策略的 reasoning 写入 recommendation
 		recMap := map[string]interface{}{
-			"strategy":        plan.StrategyName,
-			"reasoning":       plan.Reasoning,
+			"strategy":         plan.StrategyName,
+			"reasoning":        plan.Reasoning,
 			"expected_outcome": plan.ExpectedOutcome,
-			"rollback_action": plan.RollbackAction,
+			"rollback_action":  plan.RollbackAction,
 		}
 		if plan.Meta != nil {
 			recMap["confidence"] = plan.Meta.Confidence
@@ -509,7 +509,7 @@ func (dc *DecisionCenter) RejectAction(ctx context.Context, actionID int64, reas
 		if upErr := dc.checkpointRepo.UpdateHandle(ctx, cpID, g.Map{
 			"status":        consts.CheckpointStatusHandled,
 			"handle_action": consts.HandleActionReject,
-			"handle_reason":  reason,
+			"handle_reason": reason,
 			"handled_at":    gtime.Now(),
 		}); upErr != nil {
 			g.Log().Warningf(ctx, "[DecisionCenter] 驳回更新 checkpoint 状态失败: cpID=%d err=%v", cpID, upErr)
@@ -585,19 +585,16 @@ func (dc *DecisionCenter) resolveProjectScope(ctx context.Context, projectID int
 	if projectID == 0 {
 		return "", "", 0, 0
 	}
-	record, err := g.DB().Model("mvp_project").Ctx(ctx).
-		Where("id", projectID).
-		Fields("category_code, project_category, created_by, dept_id").
-		One()
-	if err != nil || record.IsEmpty() {
+	record, err := repo.NewProjectRepo().GetByID(ctx, projectID, "category_code", "project_category", "created_by", "dept_id")
+	if err != nil || record == nil {
 		return "", "", 0, 0
 	}
-	categoryCode = record["category_code"].String()
+	categoryCode = gconv.String(record["category_code"])
 	if categoryCode == "" {
-		categoryCode = record["project_category"].String()
+		categoryCode = gconv.String(record["project_category"])
 	}
 	family = dc.resolveProjectFamily(ctx, categoryCode)
-	return family, categoryCode, record["created_by"].Int64(), record["dept_id"].Int64()
+	return family, categoryCode, gconv.Int64(record["created_by"]), gconv.Int64(record["dept_id"])
 }
 
 func (dc *DecisionCenter) resolveProjectFamily(ctx context.Context, categoryCode string) string {
@@ -698,11 +695,11 @@ func (dc *DecisionCenter) recordObservation(ctx context.Context, actionID int64,
 		ActionType:       resp.ActionType,
 		InputSnapshot:    req.TriggerContext,
 		OutputSnapshot: map[string]interface{}{
-			"action_type":    resp.ActionType,
-			"decision_level": resp.DecisionLevel,
+			"action_type":     resp.ActionType,
+			"decision_level":  resp.DecisionLevel,
 			"auto_executable": resp.AutoExecutable,
-			"human_required": resp.HumanRequired,
-			"handled":        resp.Handled,
+			"human_required":  resp.HumanRequired,
+			"handled":         resp.Handled,
 		},
 		CreatedBy: createdBy,
 		DeptID:    deptID,

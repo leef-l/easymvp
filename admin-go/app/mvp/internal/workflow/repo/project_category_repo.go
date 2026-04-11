@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"strings"
 
 	"github.com/gogf/gf/v2/frame/g"
 )
@@ -40,12 +41,15 @@ func (r *ProjectCategoryRepo) GetByDisplayName(ctx context.Context, displayName 
 }
 
 // ListAll 查询所有启用的分类，按 sort 排序。
-func (r *ProjectCategoryRepo) ListAll(ctx context.Context) ([]g.Map, error) {
-	records, err := g.DB().Model(r.table()).Ctx(ctx).
+func (r *ProjectCategoryRepo) ListAll(ctx context.Context, fields ...string) ([]g.Map, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
 		Where("status", 1).
 		WhereNull("deleted_at").
-		OrderAsc("sort").
-		All()
+		OrderAsc("sort")
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	records, err := model.All()
 	if err != nil {
 		return nil, err
 	}

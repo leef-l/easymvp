@@ -6,6 +6,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	"easymvp/app/mvp/internal/consts"
+	"easymvp/app/mvp/internal/workflow/repo"
 )
 
 type recoverableWorkflowRun struct {
@@ -44,18 +45,13 @@ var (
 func RecoverActiveWorkflows(ctx context.Context) error {
 	Init()
 
-	runs, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		WhereIn("status", g.Slice{
-			consts.WorkflowRunStatusDesigning,
-			consts.WorkflowRunStatusReviewing,
-			consts.WorkflowRunStatusExecuting,
-			consts.WorkflowRunStatusAccepting,
-			consts.WorkflowRunStatusReworking,
-		}).
-		WhereNull("deleted_at").
-		Fields("id, project_id, status, current_stage, current_stage_run_id").
-		OrderAsc("created_at").
-		All()
+	runs, err := repo.NewWorkflowRunRepo().ListByStatuses(ctx, []string{
+		consts.WorkflowRunStatusDesigning,
+		consts.WorkflowRunStatusReviewing,
+		consts.WorkflowRunStatusExecuting,
+		consts.WorkflowRunStatusAccepting,
+		consts.WorkflowRunStatusReworking,
+	}, "id", "project_id", "status", "current_stage", "current_stage_run_id")
 	if err != nil {
 		return err
 	}
@@ -66,11 +62,11 @@ func RecoverActiveWorkflows(ctx context.Context) error {
 	items := make([]recoverableWorkflowRun, 0, len(runs))
 	for _, run := range runs {
 		items = append(items, recoverableWorkflowRun{
-			WorkflowRunID: run["id"].Int64(),
-			ProjectID:     run["project_id"].Int64(),
-			Status:        run["status"].String(),
-			Stage:         run["current_stage"].String(),
-			StageRunID:    run["current_stage_run_id"].Int64(),
+			WorkflowRunID: g.NewVar(run["id"]).Int64(),
+			ProjectID:     g.NewVar(run["project_id"]).Int64(),
+			Status:        g.NewVar(run["status"]).String(),
+			Stage:         g.NewVar(run["current_stage"]).String(),
+			StageRunID:    g.NewVar(run["current_stage_run_id"]).Int64(),
 		})
 	}
 
