@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 )
 
 const (
@@ -86,7 +87,43 @@ type packageManifest struct {
 	DevDependencies map[string]string `json:"devDependencies"`
 }
 
+// signalsCache 请求级 memoize: 同一个 workDir+family+type 组合只扫描一次文件系统。
+// 用于避免一次 accept 流程中 rule_engine/judge/service 重复扫描。
+// 缓存条目按需清理，不设 TTL（一次进程生命周期内项目文件变更概率极低）。
+var signalsCache = struct {
+	mu    sync.RWMutex
+	store map[string]ProjectSignals
+}{store: make(map[string]ProjectSignals)}
+
+// DetectProjectSignals 检测项目特征信号（文件系统扫描 + memoize）。
+// 同一 workDir+familyCode+projectTypeCode 组合只扫描一次。
 func DetectProjectSignals(workDir string, familyCode string, projectTypeCode string) ProjectSignals {
+	cacheKey := workDir + "|" + familyCode + "|" + projectTypeCode
+	signalsCache.mu.RLock()
+	if cached, ok := signalsCache.store[cacheKey]; ok {
+		signalsCache.mu.RUnlock()
+		return cached
+	}
+	signalsCache.mu.RUnlock()
+
+	signals := detectProjectSignalsUncached(workDir, familyCode, projectTypeCode)
+
+	signalsCache.mu.Lock()
+	signalsCache.store[cacheKey] = signals
+	signalsCache.mu.Unlock()
+
+	return signals
+}
+
+// InvalidateSignalsCache 清除信号缓存（项目文件变更后调用）。
+func InvalidateSignalsCache() {
+	signalsCache.mu.Lock()
+	signalsCache.store = make(map[string]ProjectSignals)
+	signalsCache.mu.Unlock()
+}
+
+// detectProjectSignalsUncached 实际的文件系统扫描逻辑。
+func detectProjectSignalsUncached(workDir string, familyCode string, projectTypeCode string) ProjectSignals {
 	signals := ProjectSignals{
 		FamilyCode:      strings.TrimSpace(strings.ToLower(familyCode)),
 		ProjectTypeCode: strings.TrimSpace(strings.ToLower(projectTypeCode)),
@@ -215,18 +252,24 @@ func ResolveVerificationStandard(signals ProjectSignals) VerificationStandard {
 		return standard
 	case "analysis":
 		return VerificationStandard{
-			Code:        "analysis.default",
-			DisplayName: "Analysis Default Standard",
+			Code:                      "analysis.default",
+			DisplayName:               "Analysis Default Standard",
+			RequiredCheckKinds:        nil,
+			RequirePassedVerification: false,
 		}
 	case "creative":
 		return VerificationStandard{
-			Code:        "creative.default",
-			DisplayName: "Creative Default Standard",
+			Code:                      "creative.default",
+			DisplayName:               "Creative Default Standard",
+			RequiredCheckKinds:        nil,
+			RequirePassedVerification: false,
 		}
 	default:
 		return VerificationStandard{
-			Code:        family + ".default",
-			DisplayName: "Default Standard",
+			Code:                      family + ".default",
+			DisplayName:               family + " Default Standard",
+			RequiredCheckKinds:        nil,
+			RequirePassedVerification: false,
 		}
 	}
 }

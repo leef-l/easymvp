@@ -107,9 +107,20 @@ func (e *RuleEngine) evaluateRule(ctx context.Context, in *AcceptContext, ruleCo
 	case "software.delivery_review_required":
 		return e.checkDeliveryReviewRequired(ctx, in, ruleCode, ruleName, ruleType, scopeType, cfg)
 	default:
-		// 未实现的规则直接跳过
-		g.Log().Debugf(ctx, "[RuleEngine] 规则 %s 尚无评估实现，跳过", ruleCode)
-		return nil
+		// 未实现的规则产生 warning hit，而非静默跳过（避免"明明没通过却算通过"的隐蔽 bug）
+		g.Log().Warningf(ctx, "[RuleEngine] 规则 %s 尚无评估实现，标记为未实现", ruleCode)
+		return []RuleHit{{
+			RuleCode:        ruleCode,
+			RuleName:        ruleName,
+			RuleType:        ruleType,
+			ScopeType:       scopeType,
+			Severity:        SeverityWarn,
+			Title:           fmt.Sprintf("规则 %s 尚未实现", ruleCode),
+			Detail:          fmt.Sprintf("数据库中配置了规则 %s，但引擎中没有对应的评估逻辑。该规则的检查结果无法保证。", ruleCode),
+			ExpectedValue:   "规则已实现并可执行评估",
+			ActualValue:     "评估逻辑缺失",
+			SuggestedAction: "实现该规则的评估逻辑，或从数据库中移除该规则配置",
+		}}
 	}
 }
 
