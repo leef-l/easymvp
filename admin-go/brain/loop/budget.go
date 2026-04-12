@@ -17,8 +17,10 @@
 package loop
 
 import (
+	"fmt"
 	"time"
 
+	brainerrors "easymvp/brain/errors"
 	"easymvp/brain/llm"
 )
 
@@ -74,25 +76,120 @@ type Budget struct {
 }
 
 // CheckTurn validates that a new Turn is allowed to start under the current
-// Budget counters. It MUST return a *errors.BrainError with Class=Permanent
-// and ErrorCode="budget.turns_exhausted" when UsedTurns >= MaxTurns, and nil
-// otherwise. See 22-Agent-Loop规格.md §5.1.
+// Budget counters. The check runs all five dimensions from §5 and returns
+// the first exhausted axis as a ClassPermanent BrainError. Runners MUST
+// call CheckTurn at the top of every Turn loop iteration — the first
+// failure aborts the Run with the exact budget_* code that tripped.
+//
+// The dimension order (turns → cost → llm calls → tool calls → timeout)
+// is stable so tests and alert rules can rely on the first-fire code.
+// See 22-Agent-Loop规格.md §5.1 / §5.2 / §5.3 / §5.4.
 func (b *Budget) CheckTurn() error {
-	panic("unimplemented: 22-Agent-Loop规格.md §5.1 Budget.CheckTurn")
+	if b == nil {
+		return nil
+	}
+	if b.MaxTurns > 0 && b.UsedTurns >= b.MaxTurns {
+		return brainerrors.New(brainerrors.CodeBudgetTurnsExhausted,
+			brainerrors.WithMessage(fmt.Sprintf(
+				"budget.turns_exhausted: used=%d max=%d",
+				b.UsedTurns, b.MaxTurns,
+			)),
+		)
+	}
+	if b.MaxCostUSD > 0 && b.UsedCostUSD >= b.MaxCostUSD {
+		return brainerrors.New(brainerrors.CodeBudgetCostExhausted,
+			brainerrors.WithMessage(fmt.Sprintf(
+				"budget.cost_exhausted: used=%.4f max=%.4f",
+				b.UsedCostUSD, b.MaxCostUSD,
+			)),
+		)
+	}
+	if b.MaxLLMCalls > 0 && b.UsedLLMCalls >= b.MaxLLMCalls {
+		return brainerrors.New(brainerrors.CodeBudgetLLMCallsExhausted,
+			brainerrors.WithMessage(fmt.Sprintf(
+				"budget.llm_calls_exhausted: used=%d max=%d",
+				b.UsedLLMCalls, b.MaxLLMCalls,
+			)),
+		)
+	}
+	if b.MaxToolCalls > 0 && b.UsedToolCalls >= b.MaxToolCalls {
+		return brainerrors.New(brainerrors.CodeBudgetToolCallsExhausted,
+			brainerrors.WithMessage(fmt.Sprintf(
+				"budget.tool_calls_exhausted: used=%d max=%d",
+				b.UsedToolCalls, b.MaxToolCalls,
+			)),
+		)
+	}
+	if b.MaxDuration > 0 && b.ElapsedTime >= b.MaxDuration {
+		return brainerrors.New(brainerrors.CodeBudgetTimeoutExhausted,
+			brainerrors.WithMessage(fmt.Sprintf(
+				"budget.timeout_exhausted: elapsed=%s max=%s",
+				b.ElapsedTime, b.MaxDuration,
+			)),
+		)
+	}
+	return nil
 }
 
-// CheckCost validates that the current Budget still has headroom for another
-// LLM / tool call. It MUST return a *errors.BrainError with
-// ErrorCode="budget.cost_exhausted" when UsedCostUSD >= MaxCostUSD, and nil
-// otherwise. See 22-Agent-Loop规格.md §5.2.
+// CheckCost validates that the Budget still has headroom for another LLM
+// or tool call. It is the narrower dimension check that Runners call in
+// the middle of a Turn (after receiving a Usage snapshot but before
+// issuing a follow-up call) — it exits early on the two cost-shaped
+// dimensions (cost and LLM calls) and leaves the remaining dimensions to
+// the next CheckTurn.
+//
+// See 22-Agent-Loop规格.md §5.2.
 func (b *Budget) CheckCost() error {
-	panic("unimplemented: 22-Agent-Loop规格.md §5.2 Budget.CheckCost")
+	if b == nil {
+		return nil
+	}
+	if b.MaxCostUSD > 0 && b.UsedCostUSD >= b.MaxCostUSD {
+		return brainerrors.New(brainerrors.CodeBudgetCostExhausted,
+			brainerrors.WithMessage(fmt.Sprintf(
+				"budget.cost_exhausted: used=%.4f max=%.4f",
+				b.UsedCostUSD, b.MaxCostUSD,
+			)),
+		)
+	}
+	if b.MaxLLMCalls > 0 && b.UsedLLMCalls >= b.MaxLLMCalls {
+		return brainerrors.New(brainerrors.CodeBudgetLLMCallsExhausted,
+			brainerrors.WithMessage(fmt.Sprintf(
+				"budget.llm_calls_exhausted: used=%d max=%d",
+				b.UsedLLMCalls, b.MaxLLMCalls,
+			)),
+		)
+	}
+	return nil
 }
 
-// Remaining returns a snapshot of the still-available Budget in the form
-// consumed by llm.ChatRequest.RemainingBudget. The snapshot is a point-in-time
-// copy and MUST NOT share mutable state with the Budget receiver. See
-// 22-Agent-Loop规格.md §5 and §6.3 (ChatRequest.RemainingBudget).
+// Remaining returns a point-in-time snapshot of the still-available
+// budget in the shape consumed by llm.ChatRequest.RemainingBudget.
+// TokensRemaining is derived as (MaxLLMCalls - UsedLLMCalls) × 1 because
+// v1 does not track a per-Run token envelope separately from LLM calls;
+// future specs that add one will extend BudgetSnapshot and this method.
+//
+// The snapshot is a value copy — callers can mutate the returned struct
+// without racing the Budget receiver, matching the "MUST NOT share
+// mutable state" clause from 22 §6.3.
 func (b *Budget) Remaining() llm.BudgetSnapshot {
-	panic("unimplemented: 22-Agent-Loop规格.md §5 Budget.Remaining")
+	if b == nil {
+		return llm.BudgetSnapshot{}
+	}
+	turnsLeft := b.MaxTurns - b.UsedTurns
+	if turnsLeft < 0 {
+		turnsLeft = 0
+	}
+	costLeft := b.MaxCostUSD - b.UsedCostUSD
+	if costLeft < 0 {
+		costLeft = 0
+	}
+	tokensLeft := b.MaxLLMCalls - b.UsedLLMCalls
+	if tokensLeft < 0 {
+		tokensLeft = 0
+	}
+	return llm.BudgetSnapshot{
+		TurnsRemaining:   turnsLeft,
+		CostUSDRemaining: costLeft,
+		TokensRemaining:  tokensLeft,
+	}
 }

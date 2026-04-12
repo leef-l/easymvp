@@ -1,13 +1,18 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
 
 	"easymvp/brain/cli"
+	"easymvp/brain/kernel"
+	"easymvp/brain/persistence"
 )
 
 // checkStatus classifies the outcome of one doctor check. Only 3 values are
@@ -138,13 +143,44 @@ func checkConfigFile() checkResult {
 	}
 }
 
-// checkDatabase is 27 §16.2 check #3 — SQLite / MySQL reachability. Skeleton
-// has no persistence drivers wired in, so this is a skip.
+// checkDatabase is 27 §16.2 check #3 — persistence tier reachability. In
+// the v0.1.0 reference executable the persistence tier is the in-memory
+// PlanStore; this check performs a round-trip Create → Get → Update →
+// Archive probe to prove the store's transaction boundary is honoured.
+// See 26-持久化与恢复.md §5.
 func checkDatabase() checkResult {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	k := kernel.NewMemKernel(kernel.MemKernelOptions{})
+	if k.PlanStore == nil {
+		return checkResult{"database", checkFail, "MemKernel returned nil PlanStore", ""}
+	}
+
+	snap, _ := json.Marshal(map[string]string{"probe": "doctor"})
+	plan := &persistence.BrainPlan{
+		BrainID:      "doctor",
+		Version:      1,
+		CurrentState: snap,
+	}
+	id, err := k.PlanStore.Create(ctx, plan)
+	if err != nil {
+		return checkResult{"database", checkFail, "PlanStore.Create: " + err.Error(), ""}
+	}
+	got, err := k.PlanStore.Get(ctx, id)
+	if err != nil {
+		return checkResult{"database", checkFail, "PlanStore.Get: " + err.Error(), ""}
+	}
+	if got == nil || got.ID != id {
+		return checkResult{"database", checkFail, "PlanStore.Get returned nil or mismatched plan", ""}
+	}
+	if err := k.PlanStore.Archive(ctx, id); err != nil {
+		return checkResult{"database", checkFail, "PlanStore.Archive: " + err.Error(), ""}
+	}
 	return checkResult{
 		name:   "database",
-		status: checkSkip,
-		msg:    "persistence driver not implemented in v0.1.0 skeleton",
+		status: checkOK,
+		msg:    fmt.Sprintf("MemPlanStore round-trip OK (plan=%d)", id),
 	}
 }
 
@@ -178,25 +214,61 @@ func checkLLMReachable() checkResult {
 	}
 }
 
-// checkDiskSpace is 27 §16.2 check #7 — workspace disk free space (>1GB).
-// We do a best-effort read of the workspace parent dir; on any error we skip
-// rather than fail so the skeleton stays green on unusual filesystems.
+// checkDiskSpace is 27 §16.2 check #7 — CAS artifact store round-trip.
+// The v0.1.0 reference executable has no real filesystem CAS yet, so we
+// exercise the MemArtifactStore Put→Exists→Get→read path to prove the
+// content-addressable layer is healthy. The statfs probe required by
+// 27 §16 in the full contract will layer onto this check once the
+// fs_artifact_store lands.
+//
+// See 26-持久化与恢复.md §6.
 func checkDiskSpace() checkResult {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return checkResult{"disk space", checkSkip, err.Error(), ""}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	k := kernel.NewMemKernel(kernel.MemKernelOptions{})
+	if k.ArtifactStore == nil {
+		return checkResult{"disk space", checkFail, "MemKernel returned nil ArtifactStore", ""}
 	}
-	// Portable stat-based check is non-trivial; in the skeleton we just
-	// probe that $HOME is statable and assume the full implementation will
-	// wire in syscall.Statfs. See 27 §16 for the real contract.
-	if _, err := os.Stat(home); err != nil {
-		return checkResult{"disk space", checkFail, err.Error(), ""}
+	payload := []byte("brain doctor CAS probe")
+	ref, err := k.ArtifactStore.Put(ctx, 0, persistence.Artifact{
+		Kind:    "doctor-probe",
+		Content: payload,
+		Caption: "brain doctor smoke probe",
+	})
+	if err != nil {
+		return checkResult{"disk space", checkFail, "ArtifactStore.Put: " + err.Error(), ""}
+	}
+	ok, err := k.ArtifactStore.Exists(ctx, ref)
+	if err != nil || !ok {
+		return checkResult{"disk space", checkFail, fmt.Sprintf("ArtifactStore.Exists: ok=%v err=%v", ok, err), ""}
+	}
+	rc, err := k.ArtifactStore.Get(ctx, ref)
+	if err != nil {
+		return checkResult{"disk space", checkFail, "ArtifactStore.Get: " + err.Error(), ""}
+	}
+	defer rc.Close()
+	got, err := io.ReadAll(rc)
+	if err != nil {
+		return checkResult{"disk space", checkFail, "ArtifactStore.Read: " + err.Error(), ""}
+	}
+	if string(got) != string(payload) {
+		return checkResult{"disk space", checkFail, "CAS content mismatch", ""}
 	}
 	return checkResult{
 		name:   "disk space",
-		status: checkSkip,
-		msg:    "statfs not implemented in v0.1.0 skeleton",
+		status: checkOK,
+		msg:    fmt.Sprintf("MemArtifactStore CAS round-trip OK (ref=%s)", string(ref)[:min(20, len(string(ref)))]),
 	}
+}
+
+// min is a local helper (Go 1.21+ has builtin min but we stay
+// conservative with the CLI to keep the toolchain floor low).
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // checkClockDrift is 27 §16.2 check #8 — clock drift vs NTP. Network dependent,

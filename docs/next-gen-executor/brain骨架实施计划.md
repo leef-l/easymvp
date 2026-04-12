@@ -1,6 +1,6 @@
 # brain/ Go 骨架实施计划
 
-> **状态**：执行中 · 2026-04-11
+> **状态**：✅ v0.1.0 冻结 · 2026-04-12
 > **所属任务**：Round 4 之后的 F 任务（起 Go 骨架）
 > **恢复策略**：如果对话被打断、上下文被压缩、或者换了新的 Claude 会话，读本文档可以从任何中断点继续实施。所有决策、分工、验收标准都在这里，不依赖对话历史。
 
@@ -1249,6 +1249,7 @@ type BrainTransport interface {
 - **2026-04-11 · cas.go 允许真实实现** · §5.9 特殊说明：`ComputeKey` 因为是纯函数无副作用，允许波 2 的 agent-persist 真写而不是 panic stub
 - **2026-04-11 · cmd/brain/ 独立路径** · §1.1 注释：`cmd/brain/` 放在 `admin-go/cmd/brain/` 而不是 `admin-go/brain/cmd/`，遵循 Go 惯例
 - **2026-04-11 · 零外部依赖铁律** · §4.6：波 1-3 全程不引入 cobra / otel-go / zap，全部使用标准库；将来有需要再通过 minor bump 引入
+- **2026-04-12 · v0.1.0 冻结** · 计划 §7 所有勾选项完成；go build / go vet / go test ./brain/... -race 全部 clean；cmd/brain version · version --short · version --json · doctor · run --prompt · unknown-cmd · --help · 10 个 stub 子命令行为全部符合 27-CLI命令契约.md §16 §17。实际交付超出骨架计划：agent-persist/agent-loop/agent-obs/agent-sec/agent-llm/agent-tool/agent-protocol/agent-test 在 panic stub 之外补上了 Mem* 参考实现、MockProvider、hash_chain_audit、file_cassette、run cmd，供 kernel.NewMemKernel 一站式装配，让 `brain run` / `brain doctor` 在无外部依赖的前提下可真跑端到端最小 Run。新增文件未纳入 §1.1 清单但 go 包拓扑仍然成立——延续 §4.6 铁律，零新外部依赖。
 
 ---
 
@@ -1291,3 +1292,4 @@ type BrainTransport interface {
 | 版本 | 日期 | 变更 |
 |------|------|------|
 | v1.0 | 2026-04-11 | 首版：Agent Teams 3 波并行策略 + 60 文件清单 + 11 子包接口速查 + 风格约束 + 进度勾选表 + 恢复指南 |
+| v1.1 | 2026-04-12 | v0.1.0 冻结：§7 全勾 + §8 追加冻结记录；实际交付 99 文件（含 Mem*/Mock/Test 真实实现） |

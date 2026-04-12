@@ -21,7 +21,7 @@ type command struct {
 // commandOrder so `brain --help` prints commands in the documented order from
 // 27 §5 rather than random map order.
 var commands = map[string]command{
-	"run":     {Short: "Start a new Run", Run: runStub("run"), stub: true},
+	"run":     {Short: "Start a new Run", Run: runRun},
 	"status":  {Short: "Query Run status", Run: runStub("status"), stub: true},
 	"resume":  {Short: "Resume an interrupted Run", Run: runStub("resume"), stub: true},
 	"cancel":  {Short: "Cancel a Run", Run: runStub("cancel"), stub: true},

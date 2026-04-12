@@ -3,6 +3,10 @@ package persistence
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"strings"
+
+	brainerrors "easymvp/brain/errors"
 )
 
 // casAlgoSha256 is the v1 CAS algorithm prefix defined in
@@ -38,11 +42,41 @@ func ComputeKey(data []byte) Ref {
 }
 
 // ParseRef splits a CAS Ref into its (algorithm, hex) components and
-// validates the v1 format from 26-持久化与恢复.md §6.2.
+// validates the v1 wire format from 26-持久化与恢复.md §6.2.
 //
-// Implementation is deferred until the errors package exposes a v1
-// BrainError constructor (21-错误模型.md §3.3); until then a panic stub
-// keeps the surface area discoverable via `grep unimplemented:`.
+// The only v1 algorithm is "sha256"; §6.2 requires every new algorithm
+// to claim a new prefix rather than reuse "sha256/", so ParseRef rejects
+// anything else with CodeInvalidParams. Malformed shape, non-hex
+// characters, or a digest that is not exactly 64 lowercase hex chars all
+// return ClassUserFault errors so the caller can safely surface them to
+// an end user.
 func ParseRef(s string) (algo string, hexDigest string, err error) {
-	panic("unimplemented: 26-持久化与恢复.md §6.2 ParseRef")
+	slash := strings.IndexByte(s, '/')
+	if slash <= 0 || slash == len(s)-1 {
+		return "", "", brainerrors.New(brainerrors.CodeInvalidParams,
+			brainerrors.WithMessage(fmt.Sprintf("cas ref %q missing algorithm prefix", s)),
+		)
+	}
+	algo = s[:slash]
+	hexDigest = s[slash+1:]
+
+	if algo != casAlgoSha256 {
+		return "", "", brainerrors.New(brainerrors.CodeInvalidParams,
+			brainerrors.WithMessage(fmt.Sprintf("cas ref %q uses unsupported algorithm %q (v1 only accepts %q)", s, algo, casAlgoSha256)),
+		)
+	}
+	if len(hexDigest) != 64 {
+		return "", "", brainerrors.New(brainerrors.CodeInvalidParams,
+			brainerrors.WithMessage(fmt.Sprintf("cas ref %q digest length = %d, want 64", s, len(hexDigest))),
+		)
+	}
+	for i := 0; i < len(hexDigest); i++ {
+		c := hexDigest[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return "", "", brainerrors.New(brainerrors.CodeInvalidParams,
+				brainerrors.WithMessage(fmt.Sprintf("cas ref %q digest contains non-lowercase-hex byte at offset %d", s, i)),
+			)
+		}
+	}
+	return algo, hexDigest, nil
 }

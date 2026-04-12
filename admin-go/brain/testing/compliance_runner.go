@@ -2,7 +2,12 @@ package braintesting
 
 import (
 	"context"
+	"fmt"
+	"sort"
+	"sync"
 	"time"
+
+	brainerrors "easymvp/brain/errors"
 )
 
 // ComplianceTest is a single entry in the frozen v1 conformance suite
@@ -116,10 +121,229 @@ type ComplianceRunner interface {
 	RunAll(ctx context.Context) (*ComplianceReport, error)
 }
 
+// ComplianceTestFunc is the executable side of a registered compliance
+// test: it receives the runner's shared context and returns nil on
+// success or a *BrainError describing the failure. Returning the
+// sentinel ErrComplianceSkip marks the test as "skipped" in the report
+// instead of "fail", matching the 25 §3 three-way status scheme.
+type ComplianceTestFunc func(ctx context.Context) error
+
+// ErrComplianceSkip is the sentinel a ComplianceTestFunc returns when
+// the test cannot run in the current environment (e.g. a network-only
+// test on an offline runner). The runner translates it to
+// TestResult.Status="skipped".
+var ErrComplianceSkip = brainerrors.New(brainerrors.CodeShuttingDown,
+	brainerrors.WithMessage("compliance: test skipped"))
+
+// MemComplianceRunner is the in-process ComplianceRunner from
+// 25-测试策略.md §3. It keeps a registry of ComplianceTest descriptors
+// alongside their executable ComplianceTestFunc bodies and runs them
+// deterministically (sorted by ID) in the test binary that imports
+// this package.
+//
+// The concrete compliance cases (C-01..C-P-14..C-L-14..) are NOT
+// hard-coded here — they are registered by the individual brain
+// sub-packages (brain/errors, brain/protocol, brain/persistence, ...)
+// through Register. That keeps the runner decoupled from the data
+// model and lets each sub-package own the tests that assert its own
+// contract.
+type MemComplianceRunner struct {
+	// SDKLanguage is copied into every ComplianceReport the runner
+	// produces. Defaults to "go".
+	SDKLanguage string
+	// SDKVersion is copied into every ComplianceReport.
+	SDKVersion string
+	// KernelVersion is copied into every ComplianceReport.
+	KernelVersion string
+	// ProtocolVersion is copied into every ComplianceReport.
+	ProtocolVersion string
+
+	mu    sync.Mutex
+	tests map[string]*registeredTest
+}
+
+type registeredTest struct {
+	desc ComplianceTest
+	fn   ComplianceTestFunc
+}
+
 // NewComplianceRunner returns a new ComplianceRunner bound to the current
 // Kernel build. The concrete wiring is filled in by cmd/brain compliance
 // in wave 3; this skeleton exists so that 25 §3 and 28 §5 consumers can
 // compile-time reference the entry point.
 func NewComplianceRunner() ComplianceRunner {
-	panic("unimplemented: 25-测试策略.md §3 NewComplianceRunner")
+	return &MemComplianceRunner{
+		SDKLanguage:     "go",
+		SDKVersion:      "0.0.0-dev",
+		KernelVersion:   "0.0.0-dev",
+		ProtocolVersion: "1.0",
+		tests:           make(map[string]*registeredTest),
+	}
+}
+
+// Register adds a test to the runner's catalog. Re-registering an ID
+// panics because tests are meant to be statically declared at package
+// init time — a duplicate usually signals a copy-paste error.
+func (r *MemComplianceRunner) Register(desc ComplianceTest, fn ComplianceTestFunc) {
+	if desc.ID == "" {
+		panic("braintesting.MemComplianceRunner.Register: ComplianceTest.ID is required")
+	}
+	if fn == nil {
+		panic("braintesting.MemComplianceRunner.Register: test function is required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.tests[desc.ID]; exists {
+		panic(fmt.Sprintf(
+			"braintesting.MemComplianceRunner.Register: duplicate test id %q",
+			desc.ID,
+		))
+	}
+	r.tests[desc.ID] = &registeredTest{desc: desc, fn: fn}
+}
+
+// List returns the registered tests in stable, lexicographic ID order.
+// The stable order is a hard requirement of 25 §3 so CI reporters can
+// diff two runs deterministically.
+func (r *MemComplianceRunner) List() []ComplianceTest {
+	r.mu.Lock()
+	ids := make([]string, 0, len(r.tests))
+	for id := range r.tests {
+		ids = append(ids, id)
+	}
+	r.mu.Unlock()
+	sort.Strings(ids)
+	out := make([]ComplianceTest, 0, len(ids))
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, id := range ids {
+		if t, ok := r.tests[id]; ok {
+			out = append(out, t.desc)
+		}
+	}
+	return out
+}
+
+// Run executes a single test by ID. An unknown ID trips a
+// CodeRecordNotFound BrainError so callers can distinguish "test does
+// not exist" from "test exists and failed".
+func (r *MemComplianceRunner) Run(ctx context.Context, testID string) (*TestResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, wrapCtxErr(err)
+	}
+	r.mu.Lock()
+	t, ok := r.tests[testID]
+	r.mu.Unlock()
+	if !ok {
+		return nil, brainerrors.New(brainerrors.CodeRecordNotFound,
+			brainerrors.WithMessage(fmt.Sprintf(
+				"MemComplianceRunner.Run: unknown test id %q", testID,
+			)),
+		)
+	}
+	return r.runOne(ctx, t), nil
+}
+
+// RunAll executes every registered test in List order and returns the
+// aggregated report. Failures do NOT short-circuit the loop — every
+// test is attempted so the report is complete, per the contract in
+// 25 §3.
+func (r *MemComplianceRunner) RunAll(ctx context.Context) (*ComplianceReport, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, wrapCtxErr(err)
+	}
+	report := &ComplianceReport{
+		SDKLanguage:     r.SDKLanguage,
+		SDKVersion:      r.SDKVersion,
+		KernelVersion:   r.KernelVersion,
+		ProtocolVersion: r.ProtocolVersion,
+		RunAt:           time.Now().UTC(),
+		Results:         make(map[string]*TestResult),
+	}
+	for _, desc := range r.List() {
+		r.mu.Lock()
+		t := r.tests[desc.ID]
+		r.mu.Unlock()
+		if t == nil {
+			continue
+		}
+		res := r.runOne(ctx, t)
+		report.Results[desc.ID] = res
+		report.Summary.Total++
+		switch res.Status {
+		case "pass":
+			report.Summary.Passed++
+		case "fail":
+			report.Summary.Failed++
+		case "skipped":
+			report.Summary.Skipped++
+		}
+		// Honour ctx cancellation between tests so a killed CI run
+		// does not keep burning compute — but the partial report up
+		// to this point is still returned so debuggers can inspect
+		// which test tripped the cancel.
+		if err := ctx.Err(); err != nil {
+			return report, wrapCtxErr(err)
+		}
+	}
+	return report, nil
+}
+
+// runOne dispatches a single registered test and formats its outcome.
+// A panic inside the test function is converted into a "fail" result
+// with a CodePanicked error string — the panic is NOT rethrown because
+// doing so would violate the "every test MUST be attempted" rule.
+func (r *MemComplianceRunner) runOne(ctx context.Context, t *registeredTest) *TestResult {
+	start := time.Now()
+	res := &TestResult{TestID: t.desc.ID}
+	defer func() {
+		if rec := recover(); rec != nil {
+			res.Status = "fail"
+			res.Error = fmt.Sprintf("%s: panic: %v",
+				brainerrors.CodePanicked, rec)
+		}
+		res.DurationMS = time.Since(start).Milliseconds()
+	}()
+
+	err := t.fn(ctx)
+	switch {
+	case err == nil:
+		res.Status = "pass"
+	case isSkip(err):
+		res.Status = "skipped"
+	default:
+		res.Status = "fail"
+		res.Error = formatComplianceError(err)
+	}
+	return res
+}
+
+// isSkip detects the sentinel returned by ComplianceTestFunc to mark
+// a test as skipped. We compare by identity first (fast path) and by
+// ErrorCode second (so wrapped sentinels are still recognised).
+func isSkip(err error) bool {
+	if err == nil {
+		return false
+	}
+	if err == ErrComplianceSkip {
+		return true
+	}
+	if be, ok := err.(*brainerrors.BrainError); ok && be != nil {
+		// Tests may construct their own skip errors with a
+		// matching code; recognising the code keeps the sentinel
+		// optional.
+		return be.ErrorCode == brainerrors.CodeShuttingDown &&
+			be.Message == "compliance: test skipped"
+	}
+	return false
+}
+
+// formatComplianceError renders err as "code:message" so the report
+// is diffable across SDK implementations. Non-BrainError values fall
+// back to their Error() string.
+func formatComplianceError(err error) string {
+	if be, ok := err.(*brainerrors.BrainError); ok && be != nil {
+		return fmt.Sprintf("%s: %s", be.ErrorCode, be.Message)
+	}
+	return err.Error()
 }

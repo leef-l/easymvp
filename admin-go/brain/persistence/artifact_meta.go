@@ -19,11 +19,22 @@
 //
 // The v1 contract is frozen: schemas, on-disk layout, CAS key algorithm and
 // Resume protocol MUST NOT be broken; only additive changes are allowed.
-// This skeleton declares the interfaces and panics with
-// "unimplemented: 26-持久化与恢复.md §..." on every method that has not yet
-// been ported. The only real implementation in this file set is the pure
-// CAS key helper in cas.go, which is allowed per the decision logged in
-// brain骨架实施计划.md §8 (2026-04-11 · cas.go 允许真实实现).
+//
+// Implementations in this package:
+//
+//   - cas.go — Sha256Hex / ComputeKey / ParseRef (pure stdlib helpers)
+//   - mem_plan_store.go — in-process PlanStore with optimistic locking
+//   - mem_artifact_meta.go — in-process ArtifactMetaStore with atomic refcount
+//   - mem_artifact_store.go — in-process ArtifactStore (CAS dedup via meta)
+//   - fs_artifact_store.go — local filesystem CAS layout from §6.4
+//   - mem_run_checkpoint.go — RunCheckpointStore with turn_uuid idempotency
+//   - mem_usage_ledger.go — UsageLedger with IdempotencyKey dedup
+//   - mem_resume.go — ResumeCoordinator composed over the checkpoint store
+//
+// All implementations are stdlib-only per brain骨架实施计划.md §4.6 — the
+// cluster-tier SQLite WAL / MySQL backends land in a separate package once
+// the external driver dependency is introduced (decision logged in the
+// skeleton plan §8).
 package persistence
 
 import (
