@@ -1,0 +1,20 @@
+# StageRun 状态机定义
+
+initial: pending
+
+states:
+  pending:
+    terminal: false
+    transitions: [running, skipped]
+  running:
+    terminal: false
+    transitions: [completed, failed]
+  completed:
+    terminal: true
+    transitions: []
+  failed:
+    terminal: false
+    transitions: [pending]
+  skipped:
+    terminal: true
+    transitions: []

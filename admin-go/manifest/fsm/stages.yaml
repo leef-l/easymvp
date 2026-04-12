@@ -1,0 +1,47 @@
+# 阶段编排配置（各阶段的超时、重试、跳过策略）
+
+stages:
+  - code: design
+    timeout: "0"
+    on_timeout: fail
+    max_retry: 0
+    allow_skip: false
+
+  - code: review
+    timeout: "30m"
+    on_timeout: escalate
+    max_retry: 1
+    allow_skip: true
+
+  - code: execute
+    timeout: "2h"
+    on_timeout: fail
+    max_retry: 3
+    allow_skip: false
+
+  - code: accept
+    timeout: "1h"
+    on_timeout: escalate
+    max_retry: 2
+    allow_skip: true
+
+  - code: rework
+    timeout: "2h"
+    on_timeout: fail
+    max_retry: 3
+    allow_skip: false
+
+  - code: complete
+    timeout: "10m"
+    on_timeout: fail
+    max_retry: 0
+    allow_skip: false
+
+# Task→Stage 级联规则
+cascade:
+  - task_status: bug_found
+    effect: mark_stage_has_bug
+  - task_status: failed
+    effect: retry_or_escalate
+  - task_status: completed
+    effect: check_stage_completed

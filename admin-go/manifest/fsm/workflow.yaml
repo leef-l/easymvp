@@ -1,0 +1,33 @@
+# WorkflowRun 状态机定义
+# 所有工作流状态转移必须经过此文件验证，禁止裸 UPDATE status。
+
+initial: designing
+
+states:
+  designing:
+    terminal: false
+    transitions: [reviewing, paused, canceled]
+  reviewing:
+    terminal: false
+    transitions: [executing, designing, paused, canceled, failed]
+  executing:
+    terminal: false
+    transitions: [accepting, completed, reworking, paused, failed, canceled]
+  accepting:
+    terminal: false
+    transitions: [completed, reworking, failed, paused, canceled]
+  reworking:
+    terminal: false
+    transitions: [executing, accepting, reviewing, paused, canceled]
+  paused:
+    terminal: false
+    transitions: [designing, reviewing, executing, accepting, reworking, canceled]
+  completed:
+    terminal: true
+    transitions: []
+  failed:
+    terminal: false
+    transitions: [designing, reworking, canceled]
+  canceled:
+    terminal: true
+    transitions: []

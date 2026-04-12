@@ -14,13 +14,14 @@ const (
 	TaskStatusSubmitError   = "submit_error"   // 提交异常（git 冲突等）
 )
 
-// 角色类型
+// 角色类型（6 角色一等公民）
 const (
-	RoleTypeArchitect    = "architect"    // 架构师
-	RoleTypeImplementer  = "implementer"  // 实现者
-	RoleTypeAuditor      = "auditor"      // 审计员
-	RoleTypeOperator     = "operator"     // 运维/恢复
-	RoleTypeCoordinator  = "coordinator"  // 协调者
+	RoleTypeArchitect          = "architect"           // 架构师
+	RoleTypeImplementer        = "implementer"         // 实现者
+	RoleTypeAuditor            = "auditor"             // 审计员
+	RoleTypeOperator           = "operator"            // 运维/恢复
+	RoleTypeCoordinator        = "coordinator"         // 协调者
+	RoleTypeExperienceReviewer = "experience_reviewer"  // 体验评审师
 )
 
 // 角色等级
@@ -44,13 +45,14 @@ var AllTaskStatuses = []string{
 	TaskStatusSubmitError,
 }
 
-// AllRoleTypes 所有角色类型
+// AllRoleTypes 所有角色类型（6 角色）
 var AllRoleTypes = []string{
 	RoleTypeArchitect,
 	RoleTypeImplementer,
 	RoleTypeAuditor,
 	RoleTypeOperator,
 	RoleTypeCoordinator,
+	RoleTypeExperienceReviewer,
 }
 
 // 任务记录类型（task_kind）

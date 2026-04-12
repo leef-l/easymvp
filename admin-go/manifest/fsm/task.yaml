@@ -1,0 +1,29 @@
+# DomainTask 状态机定义
+
+initial: pending
+
+states:
+  pending:
+    terminal: false
+    transitions: [running]
+  running:
+    terminal: false
+    transitions: [completed, failed]
+  completed:
+    terminal: false
+    transitions: [auditing]
+  failed:
+    terminal: false
+    transitions: [pending, escalated]
+  escalated:
+    terminal: true
+    transitions: []
+  auditing:
+    terminal: false
+    transitions: [bug_found, pending]
+  bug_found:
+    terminal: false
+    transitions: [bug_dispatched]
+  bug_dispatched:
+    terminal: false
+    transitions: [running]
