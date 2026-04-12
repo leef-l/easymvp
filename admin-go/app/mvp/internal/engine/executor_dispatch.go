@@ -6,7 +6,6 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -15,7 +14,6 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
-	"easymvp/app/mvp/internal/activity"
 	"easymvp/app/mvp/internal/consts"
 	mvpmodel "easymvp/app/mvp/internal/model"
 	"easymvp/utility/provider"
@@ -102,17 +100,15 @@ func (e *Executor) executeChatMode(ctx context.Context, projectID int64, taskID 
 		return
 	}
 
-	// 回写 conversation_id 到 task，方便前端和 watchdog 检测
+	// 回写 conversation_id 到 task
 	if _, err := g.DB().Model("mvp_task").Ctx(ctx).Where("id", taskID).Update(g.Map{
 		"conversation_id": conversationID,
 	}); err != nil {
 		g.Log().Errorf(ctx, "[Executor] 回写 conversation_id 失败: task=%d, err=%v", taskID, err)
 	}
 
-	// 构建任务指令消息
-	taskPrompt := e.buildTaskPrompt(task)
-
 	// 保存指令消息
+	taskPrompt := e.buildTaskPrompt(task)
 	userMsgID := int64(snowflake.Generate())
 	if _, err := g.DB().Model("mvp_message").Insert(g.Map{
 		"id":              userMsgID,
@@ -147,7 +143,7 @@ func (e *Executor) executeChatMode(ctx context.Context, projectID int64, taskID 
 		g.Log().Errorf(ctx, "[Executor] 创建AI回复消息失败: task=%d, err=%v", taskID, err)
 	}
 
-	// 调用 AI
+	// 创建 Provider
 	p, err := provider.GetProvider(provider.Config{
 		ProviderType:       modelInfo.ProviderType,
 		SupportedProtocols: modelInfo.SupportedProtocols,
@@ -169,126 +165,27 @@ func (e *Executor) executeChatMode(ctx context.Context, projectID int64, taskID 
 	// 构建包含上下文摘要的 system prompt
 	enrichedPrompt := BuildTaskSystemPrompt(ctx, projectID, taskID, roleType, task["role_level"].String(), modelInfo.SystemPrompt)
 
-	req := &provider.ChatRequest{
-		Model:        modelInfo.ModelCode,
-		Messages:     history,
-		MaxTokens:    modelInfo.MaxTokens,
-		Temperature:  0.7,
-		Stream:       true,
-		SystemPrompt: enrichedPrompt,
-	}
+	sseHub := GetHub()
 
-	var fullContent strings.Builder
-	chunkIndex := 0
-	hub := GetHub()
-	var lastFinishReason string
-
-	streamHandler := func(chunk *provider.StreamChunk) error {
-		if chunk.Content != "" {
-			fullContent.WriteString(chunk.Content)
-			chunkIndex++
-
-			// 每 10 个 chunk 更新一次心跳，供看门狗检测
-			if chunkIndex%10 == 0 {
-				TouchHeartbeat(ctx, taskID)
-			}
-
-			if _, insertErr := g.DB().Model("mvp_message_chunk").Insert(g.Map{
-				"message_id":  replyID,
-				"chunk_index": chunkIndex,
-				"content":     chunk.Content,
-				"created_at":  gtime.Now(),
-			}); insertErr != nil {
-				g.Log().Errorf(ctx, "[Executor] 写入 chunk 失败: msg=%d, err=%v", replyID, insertErr)
-			}
-			activity.TouchMessageActivity(ctx, replyID)
-			activity.TouchConversationActivity(ctx, conversationID)
-			activity.TouchTaskActivity(ctx, taskID)
-
-			chunkJSON, cErr := json.Marshal(map[string]interface{}{
-				"content": chunk.Content,
-				"index":   chunkIndex,
-			})
-			if cErr != nil {
-				chunkJSON = []byte(`{"content":"","index":0}`)
-			}
-			hub.Publish(replyID, string(chunkJSON))
-		}
-
-		if chunk.FinishReason != "" {
-			lastFinishReason = chunk.FinishReason
-			if chunk.Usage != nil {
-				usageJSON, uErr := json.Marshal(chunk.Usage)
-				if uErr != nil {
-					usageJSON = []byte("{}")
-				}
-				if _, err := g.DB().Model("mvp_message").Ctx(ctx).Where("id", replyID).Update(g.Map{
-					"token_usage": string(usageJSON),
-				}); err != nil {
-					g.Log().Errorf(ctx, "[Executor] 更新 token_usage 失败: msg=%d, err=%v", replyID, err)
-				}
-			}
-		}
-
-		return nil
-	}
-
-	// 带重试 + 自动续写的 AI 调用
-	const maxRetries = 2
-	const maxContinueRounds = 5
-	var callErr error
-
-	for round := 0; round <= maxContinueRounds; round++ {
-		lastFinishReason = ""
-
-		// 瞬时错误重试
-		callErr = nil
-		for attempt := 0; attempt <= maxRetries; attempt++ {
-			if attempt > 0 {
-				g.Log().Warningf(ctx, "[Executor] AI 调用第 %d 次重试 (task=%d): %v", attempt, taskID, callErr)
-				time.Sleep(time.Duration(attempt*2) * time.Second)
-			}
-			callErr = p.ChatStream(ctx, req, streamHandler)
-			if callErr == nil {
-				break
-			}
-			// context canceled/deadline exceeded 不重试，直接退出
-			if ctx.Err() != nil {
-				g.Log().Debugf(ctx, "[Executor] AI 调用因 context 取消而中断 (task=%d): %v", taskID, callErr)
-				break
-			}
-			errMsg := callErr.Error()
-			isRetryable := strings.Contains(errMsg, "status 500") ||
-				strings.Contains(errMsg, "EOF") ||
-				strings.Contains(errMsg, "connection reset")
-			if !isRetryable {
-				break
-			}
-		}
-
-		if callErr != nil {
-			break
-		}
-
-		// 检查是否被截断
-		isTruncated := lastFinishReason == "length" || lastFinishReason == "max_tokens"
-		if !isTruncated || round == maxContinueRounds {
-			break
-		}
-
-		// 被截断：自动续写
-		g.Log().Infof(ctx, "[Executor] 回复被截断(reason=%s)，自动续写第 %d 轮 (task=%d)",
-			lastFinishReason, round+1, taskID)
-		TouchHeartbeat(ctx, taskID)
-
-		req.Messages = append(req.Messages,
-			provider.Message{Role: provider.RoleAssistant, Content: fullContent.String()},
-			provider.Message{Role: provider.RoleUser, Content: "继续，从上次中断的地方接着输出，不要重复已输出的内容。"},
-		)
-	}
+	// 统一流式调用（重试 + 续写 + chunk 落盘由 StreamCall 处理）
+	result, callErr := StreamCall(ctx, &StreamCallConfig{
+		Provider: p,
+		Request: &provider.ChatRequest{
+			Model:        modelInfo.ModelCode,
+			Messages:     history,
+			MaxTokens:    modelInfo.MaxTokens,
+			Temperature:  0.7,
+			Stream:       true,
+			SystemPrompt: enrichedPrompt,
+		},
+		ReplyID:        replyID,
+		Hub:            sseHub,
+		ConversationID: conversationID,
+		TaskID:         taskID,
+		HeartbeatFn:    func() { TouchHeartbeat(ctx, taskID) },
+	})
 
 	if callErr != nil {
-		// AI 调用失败
 		if _, dbErr := g.DB().Model("mvp_message").Ctx(ctx).Where("id", replyID).Update(g.Map{
 			"content":      "AI调用失败: " + callErr.Error(),
 			"message_type": mvpmodel.MessageTypePoison,
@@ -301,9 +198,8 @@ func (e *Executor) executeChatMode(ctx context.Context, projectID int64, taskID 
 		return
 	}
 
-	// 空内容检测：AI 返回空内容视为失败
-	result := fullContent.String()
-	if strings.TrimSpace(result) == "" {
+	// 空内容检测
+	if strings.TrimSpace(result.Content) == "" {
 		if _, dbErr := g.DB().Model("mvp_message").Ctx(ctx).Where("id", replyID).Update(g.Map{
 			"content":      "AI返回空内容",
 			"message_type": mvpmodel.MessageTypePoison,
@@ -312,44 +208,41 @@ func (e *Executor) executeChatMode(ctx context.Context, projectID int64, taskID 
 		}); dbErr != nil {
 			g.Log().Errorf(ctx, "[Executor] 更新空内容消息失败: msg=%d, err=%v", replyID, dbErr)
 		}
-		hub.Publish(replyID, `{"done":true}`)
-		hub.Done(replyID)
+		sseHub.Publish(replyID, `{"done":true}`)
+		sseHub.Done(replyID)
 		e.handleTaskFailure(ctx, projectID, taskID, roleType, taskFailureExecution, "AI返回空内容，可能被模型内容过滤或请求异常")
 		return
 	}
 
 	// 完成消息
 	if _, err := g.DB().Model("mvp_message").Ctx(ctx).Where("id", replyID).Update(g.Map{
-		"content":    result,
+		"content":    result.Content,
 		"status":     "completed",
 		"updated_at": gtime.Now(),
 	}); err != nil {
 		g.Log().Errorf(ctx, "[Executor] 更新完成消息失败: msg=%d, err=%v", replyID, err)
 	}
 
-	hub.Publish(replyID, `{"done":true}`)
-	hub.Done(replyID)
+	sseHub.Publish(replyID, `{"done":true}`)
+	sseHub.Done(replyID)
 	if _, err := updateTaskStatus(ctx, taskID, "running", "completed", g.Map{
-		"result":       result,
+		"result":       result.Content,
 		"completed_at": gtime.Now(),
 	}); err != nil {
 		g.Log().Errorf(ctx, "[Executor] 保存任务结果失败: task=%d, err=%v", taskID, err)
 	}
 
-	// 压缩任务上下文为摘要（同步执行，确保不丢失）
+	// 压缩任务上下文为摘要
 	compressCtx, compressCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer compressCancel()
 	if err := GetCompressor().CompressTaskContext(compressCtx, projectID, taskID); err != nil {
 		g.Log().Errorf(ctx, "[Executor] 压缩任务上下文失败（非致命）: task=%d, err=%v", taskID, err)
 	}
 
-	// 如果是实施员任务，完成后需要创建对应的审计任务（如果还没有）
-	// 同步执行，确保审计任务一定被创建
+	// 后续处理：审计任务创建 / Bug分析调度
 	if roleType == "implementer" {
 		e.createAuditTask(ctx, projectID, taskID, task)
 	} else if roleType == "architect" {
-		// 双读：优先 task_kind，兼容旧数据名称前缀
-		// 使用项目级 ctx 传播取消信号
 		projCtx := e.scheduler.getProjectContext(projectID)
 		switch task["task_kind"].String() {
 		case consts.TaskKindBugAnalysis:
@@ -367,7 +260,6 @@ func (e *Executor) executeChatMode(ctx context.Context, projectID int64, taskID 
 		}
 	}
 
-	// 通知调度器
 	e.scheduler.OnTaskCompleted(projectID, taskID)
 }
 

@@ -49,7 +49,6 @@ type ModelInfo struct {
 // SendMessage 发送用户消息并触发 AI 回复
 // 返回用户消息 ID 和 AI 回复消息 ID
 func (e *ChatEngine) SendMessage(ctx context.Context, conversationID int64, content string, userID int64, deptID int64) (msgID int64, replyID int64, err error) {
-	// 1. 查询对话信息
 	conv, err := g.DB().Model("mvp_conversation").Ctx(ctx).Where("id", conversationID).WhereNull("deleted_at").One()
 	if err != nil {
 		return 0, 0, fmt.Errorf("查询对话失败: %w", err)
@@ -64,75 +63,23 @@ func (e *ChatEngine) SendMessage(ctx context.Context, conversationID int64, cont
 	if _, cleanErr := g.DB().Model("mvp_message").Ctx(ctx).
 		Where("conversation_id", conversationID).
 		Where("status", "streaming").
-		Where("updated_at < ?", gtime.Now().Add(-5*time.Minute)). // 超过5分钟的 streaming 视为卡住
+		Where("updated_at < ?", gtime.Now().Add(-5*time.Minute)).
 		Update(g.Map{"status": "failed", "content": "AI 调用中断，消息未完成", "updated_at": gtime.Now()}); cleanErr != nil {
 		g.Log().Warningf(ctx, "[ChatEngine] 清理卡住的 streaming 消息失败: conv=%d err=%v", conversationID, cleanErr)
 	}
 
-	// 2. 查找该对话角色对应的 AI 模型配置
-	modelInfo, err := e.resolveModel(ctx, projectID, conv["role_type"].String())
+	msgID, replyID, modelInfo, err := e.prepareAndSave(ctx, conversationID, projectID, conv["role_type"].String(), content, userID, deptID)
 	if err != nil {
 		return 0, 0, err
 	}
 
-	// 3. 展开消息中的 "读取：路径" 指令（限制在项目工作目录内）
-	project, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).WhereNull("deleted_at").Fields("work_dir").One()
-	if projErr != nil {
-		g.Log().Warningf(ctx, "[ChatEngine] 查询项目 work_dir 失败: projectID=%d err=%v", projectID, projErr)
-	}
-	workDir := project["work_dir"].String()
-	if workDir == "" {
-		workDir = "/www/wwwroot/project/easymvp"
-	}
-	expandedContent := ExpandFileReads(content, workDir)
-
-	// 4. 保存用户消息
-	msgID = int64(snowflake.Generate())
-	_, err = g.DB().Model("mvp_message").Insert(g.Map{
-		"id":              msgID,
-		"conversation_id": conversationID,
-		"role":            "user",
-		"message_type":    mvpmodel.MessageTypeChatUser,
-		"content":         expandedContent,
-		"status":          "completed",
-		"created_by":      userID,
-		"dept_id":         deptID,
-		"created_at":      gtime.Now(),
-		"updated_at":      gtime.Now(),
-	})
-	if err != nil {
-		return 0, 0, fmt.Errorf("保存用户消息失败: %w", err)
-	}
-
-	// 5. 创建 AI 回复消息（status=streaming）
-	replyID = int64(snowflake.Generate())
-	_, err = g.DB().Model("mvp_message").Insert(g.Map{
-		"id":              replyID,
-		"conversation_id": conversationID,
-		"role":            "assistant",
-		"message_type":    mvpmodel.MessageTypeChatReply,
-		"content":         "",
-		"model_id":        modelInfo.ModelID,
-		"status":          "streaming",
-		"created_by":      userID,
-		"dept_id":         deptID,
-		"created_at":      gtime.Now(),
-		"updated_at":      gtime.Now(),
-	})
-	if err != nil {
-		return 0, 0, fmt.Errorf("创建AI回复消息失败: %w", err)
-	}
-
-	// 6. 启动 goroutine 异步调用 AI（不依赖当前 HTTP 请求的 context）
 	go e.runAICall(conversationID, replyID, modelInfo)
-
 	return msgID, replyID, nil
 }
 
 // SendFeishuMessage 供飞书 Bot 调用：发送用户消息到对话并触发 AI 回复。
 // 返回 AI 回复消息的 ID（用于轮询结果）。
 func (e *ChatEngine) SendFeishuMessage(ctx context.Context, conversationID, projectID int64, content string, userID, deptID int64) (int64, error) {
-	// 1. 查询对话信息（校验存在）
 	conv, err := g.DB().Model("mvp_conversation").Ctx(ctx).Where("id", conversationID).WhereNull("deleted_at").One()
 	if err != nil {
 		return 0, fmt.Errorf("查询对话失败: %w", err)
@@ -141,26 +88,27 @@ func (e *ChatEngine) SendFeishuMessage(ctx context.Context, conversationID, proj
 		return 0, fmt.Errorf("对话不存在")
 	}
 
-	// 2. 查找该对话角色对应的 AI 模型配置
-	modelInfo, err := e.resolveModel(ctx, projectID, conv["role_type"].String())
+	_, replyID, modelInfo, err := e.prepareAndSave(ctx, conversationID, projectID, conv["role_type"].String(), content, userID, deptID)
 	if err != nil {
 		return 0, err
 	}
 
-	// 3. 展开消息中的 "读取：路径" 指令
-	project, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID).WhereNull("deleted_at").Fields("work_dir").One()
-	if projErr != nil {
-		g.Log().Warningf(ctx, "[ChatEngine] 查询项目 work_dir 失败: projectID=%d err=%v", projectID, projErr)
+	go e.runAICall(conversationID, replyID, modelInfo)
+	return replyID, nil
+}
+
+// prepareAndSave 公共流程：解析模型 → 展开指令 → 保存用户消息 → 创建 AI 回复占位。
+func (e *ChatEngine) prepareAndSave(ctx context.Context, conversationID, projectID int64, roleType, content string, userID, deptID int64) (msgID, replyID int64, modelInfo *ModelInfo, err error) {
+	modelInfo, err = e.resolveModel(ctx, projectID, roleType)
+	if err != nil {
+		return 0, 0, nil, err
 	}
-	workDir := project["work_dir"].String()
-	if workDir == "" {
-		workDir = "/www/wwwroot/project/easymvp"
-	}
+
+	workDir := GetProjectWorkDir(ctx, projectID)
 	expandedContent := ExpandFileReads(content, workDir)
 
-	// 4. 保存用户消息
-	msgID := int64(snowflake.Generate())
-	_, err = g.DB().Model("mvp_message").Insert(g.Map{
+	msgID = int64(snowflake.Generate())
+	if _, err = g.DB().Model("mvp_message").Insert(g.Map{
 		"id":              msgID,
 		"conversation_id": conversationID,
 		"role":            "user",
@@ -171,14 +119,12 @@ func (e *ChatEngine) SendFeishuMessage(ctx context.Context, conversationID, proj
 		"dept_id":         deptID,
 		"created_at":      gtime.Now(),
 		"updated_at":      gtime.Now(),
-	})
-	if err != nil {
-		return 0, fmt.Errorf("保存用户消息失败: %w", err)
+	}); err != nil {
+		return 0, 0, nil, fmt.Errorf("保存用户消息失败: %w", err)
 	}
 
-	// 5. 创建 AI 回复消息（status=streaming）
-	replyID := int64(snowflake.Generate())
-	_, err = g.DB().Model("mvp_message").Insert(g.Map{
+	replyID = int64(snowflake.Generate())
+	if _, err = g.DB().Model("mvp_message").Insert(g.Map{
 		"id":              replyID,
 		"conversation_id": conversationID,
 		"role":            "assistant",
@@ -190,15 +136,11 @@ func (e *ChatEngine) SendFeishuMessage(ctx context.Context, conversationID, proj
 		"dept_id":         deptID,
 		"created_at":      gtime.Now(),
 		"updated_at":      gtime.Now(),
-	})
-	if err != nil {
-		return 0, fmt.Errorf("创建AI回复消息失败: %w", err)
+	}); err != nil {
+		return 0, 0, nil, fmt.Errorf("创建AI回复消息失败: %w", err)
 	}
 
-	// 6. 启动 goroutine 异步调用 AI
-	go e.runAICall(conversationID, replyID, modelInfo)
-
-	return replyID, nil
+	return msgID, replyID, modelInfo, nil
 }
 
 // resolveModel 根据项目 ID 和角色类型查找对应的 AI 模型配置

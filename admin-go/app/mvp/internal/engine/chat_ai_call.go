@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -10,7 +9,6 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
-	"easymvp/app/mvp/internal/activity"
 	"easymvp/app/mvp/internal/consts"
 	"easymvp/utility/provider"
 )
@@ -47,166 +45,55 @@ func (e *ChatEngine) runAICall(conversationID int64, replyID int64, modelInfo *M
 		return
 	}
 
-	// 3. 构建请求
-	req := &provider.ChatRequest{
-		Model:        modelInfo.ModelCode,
-		Messages:     messages,
-		MaxTokens:    modelInfo.MaxTokens,
-		Temperature:  0.7,
-		Stream:       true,
-		SystemPrompt: modelInfo.SystemPrompt,
+	// 3. 统一流式调用（重试 + 续写 + chunk 落盘由 StreamCall 处理）
+	result, callErr := StreamCall(ctx, &StreamCallConfig{
+		Provider: p,
+		Request: &provider.ChatRequest{
+			Model:        modelInfo.ModelCode,
+			Messages:     messages,
+			MaxTokens:    modelInfo.MaxTokens,
+			Temperature:  0.7,
+			Stream:       true,
+			SystemPrompt: modelInfo.SystemPrompt,
+		},
+		ReplyID:        replyID,
+		Hub:            e.hub,
+		ConversationID: conversationID,
+	})
+
+	if callErr != nil {
+		e.failMessage(ctx, replyID, callErr.Error())
+		return
 	}
 
-	// 4. 流式调用 AI（带重试 + 自动续写：截断时自动发"继续"续写，最多 5 轮）
-	const maxRetries = 2
-	const maxContinueRounds = 5 // 自动续写上限
-	var fullContent strings.Builder
-	chunkIndex := 0
-	var lastFinishReason string
-
-	streamHandler := func(chunk *provider.StreamChunk) error {
-		if chunk.Content != "" {
-			fullContent.WriteString(chunk.Content)
-			chunkIndex++
-
-			// 写入 message_chunk 表
-			_, insertErr := g.DB().Model("mvp_message_chunk").Insert(g.Map{
-				"message_id":  replyID,
-				"chunk_index": chunkIndex,
-				"content":     chunk.Content,
-				"created_at":  gtime.Now(),
-			})
-			if insertErr != nil {
-				g.Log().Errorf(ctx, "写入 chunk 失败: %v", insertErr)
-			}
-			activity.TouchMessageActivity(ctx, replyID)
-			activity.TouchConversationActivity(ctx, conversationID)
-
-			// 推送到 SSE Hub
-			chunkJSON, cErr := json.Marshal(map[string]interface{}{
-				"content": chunk.Content,
-				"index":   chunkIndex,
-			})
-			if cErr != nil {
-				chunkJSON = []byte(`{"content":"","index":0}`)
-			}
-			e.hub.Publish(replyID, string(chunkJSON))
-		}
-
-		// 最后一个 chunk（有 finish_reason）
-		if chunk.FinishReason != "" {
-			lastFinishReason = chunk.FinishReason
-			// 更新 token 用量
-			if chunk.Usage != nil {
-				usageJSON, uErr := json.Marshal(chunk.Usage)
-				if uErr != nil {
-					usageJSON = []byte("{}")
-				}
-				if _, err := g.DB().Model("mvp_message").Ctx(ctx).Where("id", replyID).Update(g.Map{
-					"token_usage": string(usageJSON),
-				}); err != nil {
-					g.Log().Errorf(ctx, "[ChatEngine] 更新 token_usage 失败: msg=%d, err=%v", replyID, err)
-				}
-			}
-		}
-
-		return nil
-	}
-
-	// 外层循环：自动续写（被截断时追加"继续"重新调用）
-	for round := 0; round <= maxContinueRounds; round++ {
-		lastFinishReason = ""
-
-		// 内层循环：瞬时错误重试
-		var lastErr error
-		for attempt := 0; attempt <= maxRetries; attempt++ {
-			if attempt > 0 {
-				g.Log().Warningf(ctx, "[ChatEngine] AI 调用第 %d 次重试 (messageID=%d): %v", attempt, replyID, lastErr)
-				time.Sleep(time.Duration(attempt*2) * time.Second)
-			}
-			lastErr = p.ChatStream(ctx, req, streamHandler)
-			if lastErr == nil {
-				break
-			}
-			// context canceled/deadline exceeded 不重试，直接退出
-			if ctx.Err() != nil {
-				g.Log().Debugf(ctx, "[ChatEngine] AI 调用因 context 取消而中断 (messageID=%d): %v", replyID, lastErr)
-				break
-			}
-			errMsg := lastErr.Error()
-			isRetryable := strings.Contains(errMsg, "status 500") ||
-				strings.Contains(errMsg, "EOF") ||
-				strings.Contains(errMsg, "connection reset")
-			if !isRetryable {
-				break
-			}
-		}
-
-		if lastErr != nil {
-			// 续写失败：如果已有部分内容，保留为 completed 而不是 failed
-			if fullContent.Len() > 0 {
-				g.Log().Warningf(ctx, "[ChatEngine] 续写第 %d 轮失败但已有内容，保留为 completed: messageID=%d err=%v", round, replyID, lastErr)
-				break // 跳出续写循环，走正常完成流程
-			}
-			e.failMessage(ctx, replyID, lastErr.Error())
-			return
-		}
-
-		// 检查是否被截断（finish_reason=length 或 max_tokens）
-		isTruncated := lastFinishReason == "length" || lastFinishReason == "max_tokens"
-		if !isTruncated || round == maxContinueRounds {
-			break
-		}
-
-		// 被截断：追加当前已有内容为 assistant 消息，再加"继续"指令，重新调用
-		g.Log().Infof(ctx, "[ChatEngine] 回复被截断(reason=%s)，自动续写第 %d 轮 (messageID=%d)",
-			lastFinishReason, round+1, replyID)
-
-		// 通知前端正在续写
-		hub.Publish(replyID, fmt.Sprintf(`{"event":"continue","round":%d}`, round+1))
-
-		// 更新请求的消息列表：追加已有回复 + "继续"指令
-		req.Messages = append(req.Messages,
-			provider.Message{Role: provider.RoleAssistant, Content: fullContent.String()},
-			provider.Message{Role: provider.RoleUser, Content: "继续，从上次中断的地方接着输出，不要重复已输出的内容。"},
-		)
-	}
-
-	// 5. 更新消息为完成状态
-	_, updateErr := g.DB().Model("mvp_message").Ctx(ctx).Where("id", replyID).Update(g.Map{
-		"content":    fullContent.String(),
+	// 4. 更新消息为完成状态
+	if _, updateErr := g.DB().Model("mvp_message").Ctx(ctx).Where("id", replyID).Update(g.Map{
+		"content":    result.Content,
 		"status":     "completed",
 		"updated_at": gtime.Now(),
-	})
-	if updateErr != nil {
+	}); updateErr != nil {
 		g.Log().Errorf(ctx, "更新消息状态失败: %v", updateErr)
 	}
 
-	if architectReplyRequestsContinuation(fullContent.String()) {
+	if architectReplyRequestsContinuation(result.Content) {
 		if e.shouldAutoContinueArchitectReply(ctx, conversationID) {
 			e.autoContinueArchitectReply(ctx, conversationID)
 		}
 	} else {
-		e.tryParseArchitectTasks(conversationID, replyID, fullContent.String())
+		e.tryParseArchitectTasks(conversationID, replyID, result.Content)
 	}
 
-	// 6. 通知 SSE Hub 流式输出完成
-	doneJSON, dErr := json.Marshal(map[string]interface{}{
-		"done": true,
-	})
-	if dErr != nil {
-		doneJSON = []byte(`{"done":true}`)
-	}
-	e.hub.Publish(replyID, string(doneJSON))
+	// 5. 通知 SSE Hub 流式输出完成
+	e.hub.Publish(replyID, `{"done":true}`)
 
-	// 7. 飞书主动推送：将 AI 回复发给对话绑定用户（异步，不阻塞）
+	// 6. 飞书主动推送
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				g.Log().Errorf(context.Background(), "[ChatEngine] feishuNotifyAIReply panic: %v", r)
 			}
 		}()
-		feishuNotifyAIReply(ctx, conversationID, fullContent.String())
+		feishuNotifyAIReply(ctx, conversationID, result.Content)
 	}()
 
 	// 短暂延迟后关闭 channel，让前端有时间接收最后的消息
