@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -728,4 +729,113 @@ func (dc *DecisionCenter) rebuildRequest(action g.Map) *DecisionRequest {
 		req.TriggerContext = parseJSONMap(tc)
 	}
 	return req
+}
+
+// isEventDrivenEnabled 事件驱动灰度开关（默认关闭，需显式设置 workflow.autonomy.event_driven=1 开启）。
+func (dc *DecisionCenter) isEventDrivenEnabled(ctx context.Context) bool {
+	return engine.GetConfigInt(ctx, "workflow.autonomy.event_driven", "workflow.autonomy.eventDriven", 0) == 1
+}
+
+// stageTypeToTrigger 将阶段类型映射为自治触发源。
+func (dc *DecisionCenter) stageTypeToTrigger(stageType string) string {
+	switch stageType {
+	case "review":
+		return consts.TriggerReviewCompleted
+	case "execute":
+		return consts.TriggerExecuteCompleted
+	case "accept":
+		return consts.TriggerAcceptPassed
+	case "rework":
+		return consts.TriggerReworkCompleted
+	default:
+		return ""
+	}
+}
+
+// SubscribeEvents 订阅工作流事件总线，实现事件驱动的自治决策。
+// 监听关键转换事件，自动触发 Decide 流程，与现有硬编码回调并存。
+// 默认关闭，需设置配置项 workflow.autonomy.event_driven=1 后生效。
+func (dc *DecisionCenter) SubscribeEvents(bus *event.Bus) {
+	// 监听工作流阶段完成事件
+	bus.Subscribe(event.EventStageCompleted, func(evt event.Event) {
+		ctx := context.Background()
+		if !dc.IsEnabled(ctx) || !dc.isEventDrivenEnabled(ctx) {
+			return
+		}
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+
+		// 从事件中提取 stageRunID
+		stageRunID := int64(0)
+		if evt.StageRunID != nil {
+			stageRunID = *evt.StageRunID
+		}
+
+		// 查询阶段类型
+		stageType := ""
+		if stageRunID > 0 {
+			row, err := g.DB().Model("mvp_stage_run").Ctx(ctx).
+				Where("id", stageRunID).Fields("stage_type").One()
+			if err == nil && !row.IsEmpty() {
+				stageType = row["stage_type"].String()
+			}
+		}
+
+		triggerSource := dc.stageTypeToTrigger(stageType)
+		if triggerSource == "" {
+			return
+		}
+
+		// 查询 project_id
+		projectID := int64(0)
+		if evt.WorkflowRunID > 0 {
+			pid, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+				Where("id", evt.WorkflowRunID).Value("project_id")
+			if err == nil {
+				projectID = pid.Int64()
+			}
+		}
+
+		g.Log().Debugf(ctx, "[DecisionCenter] 事件驱动触发: wfRun=%d stage=%s trigger=%s",
+			evt.WorkflowRunID, stageType, triggerSource)
+		dc.Decide(ctx, &DecisionRequest{
+			WorkflowRunID: evt.WorkflowRunID,
+			ProjectID:     projectID,
+			StageRunID:    stageRunID,
+			TriggerSource: triggerSource,
+		})
+	})
+
+	// 监听任务失败事件
+	bus.Subscribe(event.EventTaskFailed, func(evt event.Event) {
+		ctx := context.Background()
+		if !dc.IsEnabled(ctx) || !dc.isEventDrivenEnabled(ctx) {
+			return
+		}
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+
+		taskID := int64(0)
+		if evt.EntityID != nil {
+			taskID = *evt.EntityID
+		}
+
+		projectID := int64(0)
+		if evt.WorkflowRunID > 0 {
+			pid, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
+				Where("id", evt.WorkflowRunID).Value("project_id")
+			if err == nil {
+				projectID = pid.Int64()
+			}
+		}
+
+		g.Log().Debugf(ctx, "[DecisionCenter] 事件驱动触发: wfRun=%d task=%d trigger=%s",
+			evt.WorkflowRunID, taskID, consts.TriggerTaskFailed)
+		dc.Decide(ctx, &DecisionRequest{
+			WorkflowRunID: evt.WorkflowRunID,
+			ProjectID:     projectID,
+			DomainTaskID:  taskID,
+			TriggerSource: consts.TriggerTaskFailed,
+		})
+	})
 }

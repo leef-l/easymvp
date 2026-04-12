@@ -116,6 +116,11 @@ func RunReview(ctx context.Context, projectID int64) (*ReviewResult, error) {
 }
 
 // systemPrecheck 系统预检（零 AI 消耗，毫秒级）
+//
+// TODO(PR-10): 当 precheck.use_rule_engine=true 时，使用 workflow/domain/rule.Registry 替代下方硬编码规则。
+// 单任务规则（名称非空、描述质量、资源格式、乱码检测、目录占位）已迁移到 BuiltinChecker；
+// 跨任务规则（depends_on 引用有效性、batch_no 一致性、资源冲突、role_level 覆盖）保留在此处。
+// 待 CEL 引入后逐步切换，使用 DefaultRegistry.Get("precheck").Check(ctx, &CheckContext{...})。
 func systemPrecheck(ctx context.Context, projectID int64, tasks gdb.Result, workDir string, projectCategory string) *ReviewResult {
 	result := &ReviewResult{Passed: true}
 	family := GetCategoryFamily(projectCategory)

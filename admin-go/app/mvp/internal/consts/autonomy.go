@@ -35,6 +35,8 @@ const (
 	TriggerReworkCompleted    = "rework.completed"
 	TriggerReplanSuggested    = "replan.suggested"
 	TriggerHumanOverride      = "human.override"
+	TriggerReviewCompleted    = "review.completed"
+	TriggerExecuteCompleted   = "execute.completed"
 )
 
 // ==================== 决策动作状态 ====================

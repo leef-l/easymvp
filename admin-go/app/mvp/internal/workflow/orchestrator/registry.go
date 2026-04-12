@@ -685,6 +685,9 @@ func Init() {
 			g.Log().Info(context.Background(), "[Registry] 飞书协作通知已注册")
 		}
 
+		// ==================== 自治决策事件驱动订阅（灰度关闭，默认 event_driven=0） ====================
+		decisionCenter.SubscribeEvents(eventBus)
+
 		// ==================== Phase D: 元认知定时评估任务 ====================
 		go startMetaAssessmentLoop(metaAssessor, metaTuner, metaObserver)
 	})
