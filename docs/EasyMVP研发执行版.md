@@ -1,6 +1,6 @@
 # EasyMVP研发执行版
 
-> 更新日期：2026-04-09
+> 更新日期：2026-04-13
 >
 > 用途：用于研发排期、任务分配、阶段验收与周会跟踪。
 
@@ -63,6 +63,7 @@
 - `C2`：任务级执行回放已可展示日志、事件、问题、证据、交接与动作
 - `C3`：项目级轨迹页已可展示交付闸门聚合与明细（待人工交付 / PR 草稿 / 待回写 / 高风险任务）
 - `C4`：内部评测样例清单已通过 `test-workspaces/regression-manifest.json`、校验接口和控制台“评测样例”面板接入
+- `F`：`web-antd` 已建立 GitHub Actions `1C/1G` 守卫基线，`verify-build / workflow-bundle / workflow entry bundles / 174-file full-source bundle shards` 已在 run [`24314526616`](https://github.com/leef-l/easymvp/actions/runs/24314526616) 通过
 
 当前数据库结构变更只允许通过 migration 交付，最新 migration 为：
 
@@ -75,6 +76,11 @@
 - 回归样例已补齐 `readme_refresh / multi_task_dependency / manual_takeover` 三个规格目录
 
 后续若继续推进，重点将从“补主链缺口”转为“扩充样例规模、补 CI 串联、真实运行型回归能力和线上配置治理”。
+
+补充说明：
+
+- 受工具链内存峰值影响，`web-antd` 单次 full `vue-tsc/vite build` 不再作为 `1C/1G` 阶段验收口径
+- 当前统一按 GitHub Actions 的全源码分片 guard 收口，该 guard 已覆盖 `vue-vben-admin/apps/web-antd/src/**/*.{vue,ts,tsx}`
 
 ## 3. 团队角色建议
 
@@ -244,6 +250,12 @@
 - `admin-go/app/mvp/internal/**/*_test.go`
 - `test-workspaces/`
 - CI 脚本与回归脚本
+
+当前基线（2026-04-13）：
+
+- `.github/workflows/web-antd-guard.yml` 已覆盖 `verify-build`、`workflow-bundle`、`workflow entry bundles` 和 `174` 个 `web-antd` 源文件的 `6` 分片 verify bundle
+- 当前通过记录：[`Web Antd Guard #9`](https://github.com/leef-l/easymvp/actions/runs/24314526616)
+- `1C/1G` 下单次 full typecheck/build 不再作为本阶段阻塞项
 
 ## 6. 阶段一详细执行清单
 

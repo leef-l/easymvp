@@ -1,10 +1,26 @@
 # EasyMVP项目收尾计划与进度
 
-> 更新时间：2026-04-10
+> 更新时间：2026-04-13
 >
 > 目的：把当前工作树中已经启动但尚未完全收口的主线能力持续推进到可编译、可验证、可交付状态。该文档在本轮收尾过程中持续更新，避免中断后失去上下文。
 >
-> 约束：本轮按要求不编译、不运行 `vue-vben-admin/apps/web-antd`，前端收尾仅做静态联动核查与代码修正。
+> 约束（已更新）：`web-antd` 单次 full `vue-tsc/vite build` 在 `1 core / 1G` 下仍不可行；本轮最终验收口径已切换为 GitHub Actions 下的 `1 core / 1G` 全源码分片 verify bundle guard，并以本文档 `2026-04-13 收口结论` 为准。
+
+## 2026-04-13 收口结论
+
+本轮最后一个前端阻塞已经收口，`EasyMVP` 当前主线能力全部完成。
+
+- GitHub Actions `Web Antd Guard` 已扩展为 `9` 个 job，在 `1 core / 1G` 约束下同时覆盖：
+  - `verify-build`
+  - `workflow-bundle`
+  - `workflow entry bundles`
+  - `vue-vben-admin/apps/web-antd/src/**/*.{vue,ts,tsx}` 共 `174` 个源文件的 `6` 分片逐文件 verify bundle
+- 实际通过 run：[`24314526616`](https://github.com/leef-l/easymvp/actions/runs/24314526616)
+- 实际结论：
+  - 单次 full `vue-tsc --noEmit -p apps/web-antd/tsconfig.json` 在 `1C/1G` 下会 OOM
+  - 单次 full `vite build --mode production` 在 `1C/1G` 下会被系统终止
+  - 经确认，本轮正式接受“全源码分片 guard”作为前端最终验收口径
+- 当前收尾状态：文档所列 `5` 项收尾目标已全部完成，无新的主线阻塞项
 
 ## 2026-04-11 暂停说明
 
@@ -31,8 +47,8 @@
 - 状态：本轮收尾完成
 - 范围：`workflow` 控制器拆分、验收闭环、workspace 交付元数据、轨迹/回放/评测视图
 - 当前已知问题：
-  - 主链后端已通过测试，前端按约束完成静态联动收口
-  - 保留的验证约束是 `web-antd` 未执行构建级验证，且 `validate.sh` 未在当前服务器直接执行
+  - 无主线阻塞项
+  - `web-antd` 的 `1C/1G` 验收口径已改为 GitHub Actions 分片 guard，见本文档 `2026-04-13 收口结论`
 
 ### 2.2 进度总览
 
@@ -42,7 +58,7 @@
 | 2 | 新增并维护项目计划进度文档 | 已完成 | 本文档已持续更新，文档索引已纳入 |
 | 3 | 补完后端工作流/验收/workspace 主链实现 | 已完成 | `go test ./app/mvp/... ./utility/provider/... ./app/ai/...` 通过 |
 | 4 | 补完前端工作流控制台对应页面与接口 | 已完成 | 已完成页面/接口静态对照，并修复项目切换刷新与阶段状态展示问题 |
-| 5 | 执行验证并回写最终进度 | 已完成 | 后端测试通过；前端按约束完成静态核查，未编译 `web-antd` |
+| 5 | 执行验证并回写最终进度 | 已完成 | 后端测试通过；前端 `web-antd` 的 GitHub Actions `1C/1G` 分片 guard 已在 run `24314526616` 全部通过 |
 
 ## 3. 执行策略
 
