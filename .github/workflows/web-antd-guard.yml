@@ -46,15 +46,23 @@ jobs:
           - mode: entry-bundles
             label: web-antd workflow entry bundles
             artifact_path: vue-vben-admin/dist-entry-verify-*
-    if: |
-      github.event_name != 'workflow_dispatch' ||
-      github.event.inputs.target == 'all' ||
-      github.event.inputs.target == matrix.mode
     name: ${{ matrix.label }}
     steps:
       - uses: actions/checkout@v4
 
+      - name: Resolve target selection
+        id: selection
+        run: |
+          selected=false
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || \
+             [ "${{ github.event.inputs.target }}" = "all" ] || \
+             [ "${{ github.event.inputs.target }}" = "${{ matrix.mode }}" ]; then
+            selected=true
+          fi
+          echo "selected=$selected" >> "$GITHUB_OUTPUT"
+
       - name: Cache pnpm store
+        if: steps.selection.outputs.selected == 'true'
         uses: actions/cache@v4
         with:
           path: vue-vben-admin/.pnpm-store
@@ -63,6 +71,7 @@ jobs:
             pnpm-web-antd-guard-${{ runner.os }}-
 
       - name: Run validation under 1 CPU / 1G
+        if: steps.selection.outputs.selected == 'true'
         env:
           MODE: ${{ matrix.mode }}
         run: |
@@ -109,8 +118,13 @@ jobs:
               esac
             '
 
+      - name: Skip non-selected target
+        if: steps.selection.outputs.selected != 'true'
+        run: |
+          echo "Skip ${{ matrix.mode }} for workflow_dispatch target=${{ github.event.inputs.target }}"
+
       - name: Upload validation artifact
-        if: success()
+        if: success() && steps.selection.outputs.selected == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.mode }}-artifact
