@@ -31,6 +31,7 @@ import (
 	executeStage "easymvp/app/mvp/internal/workflow/stage/execute"
 	reviewStage "easymvp/app/mvp/internal/workflow/stage/review"
 	reworkStage "easymvp/app/mvp/internal/workflow/stage/rework"
+	hookPkg "easymvp/app/mvp/internal/workflow/hook"
 	watchdogV2 "easymvp/app/mvp/internal/workflow/watchdog"
 	"easymvp/app/mvp/internal/workspace"
 )
@@ -46,6 +47,7 @@ var (
 	acceptStageSvc    *acceptStage.Service
 	reworkStageSvc    *reworkStage.Service
 	completeStageSvc  *completeStage.Service
+	completionHooks   *hookPkg.Chain
 	domainWatchdog    *watchdogV2.DomainTaskWatchdog
 	runtimeMgr        *runtime.Manager
 	eventBus          *event.Bus
@@ -127,6 +129,14 @@ func Init() {
 
 		// 完成阶段服务
 		completeStageSvc = completeStage.NewService()
+
+		// 完成 hook 链（archive → report → cleanup → notify）
+		completionHooks = hookPkg.NewChain(
+			&hookPkg.ArchiveHook{},
+			&hookPkg.ReportHook{},
+			&hookPkg.CleanupHook{},
+			&hookPkg.NotifyHook{},
+		)
 
 		// 验收阶段服务
 		acceptRunRepo := repo.NewAcceptRunRepo()

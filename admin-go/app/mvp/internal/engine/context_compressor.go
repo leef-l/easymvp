@@ -187,42 +187,69 @@ func (c *ContextCompressor) getProjectLock(projectID int64) *sync.Mutex {
 }
 
 // mergeIntoGlobalContext 将新内容合并进全局上下文
-// 如果合并后超过 3000 字，调 AI 重新压缩为 3000 字
-// 使用项目级锁防止多批次同时完成时互相覆盖
+// 如果合并后超过 GlobalLimit，调 AI 重新压缩。
+// 改造要点：AI 调用在锁外执行，锁只保护 DB 读写，避免锁持有时间 > 5s。
 func (c *ContextCompressor) mergeIntoGlobalContext(ctx context.Context, projectID int64, newContent string) {
-	mu := c.getProjectLock(projectID)
-	mu.Lock()
-	defer mu.Unlock()
-	project, err := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).
-		Fields("global_context, name, project_category").One()
-	if err != nil || project.IsEmpty() {
+	// ── 第一步：锁内读 DB，判断是否需要 AI 压缩 ────────────────────────────────
+	var merged string
+	var projectName string
+	var params compressionParams
+	needAICompress := false
+
+	func() {
+		mu := c.getProjectLock(projectID)
+		mu.Lock()
+		defer mu.Unlock()
+
+		project, err := g.DB().Ctx(ctx).Model("mvp_project").Where("id", projectID).
+			Fields("global_context, name, project_category").One()
+		if err != nil || project.IsEmpty() {
+			return
+		}
+
+		params = getCompressionParams(project["project_category"].String())
+		existing := project["global_context"].String()
+		merged = existing + "\n\n" + newContent
+		projectName = project["name"].String()
+
+		if len(merged) < params.GlobalLimit {
+			// 还没超，直接追加，无需 AI
+			c.saveProjectContext(ctx, projectID, merged)
+			return
+		}
+		needAICompress = true
+	}()
+
+	if !needAICompress {
 		return
 	}
 
-	params := getCompressionParams(project["project_category"].String())
-	existing := project["global_context"].String()
-	merged := existing + "\n\n" + newContent
-
-	if len(merged) < params.GlobalLimit {
-		// 还没超，直接追加
-		c.saveProjectContext(ctx, projectID, merged)
-		return
-	}
-
-	// 超了，调 AI 重新压缩
+	// ── 第二步：锁外调 AI 压缩（耗时操作，不持锁）────────────────────────────
 	modelInfo, err := c.getCompressModel(ctx, projectID)
 	if err != nil {
+		// AI 模型不可用，回退规则压缩，锁内写入
+		mu := c.getProjectLock(projectID)
+		mu.Lock()
 		c.saveProjectContext(ctx, projectID, ruleCompress(merged))
+		mu.Unlock()
 		return
 	}
 
-	compressed, err := c.aiMergeGlobal(ctx, modelInfo, project["name"].String(), merged, params.GlobalLimit)
+	compressed, err := c.aiMergeGlobal(ctx, modelInfo, projectName, merged, params.GlobalLimit)
 	if err != nil {
+		// AI 调用失败，回退规则压缩，锁内写入
+		mu := c.getProjectLock(projectID)
+		mu.Lock()
 		c.saveProjectContext(ctx, projectID, ruleCompress(merged))
+		mu.Unlock()
 		return
 	}
 
+	// ── 第三步：锁内写入压缩结果 ─────────────────────────────────────────────
+	mu := c.getProjectLock(projectID)
+	mu.Lock()
 	c.saveProjectContext(ctx, projectID, compressed)
+	mu.Unlock()
 }
 
 // CompressProjectContext 压缩架构师对话为初始全局上下文（确认方案时调用）

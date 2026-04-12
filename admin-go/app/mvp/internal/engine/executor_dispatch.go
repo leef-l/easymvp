@@ -1,3 +1,7 @@
+// executor_dispatch.go 任务执行与分发（Legacy 链路）。
+//
+// Deprecated: 本文件中的 Executor 及其方法将在后续 PR 中迁移到 workflow/executor/dispatcher.go。
+// 当前仍是 legacy 任务调度的核心路径，请勿直接删除。
 package engine
 
 import (

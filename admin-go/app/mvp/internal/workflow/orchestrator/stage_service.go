@@ -592,6 +592,11 @@ func (s *StageService) completeWorkflow(ctx context.Context, workflowRunID int64
 		}
 	}
 
+	// 执行完成 hook 链（异步，不阻塞主流程）
+	if completionHooks != nil {
+		go completionHooks.Run(context.Background(), workflowRunID)
+	}
+
 	// 发布 workflow.completed 事件
 	if s.workflowSvc.publisher != nil {
 		s.workflowSvc.publisher.Emit(ctx, event.Event{

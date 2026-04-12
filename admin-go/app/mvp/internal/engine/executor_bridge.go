@@ -13,17 +13,23 @@ import (
 )
 
 // GetModelInfoByID 根据模型 ID 获取模型信息（供 controller 层调用）。
+//
+// Deprecated: 将在 PR-12 中迁移到 workflow/repo 层的模型查询服务。
 func GetModelInfoByID(ctx context.Context, modelID int64) (*ModelInfo, error) {
 	return getModelInfoStatic(ctx, modelID, "")
 }
 
 // ResolveModelInfo 根据 projectID + roleType + modelID 解析模型信息。
 // 如果 modelID > 0，直接查模型；否则从角色配置中查找。
+//
+// Deprecated: 将在 PR-12 中迁移到 workflow/repo 层的模型查询服务。
 func ResolveModelInfo(ctx context.Context, projectID int64, roleType string, modelID int64) (*ModelInfo, error) {
 	return ResolveProjectModelInfo(ctx, projectID, roleType, "", modelID)
 }
 
 // getModelInfoStatic 静态版模型查询（不依赖 Executor 实例）。
+//
+// Deprecated: 将在 PR-12 中迁移到 workflow/repo 层的模型查询服务。
 func getModelInfoStatic(ctx context.Context, modelID int64, systemPrompt string) (*ModelInfo, error) {
 	model, err := g.DB().Model("ai_model m").
 		LeftJoin("ai_plan p", "p.id = m.plan_id").
@@ -127,18 +133,27 @@ type AiderTaskConfig struct {
 
 // ─── 飞书通知钩子注册 ─────────────────────────────────────────────────────────
 // 用函数变量注入避免循环引用（engine 不 import collab/notifier）
+//
+// Deprecated: 以下三个 Register* 函数及对应的全局 hook 变量将在 PR-12 中迁移到事件总线。
+// 当前仍是生产代码的主路径，请勿删除。
 
 // RegisterFeishuNotifyAIReply 注册 AI 回复完成后的飞书推送钩子。
+//
+// Deprecated: 将在 PR-12 中迁移到事件总线。
 func RegisterFeishuNotifyAIReply(fn func(ctx context.Context, conversationID int64, content string)) {
 	feishuNotifyAIReply = fn
 }
 
 // RegisterFeishuNotifyTaskFailed 注册任务失败飞书推送钩子。
+//
+// Deprecated: 将在 PR-12 中迁移到事件总线。
 func RegisterFeishuNotifyTaskFailed(fn func(ctx context.Context, projectID, taskID int64, taskName, errMsg string)) {
 	feishuNotifyTaskFailed = fn
 }
 
 // RegisterFeishuNotifyProjectCompleted 注册项目完成飞书推送钩子。
+//
+// Deprecated: 将在 PR-12 中迁移到事件总线。
 func RegisterFeishuNotifyProjectCompleted(fn func(ctx context.Context, projectID int64)) {
 	feishuNotifyProjectCompleted = fn
 }
