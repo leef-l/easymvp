@@ -163,13 +163,18 @@ func loadProjectPresetContext(ctx context.Context, projectID int64) (*projectPre
 }
 
 func loadDefaultPresets(ctx context.Context, projectCtx *projectPresetContext, roleType string, roleLevel string) (gdb.Result, error) {
-	return ListRolePresets(ctx, RolePresetQuery{
-		CategoryCode:    projectCtx.CategoryCode,
-		ProjectCategory: projectCtx.ProjectCategory,
-		RoleType:        roleType,
-		RoleLevel:       roleLevel,
-		DefaultOnly:     true,
-	})
+	// 有过滤条件时直接查库（命中率低，不缓存）
+	if roleType != "" || roleLevel != "" {
+		return ListRolePresets(ctx, RolePresetQuery{
+			CategoryCode:    projectCtx.CategoryCode,
+			ProjectCategory: projectCtx.ProjectCategory,
+			RoleType:        roleType,
+			RoleLevel:       roleLevel,
+			DefaultOnly:     true,
+		})
+	}
+	// 无过滤条件时走缓存（按 categoryCode 缓存全量预设，5 分钟 TTL）
+	return getCachedPresets(ctx, projectCtx.CategoryCode, projectCtx.ProjectCategory)
 }
 
 func selectPreferredRoleRecord(records gdb.Result, roleType string) gdb.Record {
@@ -267,19 +272,5 @@ func buildPresetRoleRecord(ctx context.Context, projectID int64, projectCtx *pro
 }
 
 func loadModelRolePrompt(ctx context.Context, modelID int64) string {
-	if modelID == 0 {
-		return ""
-	}
-	modelRec, err := g.DB().Model("ai_model").Ctx(ctx).
-		Fields("role_prompt").
-		Where("id", modelID).
-		WhereNull("deleted_at").
-		One()
-	if err != nil {
-		g.Log().Warningf(ctx, "[ProjectRoleRepo] 加载模型 role_prompt 失败: model=%d err=%v", modelID, err)
-	}
-	if modelRec.IsEmpty() {
-		return ""
-	}
-	return modelRec["role_prompt"].String()
+	return getCachedModelPrompt(ctx, modelID)
 }
