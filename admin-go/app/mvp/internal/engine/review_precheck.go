@@ -13,6 +13,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"easymvp/app/mvp/internal/workflow/domain/rule"
 	"easymvp/app/mvp/internal/workflow/resourcepath"
 )
 
@@ -115,16 +116,20 @@ func RunReview(ctx context.Context, projectID int64) (*ReviewResult, error) {
 	return result, nil
 }
 
+// useRuleEngine 检查是否启用规则引擎模式（precheck.use_rule_engine=1）。
+func useRuleEngine(ctx context.Context) bool {
+	return GetConfigInt(ctx, "precheck.use_rule_engine", "precheck.useRuleEngine", 0) == 1
+}
+
 // systemPrecheck 系统预检（零 AI 消耗，毫秒级）
 //
-// TODO(PR-10): 当 precheck.use_rule_engine=true 时，使用 workflow/domain/rule.Registry 替代下方硬编码规则。
-// 单任务规则（名称非空、描述质量、资源格式、乱码检测、目录占位）已迁移到 BuiltinChecker；
-// 跨任务规则（depends_on 引用有效性、batch_no 一致性、资源冲突、role_level 覆盖）保留在此处。
-// 待 CEL 引入后逐步切换，使用 DefaultRegistry.Get("precheck").Check(ctx, &CheckContext{...})。
+// 当 precheck.use_rule_engine=true 时，单任务规则走 rule.DefaultRegistry；
+// 跨任务规则（depends_on 引用有效性、batch_no 一致性、资源冲突、role_level 覆盖）始终在此处执行。
 func systemPrecheck(ctx context.Context, projectID int64, tasks gdb.Result, workDir string, projectCategory string) *ReviewResult {
 	result := &ReviewResult{Passed: true}
 	family := GetCategoryFamily(projectCategory)
 	autoFixBatch := GetReviewAutoFixBatch(ctx)
+	ruleEngineEnabled := useRuleEngine(ctx)
 
 	// 构建任务名集合（用于依赖校验）
 	taskNames := make(map[string]bool, len(tasks))
@@ -153,28 +158,18 @@ func systemPrecheck(ctx context.Context, projectID int64, tasks gdb.Result, work
 	}
 	var batchFixes []batchFix
 
+	// 获取规则引擎检查器（如启用）
+	var ruleChecker rule.Checker
+	if ruleEngineEnabled {
+		ruleChecker = rule.DefaultRegistry.Get("precheck")
+	}
+
 	for _, t := range tasks {
 		name := t["name"].String()
 		desc := t["description"].String()
 		batchNo := t["batch_no"].Int()
 
-		// 1. 任务名非空
-		if strings.TrimSpace(name) == "" {
-			result.Errors = append(result.Errors, ReviewIssue{
-				TaskName: "(空)", Severity: "error", Message: "任务名称为空",
-			})
-			continue
-		}
-
-		// 2. 任务描述质量
-		if utf8.RuneCountInString(strings.TrimSpace(desc)) < 10 {
-			result.Errors = append(result.Errors, ReviewIssue{
-				TaskName: name, Severity: "error",
-				Message: fmt.Sprintf("任务描述过短（%d字），需要至少10字的有效描述", utf8.RuneCountInString(desc)),
-			})
-		}
-
-		// 3. affected_resources 格式检查
+		// 解析 affected_resources
 		var resources []string
 		resJSON := t["affected_resources"].String()
 		if resJSON != "" && resJSON != "[]" && resJSON != "null" {
@@ -186,29 +181,7 @@ func systemPrecheck(ctx context.Context, projectID int64, tasks gdb.Result, work
 			}
 		}
 
-		for _, res := range resources {
-			// 路径格式合法性（无乱码/特殊字符）
-			if containsGarbage(res) {
-				result.Errors = append(result.Errors, ReviewIssue{
-					TaskName: name, Severity: "error",
-					Message: fmt.Sprintf("affected_resources 包含疑似乱码路径: %s", res),
-				})
-			}
-		}
-		if family == CategoryFamilyCoding {
-			for _, resource := range resourcepath.FindCodingDirectoryPlaceholders(resources) {
-				result.Errors = append(result.Errors, ReviewIssue{
-					TaskName: name, Severity: "error",
-					Message: fmt.Sprintf("affected_resources 必须写明确文件路径，不能使用目录占位: %s", resource),
-				})
-			}
-		}
-
-		// 4. 编码类项目允许创建新文件；不存在不再作为审核阻塞项。
-		_ = family
-		_ = workDir
-
-		// 5. depends_on 有效性
+		// 解析 depends_on
 		var dependsOn []string
 		depJSON := t["depends_on"].String()
 		if depJSON != "" && depJSON != "[]" && depJSON != "null" {
@@ -219,6 +192,77 @@ func systemPrecheck(ctx context.Context, projectID int64, tasks gdb.Result, work
 				})
 			}
 		}
+
+		// ── 单任务规则：规则引擎模式 vs 硬编码模式 ──
+		if ruleChecker != nil {
+			// 规则引擎模式：通过 BuiltinChecker 执行单任务规则
+			checkResults := ruleChecker.Check(ctx, &rule.CheckContext{
+				TaskName:          name,
+				TaskDescription:   desc,
+				BatchNo:           batchNo,
+				RoleType:          t["role_type"].String(),
+				RoleLevel:         t["role_level"].String(),
+				AffectedResources: resources,
+				DependsOn:         dependsOn,
+				WorkDir:           workDir,
+				ProjectCategory:   projectCategory,
+				CategoryFamily:    string(family),
+			})
+			for _, cr := range checkResults {
+				issue := ReviewIssue{
+					TaskName: name,
+					Severity: cr.Severity,
+					Message:  cr.Message,
+				}
+				if cr.Severity == "error" {
+					result.Errors = append(result.Errors, issue)
+				} else {
+					result.Warnings = append(result.Warnings, issue)
+				}
+			}
+			// 空名跳过后续跨任务检查
+			if strings.TrimSpace(name) == "" {
+				continue
+			}
+		} else {
+			// 硬编码模式（原始逻辑）
+			// 1. 任务名非空
+			if strings.TrimSpace(name) == "" {
+				result.Errors = append(result.Errors, ReviewIssue{
+					TaskName: "(空)", Severity: "error", Message: "任务名称为空",
+				})
+				continue
+			}
+			// 2. 任务描述质量
+			if utf8.RuneCountInString(strings.TrimSpace(desc)) < 10 {
+				result.Errors = append(result.Errors, ReviewIssue{
+					TaskName: name, Severity: "error",
+					Message: fmt.Sprintf("任务描述过短（%d字），需要至少10字的有效描述", utf8.RuneCountInString(desc)),
+				})
+			}
+			// 3. 乱码检测
+			for _, res := range resources {
+				if containsGarbage(res) {
+					result.Errors = append(result.Errors, ReviewIssue{
+						TaskName: name, Severity: "error",
+						Message: fmt.Sprintf("affected_resources 包含疑似乱码路径: %s", res),
+					})
+				}
+			}
+			// 4. 目录占位检测
+			if family == CategoryFamilyCoding {
+				for _, resource := range resourcepath.FindCodingDirectoryPlaceholders(resources) {
+					result.Errors = append(result.Errors, ReviewIssue{
+						TaskName: name, Severity: "error",
+						Message: fmt.Sprintf("affected_resources 必须写明确文件路径，不能使用目录占位: %s", resource),
+					})
+				}
+			}
+		}
+
+		// ── 跨任务规则（两种模式通用） ──
+
+		// 5. depends_on 有效性
 		for _, dep := range dependsOn {
 			if !taskNames[dep] {
 				result.Errors = append(result.Errors, ReviewIssue{
@@ -228,7 +272,7 @@ func systemPrecheck(ctx context.Context, projectID int64, tasks gdb.Result, work
 			}
 		}
 
-		// 6. batch_no 一致性：有依赖的任务 batch_no > 被依赖任务的 batch_no
+		// 6. batch_no 一致性
 		for _, dep := range dependsOn {
 			if depBatch, ok := nameToBatch[dep]; ok {
 				if batchNo <= depBatch {
@@ -253,7 +297,7 @@ func systemPrecheck(ctx context.Context, projectID int64, tasks gdb.Result, work
 			}
 		}
 
-		// 7. 资源冲突预检：同 batch_no 内不能两个任务改同一文件
+		// 7. 资源冲突预检
 		if _, ok := batchResources[batchNo]; !ok {
 			batchResources[batchNo] = make(map[string]string)
 		}
@@ -267,7 +311,7 @@ func systemPrecheck(ctx context.Context, projectID int64, tasks gdb.Result, work
 			batchResources[batchNo][res] = name
 		}
 
-		// 8. role_level 覆盖检查：lite 不可用时自动升档到 pro，再没有就升到 max。
+		// 8. role_level 覆盖检查
 		roleType := t["role_type"].String()
 		roleLevel := t["role_level"].String()
 		if roleType != "" && roleLevel != "" {
