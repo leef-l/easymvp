@@ -40,7 +40,7 @@ jobs:
         include:
           - mode: verify-build
             label: web-antd verification build
-            artifact_path: vue-vben-admin/apps/web-antd/dist
+            artifact_path: vue-vben-admin/apps/web-antd/dist-verify
           - mode: workflow-bundle
             label: web-antd workflow bundle build
             artifact_path: vue-vben-admin/dist-workflow-verify
