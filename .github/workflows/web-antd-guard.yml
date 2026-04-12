@@ -1,0 +1,118 @@
+name: Web Antd Guard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/web-antd-guard.yml'
+      - 'scripts/web-antd-*.sh'
+      - 'vue-vben-admin/**'
+  pull_request:
+    paths:
+      - '.github/workflows/web-antd-guard.yml'
+      - 'scripts/web-antd-*.sh'
+      - 'vue-vben-admin/**'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Validation target'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - verify-build
+          - workflow-bundle
+          - entry-bundles
+
+env:
+  NODE_IMAGE: 'node:22-bookworm'
+  PNPM_VERSION: '10.32.1'
+
+jobs:
+  web-antd-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: verify-build
+            label: web-antd verification build
+            artifact_path: vue-vben-admin/apps/web-antd/dist
+          - mode: workflow-bundle
+            label: web-antd workflow bundle build
+            artifact_path: vue-vben-admin/dist-workflow-verify
+          - mode: entry-bundles
+            label: web-antd workflow entry bundles
+            artifact_path: vue-vben-admin/dist-entry-verify-*
+    if: |
+      github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.target == 'all' ||
+      github.event.inputs.target == matrix.mode
+    name: ${{ matrix.label }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: vue-vben-admin/.pnpm-store
+          key: pnpm-web-antd-guard-${{ runner.os }}-${{ hashFiles('vue-vben-admin/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-web-antd-guard-${{ runner.os }}-
+
+      - name: Run validation under 1 CPU / 1G
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          docker run --rm \
+            --cpus="1.0" \
+            --memory="1g" \
+            --memory-swap="1g" \
+            -e MODE="$MODE" \
+            -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+            -e PNPM_STORE_DIR=/workspace/vue-vben-admin/.pnpm-store \
+            -e EASYMVP_BUILD_HEAP_MB=768 \
+            -e UV_THREADPOOL_SIZE=1 \
+            -e npm_config_jobs=1 \
+            -e npm_config_maxsockets=4 \
+            -e pnpm_config_child_concurrency=1 \
+            -e pnpm_config_workspace_concurrency=1 \
+            -e pnpm_config_network_concurrency=1 \
+            -e TURBO_CONCURRENCY=1 \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -w /workspace \
+            "${{ env.NODE_IMAGE }}" \
+            bash -lc '
+              set -euo pipefail
+              corepack enable
+              corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
+              cd /workspace/vue-vben-admin
+              pnpm config set store-dir "$PNPM_STORE_DIR"
+              pnpm install --frozen-lockfile
+              cd /workspace
+              case "$MODE" in
+                verify-build)
+                  ./scripts/web-antd-ci-verify-build.sh
+                  ;;
+                workflow-bundle)
+                  ./scripts/web-antd-ci-workflow-bundle.sh
+                  ;;
+                entry-bundles)
+                  ./scripts/web-antd-ci-workflow-entry-bundles.sh
+                  ;;
+                *)
+                  echo "Unsupported mode: $MODE" >&2
+                  exit 2
+                  ;;
+              esac
+            '
+
+      - name: Upload validation artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.mode }}-artifact
+          path: ${{ matrix.artifact_path }}
+          if-no-files-found: ignore
