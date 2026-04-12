@@ -1,9 +1,25 @@
+-- MySQL dump 10.13  Distrib 8.0.45, for Linux (x86_64)
+--
+-- Host: 127.0.0.1    Database: easymvp
+-- ------------------------------------------------------
+-- Server version	8.0.45
+
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
+/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!50503 SET NAMES utf8mb4 */;
 /*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
 /*!40103 SET TIME_ZONE='+00:00' */;
 /*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;
 /*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
 /*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
 /*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
+
+--
+-- Table structure for table `ai_engine`
+--
+
+DROP TABLE IF EXISTS `ai_engine`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `ai_engine` (
@@ -22,6 +38,12 @@ CREATE TABLE `ai_engine` (
   UNIQUE KEY `uk_ai_engine_code` (`code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI执行引擎定义表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `ai_engine_config`
+--
+
+DROP TABLE IF EXISTS `ai_engine_config`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `ai_engine_config` (
@@ -47,6 +69,12 @@ CREATE TABLE `ai_engine_config` (
   UNIQUE KEY `uk_ai_engine_config_engine_code` (`engine_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI执行引擎配置表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `ai_model`
+--
+
+DROP TABLE IF EXISTS `ai_model`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `ai_model` (
@@ -73,6 +101,12 @@ CREATE TABLE `ai_model` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI模型表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `ai_plan`
+--
+
+DROP TABLE IF EXISTS `ai_plan`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `ai_plan` (
@@ -94,13 +128,19 @@ CREATE TABLE `ai_plan` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI套餐表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `ai_provider`
+--
+
+DROP TABLE IF EXISTS `ai_provider`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `ai_provider` (
   `id` bigint unsigned NOT NULL COMMENT '雪花ID',
   `name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '供应商名称',
   `code` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '供应商代码：openai/anthropic/deepseek/qwen/doubao/ernie/spark/glm/moonshot/yi/google/ollama',
-  `provider_type` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '供应商主类型/默认路由类型',
+  `provider_type` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Provider类型：openai_compatible/anthropic/baidu/xfyun/google',
   `supported_protocols` json DEFAULT NULL COMMENT '支持的协议类型(JSON)：anthropic/openai_compatible/google 等',
   `base_url` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'API基础地址',
   `icon` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '图标URL',
@@ -116,6 +156,12 @@ CREATE TABLE `ai_provider` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI供应商表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `ai_task`
+--
+
+DROP TABLE IF EXISTS `ai_task`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `ai_task` (
@@ -147,6 +193,12 @@ CREATE TABLE `ai_task` (
   KEY `idx_ai_task_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI执行任务表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `ai_task_log`
+--
+
+DROP TABLE IF EXISTS `ai_task_log`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `ai_task_log` (
@@ -161,6 +213,12 @@ CREATE TABLE `ai_task_log` (
   KEY `idx_ai_task_log_task_seq` (`task_id`,`seq`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI执行任务日志表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_accept_evidence`
+--
+
+DROP TABLE IF EXISTS `mvp_accept_evidence`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_accept_evidence` (
@@ -180,6 +238,12 @@ CREATE TABLE `mvp_accept_evidence` (
   KEY `idx_source_type_source_id` (`source_type`,`source_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='自动验收证据';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_accept_issue`
+--
+
+DROP TABLE IF EXISTS `mvp_accept_issue`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_accept_issue` (
@@ -213,6 +277,12 @@ CREATE TABLE `mvp_accept_issue` (
   KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='自动验收问题';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_accept_rule`
+--
+
+DROP TABLE IF EXISTS `mvp_accept_rule`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_accept_rule` (
@@ -235,6 +305,12 @@ CREATE TABLE `mvp_accept_rule` (
   KEY `idx_enabled_priority` (`enabled`,`priority`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='自动验收规则定义';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_accept_run`
+--
+
+DROP TABLE IF EXISTS `mvp_accept_run`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_accept_run` (
@@ -266,6 +342,12 @@ CREATE TABLE `mvp_accept_run` (
   KEY `idx_decision` (`decision`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='自动验收运行记录';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_action_outcome`
+--
+
+DROP TABLE IF EXISTS `mvp_action_outcome`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_action_outcome` (
@@ -294,6 +376,40 @@ CREATE TABLE `mvp_action_outcome` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='策略效果跟踪';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_artifact_meta`
+--
+
+DROP TABLE IF EXISTS `mvp_artifact_meta`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `mvp_artifact_meta` (
+  `ref` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'CAS 引用键: sha256/<64 hex>',
+  `mime_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'MIME 类型',
+  `size_bytes` bigint unsigned NOT NULL COMMENT '字节数',
+  `run_id` bigint unsigned DEFAULT NULL COMMENT '首次产出该 artifact 的 Run ID',
+  `turn_index` int DEFAULT NULL COMMENT '首次产出时的 Turn 序号',
+  `caption` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'artifact 描述（用于 LLM 引用）',
+  `ref_count` bigint unsigned NOT NULL DEFAULT '1' COMMENT '引用计数（用于 CAS 垃圾回收）',
+  `tags` json DEFAULT NULL COMMENT '自定义标签',
+  `created_by` bigint unsigned DEFAULT NULL COMMENT '创建人用户ID',
+  `dept_id` bigint unsigned DEFAULT NULL COMMENT '创建人部门ID',
+  `created_at` datetime NOT NULL COMMENT '创建时间',
+  `updated_at` datetime NOT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '软删除时间',
+  PRIMARY KEY (`ref`),
+  KEY `idx_artifact_meta_created` (`created_at`),
+  KEY `idx_artifact_meta_refcount` (`ref_count`),
+  KEY `idx_artifact_meta_run` (`run_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='BrainKernel Artifact 元数据（CAS 内容寻址）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_assessment_result`
+--
+
+DROP TABLE IF EXISTS `mvp_assessment_result`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_assessment_result` (
@@ -321,6 +437,12 @@ CREATE TABLE `mvp_assessment_result` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='系统评估结果';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_autonomy_decision`
+--
+
+DROP TABLE IF EXISTS `mvp_autonomy_decision`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_autonomy_decision` (
@@ -347,6 +469,92 @@ CREATE TABLE `mvp_autonomy_decision` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='自治决策记录';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_brain_plan`
+--
+
+DROP TABLE IF EXISTS `mvp_brain_plan`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `mvp_brain_plan` (
+  `id` bigint unsigned NOT NULL COMMENT '雪花ID',
+  `run_id` bigint unsigned NOT NULL COMMENT '所属 Run ID',
+  `brain_id` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '产出该 plan 的 brain 标识',
+  `version` bigint unsigned NOT NULL DEFAULT '1' COMMENT '当前 plan 版本号（每次 delta 提交 +1）',
+  `current_state` json NOT NULL COMMENT '当前 plan 完整快照',
+  `archived` tinyint NOT NULL DEFAULT '0' COMMENT '是否已归档: 0-活跃 1-已归档',
+  `archived_at` datetime DEFAULT NULL COMMENT '归档时间',
+  `archive_ref` varchar(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '归档后的冷存储引用',
+  `created_by` bigint unsigned DEFAULT NULL COMMENT '创建人用户ID',
+  `dept_id` bigint unsigned DEFAULT NULL COMMENT '创建人部门ID',
+  `created_at` datetime NOT NULL COMMENT '创建时间',
+  `updated_at` datetime NOT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '软删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_brain_plan_run` (`run_id`),
+  KEY `idx_brain_plan_created` (`created_at`),
+  KEY `idx_brain_plan_brain_archived` (`brain_id`,`archived`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='BrainKernel 计划表（中央大脑产出的任务树快照）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_brain_plan_delta`
+--
+
+DROP TABLE IF EXISTS `mvp_brain_plan_delta`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `mvp_brain_plan_delta` (
+  `id` bigint unsigned NOT NULL COMMENT '雪花ID',
+  `plan_id` bigint unsigned NOT NULL COMMENT '所属 plan ID',
+  `version` bigint unsigned NOT NULL COMMENT '该 delta 对应的 plan 版本号',
+  `op_type` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '操作类型: add_node/update_status/mark_done/...',
+  `payload` json NOT NULL COMMENT 'delta 具体内容',
+  `actor` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '发起变更的 brain 或 user 标识',
+  `created_by` bigint unsigned DEFAULT NULL COMMENT '创建人用户ID',
+  `dept_id` bigint unsigned DEFAULT NULL COMMENT '创建人部门ID',
+  `created_at` datetime NOT NULL COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_brain_plan_delta_plan_version` (`plan_id`,`version`),
+  KEY `idx_brain_plan_delta_plan` (`plan_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='BrainKernel 计划增量日志（append-only，用于审计与重放）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_brain_usage`
+--
+
+DROP TABLE IF EXISTS `mvp_brain_usage`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `mvp_brain_usage` (
+  `id` bigint unsigned NOT NULL COMMENT '雪花ID',
+  `run_id` bigint unsigned NOT NULL COMMENT '所属 Run ID',
+  `turn_index` int NOT NULL COMMENT '对应 Turn 序号',
+  `provider` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'LLM 供应商: anthropic/openai/...',
+  `model` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '模型名',
+  `input_tokens` bigint unsigned NOT NULL COMMENT '输入 token 数',
+  `output_tokens` bigint unsigned NOT NULL COMMENT '输出 token 数',
+  `cache_read` bigint unsigned NOT NULL DEFAULT '0' COMMENT 'Prompt Cache 命中读取的 token',
+  `cache_creation` bigint unsigned NOT NULL DEFAULT '0' COMMENT 'Prompt Cache 写入创建的 token',
+  `cost_usd` decimal(10,4) NOT NULL COMMENT '本次调用成本（USD）',
+  `idempotency_key` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '幂等键（防止重复记账）',
+  `created_by` bigint unsigned DEFAULT NULL COMMENT '创建人用户ID',
+  `dept_id` bigint unsigned DEFAULT NULL COMMENT '创建人部门ID',
+  `created_at` datetime NOT NULL COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_brain_usage_idempotency` (`idempotency_key`),
+  KEY `idx_brain_usage_run` (`run_id`),
+  KEY `idx_brain_usage_provider_model` (`provider`,`model`,`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='BrainKernel LLM 调用计费明细（append-only）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_config`
+--
+
+DROP TABLE IF EXISTS `mvp_config`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_config` (
@@ -365,8 +573,14 @@ CREATE TABLE `mvp_config` (
   UNIQUE KEY `uk_config_key` (`config_key`),
   KEY `idx_category` (`category`),
   KEY `idx_deleted_at` (`deleted_at`)
-) ENGINE=InnoDB AUTO_INCREMENT=315200000000000101 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='MVP配置表';
+) ENGINE=InnoDB AUTO_INCREMENT=315200000000000108 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='MVP配置表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_conversation`
+--
+
+DROP TABLE IF EXISTS `mvp_conversation`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_conversation` (
@@ -389,6 +603,12 @@ CREATE TABLE `mvp_conversation` (
   KEY `idx_project_role` (`project_id`,`role_type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='MVP对话表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_decision_action`
+--
+
+DROP TABLE IF EXISTS `mvp_decision_action`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_decision_action` (
@@ -424,6 +644,12 @@ CREATE TABLE `mvp_decision_action` (
   KEY `idx_trigger` (`trigger_source`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='自治决策动作记录';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_domain_task`
+--
+
+DROP TABLE IF EXISTS `mvp_domain_task`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_domain_task` (
@@ -470,6 +696,12 @@ CREATE TABLE `mvp_domain_task` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='领域任务';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_handoff_record`
+--
+
+DROP TABLE IF EXISTS `mvp_handoff_record`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_handoff_record` (
@@ -485,6 +717,12 @@ CREATE TABLE `mvp_handoff_record` (
   KEY `idx_workflow_type` (`workflow_run_id`,`handoff_type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='交接记录';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_human_checkpoint`
+--
+
+DROP TABLE IF EXISTS `mvp_human_checkpoint`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_human_checkpoint` (
@@ -515,6 +753,12 @@ CREATE TABLE `mvp_human_checkpoint` (
   KEY `idx_assigned` (`assigned_to`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='人工介入节点';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_learning_record`
+--
+
+DROP TABLE IF EXISTS `mvp_learning_record`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_learning_record` (
@@ -537,6 +781,12 @@ CREATE TABLE `mvp_learning_record` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='EMA学习记录';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_message`
+--
+
+DROP TABLE IF EXISTS `mvp_message`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_message` (
@@ -562,6 +812,12 @@ CREATE TABLE `mvp_message` (
   KEY `idx_mvp_message_conversation_status` (`conversation_id`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='MVP消息表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_message_chunk`
+--
+
+DROP TABLE IF EXISTS `mvp_message_chunk`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_message_chunk` (
@@ -573,8 +829,14 @@ CREATE TABLE `mvp_message_chunk` (
   PRIMARY KEY (`id`),
   KEY `idx_message_chunk` (`message_id`,`chunk_index`),
   KEY `idx_chunk_created` (`created_at`)
-) ENGINE=InnoDB AUTO_INCREMENT=262469 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='消息分片表（流式输出）';
+) ENGINE=InnoDB AUTO_INCREMENT=385729 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='消息分片表（流式输出）';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_observation_record`
+--
+
+DROP TABLE IF EXISTS `mvp_observation_record`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_observation_record` (
@@ -608,6 +870,12 @@ CREATE TABLE `mvp_observation_record` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='决策观测记录';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_plan_version`
+--
+
+DROP TABLE IF EXISTS `mvp_plan_version`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_plan_version` (
@@ -635,6 +903,12 @@ CREATE TABLE `mvp_plan_version` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='计划版本';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_policy_rule`
+--
+
+DROP TABLE IF EXISTS `mvp_policy_rule`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_policy_rule` (
@@ -661,6 +935,12 @@ CREATE TABLE `mvp_policy_rule` (
   KEY `idx_family_cat` (`project_family`,`project_category_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='自治策略规则';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_project`
+--
+
+DROP TABLE IF EXISTS `mvp_project`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_project` (
@@ -690,6 +970,12 @@ CREATE TABLE `mvp_project` (
   KEY `idx_datascope` (`dept_id`,`created_by`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='MVP项目表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_project_category`
+--
+
+DROP TABLE IF EXISTS `mvp_project_category`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_project_category` (
@@ -698,6 +984,8 @@ CREATE TABLE `mvp_project_category` (
   `display_name` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '展示名称',
   `family_code` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '能力家族编码',
   `description` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '分类说明',
+  `verification_profile_json` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '分类默认验证配置(JSON)',
+  `verification_gate_json` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '分类验证放行规则(JSON)',
   `status` tinyint NOT NULL DEFAULT '1' COMMENT '1启用 0停用',
   `sort` int NOT NULL DEFAULT '100' COMMENT '排序',
   `created_by` bigint NOT NULL DEFAULT '0' COMMENT '创建人',
@@ -711,6 +999,12 @@ CREATE TABLE `mvp_project_category` (
   KEY `idx_status_sort` (`status`,`sort`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='项目分类配置表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_project_report`
+--
+
+DROP TABLE IF EXISTS `mvp_project_report`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_project_report` (
@@ -734,6 +1028,12 @@ CREATE TABLE `mvp_project_report` (
   KEY `idx_datascope` (`dept_id`,`created_by`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='项目汇报';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_project_role`
+--
+
+DROP TABLE IF EXISTS `mvp_project_role`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_project_role` (
@@ -758,6 +1058,46 @@ CREATE TABLE `mvp_project_role` (
   KEY `idx_datascope` (`dept_id`,`created_by`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='项目角色配置表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_quality_finding`
+--
+
+DROP TABLE IF EXISTS `mvp_quality_finding`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `mvp_quality_finding` (
+  `id` bigint unsigned NOT NULL COMMENT '雪花ID',
+  `workflow_run_id` bigint unsigned NOT NULL COMMENT '所属工作流运行ID',
+  `stage_code` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '阶段: review/accept/rework',
+  `producer` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '发现者: hard_rule/llm_judge/experience_reviewer/human',
+  `severity` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '严重级别: blocker/error/warn/info',
+  `rule_code` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '规则代码或llm_auto',
+  `target_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '目标类型: task/file/blueprint/project',
+  `target_id` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '目标ID',
+  `message` text COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '问题描述',
+  `evidence_json` json DEFAULT NULL COMMENT '证据JSON',
+  `resolved` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否已解决',
+  `resolved_by` bigint unsigned DEFAULT NULL COMMENT '解决人ID',
+  `resolved_at` datetime DEFAULT NULL COMMENT '解决时间',
+  `created_by` bigint unsigned NOT NULL DEFAULT '0' COMMENT '创建人ID',
+  `dept_id` bigint unsigned NOT NULL DEFAULT '0' COMMENT '部门ID',
+  `created_at` datetime NOT NULL COMMENT '创建时间',
+  `updated_at` datetime NOT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '软删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_finding` (`workflow_run_id`,`stage_code`,`rule_code`,`target_type`,`target_id`),
+  KEY `idx_workflow_severity` (`workflow_run_id`,`severity`),
+  KEY `idx_datascope` (`dept_id`,`created_by`),
+  KEY `idx_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='统一质量发现';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_review_issue`
+--
+
+DROP TABLE IF EXISTS `mvp_review_issue`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_review_issue` (
@@ -787,6 +1127,12 @@ CREATE TABLE `mvp_review_issue` (
   KEY `idx_workflow_run` (`workflow_run_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='审核问题';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_risk_gate_rule`
+--
+
+DROP TABLE IF EXISTS `mvp_risk_gate_rule`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_risk_gate_rule` (
@@ -812,6 +1158,12 @@ CREATE TABLE `mvp_risk_gate_rule` (
   KEY `idx_family_cat` (`project_family`,`project_category_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='风险闸门规则';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_role_preset`
+--
+
+DROP TABLE IF EXISTS `mvp_role_preset`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_role_preset` (
@@ -835,6 +1187,45 @@ CREATE TABLE `mvp_role_preset` (
   KEY `idx_project_category` (`project_category`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='角色预设模板';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_run_checkpoint`
+--
+
+DROP TABLE IF EXISTS `mvp_run_checkpoint`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `mvp_run_checkpoint` (
+  `run_id` bigint unsigned NOT NULL COMMENT 'Run ID（一个 run 只有一个最新 checkpoint）',
+  `turn_index` int NOT NULL COMMENT 'Turn 序号（从 0 开始）',
+  `brain_id` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '当前活跃 brain',
+  `state` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Run 状态: running/paused/waiting_tool/...',
+  `messages_ref` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'messages 的 CAS 引用（sha256/...）',
+  `system_ref` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'system prompt 的 CAS 引用',
+  `tools_ref` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'tools 定义的 CAS 引用',
+  `cost_snapshot` json DEFAULT NULL COMMENT '截至当前 Turn 的累计成本（USD）',
+  `token_snapshot` json DEFAULT NULL COMMENT '截至当前 Turn 的累计 token',
+  `budget_remain` json DEFAULT NULL COMMENT '剩余 Run/Turn/Tool/LLMCall 预算',
+  `trace_parent` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'W3C Trace Context parent',
+  `turn_uuid` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '当前 Turn 的唯一标识（恢复时幂等判据）',
+  `resume_attempts` int NOT NULL DEFAULT '0' COMMENT '恢复尝试次数',
+  `created_by` bigint unsigned DEFAULT NULL COMMENT '创建人用户ID',
+  `dept_id` bigint unsigned DEFAULT NULL COMMENT '创建人部门ID',
+  `created_at` datetime NOT NULL COMMENT '创建时间',
+  `updated_at` datetime NOT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '软删除时间',
+  PRIMARY KEY (`run_id`),
+  UNIQUE KEY `uk_run_checkpoint_turn_uuid` (`turn_uuid`),
+  KEY `idx_run_checkpoint_updated` (`updated_at`),
+  KEY `idx_run_checkpoint_state_updated` (`state`,`updated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='BrainKernel Run 检查点（Turn 边界覆盖式，用于崩溃恢复）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_situation_snapshot`
+--
+
+DROP TABLE IF EXISTS `mvp_situation_snapshot`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_situation_snapshot` (
@@ -855,6 +1246,12 @@ CREATE TABLE `mvp_situation_snapshot` (
   KEY `idx_workflow_deleted_id` (`workflow_run_id`,`deleted_at`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='态势快照';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_stage_run`
+--
+
+DROP TABLE IF EXISTS `mvp_stage_run`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_stage_run` (
@@ -881,6 +1278,12 @@ CREATE TABLE `mvp_stage_run` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='阶段运行实例';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_stage_task`
+--
+
+DROP TABLE IF EXISTS `mvp_stage_task`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_stage_task` (
@@ -901,6 +1304,12 @@ CREATE TABLE `mvp_stage_task` (
   KEY `idx_stage_type` (`stage_run_id`,`task_type`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='阶段任务';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_task`
+--
+
+DROP TABLE IF EXISTS `mvp_task`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_task` (
@@ -946,6 +1355,12 @@ CREATE TABLE `mvp_task` (
   KEY `idx_project_kind` (`project_id`,`task_kind`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='MVP任务表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_task_blueprint`
+--
+
+DROP TABLE IF EXISTS `mvp_task_blueprint`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_task_blueprint` (
@@ -973,6 +1388,12 @@ CREATE TABLE `mvp_task_blueprint` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='任务蓝图';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_task_dependency`
+--
+
+DROP TABLE IF EXISTS `mvp_task_dependency`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_task_dependency` (
@@ -984,6 +1405,12 @@ CREATE TABLE `mvp_task_dependency` (
   KEY `idx_depends` (`depends_on_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=215 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='任务依赖关系表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_task_log`
+--
+
+DROP TABLE IF EXISTS `mvp_task_log`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_task_log` (
@@ -1002,6 +1429,12 @@ CREATE TABLE `mvp_task_log` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB AUTO_INCREMENT=134 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='任务日志表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_task_resource_lock`
+--
+
+DROP TABLE IF EXISTS `mvp_task_resource_lock`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_task_resource_lock` (
@@ -1017,6 +1450,12 @@ CREATE TABLE `mvp_task_resource_lock` (
   KEY `idx_workflow_resource` (`workflow_run_id`,`resource_path`,`lock_status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='任务资源锁';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_task_workspace`
+--
+
+DROP TABLE IF EXISTS `mvp_task_workspace`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_task_workspace` (
@@ -1029,6 +1468,14 @@ CREATE TABLE `mvp_task_workspace` (
   `base_ref` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '基线引用(commit hash/branch)',
   `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'creating' COMMENT '状态: creating/ready/running/completed/failed/canceled',
   `cleanup_status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT '清理状态: pending/done/retained/failed',
+  `delivery_mode` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'patch' COMMENT '交付结果形态: patch/pr/manual',
+  `delivery_status` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT '交付状态: pending/ready/skipped/failed',
+  `sync_strategy` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'auto_apply' COMMENT '回写策略: auto_apply/manual',
+  `sync_status` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT '回写状态: pending/applied/skipped/failed',
+  `risk_level` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'medium' COMMENT '风险等级: low/medium/high',
+  `patch_ref` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'patch产物路径',
+  `delivery_ref` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '交付引用(PR草稿文件/外部链接)',
+  `delivery_title` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '交付标题',
   `diff_summary` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '变更摘要(diff统计)',
   `error_message` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '错误信息',
   `created_at` datetime NOT NULL COMMENT '创建时间',
@@ -1041,6 +1488,12 @@ CREATE TABLE `mvp_task_workspace` (
   KEY `idx_cleanup` (`cleanup_status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='任务工作空间(Git Worktree隔离)';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_tune_recommendation`
+--
+
+DROP TABLE IF EXISTS `mvp_tune_recommendation`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_tune_recommendation` (
@@ -1071,6 +1524,12 @@ CREATE TABLE `mvp_tune_recommendation` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='调参建议';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_user_collab_binding`
+--
+
+DROP TABLE IF EXISTS `mvp_user_collab_binding`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_user_collab_binding` (
@@ -1090,6 +1549,108 @@ CREATE TABLE `mvp_user_collab_binding` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户协作平台绑定';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_verification_evidence`
+--
+
+DROP TABLE IF EXISTS `mvp_verification_evidence`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `mvp_verification_evidence` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `verification_run_id` bigint NOT NULL COMMENT '验证运行ID',
+  `evidence_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'profile/command/log/summary',
+  `source_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'verification_run/verification_step/domain_task',
+  `source_id` bigint DEFAULT NULL COMMENT '来源对象ID',
+  `content_ref` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '证据引用或JSON',
+  `summary` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '证据摘要',
+  `created_at` datetime NOT NULL COMMENT '创建时间',
+  `updated_at` datetime NOT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_verification_run_id` (`verification_run_id`),
+  KEY `idx_evidence_type` (`evidence_type`),
+  KEY `idx_source_type_source_id` (`source_type`,`source_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='项目验证证据';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_verification_issue`
+--
+
+DROP TABLE IF EXISTS `mvp_verification_issue`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `mvp_verification_issue` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `verification_run_id` bigint NOT NULL COMMENT '验证运行ID',
+  `workflow_run_id` bigint NOT NULL COMMENT '工作流运行ID',
+  `project_id` bigint NOT NULL COMMENT '项目ID',
+  `domain_task_id` bigint DEFAULT NULL COMMENT '关联任务ID',
+  `issue_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'environment/command/config/runtime',
+  `severity` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'info/warn/error/blocker',
+  `title` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '问题标题',
+  `detail` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '问题详情',
+  `expected_value` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '预期值',
+  `actual_value` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '实际值',
+  `suggested_action` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '建议动作',
+  `resource_ref` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '关联资源引用(JSON)',
+  `status` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'open' COMMENT 'open/resolved/ignored/rework_requested',
+  `created_by` bigint NOT NULL DEFAULT '0' COMMENT '创建人',
+  `dept_id` bigint NOT NULL DEFAULT '0' COMMENT '部门ID',
+  `created_at` datetime NOT NULL COMMENT '创建时间',
+  `updated_at` datetime NOT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_verification_run_id` (`verification_run_id`),
+  KEY `idx_workflow_run_id` (`workflow_run_id`),
+  KEY `idx_project_id` (`project_id`),
+  KEY `idx_domain_task_id` (`domain_task_id`),
+  KEY `idx_severity` (`severity`),
+  KEY `idx_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='项目验证问题';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_verification_run`
+--
+
+DROP TABLE IF EXISTS `mvp_verification_run`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `mvp_verification_run` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `workflow_run_id` bigint NOT NULL COMMENT '工作流运行ID',
+  `project_id` bigint NOT NULL COMMENT '项目ID',
+  `verification_round` int NOT NULL DEFAULT '1' COMMENT '第几轮验证',
+  `status` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'pending/running/completed/failed/canceled',
+  `decision` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'passed/failed/manual_review',
+  `trigger_source` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'manual' COMMENT 'manual/feishu/telegram/system',
+  `runner_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'docker_compose/dockerfile/local',
+  `summary` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '验证摘要',
+  `config_snapshot_ref` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '验证配置快照或JSON',
+  `created_by` bigint NOT NULL DEFAULT '0' COMMENT '创建人',
+  `dept_id` bigint NOT NULL DEFAULT '0' COMMENT '部门ID',
+  `started_at` datetime DEFAULT NULL COMMENT '开始时间',
+  `finished_at` datetime DEFAULT NULL COMMENT '结束时间',
+  `created_at` datetime NOT NULL COMMENT '创建时间',
+  `updated_at` datetime NOT NULL COMMENT '更新时间',
+  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_workflow_run_id` (`workflow_run_id`),
+  KEY `idx_project_id` (`project_id`),
+  KEY `idx_workflow_round` (`workflow_run_id`,`verification_round`),
+  KEY `idx_status` (`status`),
+  KEY `idx_decision` (`decision`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='项目验证运行记录';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_workflow_event`
+--
+
+DROP TABLE IF EXISTS `mvp_workflow_event`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_workflow_event` (
@@ -1111,6 +1672,12 @@ CREATE TABLE `mvp_workflow_event` (
   KEY `idx_entity_event` (`entity_type`,`entity_id`,`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流事件';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_workflow_event_ledger`
+--
+
+DROP TABLE IF EXISTS `mvp_workflow_event_ledger`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_workflow_event_ledger` (
@@ -1132,6 +1699,12 @@ CREATE TABLE `mvp_workflow_event_ledger` (
   KEY `idx_workflow_event_ledger_workflow` (`workflow_run_id`,`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流事件 durable 幂等账本';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_workflow_run`
+--
+
+DROP TABLE IF EXISTS `mvp_workflow_run`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mvp_workflow_run` (
@@ -1163,6 +1736,52 @@ CREATE TABLE `mvp_workflow_run` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流运行实例';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `mvp_workflow_transition_log`
+--
+
+DROP TABLE IF EXISTS `mvp_workflow_transition_log`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `mvp_workflow_transition_log` (
+  `id` bigint unsigned NOT NULL COMMENT '雪花ID',
+  `workflow_run_id` bigint unsigned NOT NULL COMMENT '所属工作流运行ID',
+  `scope` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'workflow' COMMENT '转移范围: workflow/stage',
+  `from_state` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '源状态',
+  `to_state` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '目标状态',
+  `guard_result` json DEFAULT NULL COMMENT '守卫求值结果',
+  `duration_ms` bigint DEFAULT NULL COMMENT '状态停留时长(ms)',
+  `actor` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'system' COMMENT '操作者: user_id或system',
+  `reason` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '转移原因',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `created_by` bigint unsigned NOT NULL DEFAULT '0' COMMENT '创建人ID',
+  `dept_id` bigint unsigned NOT NULL DEFAULT '0' COMMENT '部门ID',
+  PRIMARY KEY (`id`),
+  KEY `idx_workflow_time` (`workflow_run_id`,`created_at`),
+  KEY `idx_datascope` (`dept_id`,`created_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流状态转移日志';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `schema_migrations`
+--
+
+DROP TABLE IF EXISTS `schema_migrations`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `schema_migrations` (
+  `version` bigint NOT NULL,
+  `dirty` tinyint(1) NOT NULL,
+  PRIMARY KEY (`version`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `sys_delete_queue`
+--
+
+DROP TABLE IF EXISTS `sys_delete_queue`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `sys_delete_queue` (
@@ -1178,6 +1797,12 @@ CREATE TABLE `sys_delete_queue` (
   KEY `idx_status` (`status`,`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='异步删除队列';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `system_dept`
+--
+
+DROP TABLE IF EXISTS `system_dept`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `system_dept` (
@@ -1198,6 +1823,12 @@ CREATE TABLE `system_dept` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='部门表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `system_menu`
+--
+
+DROP TABLE IF EXISTS `system_menu`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `system_menu` (
@@ -1224,6 +1855,12 @@ CREATE TABLE `system_menu` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='菜单表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `system_role`
+--
+
+DROP TABLE IF EXISTS `system_role`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `system_role` (
@@ -1245,6 +1882,12 @@ CREATE TABLE `system_role` (
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='角色表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `system_role_ai_engine`
+--
+
+DROP TABLE IF EXISTS `system_role_ai_engine`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `system_role_ai_engine` (
@@ -1253,6 +1896,12 @@ CREATE TABLE `system_role_ai_engine` (
   PRIMARY KEY (`role_id`,`engine_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='角色AI执行引擎授权表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `system_role_dept`
+--
+
+DROP TABLE IF EXISTS `system_role_dept`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `system_role_dept` (
@@ -1262,6 +1911,12 @@ CREATE TABLE `system_role_dept` (
   KEY `idx_dept_id` (`dept_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='角色自定义数据权限部门关联表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `system_role_menu`
+--
+
+DROP TABLE IF EXISTS `system_role_menu`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `system_role_menu` (
@@ -1271,6 +1926,12 @@ CREATE TABLE `system_role_menu` (
   KEY `idx_menu_id` (`menu_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='角色菜单权限关联表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `system_user_dept`
+--
+
+DROP TABLE IF EXISTS `system_user_dept`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `system_user_dept` (
@@ -1280,6 +1941,12 @@ CREATE TABLE `system_user_dept` (
   KEY `idx_dept_id` (`dept_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户部门关联表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `system_user_role`
+--
+
+DROP TABLE IF EXISTS `system_user_role`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `system_user_role` (
@@ -1289,6 +1956,12 @@ CREATE TABLE `system_user_role` (
   KEY `idx_role_id` (`role_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户角色关联表';
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `system_users`
+--
+
+DROP TABLE IF EXISTS `system_users`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `system_users` (
@@ -1315,4 +1988,9 @@ CREATE TABLE `system_users` (
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
 /*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
 /*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
+
+-- Dump completed on 2026-04-12 10:29:55
