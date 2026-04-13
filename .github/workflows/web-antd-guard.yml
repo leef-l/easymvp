@@ -21,6 +21,8 @@ on:
         type: choice
         options:
           - all
+          - full-typecheck
+          - full-build
           - verify-build
           - workflow-bundle
           - entry-bundles
@@ -39,6 +41,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - mode: full-typecheck
+            label: web-antd full typecheck
+            artifact_path: ''
+            upload_artifact: false
+            shard_index: 0
+            shard_total: 0
+          - mode: full-build
+            label: web-antd full production build
+            artifact_path: vue-vben-admin/apps/web-antd/dist
+            upload_artifact: true
+            shard_index: 0
+            shard_total: 0
           - mode: verify-build
             label: web-antd verification build
             artifact_path: vue-vben-admin/apps/web-antd/dist-verify
@@ -167,6 +181,12 @@ jobs:
               corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
               cd /workspace
               case "$MODE" in
+                full-typecheck)
+                  ./scripts/web-antd-ci-typecheck.sh
+                  ;;
+                full-build)
+                  ./scripts/web-antd-ci-full-build.sh
+                  ;;
                 verify-build)
                   ./scripts/web-antd-ci-verify-build.sh
                   ;;
