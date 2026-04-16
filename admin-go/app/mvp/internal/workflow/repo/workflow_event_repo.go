@@ -14,6 +14,12 @@ func NewWorkflowEventRepo() *WorkflowEventRepo { return &WorkflowEventRepo{} }
 
 func (r *WorkflowEventRepo) table() string { return "mvp_workflow_event" }
 
+// Insert 创建工作流事件记录。
+func (r *WorkflowEventRepo) Insert(ctx context.Context, data g.Map) error {
+	_, err := g.DB().Model(r.table()).Ctx(ctx).Insert(data)
+	return err
+}
+
 // CountByWorkflow 统计工作流事件数。
 func (r *WorkflowEventRepo) CountByWorkflow(ctx context.Context, workflowRunID int64) (int, error) {
 	return g.DB().Model(r.table()).Ctx(ctx).

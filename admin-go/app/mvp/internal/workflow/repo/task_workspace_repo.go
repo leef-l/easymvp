@@ -91,6 +91,38 @@ func (r *TaskWorkspaceRepo) ListMetaByTasks(ctx context.Context, taskIDs []int64
 		All()
 }
 
+// ListArtifactRecordsByWorkflow 查询工作流下 workspace 交付记录，兼容旧表结构。
+func (r *TaskWorkspaceRepo) ListArtifactRecordsByWorkflow(ctx context.Context, workflowRunID int64) (gdb.Result, error) {
+	records, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at").
+		Fields("id, task_id, delivery_mode, delivery_status, sync_status, patch_ref, delivery_ref, delivery_title, diff_summary").
+		OrderAsc("task_id").
+		All()
+	if err == nil || !isUnknownTaskWorkspaceColumnErr(err) {
+		return records, err
+	}
+
+	if isTaskWorkspaceDeliveryRefColumnErr(err) {
+		records, err = g.DB().Model(r.table()).Ctx(ctx).
+			Where("workflow_run_id", workflowRunID).
+			WhereNull("deleted_at").
+			Fields("id, task_id, delivery_mode, delivery_status, sync_status, patch_ref, diff_summary").
+			OrderAsc("task_id").
+			All()
+		if err == nil || !isUnknownTaskWorkspaceColumnErr(err) {
+			return records, err
+		}
+	}
+
+	return g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at").
+		Fields("id, task_id, diff_summary").
+		OrderAsc("task_id").
+		All()
+}
+
 // GetLatestIDByTask 查询任务最近一条工作空间记录 ID。
 func (r *TaskWorkspaceRepo) GetLatestIDByTask(ctx context.Context, taskID int64) (int64, error) {
 	record, err := g.DB().Model(r.table()).Ctx(ctx).
@@ -112,6 +144,7 @@ func (r *TaskWorkspaceRepo) ListReadyPendingSyncByWorkflow(ctx context.Context, 
 		Where("w.workflow_run_id", workflowRunID).
 		WhereNull("w.deleted_at").
 		WhereNull("t.deleted_at").
+		Where("t.status", "completed").
 		Where("w.delivery_status", "ready").
 		WhereIn("w.sync_status", g.Slice{"pending", "failed"}).
 		Fields("w.id, w.task_id, w.sync_status, w.delivery_status, t.name, t.batch_no, t.sort")

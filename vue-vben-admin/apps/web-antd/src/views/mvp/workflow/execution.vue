@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 import {
@@ -38,8 +38,12 @@ import {
 import { stageRunStatusMap, taskStatusMap } from '../consts';
 
 const props = defineProps<{ projectId?: string }>();
+const emit = defineEmits<{
+  changed: [];
+}>();
 
 const route = useRoute();
+const router = useRouter();
 const loading = ref(false);
 const resolvedProjectId = computed(() => props.projectId || (route.query.projectId as string) || '');
 const data = ref<ExecutionStatusResult | null>(null);
@@ -48,6 +52,7 @@ const replayLoading = ref(false);
 const selectedTask = ref<DomainTaskItem | null>(null);
 const replayData = ref<TaskReplayResult | null>(null);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+let loadRequestVersion = 0;
 
 type BadgeStatus = 'default' | 'processing' | 'success' | 'error' | 'warning';
 
@@ -84,14 +89,23 @@ watch(
 );
 
 async function loadData() {
+  const currentProjectId = resolvedProjectId.value;
+  if (!currentProjectId) {
+    resetExecutionState();
+    return;
+  }
+  const requestVersion = ++loadRequestVersion;
   loading.value = true;
   try {
-    const res = await getExecutionStatus(resolvedProjectId.value);
+    const res = await getExecutionStatus(currentProjectId);
+    if (requestVersion !== loadRequestVersion || currentProjectId !== resolvedProjectId.value) return;
     data.value = res;
   } catch {
     // silent
   } finally {
-    loading.value = false;
+    if (requestVersion === loadRequestVersion && currentProjectId === resolvedProjectId.value) {
+      loading.value = false;
+    }
   }
 }
 
@@ -185,7 +199,8 @@ async function handleRetry(task: DomainTaskItem) {
     onOk: async () => {
       await retryTask({ projectID: resolvedProjectId.value, taskID: task.id });
       message.success('已提交重试');
-      loadData();
+      await loadData();
+      emit('changed');
     },
   });
 }
@@ -197,7 +212,8 @@ async function handleSkip(task: DomainTaskItem) {
     onOk: async () => {
       await skipTask({ projectID: resolvedProjectId.value, taskID: task.id, reason: '手动跳过' });
       message.success('已跳过');
-      loadData();
+      await loadData();
+      emit('changed');
     },
   });
 }
@@ -212,6 +228,22 @@ function handleRetryRecord(record: Record<string, any>) {
 
 function handleSkipRecord(record: Record<string, any>) {
   handleSkip(record as DomainTaskItem);
+}
+
+function handleOpenSituation(task: DomainTaskItem) {
+  if (!resolvedProjectId.value || !data.value?.workflowRunID) return;
+  router.push({
+    path: '/mvp/workflow/situation',
+    query: {
+      projectId: resolvedProjectId.value,
+      taskId: task.id,
+      workflowRunId: data.value.workflowRunID,
+    },
+  });
+}
+
+function handleOpenSituationRecord(record: Record<string, any>) {
+  handleOpenSituation(record as DomainTaskItem);
 }
 </script>
 
@@ -332,6 +364,7 @@ function handleSkipRecord(record: Record<string, any>) {
               <template v-else-if="column.key === 'action'">
                 <Space>
                   <Button type="link" size="small" @click="showDetailRecord(record)">详情</Button>
+                  <Button type="link" size="small" @click="handleOpenSituationRecord(record)">态势</Button>
                   <Button
                     v-if="record.status === 'failed' || record.status === 'escalated'"
                     type="link"

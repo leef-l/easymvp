@@ -100,3 +100,20 @@ func (r *MessageRepo) ListHistoryByConversation(ctx context.Context, conversatio
 	}
 	return records.List(), nil
 }
+
+// GetLatestAssistantContentByConversation 查询对话下最近一条 assistant 内容消息。
+func (r *MessageRepo) GetLatestAssistantContentByConversation(ctx context.Context, conversationID int64) (string, error) {
+	record, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("conversation_id", conversationID).
+		Where("role", "assistant").
+		Where("content <> ''").
+		WhereNull("deleted_at").
+		OrderDesc("created_at").
+		OrderDesc("id").
+		Fields("content").
+		One()
+	if err != nil || record.IsEmpty() {
+		return "", err
+	}
+	return strings.TrimSpace(record["content"].String()), nil
+}

@@ -10,6 +10,7 @@ import (
 
 	v1 "easymvp/app/mvp/api/mvp/v1"
 	"easymvp/app/mvp/internal/engine"
+	"easymvp/app/mvp/internal/workflow/contract"
 	"easymvp/app/mvp/internal/workflow/orchestrator"
 	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/utility/snowflake"
@@ -149,6 +150,10 @@ func parseAndCreateBlueprints(ctx context.Context, projectID, conversationID, me
 
 // createBlueprints 将已提取的任务列表写入 plan_version + task_blueprint。
 func createBlueprints(ctx context.Context, projectID, conversationID, messageID int64, tasks []engine.ArchitectTask) (int, error) {
+	if _, syncErr := contract.SyncFromConversation(ctx, projectID, conversationID); syncErr != nil {
+		g.Log().Warningf(ctx, "[WorkflowReview] 同步项目级硬约束失败: project=%d conversation=%d err=%v", projectID, conversationID, syncErr)
+	}
+
 	wfRun, _ := repo.NewWorkflowRunRepo().GetLatestByProjectExcludingStatuses(ctx, projectID, []string{"completed", "canceled"}, "id")
 	var wfRunID int64
 	if len(wfRun) != 0 {

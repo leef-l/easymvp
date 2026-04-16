@@ -27,6 +27,21 @@ func (r *DomainTaskRepo) Create(ctx context.Context, data g.Map) (int64, error) 
 	return int64(id), err
 }
 
+// Insert 使用给定数据插入任务记录，不自动生成 ID。
+func (r *DomainTaskRepo) Insert(ctx context.Context, data g.Map) error {
+	_, err := g.DB().Model(r.table()).Ctx(ctx).Insert(data)
+	return err
+}
+
+// BatchCreate 批量创建领域任务。
+func (r *DomainTaskRepo) BatchCreate(ctx context.Context, rows []g.Map) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	_, err := g.DB().Model(r.table()).Ctx(ctx).Insert(rows)
+	return err
+}
+
 // GetByID 按 ID 查询。
 func (r *DomainTaskRepo) GetByID(ctx context.Context, id int64) (*entity.MvpDomainTask, error) {
 	var ent entity.MvpDomainTask
@@ -47,6 +62,21 @@ func (r *DomainTaskRepo) GetByIDMap(ctx context.Context, taskID int64, fields ..
 		return nil, err
 	}
 	return record.Map(), nil
+}
+
+// GetRecordByID 按 ID 查询任务原始记录，供仍需 gdb.Record 的旧调用链复用。
+func (r *DomainTaskRepo) GetRecordByID(ctx context.Context, taskID int64, fields ...string) (gdb.Record, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("id", taskID).
+		WhereNull("deleted_at")
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	record, err := model.One()
+	if err != nil || record.IsEmpty() {
+		return nil, err
+	}
+	return record, nil
 }
 
 // GetByWorkflowAndID 查询指定工作流下的任务记录。
@@ -236,6 +266,38 @@ func (r *DomainTaskRepo) UpdateFields(ctx context.Context, taskID int64, data g.
 	return err
 }
 
+// UpdateFieldsIfStatus 在状态命中时更新任务字段。
+func (r *DomainTaskRepo) UpdateFieldsIfStatus(ctx context.Context, taskID int64, status string, data g.Map) (int64, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("id", taskID).
+		WhereNull("deleted_at")
+	if status != "" {
+		model = model.Where("status", status)
+	}
+	result, err := model.Data(data).Update()
+	if err != nil {
+		return 0, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows, nil
+}
+
+// UpdateFieldsIfStatuses 在状态命中集合时更新任务字段。
+func (r *DomainTaskRepo) UpdateFieldsIfStatuses(ctx context.Context, taskID int64, statuses []string, data g.Map) (int64, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("id", taskID).
+		WhereNull("deleted_at")
+	if len(statuses) > 0 {
+		model = model.WhereIn("status", statuses)
+	}
+	result, err := model.Data(data).Update()
+	if err != nil {
+		return 0, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows, nil
+}
+
 // UpdateByIDsStatuses 按任务 ID 集合和状态集合批量更新任务。
 func (r *DomainTaskRepo) UpdateByIDsStatuses(ctx context.Context, taskIDs []int64, statuses []string, data g.Map) error {
 	if len(taskIDs) == 0 {
@@ -249,6 +311,22 @@ func (r *DomainTaskRepo) UpdateByIDsStatuses(ctx context.Context, taskIDs []int6
 	}
 	_, err := model.Data(data).Update()
 	return err
+}
+
+// UpdateByWorkflowAndStatuses 按工作流和状态集合批量更新任务。
+func (r *DomainTaskRepo) UpdateByWorkflowAndStatuses(ctx context.Context, workflowRunID int64, statuses []string, data g.Map) (int64, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at")
+	if len(statuses) > 0 {
+		model = model.WhereIn("status", statuses)
+	}
+	result, err := model.Data(data).Update()
+	if err != nil {
+		return 0, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows, nil
 }
 
 // FindLatestByWorkflowAndAffectedResourceLike 查询最新命中 resourceRef 的领域任务。
@@ -270,6 +348,46 @@ func (r *DomainTaskRepo) FindLatestByWorkflowAndAffectedResourceLike(ctx context
 func (r *DomainTaskRepo) ListByWorkflowAndStatuses(ctx context.Context, workflowRunID int64, statuses []string, fields ...string) ([]g.Map, error) {
 	model := g.DB().Model(r.table()).Ctx(ctx).
 		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at")
+	if len(statuses) > 0 {
+		model = model.WhereIn("status", statuses)
+	}
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	records, err := model.All()
+	if err != nil {
+		return nil, err
+	}
+	return records.List(), nil
+}
+
+// ListByWorkflowBatchesAndStatusesOrdered 查询工作流下指定批次与状态集合的任务，按 batch_no/sort 升序返回。
+func (r *DomainTaskRepo) ListByWorkflowBatchesAndStatusesOrdered(ctx context.Context, workflowRunID int64, batchNos []int, statuses []string, fields ...string) ([]g.Map, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at").
+		OrderAsc("batch_no").
+		OrderAsc("sort")
+	if len(batchNos) > 0 {
+		model = model.WhereIn("batch_no", batchNos)
+	}
+	if len(statuses) > 0 {
+		model = model.WhereIn("status", statuses)
+	}
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	records, err := model.All()
+	if err != nil {
+		return nil, err
+	}
+	return records.List(), nil
+}
+
+// ListByStatuses 查询指定状态集合的任务。
+func (r *DomainTaskRepo) ListByStatuses(ctx context.Context, statuses []string, fields ...string) ([]g.Map, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
 		WhereNull("deleted_at")
 	if len(statuses) > 0 {
 		model = model.WhereIn("status", statuses)
@@ -342,6 +460,63 @@ func (r *DomainTaskRepo) CountByWorkflow(ctx context.Context, workflowRunID int6
 		Where("workflow_run_id", workflowRunID).
 		WhereNull("deleted_at").
 		Count()
+}
+
+// CountByWorkflowNotInStatuses 统计工作流下不在指定状态集合中的任务数。
+func (r *DomainTaskRepo) CountByWorkflowNotInStatuses(ctx context.Context, workflowRunID int64, statuses []string) (int, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		WhereNull("deleted_at")
+	if len(statuses) > 0 {
+		model = model.WhereNotIn("status", statuses)
+	}
+	return model.Count()
+}
+
+// CountByWorkflowBatchLessThanNotInStatuses 统计工作流下指定批次之前且不在给定状态集合中的任务数。
+func (r *DomainTaskRepo) CountByWorkflowBatchLessThanNotInStatuses(ctx context.Context, workflowRunID int64, maxBatch int, statuses []string) (int, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		Where("batch_no > 0").
+		Where("batch_no < ?", maxBatch).
+		WhereNull("deleted_at")
+	if len(statuses) > 0 {
+		model = model.WhereNotIn("status", statuses)
+	}
+	return model.Count()
+}
+
+// GetMinBatchNoByWorkflowStatusGreaterThan 查询工作流下命中状态且批次号大于给定值的最小批次号。
+func (r *DomainTaskRepo) GetMinBatchNoByWorkflowStatusGreaterThan(ctx context.Context, workflowRunID int64, status string, minBatchExclusive int) (int, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		Where("batch_no > ?", minBatchExclusive).
+		WhereNull("deleted_at")
+	if status != "" {
+		model = model.Where("status", status)
+	}
+	value, err := model.Min("batch_no")
+	if err != nil {
+		return 0, err
+	}
+	return int(value), nil
+}
+
+// GetMinBatchNoByWorkflowBatchLessThanNotInStatuses 查询工作流下指定批次之前且不在给定状态集合中的最小批次号。
+func (r *DomainTaskRepo) GetMinBatchNoByWorkflowBatchLessThanNotInStatuses(ctx context.Context, workflowRunID int64, maxBatch int, statuses []string) (int, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		Where("batch_no > 0").
+		Where("batch_no < ?", maxBatch).
+		WhereNull("deleted_at")
+	if len(statuses) > 0 {
+		model = model.WhereNotIn("status", statuses)
+	}
+	value, err := model.Min("batch_no")
+	if err != nil {
+		return 0, err
+	}
+	return int(value), nil
 }
 
 // ResetForRetry 将失败任务重置为 pending 并增加重试次数。

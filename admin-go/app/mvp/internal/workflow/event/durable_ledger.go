@@ -7,6 +7,7 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/utility/snowflake"
 )
 
@@ -33,39 +34,23 @@ type durableEventClaim struct {
 type noopDurableEventClaim struct{}
 
 var insertDurableEventLedgerFn = func(ctx context.Context, data g.Map) error {
-	_, err := g.DB().Model(durableEventLedgerTable).Ctx(ctx).Insert(data)
-	return err
+	return repo.NewWorkflowEventLedgerRepo().Insert(ctx, data)
 }
 
 var reviveDurableEventLedgerFn = func(ctx context.Context, scope, idempotencyKey string, evt Event, now time.Time) (int64, error) {
-	result, err := g.DB().Model(durableEventLedgerTable).Ctx(ctx).
-		Where("scope", scope).
-		Where("idempotency_key", idempotencyKey).
-		Where("status", durableEventLedgerStatusFailed).
-		Data(g.Map{
-			"event_id":        evt.EventID,
-			"workflow_run_id": evt.WorkflowRunID,
-			"event_type":      evt.EventType,
-			"attempt":         evt.Attempt,
-			"status":          durableEventLedgerStatusHandling,
-			"last_error":      nil,
-			"updated_at":      now,
-		}).
-		Update()
-	if err != nil {
-		return 0, err
-	}
-	rows, _ := result.RowsAffected()
-	return rows, nil
+	return repo.NewWorkflowEventLedgerRepo().ReviveFailedClaim(ctx, scope, idempotencyKey, g.Map{
+		"event_id":        evt.EventID,
+		"workflow_run_id": evt.WorkflowRunID,
+		"event_type":      evt.EventType,
+		"attempt":         evt.Attempt,
+		"status":          durableEventLedgerStatusHandling,
+		"last_error":      nil,
+		"updated_at":      now,
+	})
 }
 
 var updateDurableEventLedgerFn = func(ctx context.Context, scope, idempotencyKey string, data g.Map) error {
-	_, err := g.DB().Model(durableEventLedgerTable).Ctx(ctx).
-		Where("scope", scope).
-		Where("idempotency_key", idempotencyKey).
-		Data(data).
-		Update()
-	return err
+	return repo.NewWorkflowEventLedgerRepo().UpdateByScopeKey(ctx, scope, idempotencyKey, data)
 }
 
 // BeginDurableEventClaim 为同一 scope + idempotency_key 建立一次可恢复 claim。
@@ -140,14 +125,7 @@ func (c *durableEventClaim) MarkFailed(ctx context.Context, handleErr error) err
 }
 
 func trimLedgerError(handleErr error) string {
-	if handleErr == nil {
-		return ""
-	}
-	message := strings.TrimSpace(handleErr.Error())
-	if len(message) <= 500 {
-		return message
-	}
-	return message[:500]
+	return repo.TrimWorkflowEventLedgerError(handleErr)
 }
 
 func isDuplicateKeyErr(err error) bool {

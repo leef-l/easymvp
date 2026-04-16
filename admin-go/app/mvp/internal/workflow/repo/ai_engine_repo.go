@@ -44,6 +44,43 @@ func (r *AIEngineConfigRepo) GetByCode(ctx context.Context, engineCode string, f
 	return record.Map(), nil
 }
 
+// GetEnabledByCode 按引擎编码读取启用中的配置。
+func (r *AIEngineConfigRepo) GetEnabledByCode(ctx context.Context, engineCode string, fields ...string) (g.Map, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("engine_code", engineCode).
+		Where("status", 1).
+		WhereNull("deleted_at")
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	record, err := model.One()
+	if err != nil || record.IsEmpty() {
+		return nil, err
+	}
+	return record.Map(), nil
+}
+
+// ListEnabledCodes 查询所有启用中的引擎编码。
+func (r *AIEngineConfigRepo) ListEnabledCodes(ctx context.Context) ([]string, error) {
+	records, err := g.DB().Model(r.table()).Ctx(ctx).
+		Fields("engine_code").
+		Where("status", 1).
+		WhereNull("deleted_at").
+		All()
+	if err != nil {
+		return nil, err
+	}
+
+	codes := make([]string, 0, len(records))
+	for _, record := range records {
+		code := strings.TrimSpace(record["engine_code"].String())
+		if code != "" {
+			codes = append(codes, code)
+		}
+	}
+	return codes, nil
+}
+
 // SystemRoleAIEngineRepo 角色引擎授权仓储。
 type SystemRoleAIEngineRepo struct{}
 

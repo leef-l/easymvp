@@ -262,8 +262,8 @@ func appendRoleRuntimeRules(projectCategory, roleType, prompt string) string {
 	parts := []string{
 		strings.TrimSpace(prompt),
 		`## 工程铁律：数据访问与分层
-- 禁止在 controller、workflow、stage、review、acceptance、verification 等编排层直接调用 g.DB()、dao.* 或直接拼表读写
-- 所有数据库访问必须先抽象接口，再下沉到 repo 实现；上层只能依赖 service / interface
+- 禁止在 controller、workflow、stage、review、acceptance、verification 等编排层直接依赖底层数据库入口，包括 DB 原生句柄、dao.* 与直接拼表读写
+- 所有数据库访问必须先抽象契约，再下沉到 repo 实现；业务编排层只能依赖 repo / service 暴露的入口，不得新增 repo 之外的 DB 入口
 - 新增配置、状态、证据、角色定义等数据读写时，先补 repo 接口与数据契约，再接控制器和阶段逻辑
 - 如果发现存量代码存在直连 DB，本次新增代码不得继续复制该模式，至少要在当前改动范围内完成抽象收口`,
 	}

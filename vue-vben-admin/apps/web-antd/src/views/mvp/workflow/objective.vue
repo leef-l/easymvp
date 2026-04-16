@@ -27,6 +27,7 @@ import {
 import {
   getObjective,
   type ObjectiveData,
+  type ObjectiveSavePayload,
   saveObjective,
 } from '../../../api/mvp/workflow';
 
@@ -35,8 +36,9 @@ const projectId = ref<string>('');
 const loading = ref(false);
 const saving = ref(false);
 const isEdit = ref(false);
+type ObjectiveFormData = Partial<Omit<ObjectiveData, 'projectId' | 'technicalContract'>>;
 
-const defaultForm: Partial<ObjectiveData> = {
+const defaultForm: ObjectiveFormData = {
   deliveryGoal: '',
   qualityFloor: 0.8,
   tokenBudget: 0,
@@ -51,7 +53,8 @@ const defaultForm: Partial<ObjectiveData> = {
   maxSideEffectLevel: 'reversible',
 };
 
-const form = ref<Partial<ObjectiveData>>({ ...defaultForm });
+const form = ref<ObjectiveFormData>({ ...defaultForm });
+const technicalContract = ref<ObjectiveData['technicalContract'] | undefined>();
 
 const riskOptions = [
   { label: '低（保守）', value: 'low' },
@@ -77,12 +80,22 @@ async function loadObjective() {
   try {
     const res = await getObjective(projectId.value);
     form.value = { ...defaultForm };
+    technicalContract.value = undefined;
     if (res.objective) {
-      form.value = { ...form.value, ...res.objective };
+      const { technicalContract: nextTechnicalContract, projectId: _projectId, ...editableObjective } = res.objective;
+      form.value = { ...form.value, ...editableObjective };
+      technicalContract.value = nextTechnicalContract;
     }
   } finally {
     loading.value = false;
   }
+}
+
+function buildObjectiveSavePayload(data: ObjectiveFormData): ObjectiveSavePayload {
+  return {
+    projectID: projectId.value,
+    ...data,
+  };
 }
 
 async function handleSave() {
@@ -92,7 +105,7 @@ async function handleSave() {
   }
   saving.value = true;
   try {
-    await saveObjective({ projectID: projectId.value, ...form.value });
+    await saveObjective(buildObjectiveSavePayload(form.value));
     message.success('目标约束已保存');
     isEdit.value = false;
   } catch (error: any) {
@@ -107,6 +120,7 @@ watch(
   async (value) => {
     projectId.value = (value as string) ?? '';
     form.value = { ...defaultForm };
+    technicalContract.value = undefined;
     if (!projectId.value) return;
     await loadObjective();
   },
@@ -150,9 +164,34 @@ watch(
       show-icon
       style="margin-bottom: 16px"
     />
+    <Alert
+      type="info"
+      message="项目级硬约束由项目描述与最近用户指令自动抽取；本页保存目标层参数时不会覆盖这些硬约束。"
+      show-icon
+      style="margin-bottom: 16px"
+    />
 
     <Spin :spinning="loading">
       <Row :gutter="16">
+        <Col :span="24">
+          <Card title="项目级硬约束" style="margin-bottom: 16px">
+            <Descriptions :column="1" bordered size="small">
+              <DescriptionsItem label="禁止技术">
+                <span v-if="technicalContract?.forbiddenTechnologies?.length">
+                  {{ technicalContract.forbiddenTechnologies.join('、') }}
+                </span>
+                <span v-else>（未识别）</span>
+              </DescriptionsItem>
+              <DescriptionsItem label="必需技术">
+                <span v-if="technicalContract?.requiredTechnologies?.length">
+                  {{ technicalContract.requiredTechnologies.join('、') }}
+                </span>
+                <span v-else>（未识别）</span>
+              </DescriptionsItem>
+            </Descriptions>
+          </Card>
+        </Col>
+
         <!-- 交付目标 -->
         <Col :span="24">
           <Card title="交付目标" style="margin-bottom: 16px">

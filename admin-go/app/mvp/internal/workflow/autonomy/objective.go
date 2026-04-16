@@ -65,11 +65,16 @@ func (s *ObjectiveService) Load(ctx context.Context, projectID int64) (*ProjectO
 }
 
 // Check 执行目标层准入控制。
-func (s *ObjectiveService) Check(ctx context.Context, sit *Situation, obj *ProjectObjective, actionType string) (*AdmissionResult, error) {
+func (s *ObjectiveService) Check(ctx context.Context, sit *Situation, obj *ProjectObjective, req *DecisionRequest) (*AdmissionResult, error) {
 	res := &AdmissionResult{Allowed: true}
 	if obj == nil || sit == nil {
 		return res, nil
 	}
+	triggerSource := ""
+	if req != nil {
+		triggerSource = req.TriggerSource
+	}
+	budgetMetrics := resolveScopedBudgetMetrics(sit, req)
 
 	if obj.AutonomyLevel == "manual" {
 		return s.denied("autonomy_level_manual", "notify_human", true, &DecisionMeta{
@@ -89,21 +94,21 @@ func (s *ObjectiveService) Check(ctx context.Context, sit *Situation, obj *Proje
 		}), nil
 	}
 
-	if obj.MaxAutoRetries > 0 && sit.Health != nil && sit.Health.RetryCount >= obj.MaxAutoRetries && actionType == "task.failed" {
+	if obj.MaxAutoRetries > 0 && sit.Health != nil && budgetMetrics.retryCount >= obj.MaxAutoRetries && triggerSource == "task.failed" {
 		return s.denied("retry_limit_reached", "notify_human", true, &DecisionMeta{
 			Confidence:          0.9,
 			EvidenceSufficiency: 0.9,
 			Reversibility:       "full",
-			BlastRadius:         "stage",
+			BlastRadius:         budgetMetrics.scope,
 		}), nil
 	}
 
-	if obj.MaxAutoReworks > 0 && sit.Health != nil && sit.Health.ReworkRounds >= obj.MaxAutoReworks {
+	if obj.MaxAutoReworks > 0 && sit.Health != nil && budgetMetrics.reworkRounds >= obj.MaxAutoReworks {
 		return s.denied("rework_limit_reached", "notify_human", true, &DecisionMeta{
 			Confidence:          0.9,
 			EvidenceSufficiency: 0.85,
 			Reversibility:       "full",
-			BlastRadius:         "workflow",
+			BlastRadius:         budgetMetrics.scope,
 		}), nil
 	}
 

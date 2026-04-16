@@ -1,6 +1,6 @@
 # EasyMVP
 
-> 更新日期：2026-04-09
+> 更新日期：2026-04-13
 
 EasyMVP 是一个 AI 协作开发平台仓库。当前主线代码由 `system`、`ai`、`mvp` 三个 Go 服务和 `vue-vben-admin` 前端组成，核心能力包括 Workflow V2、统一执行器抽象、任务级 `git worktree` 隔离、飞书/Telegram 协作，以及 AI 模型与执行引擎配置管理。
 
@@ -67,26 +67,14 @@ docker compose --project-name easymvp --env-file docker/dev/.env -f docker/dev/d
 
 更多说明见 [docs/Docker开发环境说明.md](docs/Docker开发环境说明.md)。
 
-## 受限资源验证
+## CI 验证
 
-当前服务器可以执行 `web-antd` 的全量类型检查，但需要受控资源窗口，不能继续沿用 `512MB / 768MB / 1024MB / 1280MB` 这类过低堆上限。
+当前仓库不允许在本机直接执行测试或编译。后端测试、前端 typecheck/build、二进制构建与相关守卫统一交给 GitHub Actions。
 
-推荐入口：
+权威入口：
 
-```bash
-bash scripts/web-antd-typecheck-safe.sh
-```
-
-这条脚本会：
-
-- 检查 `MemAvailable`
-- 使用文件锁避免并发重复执行
-- 以低优先级运行
-- 默认使用 `1536MB` Node 堆执行 `vue-tsc --noEmit`
+- `.github/workflows/backend-guard.yml`
+- `.github/workflows/deploy.yml`
+- `.github/workflows/web-antd-guard.yml`
 
 当前 EasyMVP 主链还新增了一条硬约束：`category resolver / verification / acceptance / accept stage` 这些编排链路不得直接访问 DB，新增查询必须先下沉到 repo。
-
-可选环境变量：
-
-- `EASYMVP_TYPECHECK_HEAP_MB`
-- `EASYMVP_TYPECHECK_MIN_AVAILABLE_MB`

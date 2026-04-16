@@ -76,8 +76,11 @@ func TestBuildRoleSystemPromptAddsCodingImplementerRuntimeRules(t *testing.T) {
 	if !strings.Contains(prompt, "工程铁律：数据访问与分层") {
 		t.Fatalf("missing db layering iron law: %s", prompt)
 	}
-	if !strings.Contains(prompt, "禁止在 controller、workflow、stage、review、acceptance、verification 等编排层直接调用 g.DB()") {
+	if !strings.Contains(prompt, "禁止在 controller、workflow、stage、review、acceptance、verification 等编排层直接依赖底层数据库入口") {
 		t.Fatalf("missing direct db ban: %s", prompt)
+	}
+	if !strings.Contains(prompt, "业务编排层只能依赖 repo / service 暴露的入口") {
+		t.Fatalf("missing repo entrypoint rule: %s", prompt)
 	}
 	if !strings.Contains(prompt, "优先使用这些方式快速初始化") {
 		t.Fatalf("missing scaffold execution guidance: %s", prompt)

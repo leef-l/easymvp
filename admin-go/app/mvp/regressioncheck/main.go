@@ -10,6 +10,8 @@ import (
 
 	"easymvp/app/mvp/internal/regression"
 	workspacepkg "easymvp/app/mvp/internal/workspace"
+
+	_ "github.com/gogf/gf/contrib/drivers/mysql/v2"
 )
 
 var validateManifest = regression.ValidateManifest
@@ -19,6 +21,9 @@ var inspectRiskDeliveryPolicies = func() workspacepkg.RiskDeliveryPolicyReport {
 }
 
 func main() {
+	if strings.TrimSpace(os.Getenv("GITHUB_ACTIONS")) != "true" {
+		fail(fmt.Errorf("regressioncheck 仅允许在 GitHub Actions 中执行；请触发 .github/workflows/backend-guard.yml"))
+	}
 	if err := run(os.Args[1:], os.Stdout); err != nil {
 		fail(err)
 	}

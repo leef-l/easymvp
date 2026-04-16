@@ -67,7 +67,7 @@ func (s *StageService) StartStage(ctx context.Context, workflowRunID int64, stag
 	targetWfStatus := StageTypeToWorkflowStatus(stageType)
 	projectRepo := repo.NewProjectRepo()
 
-	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+	err := repo.WithTx(ctx, func(ctx context.Context, tx gdb.TX) error {
 		// 1. 查当前 workflow_run 状态，校验状态迁移合法性
 		wfRun, err := s.workflowRunRepo().GetByIDMapInTx(ctx, tx, workflowRunID, "id", "project_id", "status")
 		if err != nil {
@@ -406,7 +406,7 @@ func (s *StageService) ForceStartStage(ctx context.Context, workflowRunID int64,
 	}
 
 	var projectID int64
-	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+	err := repo.WithTx(ctx, func(ctx context.Context, tx gdb.TX) error {
 		wfRun, err := s.workflowRunRepo().GetByIDMapInTx(ctx, tx, workflowRunID, "id", "project_id")
 		if err != nil {
 			return fmt.Errorf("查询 workflow_run 失败: %w", err)

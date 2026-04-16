@@ -114,7 +114,13 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 	// 2. Phase A：统一态势感知 + 目标层准入
 	var sit *Situation
 	if dc.sensor != nil && req.WorkflowRunID > 0 && (dc.isPatrolEnabled(ctx) || dc.isObjectiveEnabled(ctx)) {
-		if perceived, err := dc.sensor.Perceive(ctx, req.WorkflowRunID); err != nil {
+		perceiveFn := dc.sensor.Perceive
+		if req.DomainTaskID > 0 {
+			perceiveFn = func(ctx context.Context, workflowRunID int64) (*Situation, error) {
+				return dc.sensor.PerceiveForTask(ctx, workflowRunID, req.DomainTaskID)
+			}
+		}
+		if perceived, err := perceiveFn(ctx, req.WorkflowRunID); err != nil {
 			g.Log().Warningf(ctx, "[DecisionCenter] Situation 感知失败: wfRun=%d err=%v", req.WorkflowRunID, err)
 		} else {
 			sit = perceived
@@ -125,7 +131,7 @@ func (dc *DecisionCenter) Decide(ctx context.Context, req *DecisionRequest) *Dec
 		obj, err := dc.objectiveSvc.Load(ctx, req.ProjectID)
 		if err != nil {
 			g.Log().Warningf(ctx, "[DecisionCenter] Objective 加载失败: project=%d err=%v", req.ProjectID, err)
-		} else if admission, _ := dc.objectiveSvc.Check(ctx, sit, obj, req.TriggerSource); admission != nil && !admission.Allowed {
+		} else if admission, _ := dc.objectiveSvc.Check(ctx, sit, obj, req); admission != nil && !admission.Allowed {
 			return dc.handleAdmissionDenied(ctx, req, admission, sit, createdBy, deptID)
 		}
 	}

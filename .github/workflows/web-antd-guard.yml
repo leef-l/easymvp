@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/web-antd-guard.yml'
+      - 'scripts/github-actions-write-latest-json.sh'
       - 'scripts/web-antd-*.sh'
       - 'vue-vben-admin/**'
   pull_request:
     paths:
       - '.github/workflows/web-antd-guard.yml'
+      - 'scripts/github-actions-write-latest-json.sh'
       - 'scripts/web-antd-*.sh'
       - 'vue-vben-admin/**'
   workflow_dispatch:
@@ -26,7 +28,6 @@ on:
           - verify-build
           - workflow-bundle
           - entry-bundles
-          - source-bundles
 
 env:
   NODE_IMAGE: 'node:22-bookworm'
@@ -43,70 +44,24 @@ jobs:
         include:
           - mode: full-typecheck
             label: web-antd full typecheck
+            kind: lint
             artifact_path: ''
-            upload_artifact: false
-            shard_index: 0
-            shard_total: 0
           - mode: full-build
             label: web-antd full production build
+            kind: build
             artifact_path: vue-vben-admin/apps/web-antd/dist
-            upload_artifact: true
-            shard_index: 0
-            shard_total: 0
           - mode: verify-build
             label: web-antd verification build
+            kind: build
             artifact_path: vue-vben-admin/apps/web-antd/dist-verify
-            upload_artifact: true
-            shard_index: 0
-            shard_total: 0
           - mode: workflow-bundle
             label: web-antd workflow bundle build
-            artifact_path: vue-vben-admin/dist-workflow-verify
-            upload_artifact: true
-            shard_index: 0
-            shard_total: 0
+            kind: build
+            artifact_path: vue-vben-admin/apps/web-antd/dist-workflow-verify
           - mode: entry-bundles
             label: web-antd workflow entry bundles
-            artifact_path: vue-vben-admin/dist-entry-verify-*
-            upload_artifact: true
-            shard_index: 0
-            shard_total: 0
-          - mode: source-bundles
-            label: web-antd full-source bundle shard 1/6
-            artifact_path: ''
-            upload_artifact: false
-            shard_index: 1
-            shard_total: 6
-          - mode: source-bundles
-            label: web-antd full-source bundle shard 2/6
-            artifact_path: ''
-            upload_artifact: false
-            shard_index: 2
-            shard_total: 6
-          - mode: source-bundles
-            label: web-antd full-source bundle shard 3/6
-            artifact_path: ''
-            upload_artifact: false
-            shard_index: 3
-            shard_total: 6
-          - mode: source-bundles
-            label: web-antd full-source bundle shard 4/6
-            artifact_path: ''
-            upload_artifact: false
-            shard_index: 4
-            shard_total: 6
-          - mode: source-bundles
-            label: web-antd full-source bundle shard 5/6
-            artifact_path: ''
-            upload_artifact: false
-            shard_index: 5
-            shard_total: 6
-          - mode: source-bundles
-            label: web-antd full-source bundle shard 6/6
-            artifact_path: ''
-            upload_artifact: false
-            shard_index: 6
-            shard_total: 6
+            kind: build
+            artifact_path: vue-vben-admin/apps/web-antd/dist-entry-verify-*
     name: ${{ matrix.label }}
     steps:
       - uses: actions/checkout@v4
@@ -160,8 +115,6 @@ jobs:
             --memory="1g" \
             --memory-swap="1g" \
             -e MODE="$MODE" \
-            -e EASYMVP_WEB_ANTD_SHARD_INDEX="${{ matrix.shard_index }}" \
-            -e EASYMVP_WEB_ANTD_SHARD_TOTAL="${{ matrix.shard_total }}" \
             -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
             -e PNPM_STORE_DIR=/workspace/vue-vben-admin/.pnpm-store \
             -e EASYMVP_BUILD_HEAP_MB=768 \
@@ -196,9 +149,6 @@ jobs:
                 entry-bundles)
                   ./scripts/web-antd-ci-workflow-entry-bundles.sh
                   ;;
-                source-bundles)
-                  ./scripts/web-antd-ci-source-bundles.sh
-                  ;;
                 *)
                   echo "Unsupported mode: $MODE" >&2
                   exit 2
@@ -211,10 +161,99 @@ jobs:
         run: |
           echo "Skip ${{ matrix.mode }} for workflow_dispatch target=${{ github.event.inputs.target }}"
 
+      - name: Record CI check result
+        if: always() && steps.selection.outputs.selected == 'true'
+        env:
+          CHECK_NAME: ${{ matrix.label }}
+          CHECK_KIND: ${{ matrix.kind }}
+          CHECK_MODE: ${{ matrix.mode }}
+          CHECK_STATUS: ${{ job.status }}
+        run: |
+          mkdir -p .tmp/web-antd-guard
+          python3 - <<'PY'
+import json
+import os
+
+path = os.path.join(".tmp", "web-antd-guard", f"{os.environ['CHECK_MODE']}.json")
+payload = {
+    "name": os.environ["CHECK_NAME"],
+    "kind": os.environ["CHECK_KIND"],
+    "status": os.environ["CHECK_STATUS"],
+    "summary": f"{os.environ['CHECK_NAME']}; job_result={os.environ['CHECK_STATUS']}",
+    "workflow": "web-antd-guard",
+    "job": os.environ["CHECK_MODE"],
+}
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(payload, fh, ensure_ascii=False, indent=2)
+    fh.write("\n")
+PY
+
+      - name: Upload CI check result
+        if: always() && steps.selection.outputs.selected == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-antd-ci-check-${{ matrix.mode }}
+          path: .tmp/web-antd-guard/${{ matrix.mode }}.json
+          if-no-files-found: ignore
+
       - name: Upload validation artifact
-        if: success() && steps.selection.outputs.selected == 'true' && matrix.upload_artifact == true
+        if: success() && steps.selection.outputs.selected == 'true' && matrix.artifact_path != ''
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.mode }}-artifact
           path: ${{ matrix.artifact_path }}
+          if-no-files-found: ignore
+
+  publish-ci-result:
+    needs: [web-antd-guard]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download CI check results
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: web-antd-ci-check-*
+          path: .tmp/web-antd-guard
+          merge-multiple: true
+
+      - name: Build web-antd latest.json
+        env:
+          EASYMVP_CI_OUTPUT: .easymvp/ci/latest.json
+          EASYMVP_CI_WORKFLOW: ${{ github.workflow }}
+          EASYMVP_CI_PIPELINE: web-antd-guard
+          EASYMVP_CI_RUN_ID: ${{ github.run_id }}
+          EASYMVP_CI_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EASYMVP_CI_SUMMARY: web-antd-guard GitHub Actions 结果
+        run: |
+          checks_json="$(
+            python3 - <<'PY'
+import glob
+import json
+
+checks = []
+for path in sorted(glob.glob(".tmp/web-antd-guard/*.json")):
+    with open(path, "r", encoding="utf-8") as fh:
+        payload = json.load(fh)
+    if isinstance(payload, dict):
+        checks.append(payload)
+
+print(json.dumps(checks, ensure_ascii=False))
+PY
+          )"
+          if [ "$checks_json" = "[]" ]; then
+            echo "No web-antd checks were selected for this run; skip latest.json generation."
+            exit 0
+          fi
+          export EASYMVP_CI_CHECKS_JSON="$checks_json"
+          ./scripts/github-actions-write-latest-json.sh
+          cat .easymvp/ci/latest.json
+
+      - name: Upload web-antd latest.json artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-antd-guard-ci-latest
+          path: .easymvp/ci/latest.json
           if-no-files-found: ignore

@@ -9,6 +9,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	"easymvp/app/mvp/internal/engine"
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/app/mvp/internal/workspace"
 )
 
@@ -27,11 +28,11 @@ func (e *AiderExecutor) NeedsWorkspace() bool { return true }
 
 // Execute 执行 Aider 任务。
 func (e *AiderExecutor) Execute(ctx context.Context, req *Request) *Result {
-	project, err := g.DB().Model("mvp_project").Ctx(ctx).Where("id", req.ProjectID).WhereNull("deleted_at").One()
-	if err != nil || project.IsEmpty() {
+	project, err := repo.NewProjectRepo().GetByID(ctx, req.ProjectID, "work_dir")
+	if err != nil || len(project) == 0 {
 		return &Result{Success: false, Error: fmt.Errorf("项目 %d 不存在或查询失败: %v", req.ProjectID, err)}
 	}
-	workDir := project["work_dir"].String()
+	workDir := g.NewVar(project["work_dir"]).String()
 
 	// 如果有 workspace 隔离，使用 worktree 路径
 	if req.Workspace != nil {
@@ -68,10 +69,9 @@ func (e *AiderExecutor) Execute(ctx context.Context, req *Request) *Result {
 
 	// 从引擎配置读取超时，与其他执行器保持一致
 	timeoutSeconds := 1800
-	engineCfg, cfgErr := g.DB().Model("ai_engine_config").Ctx(ctx).
-		Where("engine_code", "aider").Where("status", 1).WhereNull("deleted_at").One()
-	if cfgErr == nil && !engineCfg.IsEmpty() && engineCfg["timeout_seconds"].Int() > 0 {
-		timeoutSeconds = engineCfg["timeout_seconds"].Int()
+	engineCfg, cfgErr := repo.NewAIEngineConfigRepo().GetEnabledByCode(ctx, "aider", "timeout_seconds")
+	if cfgErr == nil && len(engineCfg) > 0 && g.NewVar(engineCfg["timeout_seconds"]).Int() > 0 {
+		timeoutSeconds = g.NewVar(engineCfg["timeout_seconds"]).Int()
 	}
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
@@ -133,21 +133,17 @@ type chatReplySnapshot struct {
 }
 
 var loadChatReplySnapshot = func(ctx context.Context, replyID int64) (chatReplySnapshot, error) {
-	reply, err := g.DB().Model("mvp_message").Ctx(ctx).
-		Where("id", replyID).
-		WhereNull("deleted_at").
-		Fields("status, content").
-		One()
+	reply, err := repo.NewMessageRepo().GetByID(ctx, replyID, "status", "content")
 	if err != nil {
 		return chatReplySnapshot{}, err
 	}
-	if reply.IsEmpty() {
+	if len(reply) == 0 {
 		return chatReplySnapshot{}, fmt.Errorf("chat reply %d 不存在", replyID)
 	}
 
 	return chatReplySnapshot{
-		Status:  strings.TrimSpace(reply["status"].String()),
-		Content: reply["content"].String(),
+		Status:  strings.TrimSpace(g.NewVar(reply["status"]).String()),
+		Content: g.NewVar(reply["content"]).String(),
 	}, nil
 }
 

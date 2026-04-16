@@ -142,6 +142,45 @@ func (r *WorkflowRunRepo) ListByStatuses(ctx context.Context, statuses []string,
 	return records.List(), nil
 }
 
+// ListByIDs 查询指定工作流运行集合。
+func (r *WorkflowRunRepo) ListByIDs(ctx context.Context, workflowRunIDs []int64, fields ...string) ([]g.Map, error) {
+	if len(workflowRunIDs) == 0 {
+		return nil, nil
+	}
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		WhereIn("id", workflowRunIDs).
+		WhereNull("deleted_at")
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	records, err := model.All()
+	if err != nil {
+		return nil, err
+	}
+	return records.List(), nil
+}
+
+// ListByIDsStatuses 查询指定工作流集合内命中状态集合的记录。
+func (r *WorkflowRunRepo) ListByIDsStatuses(ctx context.Context, workflowRunIDs []int64, statuses []string, fields ...string) ([]g.Map, error) {
+	if len(workflowRunIDs) == 0 {
+		return nil, nil
+	}
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		WhereIn("id", workflowRunIDs).
+		WhereNull("deleted_at")
+	if len(statuses) > 0 {
+		model = model.WhereIn("status", statuses)
+	}
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	records, err := model.All()
+	if err != nil {
+		return nil, err
+	}
+	return records.List(), nil
+}
+
 // ListLatestByProjects 查询项目集合下各自最新一条工作流运行。
 func (r *WorkflowRunRepo) ListLatestByProjects(ctx context.Context, projectIDs []int64, fields ...string) ([]g.Map, error) {
 	if len(projectIDs) == 0 {

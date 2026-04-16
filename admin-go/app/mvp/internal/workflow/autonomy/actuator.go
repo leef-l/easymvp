@@ -168,7 +168,9 @@ func (a *Actuator) summarizeSituation(sit *Situation) string {
 		m["failureRate"] = sit.Health.RecentFailureRate
 		m["consecutiveFailures"] = sit.Health.ConsecutiveFailures
 		m["retryCount"] = sit.Health.RetryCount
+		m["taskRetryCount"] = sit.Health.TaskRetryCount
 		m["reworkRounds"] = sit.Health.ReworkRounds
+		m["taskReworkRounds"] = sit.Health.TaskReworkRounds
 	}
 	if sit.Resource != nil {
 		m["tokensConsumed"] = sit.Resource.TokensConsumed

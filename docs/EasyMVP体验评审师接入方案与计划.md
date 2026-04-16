@@ -1,6 +1,15 @@
 # EasyMVP 体验评审师接入方案与计划
 
-更新日期：2026-04-11
+更新日期：2026-04-12
+
+## 0. 当前状态（2026-04-12）
+
+按“最小闭环”口径，本专题已经完成代码层接入：
+
+- 已为 `software_dev / game_dev` 补齐 `experience_reviewer/max` 默认预设
+- 默认预设统一绑定启用模型 `315100000000000007 (hunyuan-turbos)`
+- 系统自检已新增体验评审师 readiness 检查，校验预设存在、`model_id` 非 0、模型记录存在且启用
+- 质量标准、acceptance 规则、默认提示词和前端角色定义原有支持继续保留，无需新增 schema / stage / 前端硬编码
 
 ## 1. 背景与目标
 
@@ -46,27 +55,27 @@
 5. 前端角色定义兜底也已经带上该角色。
    - `vue-vben-admin/apps/web-antd/src/views/mvp/role-definitions.ts`
 
-### 2.2 当前真正缺的不是定义，而是可运行闭环
+### 2.2 此前真正缺的不是定义，而是可运行闭环
 
-当前主缺口有四个：
+截至 2026-04-12，这条专题的关键缺口已经补齐，当前状态如下：
 
-1. 默认角色预设 seed 没补齐。
+1. 默认角色预设 seed 已补齐。
    - `admin-go/manifest/sql/seed/mysql_seed.sql`
-   - 当前 seed 中没有 `experience_reviewer`
+   - 已新增 `software_dev / game_dev -> experience_reviewer/max`
 
-2. 系统自检没有覆盖体验评审师就绪性。
+2. 系统自检已覆盖体验评审师就绪性。
    - `admin-go/app/mvp/internal/controller/chat/workflow_system_check.go`
-   - 现在只检查架构师和实施员模型/预设
+   - 当前会单独检查体验评审师默认预设与模型可用性
 
-3. V2 默认预设解析依赖 `mvp_role_preset`，不是只靠角色注册表。
+3. V2 默认预设解析仍然依赖 `mvp_role_preset`，不是只靠角色注册表。
    - `admin-go/app/mvp/internal/workflow/repo/project_role_repo.go`
-   - `GetProjectRoleByLevel(...)` 的默认回退来源是分类默认预设
+   - `GetProjectRoleByLevel(...)` 的默认回退来源仍是分类默认预设，这也是本次必须补 seed 的根因
 
-4. 模型绑定不能留空。
+4. 模型绑定仍然不能留空。
    - `admin-go/app/mvp/internal/engine/role_resolver.go`
-   - `ResolveProjectModelInfo(...)` 在 `model_id=0` 时会直接失败
+   - `ResolveProjectModelInfo(...)` 在 `model_id=0` 时会直接失败，所以本次新增预设全部绑定了非 0 模型
 
-这意味着：即便角色定义、提示词、质量标准都已存在，只要默认预设里没有可解析的 `experience_reviewer`，验收链路仍然会报缺角色或直接无法解析模型。
+结论已经从“缺闭环”变成“闭环已补齐，后续只需按正常验证流程继续跟进环境实跑”。
 
 ## 3. 关键结论
 

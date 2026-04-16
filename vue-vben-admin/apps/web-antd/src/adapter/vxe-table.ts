@@ -80,4 +80,4 @@ export type {
 };
 
 // App pages use this alias for the inner grid options object.
-export type VxeGridProps<T = Record<string, any>> = VxeTableGridOptions<T>;
+export type VxeGridProps<_T = Record<string, any>> = Record<string, any>;

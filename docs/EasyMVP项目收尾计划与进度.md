@@ -2,25 +2,11 @@
 
 > 更新时间：2026-04-13
 >
-> 目的：把当前工作树中已经启动但尚未完全收口的主线能力持续推进到可编译、可验证、可交付状态。该文档在本轮收尾过程中持续更新，避免中断后失去上下文。
+> 目的：记录当前收尾状态、验证约束、文档治理结果与下一批次排期，避免在长链路推进中丢失上下文。
 >
-> 约束（已更新）：`web-antd` 单次 full `vue-tsc/vite build` 在 `1 core / 1G` 下仍不可行；本轮最终验收口径已切换为 GitHub Actions 下的 `1 core / 1G` 全源码分片 verify bundle guard，并以本文档 `2026-04-13 收口结论` 为准。
+> 约束：所有测试与编译统一只走 GitHub Actions；不允许在宿主机、本地开发机或 AI 会话中直接执行 `go test`、`go build`、`pnpm build`、`pnpm exec vite build`、`pnpm exec vue-tsc`、`npm/pnpm test`、`docker build`。仓库内 `scripts/web-antd-*-safe.sh` 仅保留为历史受控脚本资产，不再作为人工执行入口。
 
-## 2026-04-13 收口结论
-
-本轮最后一个前端阻塞已经收口，`EasyMVP` 当前主线能力全部完成。
-
-- GitHub Actions `Web Antd Guard` 已扩展为 `9` 个 job，在 `1 core / 1G` 约束下同时覆盖：
-  - `verify-build`
-  - `workflow-bundle`
-  - `workflow entry bundles`
-  - `vue-vben-admin/apps/web-antd/src/**/*.{vue,ts,tsx}` 共 `174` 个源文件的 `6` 分片逐文件 verify bundle
-- 实际通过 run：[`24314526616`](https://github.com/leef-l/easymvp/actions/runs/24314526616)
-- 实际结论：
-  - 单次 full `vue-tsc --noEmit -p apps/web-antd/tsconfig.json` 在 `1C/1G` 下会 OOM
-  - 单次 full `vite build --mode production` 在 `1C/1G` 下会被系统终止
-  - 经确认，本轮正式接受“全源码分片 guard”作为前端最终验收口径
-- 当前收尾状态：文档所列 `5` 项收尾目标已全部完成，无新的主线阻塞项
+> 历史说明：本文档中 2026-04-13 之前出现的 `go test`、`validate.sh`、`web-antd-*-safe.sh`、`mode:auto/local/docker*` 等记录均属于历史证据或迁移轨迹，不代表当前执行入口；现行口径只认 GitHub Actions workflow run、日志、artifact 与 `.easymvp/ci/latest.json`。
 
 ## 2026-04-11 暂停说明
 
@@ -30,42 +16,80 @@
 
 恢复这条主线时，优先按该文档里的“推荐恢复顺序”和“恢复工作前的检查项”执行，不要只根据对话上下文继续。
 
-## 1. 收尾目标
+## 1. 当前阶段目标（2026-04-12 重排）
 
-本轮必须完成以下 5 项，未全部完成前不视为收尾完成：
+原始 5 项收尾目标已经完成，当前阶段不再继续把已落地主线重新列为“待做项”。截至当前，阶段目标已收缩为：
 
-1. 盘点当前未完成改动，识别编译、测试和联动缺口
-2. 补齐并维护项目计划与进度文档
-3. 收口后端 `workflow / acceptance / workspace / provider routing` 主链实现
-4. 收口前端工作流控制台对应接口与页面
-5. 完成至少一轮后端、前端验证，并回写最终结果
+1. 收口 `web-antd` 在 `1 core / 1G` 限制下的验证失败点
+2. 继续维护 `docs/` 主入口、专项基线和验证记录口径一致
+
+## 1.1 当前文档主入口
+
+- [README](./README.md)：文档索引与状态说明
+- [EasyMVP项目收尾计划与进度](./EasyMVP项目收尾计划与进度.md)：当前收尾、验证约束与剩余风险主入口
+- [EasyMVP研发执行版](./EasyMVP研发执行版.md)：当前研发排期与近期任务主入口
+- [系统机制类问题彻底根治计划](./系统机制类问题彻底根治计划.md)、[Watchdog双保险实施计划](./Watchdog双保险实施计划.md)、[EasyMVP直连DB收口暂停说明](./EasyMVP直连DB收口暂停说明.md)：已完成基线与防回退入口
 
 ## 2. 当前状态快照
 
 ### 2.1 工作流
 
-- 状态：本轮收尾完成
+- 状态：代码主链收尾完成；当前阶段收尾未完成
 - 范围：`workflow` 控制器拆分、验收闭环、workspace 交付元数据、轨迹/回放/评测视图
 - 当前已知问题：
-  - 无主线阻塞项
-  - `web-antd` 的 `1C/1G` 验收口径已改为 GitHub Actions 分片 guard，见本文档 `2026-04-13 收口结论`
+  - 主链后端已通过测试，前端按约束完成静态联动收口
+  - 系统机制专项文档中的 `4.9 / 4.10 / 4.15 / 直连 DB 收口` 已补齐，当前不再存在后端主链级待根治项
+  - `objective / situation / dashboard / execution / review / accept / verification / autonomy` 8 个工作流页面已在 `1 core / 1G` 下通过单入口类型检查
+  - 当前剩余主阻塞已收缩到 `web-antd` 在 `1 core / 1G` 限制下无法完成 full typecheck/build
 
 ### 2.2 进度总览
 
 | 序号 | 任务 | 状态 | 备注 |
 |------|------|------|------|
-| 1 | 盘点当前未完成改动、识别编译/测试缺口 | 已完成 | 已完成仓库状态、diff 范围、文档与新增控制器/页面梳理 |
-| 2 | 新增并维护项目计划进度文档 | 已完成 | 本文档已持续更新，文档索引已纳入 |
-| 3 | 补完后端工作流/验收/workspace 主链实现 | 已完成 | `go test ./app/mvp/... ./utility/provider/... ./app/ai/...` 通过 |
-| 4 | 补完前端工作流控制台对应页面与接口 | 已完成 | 已完成页面/接口静态对照，并修复项目切换刷新与阶段状态展示问题 |
-| 5 | 执行验证并回写最终进度 | 已完成 | 后端测试通过；前端 `web-antd` 的 GitHub Actions `1C/1G` 分片 guard 已在 run `24314526616` 全部通过 |
+| 1 | 文档索引与主入口整理 | 已完成 | `README`、本文档、`研发执行版` 与 `路线图` 已按当前状态重排 |
+| 2 | 当前阶段计划重排 | 已完成 | 已把已完成主线从“本周待启动”口径中剥离 |
+| 3 | `web-antd` 构建/类型检查验证 | 已执行，未收口 | full typecheck/build 已按 `1 core / 1G` 实跑但失败；8 个 workflow 页面已通过单入口类型检查 |
+| 4 | `validate.sh` / `regressioncheck` 守卫验证 | 已完成 | 守卫逻辑已转入 GitHub Actions `backend-guard`；历史本机通过记录仅保留为证据 |
+| 5 | 剩余专题能力收口 | 已完成 | `experience_reviewer` 已补默认预设、system-check readiness 与专题文档回写 |
 
-## 3. 执行策略
+### 2.3 当前剩余执行顺序（2026-04-12）
+
+当前剩余项不再按“大而泛”的主线描述，而按真正阻塞最终完成的顺序执行：
+
+1. 先处理 `web-antd` 在 `1 core / 1G` 限制下的验证失败
+   - 当前唯一权威入口是 [web-antd-guard.yml](../.github/workflows/web-antd-guard.yml)
+   - `scripts/web-antd-*-safe.sh` 仅保留为历史受控脚本资产，不再作为人工执行入口
+   - GitHub Actions 产物需统一回写/同步为 `.easymvp/ci/latest.json`，供验证阶段读取
+   - 当前已得到历史实跑结论：`vue-tsc` 在 `heap=768MB` 下 OOM，`heap=896MB` 下被 `1G` scope 终止；`vite build` 在 `transforming...` 阶段退出 `143`
+   - 当前已确认上述 8 个 `workflow` 页面可以通过单入口拆分验证；这条路径仍可作为 `web-antd-guard` 的受限 CI 验证策略
+   - 已静态补上 `EASYMVP_WEB_ANTD_VERIFY_BUILD=1`、`EASYMVP_WEB_ANTD_WORKFLOW_BUNDLE=1`、`EASYMVP_WEB_ANTD_BUNDLE_ENTRY=<entry>` 等 CI 专用降载模式，用于继续压低验证构建峰值
+   - 后续若继续坚持这条硬限制，仍需继续降低 full typecheck/build 峰值，而不是恢复本机执行
+2. 同步维护文档与验证记录
+   - 若 `web-antd-guard` 在 GitHub Actions 内完成复跑，需把结果同步回写到本文档、`README` 与 `研发执行版`
+   - 继续保持“测试与编译只认 GitHub Actions”这条工程铁律，不恢复本机执行口径
+
+### 2.4 当前状态判定
+
+- `workflow / acceptance / workspace / provider routing` 主链：已完成
+- 工作流控制台静态联动收口：已完成
+- 文档主入口与索引整理：已完成
+- 当前阶段全部收尾：未完成
+
+当前不能直接宣称“全部做完”，原因只剩一类：
+
+1. `web-antd` 已有受限拆分验证路径，但 full typecheck/build 当前仍无法在 `1 core / 1G` 限制下完整通过
+
+## 3. 执行策略与历史批次
 
 1. 以编译和测试结果为主线，不靠人工猜测“可能完成”
 2. 优先修复阻塞全量测试的低风险问题，再处理逻辑与联动问题
 3. 每完成一个阶段，必须回写本文档中的状态和日志
 4. 若发现新缺口，直接并入本文档，不另起临时 TODO
+
+说明：
+
+- `2.3` 和 `2.4` 是当前仍未完成的执行顺序与状态判定
+- `3.1` 之后的条目主要用于追溯已完成的历史批次，不再代表当前待执行项
 
 ## 3.1 本轮追加批次（2026-04-09）
 
@@ -628,18 +652,167 @@
   - 已新增 migration `10`，为 `coding / analysis / creative` 家族回填首批分类默认 `verification_profile_json`
   - `coding` 家族默认 profile 为 `{"mode":"auto"}`，保留 Docker-first 自动探测
   - `analysis / creative` 家族默认 profile 为 `{"mode":"local"}`，直接走本机验证 / 人工复核路径
+  - 注：以上为历史回填记录；当前已由 migration `12` 统一归一到 `{"mode":"github_actions"}`
   - migration 已执行完成，当前系统检查已达到 `gate 9/9, profile 9/9`
   - 已通过 EasyMVP 系统再次触发贪吃蛇项目验证：`verificationRunID=317752601615536128`，结果 `passed`
   - 最新验证证据已明确记录 `profileSource=category:software_dev` 与 `gateSource=category:software_dev`，说明分类级 profile 与 gate 都已进入真实验收链
+- 本轮第二十七批追加：
+  - 已补齐项目级硬约束 contract 下钻链路：`architect plan -> review precheck -> domain task instantiation -> objective_json merge` 现在消费同一份结构化约束
+  - 已补齐 `objective_guard` 的任务级预算判定，`retry / rework` 不再错误复用 workflow 总量压死后续新任务
+  - 已重新执行高档位后端验证：`go test ./app/mvp/... ./utility/provider/... ./app/ai/...`
+  - 当前后端主链、provider 路由与 `app/ai` 相关包均通过编译/测试，收尾文档里的后端验证口径已与真实代码状态重新对齐
+- 本轮第二十八批追加：
+  - 已继续提升验证强度，执行 `cd admin-go && go test ./...`
+  - `app/mvp / app/ai / app/system / utility/*` 当前 Go 包均通过整仓测试
+  - 当前后端剩余风险已进一步压缩为环境约束项，不再是 Go 代码主链或包级回归项
+- 本轮第二十九批追加：
+  - 已修正 `/workflow/situation-history` 的返回口径，控制器现在会把 `snapshot_data` 解包为前端实际消费的 `progress / health / resource / trend` 结构，不再直接回传原始快照表行
+  - `/workflow/situation` 已支持可选 `taskID`，可返回带任务焦点的自治预算视角；`/workflow/situation-history` 也支持按 `taskID` 过滤同任务焦点快照
+  - `web-antd` 的态势页已完成静态联动收口：支持 `taskId` 路由参数，并同时展示 workflow 总量与当前任务的 `retry / rework` 预算
+  - 已新增控制器纯逻辑回归，覆盖快照解包、坏 JSON 兜底和任务过滤逻辑；`cd admin-go && go test ./app/mvp/internal/controller/chat ./app/mvp/internal/workflow/autonomy` 与 `go test ./app/mvp/internal/workflow/... ./app/mvp/internal/controller/chat` 通过
+- 本轮第三十批追加：
+  - `workflow/objective` 接口已把 `technicalContract` 一并返回，控制台可直接看到当前项目识别出的 `required / forbidden technologies`
+  - `web-antd` 的目标层页面已补只读“项目级硬约束”区块，并明确提示“保存目标层参数不会覆盖硬约束”
+  - 已执行 `cd admin-go && go test ./app/mvp/internal/controller/chat ./app/mvp/internal/workflow/contract ./app/mvp/internal/workflow/autonomy`，通过
+- 本轮第三十一批追加：
+  - `web-antd` 执行控制台已新增“态势”入口，能直接带 `projectId / workflowRunId / taskId` 跳到任务焦点态势页
+  - 任务级预算从“后端内部可用”提升到“控制台可直接进入并查看”，前端静态联动又收掉一处手工拼参数缺口
+- 本轮第三十二批追加：
+  - 已在上述 `situation / objective / execution` 联动补丁后再次执行 `cd admin-go && go test ./...`
+  - 最新整仓 Go 测试仍为全绿，说明本轮新增的接口扩展、快照解包与控制台静态联动没有带出后端回归
+- 本轮第三十三批追加：
+  - 已收紧 `/workflow/situation-history` 的过滤语义：未传 `taskID` 时只返回 workflow 总量快照，避免把任务焦点快照混入通用历史视图
+  - 已补充控制器纯逻辑回归，覆盖“通用历史排除任务焦点快照”的边界
+  - `web-antd` 的目标层页面已把 `technicalContract` 从表单态与保存载荷中剥离，避免只读硬约束字段被一并回传到写接口
+  - 已再次执行 `cd admin-go && go test ./app/mvp/internal/controller/chat ./app/mvp/internal/workflow/autonomy` 与 `cd admin-go && go test ./...`，结果继续全绿
+- 本轮第三十四批追加：
+  - `web-antd` 的态势页已把“刷新态势”收敛为统一 `refreshDashboard` 入口，按钮刷新与路由切换都会同时拉取当前态势和快照历史
+  - 任务焦点模式下不再出现“上方态势已刷新、下方快照历史仍停留旧数据”的前端静态联动缺口
+  - 本批未执行 `web-antd` 构建或类型检查，仍保持当前服务器只做静态修正的约束；后端基线已通过 `cd admin-go && go test ./app/mvp/...`
+- 本轮第三十五批追加：
+  - 已修正 `/workflow/situation-history` 的分页过滤缺口：现在会分页拉取快照窗口并在攒够目标结果前持续过滤，不再出现“项目最新快照很多时，任务焦点历史被无关快照挤掉”的误空结果
+  - `workflow_run_id` 过滤已下推到 `SituationSnapshotRepo.ListByProjectIDWindow(...)`，控制器侧只保留 `taskID` 焦点过滤与快照解包
+  - `workflow/situation` 在传入 `taskID` 时不再先做一遍多余的 workflow 全量感知，避免一次请求里重复计算两套态势
+  - 已新增控制器纯逻辑回归，覆盖“跨页后才命中目标任务快照”的场景；`cd admin-go && go test ./app/mvp/internal/controller/chat ./app/mvp/internal/workflow/repo ./app/mvp/internal/workflow/autonomy` 与 `cd admin-go && go test ./app/mvp/...` 通过
+- 本轮第三十六批追加：
+  - `project-status` 接口已补充返回 `workflowRunID`，工作流仪表板不再需要靠其他页面间接推断当前运行实例
+  - 仪表板“快速导航”已新增“目标约束 / 态势仪表板”入口；进入态势页时会自动带上 `projectId + workflowRunId`
+  - `web-antd` 的态势页已统一用 `refreshLoading` 驱动主区块加载状态，并且缺少 `workflowRunId` 时不再误拉项目级快照历史
+  - 本批继续保持“仅做前端静态联动、不跑 `web-antd` 构建”的约束；后端已再次执行 `cd admin-go && go test ./app/mvp/...`，结果全绿
+- 本轮第三十七批追加：
+  - 工作流仪表板中的 `重试 / 跳过 / 全部重试 / 全部跳过` 现在都会触发整页 `loadAll()` 刷新，不再只更新失败任务列表
+  - 顶部总任务、失败数、阶段状态和进度条不再在人工介入后短时间停留旧值，仪表板的统计口径已和操作结果保持同步
+  - 项目切换时会先重置旧的仪表板状态，再加载新项目数据，避免切页过程中短暂显示上一个项目的残留信息
+  - 本批为纯前端静态联动修正，未执行 `web-antd` 构建或类型检查；静态检查 `git diff --check` 通过
+- 本轮第三十八批追加：
+  - 嵌入式 `execution / review / accept / verification` 子面板已统一补上 `changed` 事件，人工动作完成后会通知父级工作流仪表板刷新顶部统计和阶段状态
+  - `review / verification` 在项目切换时也会先清空旧数据，再加载新项目内容，避免短时间显示上一项目的审核/验证残留
+  - 这样工作流仪表板中的子面板动作和父级概览已经形成一致的刷新口径，不再出现“子页已变更、父级仍显示旧状态”的分裂
+  - 本批仍为纯前端静态联动修正，未执行 `web-antd` 构建或类型检查；静态检查 `git diff --check` 通过
+- 本轮第三十九批追加：
+  - `autonomy` 子面板中的 `approve / reject / triggerReplan` 也已纳入统一 `changed` 事件链路，父级工作流仪表板会同步刷新
+  - 到当前为止，仪表板内所有会直接改变工作流状态或阶段推进的子面板动作，都已具备“子页动作完成 -> 父级概览同步刷新”的一致行为
+  - `rework / timeline / regression` 仍保持只读展示，不需要额外的父级刷新回调
+  - 本批仍为纯前端静态联动修正，未执行 `web-antd` 构建或类型检查；静态检查 `git diff --check` 通过
+- 本轮第四十批追加：
+  - `review / accept / verification / autonomy` 在切换项目时，除了清主数据外，也会清空筛选条件、弹窗开关、驳回/返工原因、已选问题等临时 UI 状态
+  - 新项目页面不再继承上一个项目残留的 severity filter、驳回理由、返工弹窗或报告详情，跨项目状态隔离更完整
+  - 这批修正不改变业务接口，仅收紧控制台局部状态管理；仍未执行 `web-antd` 构建或类型检查
+  - 静态检查 `git diff --check` 通过
+- 本轮第四十一批追加：
+  - `dashboard / execution / review / accept / verification / autonomy / situation` 已统一补上请求版本保护，切换项目或路由后，旧请求回包不再反写新页面状态
+  - 这批修正重点收口“异步请求后返回覆盖当前项目数据”的前端竞态问题，避免控制台在快速切换项目时短时间闪回旧数据
+  - `dashboard` 的失败任务列表也已并入同一版本保护口径，不再出现主状态已切到新项目、失败任务仍被旧请求回填的分裂
+  - 本批仍为纯前端静态联动修正，未执行 `web-antd` 构建或类型检查；静态检查 `git diff --check` 通过
+- 本轮第四十二批追加：
+  - 已完成 `docs/README.md`、`EasyMVP项目收尾计划与进度.md`、`EasyMVP研发执行版.md`、`EasyMVP全面分析与优化路线图.md` 的统一整理，明确“主入口 / 已完成基线 / 专题规划 / 验证记录”四类口径
+  - 当前计划已从“补第一轮主链实现”切换为“补隔离环境验证、继续文档治理、收缩剩余专题能力”
+  - 不再把 `workflow` 控制器拆分、provider 协议路由、worktree 回写策略等已完成主线重新列为近期待启动任务
+  - 本批为纯文档整理；静态检查 `git diff --check` 通过
+- 本轮第四十三批追加：
+  - 已修正本文档内部“已完成 / 待执行”并存的状态冲突，明确拆成“代码主链收尾完成”和“当前阶段全部完成”两个判定层级
+  - 已新增“当前剩余执行顺序”，把收尾顺序固定为：`web-antd` 隔离验证 -> `validate.sh / regressioncheck` 守卫验证 -> `experience_reviewer` 专题收口
+  - 已把最终未完成项压缩为三个明确阻塞，不再用泛化的“还有一些收尾工作”表述
+  - 本批为纯文档修正；静态检查 `git diff --check` 通过
+- 本轮第四十四批追加：
+  - 已把第 3 节口径收敛为“执行策略与历史批次”，避免继续把旧批次记录误读为当前待执行事项
+  - 已明确：当前真正未完成的内容只看 `2.3 当前剩余执行顺序` 和 `2.4 当前状态判定`
+  - 本批为纯文档修正；静态检查 `git diff --check` 通过
+- 本轮第四十五批追加：
+  - 已新增 [scripts/web-antd-build-safe.sh](../scripts/web-antd-build-safe.sh)，把 `web-antd` 生产构建也纳入与类型检查一致的受控执行入口
+  - 当前 `web-antd` 的构建/类型检查口径已统一为：`NODE_OPTIONS` 堆上限、`pnpm child/workspace concurrency=1`、`nice/ionice`、内存门槛检查、单实例锁
+  - 已回写 `EasyMVP工程铁律`、`workflow-verification-docker` 和本文档，明确不允许直接裸跑高负载 `pnpm build`
+  - 本批为脚本与文档修正；静态检查 `git diff --check` 通过
+- 本轮第四十六批追加：
+  - 已修正 `test-workspaces/validate.sh` 的 GoFrame 配置入口，默认注入 `GF_GCFG_PATH=app/mvp/manifest/config` 与 `GF_GCFG_FILE=config.yaml`
+  - 已补 `admin-go/app/mvp/regressioncheck/main.go` 的 MySQL driver blank import，避免 `g.DB()` 初始化时缺驱动崩溃
+  - 现已通过：`bash ./test-workspaces/validate.sh`、`cd admin-go && go test ./app/mvp/regressioncheck`
+  - `validate.sh / regressioncheck` 这条守卫验证已从“待执行”收口为“已完成”
+- 本轮第四十七批追加：
+  - 已按受控脚本试跑 `web-antd` 构建/类型检查；当前实机可用内存 `1909MB`，低于脚本默认门槛 `2048MB`
+  - 两条脚本均按设计自动跳过，没有裸跑高负载 `pnpm` 命令，也没有把宿主机继续压满
+  - `web-antd` 这条剩余项当前不是“缺脚本”，而是“等待更空闲窗口或隔离验证环境”
+- 本轮第四十八批追加：
+  - 已补 `admin-go/manifest/sql/seed/mysql_seed.sql` 的 `software_dev / game_dev -> experience_reviewer/max` 默认预设，统一绑定启用模型 `315100000000000007`
+  - 已补 `workflow_system_check` 的体验评审师 readiness 检查，会校验默认预设存在、`model_id` 非 0、模型记录存在且启用
+  - 已补 `workflow_system_check_test` 的存在 / 缺失 / 模型失效断言，并回写 [EasyMVP体验评审师接入方案与计划](./EasyMVP体验评审师接入方案与计划.md)
+  - `experience_reviewer` 专题已从“当前剩余阻塞”收口为“已完成专题”
+- 本轮第四十九批追加：
+  - 已把 `web-antd` 两条受控脚本升级为硬限制模式：`systemd-run --scope + AllowedCPUs=0 + CPUQuota=100% + MemoryMax=1G + MemorySwapMax=0`
+  - 已完成首轮实跑：`./scripts/web-antd-typecheck-safe.sh` 在 `heap=768MB` 下触发 V8 OOM；保持 `1G cgroup`、把 heap 提到 `896MB` 后会被 scope 终止
+  - 已完成首轮构建实跑：`./scripts/web-antd-build-safe.sh` 在 `transforming...` 阶段被 `1G` 限制终止，退出 `143`
+  - 当前 `web-antd` 的剩余问题已从“未验证”切换为“已验证，但当前 full typecheck/build 无法在 1 core / 1G 下通过”
+- 本轮第五十批追加：
+  - 已新增 [scripts/web-antd-entry-typecheck-safe.sh](../scripts/web-antd-entry-typecheck-safe.sh) 的正式批量入口 [scripts/web-antd-workflow-pages-typecheck-safe.sh](../scripts/web-antd-workflow-pages-typecheck-safe.sh)
+  - 已在 `1 core / 1G` 硬限制下顺序通过：`objective / situation / dashboard / execution / review / accept / verification / autonomy`
+  - 当前 `web-antd` 的验证口径已从“只有 full typecheck/build”扩展为“full 验证失败 + workflow 页面可拆分验证”
+- 本轮第五十一批追加：
+  - 已新增 [scripts/web-antd-verify-build-safe.sh](../scripts/web-antd-verify-build-safe.sh)，用于在同样 `1 core / 1G` 限制下触发 `web-antd` 轻量验证构建
+  - 已补 `vue-vben-admin/apps/web-antd/vite.config.ts` 的 `EASYMVP_WEB_ANTD_VERIFY_BUILD=1` 静态开关，会关闭 `archiver / extraAppConfig / html / i18n / injectAppLoading / injectMetadata / license`
+  - 当前这批为纯静态收口，遵循“禁止编译”约束，尚未重新执行 `web-antd` 构建验证
+- 本轮第五十二批追加：
+  - 已新增 [scripts/web-antd-workflow-bundle-safe.sh](../scripts/web-antd-workflow-bundle-safe.sh)，用于在同样 `1 core / 1G` 限制下触发 `workflow` 最小 bundle 验证
+  - 已新增 [src/verify/workflow-bundle.ts](../vue-vben-admin/apps/web-antd/src/verify/workflow-bundle.ts)，会把 `workflow` 目录下的 `vue/ts/tsx` 模块与 `api/mvp/workflow` 纳入单独构建入口
+  - 已补 `vue-vben-admin/apps/web-antd/vite.config.ts` 的 `EASYMVP_WEB_ANTD_WORKFLOW_BUNDLE=1` 开关；当前这批仍为纯静态收口，未执行构建
+- 本轮第五十三批追加：
+  - 已新增 [scripts/web-antd-entry-bundle-safe.sh](../scripts/web-antd-entry-bundle-safe.sh)，用于在同样 `1 core / 1G` 限制下按单入口触发页面级 bundle 验证
+  - 已新增 [scripts/web-antd-workflow-entry-bundles-safe.sh](../scripts/web-antd-workflow-entry-bundles-safe.sh)，用于串行执行 `objective / situation / dashboard / execution / review / accept / verification / autonomy` 的页面级 bundle 验证
+  - 已补 `vue-vben-admin/apps/web-antd/vite.config.ts` 的 `EASYMVP_WEB_ANTD_BUNDLE_ENTRY` / `EASYMVP_WEB_ANTD_BUNDLE_OUT_DIR` 开关，使轻量验证构建可以进一步收窄到单页面入口
+  - 同步修正了本文档第 `5.2` 节的旧完成定义残留；当前这批仍为纯静态收口，未执行构建
+- 本轮第五十四批追加：
+  - 已补 [README.md](./README.md) 的“当前状态”区块，把 `web-antd` 受控验证脚本矩阵、`1 core / 1G` 资源约束和禁止裸跑口径补回主索引
+  - 本文档第 `5.2` 节要求的 `README` 同步口径现已收口，不再只在 `研发执行版 / 工程铁律 / 验证说明` 中单边存在
+  - 当前这批仍为纯文档治理，未执行 `pnpm` / `vite build` / `vue-tsc`
+- 本轮第五十五批追加：
+  - 已继续收紧 `vue-vben-admin/apps/web-antd/vite.config.ts` 的轻量验证模式：除关闭附加插件外，再禁用 `minify / cssMinify / reportCompressedSize / modulePreload / treeshake`
+  - `scripts/web-antd-verify-build-safe.sh`、`scripts/web-antd-workflow-bundle-safe.sh`、`scripts/web-antd-entry-bundle-safe.sh` 与 `scripts/web-antd-workflow-entry-bundles-safe.sh` 会自动复用这一层更轻的 Vite 构建口径
+  - 当前这批仍为纯静态压峰值，未执行构建
 - 当前剩余风险：
-  - 前端未做构建级验证，若后续解除约束，建议补一轮 `web-antd` 类型检查/构建验证
-  - `validate.sh` 未在当前服务器直接执行；如需脚本级确认，请在隔离验证环境运行
+  - `web-antd` 在当前强限制下仍无法完成 full typecheck/build；拆分类型检查、轻量验证构建、`workflow` 最小 bundle 和单页面 bundle 入口都已补上，但都还不能替代全量构建级验证
 
 ## 5. 完成定义
 
-满足以下条件后，本文档状态才能改为“本轮收尾完成”：
+### 5.1 代码主链收尾完成
+
+满足以下条件后，可判定“代码主链收尾完成”：
 
 1. 后端相关包通过编译，关键测试可执行
-2. 前端工作流页面与接口完成联动核对；如允许，再补类型检查或构建验证
-3. 本文档和文档索引已反映最终结果
-4. 未完成项被压缩到明确、可追踪、非主链阻塞范围
+2. 前端工作流页面与接口完成静态联动核对
+3. 文档主入口、专项基线与进度日志已能反映真实代码状态
+4. 后端主链剩余风险已压缩到环境约束或专题能力，而非主流程缺口
+
+当前状态：
+
+- 已满足
+
+### 5.2 当前阶段全部完成
+
+满足以下条件后，本文档顶部状态才能改为“当前阶段收尾完成”：
+
+1. `web-antd` 在 `1 core / 1G` 限制下至少完成一轮可追溯的受控验证，并把成功或失败结果回写到本文档
+2. 当前受限验证入口、资源约束和禁止裸跑口径已同步更新到 `README`、`研发执行版`、`工程铁律` 与相关验证说明
+3. 剩余未完成项已不再是当前阶段阻塞，或者已被正式移交到后续独立专题文档
+
+当前状态：
+
+- 未满足

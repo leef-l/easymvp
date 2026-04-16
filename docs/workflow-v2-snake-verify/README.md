@@ -2,13 +2,15 @@
 
 本目录记录 2026-04-09 对 React + GoFrame v2 贪吃蛇样例项目的重建、项目级验证和 Workflow V2 全链路完成验证材料。
 
+说明：本目录中的命令与“已通过”描述均为 2026-04-09 的历史验证记录。自 2026-04-13 起，仓库现行铁律已经切换为“测试与编译统一只走 GitHub Actions”，因此下文中的本机 `go test` / `npm run test` / `npm run build` 只作为历史证据保留，不再是当前执行入口。
+
 核心结论：
 
 - 样例项目目录：`/www/wwwroot/project/easymvp/test-workspaces/workflow-v2-snake-verify/repo`
 - Workflow V2 项目 `317610689273270272` 已完成
 - `project-status` 已返回 `workflowStatus=completed`、`currentStage=complete`
 - 验收已通过，`score=91`
-- 代码验证已通过：`go test ./...`、`npm run test -- --run`、`npm run lint`、`npm run build`
+- 历史代码验证记录：`go test ./...`、`npm run test -- --run`、`npm run lint`、`npm run build`
 
 主要文件：
 

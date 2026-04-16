@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -14,6 +15,7 @@ import (
 
 	"easymvp/app/mvp/internal/consts"
 	"easymvp/app/mvp/internal/engine"
+	"easymvp/app/mvp/internal/workflow/contract"
 	"easymvp/app/mvp/internal/workflow/qualitygate"
 	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/app/mvp/internal/workflow/resourcepath"
@@ -155,8 +157,14 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 	workDir := gconv.String(project["work_dir"])
 	projectCategory := gconv.String(project["project_category"])
 	family := engine.GetCategoryFamily(projectCategory)
+	projectContract, contractErr := contract.Load(ctx, projectID)
+	if contractErr != nil {
+		g.Log().Warningf(ctx, "[ReviewStage] 加载项目级硬约束失败: project=%d err=%v", projectID, contractErr)
+		projectContract = &contract.ProjectContract{}
+	}
 
 	result := &precheckResult{}
+	contractCoverageTexts := make([]string, 0, len(blueprints)*3)
 
 	// 构建名称集合
 	bpNames := make(map[string]bool, len(blueprints))
@@ -200,6 +208,12 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 					"affected_resources 格式非法: "+err.Error())
 				result.HasErrors = true
 			}
+		}
+		contractCoverageTexts = append(contractCoverageTexts, name, desc, strings.Join(resources, "\n"))
+		for _, conflict := range contract.DetectConflicts(projectContract, name, desc, strings.Join(resources, "\n")) {
+			s.createIssue(ctx, workflowRunID, stageRunID, planVersionID, bpID, "error", "project_contract_conflict", "precheck", name,
+				fmt.Sprintf("蓝图违反项目级硬约束: %s", conflict))
+			result.HasErrors = true
 		}
 		if family == engine.CategoryFamilyCoding {
 			for _, resource := range resourcepath.FindCodingDirectoryPlaceholders(resources) {
@@ -277,6 +291,10 @@ func (s *Service) runPrecheck(ctx context.Context, stageRunID, workflowRunID, pl
 	if shouldWarnMissingBrowserVerificationPlan(standard, hasBrowserPlan) {
 		s.createIssue(ctx, workflowRunID, stageRunID, planVersionID, 0, "warning", "missing_browser_verification_plan", "precheck", "",
 			"方案包含前端/客户端关键交互，但未规划浏览器级或端到端验证任务。生产级交付必须在 review 阶段明确关键用户路径验证任务。")
+	}
+	for _, missingTech := range contract.DetectMissingRequired(projectContract, contractCoverageTexts...) {
+		s.createIssue(ctx, workflowRunID, stageRunID, planVersionID, 0, "warning", "missing_required_project_contract", "precheck", "",
+			fmt.Sprintf("当前方案未显式覆盖项目要求的技术约束: %s", missingTech))
 	}
 	s.warnMissingStandardProjectRoles(ctx, workflowRunID, stageRunID, planVersionID, projectID, standard)
 

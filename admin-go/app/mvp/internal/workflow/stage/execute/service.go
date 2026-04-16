@@ -12,6 +12,7 @@ import (
 	"easymvp/app/mvp/internal/engine"
 	domainTask "easymvp/app/mvp/internal/workflow/domain/task"
 	"easymvp/app/mvp/internal/workflow/executor"
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/app/mvp/internal/workflow/scheduler"
 	"easymvp/app/mvp/internal/workspace"
 )
@@ -30,6 +31,10 @@ type Service struct {
 	stageCompleter      StageCompleter
 	executorRegistry    *executor.Registry
 	onAnalysisCompleted AnalysisCompletedFn
+	stageRunRepo        *repo.StageRunRepo
+	workflowRunRepo     *repo.WorkflowRunRepo
+	projectRepo         *repo.ProjectRepo
+	taskRepo            *repo.DomainTaskRepo
 }
 
 // NewService 创建执行阶段服务。
@@ -39,6 +44,10 @@ func NewService(ts *domainTask.TaskService, sched *scheduler.DomainTaskScheduler
 		scheduler:        sched,
 		stageCompleter:   sc,
 		executorRegistry: reg,
+		stageRunRepo:     repo.NewStageRunRepo(),
+		workflowRunRepo:  repo.NewWorkflowRunRepo(),
+		projectRepo:      repo.NewProjectRepo(),
+		taskRepo:         repo.NewDomainTaskRepo(),
 	}
 }
 
@@ -59,11 +68,11 @@ func (s *Service) BindExecuteStage(stageRunID, workflowRunID int64) {
 // InstantiateAndStart 将审核通过的蓝图实例化为领域任务并启动调度。
 func (s *Service) InstantiateAndStart(ctx context.Context, stageRunID int64, planVersionID int64) error {
 	// 获取 workflow_run_id
-	stageRun, err := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).WhereNull("deleted_at").One()
-	if err != nil || stageRun.IsEmpty() {
+	stageRun, err := s.stageRunRepo.GetByIDMap(ctx, stageRunID, "workflow_run_id")
+	if err != nil || len(stageRun) == 0 {
 		return fmt.Errorf("stage_run(%d) 不存在", stageRunID)
 	}
-	workflowRunID := stageRun["workflow_run_id"].Int64()
+	workflowRunID := g.NewVar(stageRun["workflow_run_id"]).Int64()
 
 	// 1. 实例化蓝图为领域任务
 	taskCount, err := s.taskSvc.InstantiateFromBlueprint(ctx, planVersionID, stageRunID, workflowRunID)
@@ -93,6 +102,9 @@ type domainTaskExecutor struct {
 	wsMgr               workspace.Manager
 	registry            *executor.Registry
 	onAnalysisCompleted AnalysisCompletedFn
+	workflowRunRepo     *repo.WorkflowRunRepo
+	projectRepo         *repo.ProjectRepo
+	taskRepo            *repo.DomainTaskRepo
 }
 
 func (s *Service) newDomainTaskExecutor(workflowRunID int64) *domainTaskExecutor {
@@ -102,6 +114,9 @@ func (s *Service) newDomainTaskExecutor(workflowRunID int64) *domainTaskExecutor
 		wsMgr:               workspace.NewGitWorktreeManager(),
 		registry:            s.executorRegistry,
 		onAnalysisCompleted: s.onAnalysisCompleted,
+		workflowRunRepo:     s.workflowRunRepo,
+		projectRepo:         s.projectRepo,
+		taskRepo:            s.taskRepo,
 	}
 }
 
@@ -112,13 +127,13 @@ func (s *Service) newCompletionCallback(stageRunID int64) scheduler.CompletionCa
 		g.Log().Infof(ctx, "[ExecuteStage] 所有任务完成, workflowRunID=%d", wfRunID)
 
 		// 压缩上下文
-		projectID, pidErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-			Where("id", wfRunID).Value("project_id")
+		workflowRun, pidErr := s.workflowRunRepo.GetByIDMap(ctx, wfRunID, "project_id")
 		if pidErr != nil {
 			g.Log().Warningf(ctx, "[ExecuteStage] 查询 project_id 失败: wfRunID=%d err=%v", wfRunID, pidErr)
 		}
-		if projectID.Int64() > 0 {
-			_ = engine.GetCompressor().CompressProjectContext(ctx, projectID.Int64())
+		projectID := g.NewVar(workflowRun["project_id"]).Int64()
+		if projectID > 0 {
+			_ = engine.GetCompressor().CompressProjectContext(ctx, projectID)
 		}
 
 		// 延时清理：扫描已超过保留期的 workspace（失败/取消态的 worktree 依赖此机制）。
@@ -170,45 +185,37 @@ func (s *Service) reconcileCompletionTransition(ctx context.Context, workflowRun
 		return fmt.Errorf("workflowRunID/stageRunID 不能为空")
 	}
 
-	stageRun, err := g.DB().Model("mvp_stage_run").Ctx(ctx).
-		Where("id", stageRunID).
-		WhereNull("deleted_at").
-		Fields("status").
-		One()
+	stageRun, err := s.stageRunRepo.GetByIDMap(ctx, stageRunID, "status")
 	if err != nil {
 		return fmt.Errorf("查询 execute stage_run 失败: %w", err)
 	}
-	if stageRun.IsEmpty() {
+	if len(stageRun) == 0 {
 		return fmt.Errorf("execute stage_run(%d) 不存在", stageRunID)
 	}
 
-	workflowRun, err := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("id", workflowRunID).
-		WhereNull("deleted_at").
-		Fields("status, current_stage, current_stage_run_id").
-		One()
+	workflowRun, err := s.workflowRunRepo.GetByIDMap(ctx, workflowRunID, "status", "current_stage", "current_stage_run_id")
 	if err != nil {
 		return fmt.Errorf("查询 workflow_run 失败: %w", err)
 	}
-	if workflowRun.IsEmpty() {
+	if len(workflowRun) == 0 {
 		return fmt.Errorf("workflow_run(%d) 不存在", workflowRunID)
 	}
 
 	plan := buildCompletionTransitionPlan(
-		stageRun["status"].String(),
-		workflowRun["status"].String(),
-		workflowRun["current_stage"].String(),
-		workflowRun["current_stage_run_id"].Int64(),
+		g.NewVar(stageRun["status"]).String(),
+		g.NewVar(workflowRun["status"]).String(),
+		g.NewVar(workflowRun["current_stage"]).String(),
+		g.NewVar(workflowRun["current_stage_run_id"]).Int64(),
 		stageRunID,
 	)
 	if !plan.completeStage && !plan.transition {
 		g.Log().Infof(ctx, "[ExecuteStage] completion reconcile skipped: workflowRunID=%d stageRunID=%d stage=%s workflow=%s/%s currentStageRunID=%d",
 			workflowRunID,
 			stageRunID,
-			stageRun["status"].String(),
-			workflowRun["status"].String(),
-			workflowRun["current_stage"].String(),
-			workflowRun["current_stage_run_id"].Int64(),
+			g.NewVar(stageRun["status"]).String(),
+			g.NewVar(workflowRun["status"]).String(),
+			g.NewVar(workflowRun["current_stage"]).String(),
+			g.NewVar(workflowRun["current_stage_run_id"]).Int64(),
 		)
 		return nil
 	}
@@ -236,23 +243,27 @@ func (e *domainTaskExecutor) ExecuteDomainTask(ctx context.Context, workflowRunI
 	}()
 
 	// 查任务详情
-	taskRecord, err := g.DB().Model("mvp_domain_task").Ctx(ctx).Where("id", taskID).WhereNull("deleted_at").One()
-	if err != nil || taskRecord.IsEmpty() {
+	taskRecord, err := e.taskRepo.GetRecordByID(ctx, taskID)
+	if err != nil || taskRecord == nil || taskRecord.IsEmpty() {
 		e.scheduler.OnTaskFailed(ctx, taskID, "任务不存在")
 		return
 	}
 
 	// 查 project_id
-	projectID, pidErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("id", workflowRunID).Value("project_id")
+	workflowRun, pidErr := e.workflowRunRepo.GetByIDMap(ctx, workflowRunID, "project_id")
 	if pidErr != nil {
 		e.handleFailure(ctx, taskID, fmt.Sprintf("查询 project_id 失败: %v", pidErr))
 		return
 	}
+	projectID := g.NewVar(workflowRun["project_id"]).Int64()
+	if projectID == 0 {
+		e.handleFailure(ctx, taskID, "工作流缺少 project_id")
+		return
+	}
 
-	roleType := taskRecord["role_type"].String()
-	executionMode := taskRecord["execution_mode"].String()
-	modelID := taskRecord["model_id"].Int64()
+	roleType := g.NewVar(taskRecord["role_type"]).String()
+	executionMode := g.NewVar(taskRecord["execution_mode"]).String()
+	modelID := g.NewVar(taskRecord["model_id"]).Int64()
 
 	// 从注册表获取执行器
 	exec, err := e.registry.MustGet(executionMode)
@@ -262,7 +273,7 @@ func (e *domainTaskExecutor) ExecuteDomainTask(ctx context.Context, workflowRunI
 	}
 
 	// 获取模型信息
-	modelInfo, err := engine.ResolveProjectModelInfo(ctx, projectID.Int64(), roleType, taskRecord["role_level"].String(), modelID)
+	modelInfo, err := engine.ResolveProjectModelInfo(ctx, projectID, roleType, g.NewVar(taskRecord["role_level"]).String(), modelID)
 	if err != nil {
 		e.handleFailure(ctx, taskID, err.Error())
 		return
@@ -271,15 +282,15 @@ func (e *domainTaskExecutor) ExecuteDomainTask(ctx context.Context, workflowRunI
 	// 如果执行器需要工作空间隔离，准备 worktree
 	var ws *workspace.TaskWorkspace
 	if exec.NeedsWorkspace() && e.wsMgr != nil {
-		project, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", projectID.Int64()).WhereNull("deleted_at").One()
+		project, projErr := e.projectRepo.GetByID(ctx, projectID, "work_dir")
 		if projErr != nil {
-			g.Log().Warningf(ctx, "[domainTaskExecutor] 查询项目失败: projectID=%d err=%v", projectID.Int64(), projErr)
+			g.Log().Warningf(ctx, "[domainTaskExecutor] 查询项目失败: projectID=%d err=%v", projectID, projErr)
 		}
-		workDir := project["work_dir"].String()
+		workDir := g.NewVar(project["work_dir"]).String()
 		ws, err = e.wsMgr.Prepare(ctx, workspace.PrepareRequest{
 			TaskID:        taskID,
 			WorkflowRunID: workflowRunID,
-			ProjectID:     projectID.Int64(),
+			ProjectID:     projectID,
 			WorkDir:       workDir,
 		})
 		if err != nil {
@@ -290,12 +301,12 @@ func (e *domainTaskExecutor) ExecuteDomainTask(ctx context.Context, workflowRunI
 
 	// 启动心跳
 	hbCtx, hbCancel := context.WithCancel(ctx)
-	go touchHeartbeatLoop(hbCtx, taskID)
+	go touchHeartbeatLoop(hbCtx, e.taskRepo, taskID)
 	defer hbCancel()
 
 	// 统一调用执行器
 	result := exec.Execute(ctx, &executor.Request{
-		ProjectID:     projectID.Int64(),
+		ProjectID:     projectID,
 		WorkflowRunID: workflowRunID,
 		TaskID:        taskID,
 		TaskRecord:    taskRecord,
@@ -313,19 +324,16 @@ func (e *domainTaskExecutor) ExecuteDomainTask(ctx context.Context, workflowRunI
 // handleSuccess 任务成功。
 func (e *domainTaskExecutor) handleSuccess(ctx context.Context, taskID int64, result string) {
 	now := gtime.Now()
-	res, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("id", taskID).Where("status", domainTask.StatusRunning).
-		Update(g.Map{
-			"status":       domainTask.StatusCompleted,
-			"result":       result,
-			"completed_at": now,
-			"updated_at":   now,
-		})
+	rows, err := e.taskRepo.UpdateFieldsIfStatus(ctx, taskID, domainTask.StatusRunning, g.Map{
+		"status":       domainTask.StatusCompleted,
+		"result":       result,
+		"completed_at": now,
+		"updated_at":   now,
+	})
 	if err != nil {
 		g.Log().Errorf(ctx, "[domainTaskExecutor] handleSuccess 更新失败: task=%d err=%v", taskID, err)
 		return
 	}
-	rows, _ := res.RowsAffected()
 	if rows == 0 {
 		// 任务已被并发改状态（failed/canceled/escalated），不推进后续流程
 		g.Log().Warningf(ctx, "[domainTaskExecutor] handleSuccess CAS 失败，任务已不在 running: task=%d", taskID)
@@ -334,24 +342,20 @@ func (e *domainTaskExecutor) handleSuccess(ctx context.Context, taskID int64, re
 
 	// 检查是否为 failure_analysis 任务 → 路由到 rework OnAnalysisCompleted
 	if e.onAnalysisCompleted != nil {
-		task, taskErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
-			Where("id", taskID).Fields("task_kind, stage_run_id").One()
+		task, taskErr := e.taskRepo.GetByIDMap(ctx, taskID, "task_kind", "stage_run_id")
 		if taskErr != nil {
 			g.Log().Warningf(ctx, "[domainTaskExecutor] 查询任务类型失败: task=%d err=%v", taskID, taskErr)
 		}
-		if !task.IsEmpty() && task["task_kind"].String() == "failure_analysis" {
-			stageRunID := task["stage_run_id"].Int64()
+		if len(task) > 0 && g.NewVar(task["task_kind"]).String() == "failure_analysis" {
+			stageRunID := g.NewVar(task["stage_run_id"]).Int64()
 			if err := e.onAnalysisCompleted(ctx, stageRunID, taskID); err != nil {
 				// 回调失败：回滚分析任务为 failed，让 watchdog 后续重试
 				g.Log().Errorf(ctx, "[domainTaskExecutor] OnAnalysisCompleted 失败，回滚分析任务: task=%d err=%v", taskID, err)
-				_, _ = g.DB().Model("mvp_domain_task").Ctx(ctx).
-					Where("id", taskID).
-					Where("status", domainTask.StatusCompleted).
-					Update(g.Map{
-						"status":     domainTask.StatusFailed,
-						"result":     fmt.Sprintf("rework 回调失败: %v", err),
-						"updated_at": gtime.Now(),
-					})
+				_, _ = e.taskRepo.UpdateFieldsIfStatus(ctx, taskID, domainTask.StatusCompleted, g.Map{
+					"status":     domainTask.StatusFailed,
+					"result":     fmt.Sprintf("rework 回调失败: %v", err),
+					"updated_at": gtime.Now(),
+				})
 				e.scheduler.OnTaskFailed(ctx, taskID, "rework callback failed: "+err.Error())
 				return
 			}
@@ -363,13 +367,11 @@ func (e *domainTaskExecutor) handleSuccess(ctx context.Context, taskID int64, re
 
 // handleFailure 任务失败。
 func (e *domainTaskExecutor) handleFailure(ctx context.Context, taskID int64, errMsg string) {
-	if _, upErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("id", taskID).Where("status", domainTask.StatusRunning).
-		Update(g.Map{
-			"status":     domainTask.StatusFailed,
-			"result":     errMsg,
-			"updated_at": gtime.Now(),
-		}); upErr != nil {
+	if _, upErr := e.taskRepo.UpdateFieldsIfStatus(ctx, taskID, domainTask.StatusRunning, g.Map{
+		"status":     domainTask.StatusFailed,
+		"result":     errMsg,
+		"updated_at": gtime.Now(),
+	}); upErr != nil {
 		g.Log().Errorf(ctx, "[domainTaskExecutor] handleFailure 更新状态失败: task=%d err=%v", taskID, upErr)
 	}
 	e.scheduler.OnTaskFailed(ctx, taskID, errMsg)
@@ -377,12 +379,11 @@ func (e *domainTaskExecutor) handleFailure(ctx context.Context, taskID int64, er
 
 // touchHeartbeatLoop 定期更新 domain_task 的 heartbeat_at。
 // 启动时立即写一次，之后每 30s 更新。
-func touchHeartbeatLoop(ctx context.Context, taskID int64) {
+func touchHeartbeatLoop(ctx context.Context, taskRepo *repo.DomainTaskRepo, taskID int64) {
 	// 立即写一次心跳，消除启动空窗期
-	_, _ = g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("id", taskID).
-		Where("status", domainTask.StatusRunning).
-		Update(g.Map{"heartbeat_at": gtime.Now()})
+	if taskRepo != nil {
+		_, _ = taskRepo.UpdateFieldsIfStatus(ctx, taskID, domainTask.StatusRunning, g.Map{"heartbeat_at": gtime.Now()})
+	}
 
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -392,10 +393,9 @@ func touchHeartbeatLoop(ctx context.Context, taskID int64) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			_, _ = g.DB().Model("mvp_domain_task").
-				Where("id", taskID).
-				Where("status", domainTask.StatusRunning).
-				Update(g.Map{"heartbeat_at": gtime.Now()})
+			if taskRepo != nil {
+				_, _ = taskRepo.UpdateFieldsIfStatus(ctx, taskID, domainTask.StatusRunning, g.Map{"heartbeat_at": gtime.Now()})
+			}
 		}
 	}
 }

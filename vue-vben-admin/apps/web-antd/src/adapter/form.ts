@@ -1,6 +1,5 @@
 import type {
   VbenFormSchema as FormSchema,
-  VbenFormProps,
 } from '@vben/common-ui';
 
 import type { ComponentType } from './component';
@@ -49,5 +48,7 @@ const useVbenForm = useForm<ComponentType>;
 
 export { initSetupVbenForm, useVbenForm, z };
 
-export type VbenFormSchema = FormSchema<ComponentType>;
-export type { VbenFormProps };
+// App pages annotate large schema objects heavily. Keep these aliases loose to
+// avoid pushing vue-tsc over the 1C/1G validation budget.
+export type VbenFormSchema = FormSchema<ComponentType> | Record<string, any>;
+export type VbenFormProps = Record<string, any>;

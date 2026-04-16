@@ -12,6 +12,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	"easymvp/app/mvp/internal/engine"
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/app/mvp/internal/workspace"
 )
 
@@ -32,16 +33,12 @@ func (e *OpenHandsExecutor) NeedsWorkspace() bool { return true }
 // Execute 执行 OpenHands 任务。
 func (e *OpenHandsExecutor) Execute(ctx context.Context, req *Request) *Result {
 	// 1. 加载 command_template 配置
-	engineCfg, err := g.DB().Model("ai_engine_config").Ctx(ctx).
-		Where("engine_code", "openhands").
-		Where("status", 1).
-		WhereNull("deleted_at").
-		One()
-	if err != nil || engineCfg.IsEmpty() {
+	engineCfg, err := repo.NewAIEngineConfigRepo().GetEnabledByCode(ctx, "openhands")
+	if err != nil || len(engineCfg) == 0 {
 		return &Result{Success: false, Error: fmt.Errorf("OpenHands 引擎未配置或已禁用")}
 	}
 
-	cmdTemplate := engineCfg["command_template"].String()
+	cmdTemplate := g.NewVar(engineCfg["command_template"]).String()
 	if cmdTemplate == "" {
 		return &Result{Success: false, Error: fmt.Errorf("OpenHands command_template 未配置")}
 	}
@@ -49,17 +46,17 @@ func (e *OpenHandsExecutor) Execute(ctx context.Context, req *Request) *Result {
 		return &Result{Success: false, Error: fmt.Errorf("OpenHands command_template 依赖 Docker，当前环境已禁用 Docker，请改用非 Docker 模板或切换其他执行模式")}
 	}
 
-	timeoutSeconds := engineCfg["timeout_seconds"].Int()
+	timeoutSeconds := g.NewVar(engineCfg["timeout_seconds"]).Int()
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = 1800
 	}
 
 	// 2. 确定工作目录
-	project, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", req.ProjectID).WhereNull("deleted_at").Fields("work_dir").One()
-	if projErr != nil || project.IsEmpty() {
+	project, projErr := repo.NewProjectRepo().GetByID(ctx, req.ProjectID, "work_dir")
+	if projErr != nil || len(project) == 0 {
 		return &Result{Success: false, Error: fmt.Errorf("项目 %d 不存在或查询失败: %v", req.ProjectID, projErr)}
 	}
-	workDir := project["work_dir"].String()
+	workDir := g.NewVar(project["work_dir"]).String()
 	if req.Workspace != nil {
 		workDir = req.Workspace.WorkspacePath
 		if mrErr := e.wsMgr.MarkRunning(ctx, req.TaskID); mrErr != nil {
@@ -83,7 +80,7 @@ func (e *OpenHandsExecutor) Execute(ctx context.Context, req *Request) *Result {
 	if req.ModelInfo != nil {
 		envVars["AI_MODEL_API_KEY"] = req.ModelInfo.APIKey
 		envVars["AI_MODEL_CODE"] = req.ModelInfo.ModelCode
-		envVars["AI_MODEL_BASE_URL"] = resolveProtocolBaseURL(req.ModelInfo, engineCfg["base_url"].String(), "")
+		envVars["AI_MODEL_BASE_URL"] = resolveProtocolBaseURL(req.ModelInfo, g.NewVar(engineCfg["base_url"]).String(), "")
 	}
 
 	targets := parseResourceTargets(req.TaskRecord["affected_resources"].String())
@@ -117,7 +114,7 @@ func (e *OpenHandsExecutor) Execute(ctx context.Context, req *Request) *Result {
 		cmd.Env = append(cmd.Env,
 			"AI_MODEL_API_KEY="+req.ModelInfo.APIKey,
 			"AI_MODEL_CODE="+req.ModelInfo.ModelCode,
-			"AI_MODEL_BASE_URL="+resolveProtocolBaseURL(req.ModelInfo, engineCfg["base_url"].String(), ""),
+			"AI_MODEL_BASE_URL="+resolveProtocolBaseURL(req.ModelInfo, g.NewVar(engineCfg["base_url"]).String(), ""),
 		)
 	}
 	engine.GetCommandResourcePolicy(ctx).Apply(cmd)

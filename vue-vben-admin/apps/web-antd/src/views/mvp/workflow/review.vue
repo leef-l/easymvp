@@ -34,6 +34,9 @@ import {
 } from '#/api/mvp/workflow';
 
 const props = defineProps<{ projectId?: string }>();
+const emit = defineEmits<{
+  changed: [];
+}>();
 
 const route = useRoute();
 const projectID = computed(() => props.projectId || (route.query.projectId as string) || '');
@@ -43,27 +46,38 @@ const reviewStatus = ref<any>(null);
 const issues = ref<ReviewIssueItem[]>([]);
 const rejectReason = ref('');
 const rejectModalVisible = ref(false);
+let loadRequestVersion = 0;
 
 function resetReviewState() {
   reviewStatus.value = null;
   issues.value = [];
+  rejectReason.value = '';
+  rejectModalVisible.value = false;
 }
 
 /** 加载审核数据 */
 async function loadData() {
-  if (!projectID.value) return;
+  const currentProjectId = projectID.value;
+  if (!currentProjectId) {
+    resetReviewState();
+    return;
+  }
+  const requestVersion = ++loadRequestVersion;
   loading.value = true;
   try {
     const [statusRes, issuesRes] = await Promise.all([
-      getReviewStatus(projectID.value),
-      getReviewIssues(projectID.value),
+      getReviewStatus(currentProjectId),
+      getReviewIssues(currentProjectId),
     ]);
+    if (requestVersion !== loadRequestVersion || currentProjectId !== projectID.value) return;
     reviewStatus.value = statusRes;
     issues.value = issuesRes?.issues ?? [];
   } catch {
     /* ignore */
   } finally {
-    loading.value = false;
+    if (requestVersion === loadRequestVersion && currentProjectId === projectID.value) {
+      loading.value = false;
+    }
   }
 }
 
@@ -114,7 +128,8 @@ async function handleApprove() {
     onOk: async () => {
       await manualApprove(projectID.value);
       message.success('审核已通过');
-      loadData();
+      await loadData();
+      emit('changed');
     },
   });
 }
@@ -129,7 +144,8 @@ async function handleReject() {
   message.success('已驳回');
   rejectModalVisible.value = false;
   rejectReason.value = '';
-  loadData();
+  await loadData();
+  emit('changed');
 }
 
 function handleIssueReplan(issue: ReviewIssueItem) {
@@ -139,7 +155,8 @@ function handleIssueReplan(issue: ReviewIssueItem) {
     onOk: async () => {
       await reviewIssueReplan(projectID.value, [issue.id]);
       message.success('已发起方案修订');
-      loadData();
+      await loadData();
+      emit('changed');
     },
   });
 }
@@ -151,8 +168,8 @@ function handleIssueReplanRecord(record: Record<string, any>) {
 watch(
   projectID,
   (value) => {
+    resetReviewState();
     if (!value) {
-      resetReviewState();
       return;
     }
     loadData();

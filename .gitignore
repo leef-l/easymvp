@@ -17,6 +17,13 @@ admin-go/mvp
 
 # Node
 node_modules/
+vue-vben-admin/apps/web-antd/dist-verify/
+vue-vben-admin/apps/web-antd/dist-workflow-verify/
+vue-vben-admin/apps/web-antd/dist-entry-verify-*/
+vue-vben-admin/apps/web-antd/.easymvp/
+
+# CI artifacts
+.easymvp/ci/
 
 # Env
 .env.local

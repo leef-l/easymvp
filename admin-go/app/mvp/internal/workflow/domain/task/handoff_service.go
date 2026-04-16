@@ -5,6 +5,7 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/utility/snowflake"
 )
 
@@ -16,7 +17,7 @@ func NewHandoffService() *HandoffService { return &HandoffService{} }
 
 // RecordHandoff 记录任务间交接。
 func (s *HandoffService) RecordHandoff(ctx context.Context, workflowRunID, fromTaskID, toTaskID int64, handoffType, reason string) error {
-	_, err := g.DB().Model("mvp_handoff_record").Ctx(ctx).Insert(g.Map{
+	return repo.NewHandoffRecordRepo().Create(ctx, g.Map{
 		"id":              snowflake.Generate(),
 		"workflow_run_id": workflowRunID,
 		"from_task_id":    fromTaskID,
@@ -24,5 +25,4 @@ func (s *HandoffService) RecordHandoff(ctx context.Context, workflowRunID, fromT
 		"handoff_type":    handoffType,
 		"reason":          reason,
 	})
-	return err
 }

@@ -69,6 +69,76 @@ func TestSummarizeRiskDeliveryPoliciesWarnsOnUnsafePolicy(t *testing.T) {
 	}
 }
 
+func TestInspectExperienceReviewerReadinessOK(t *testing.T) {
+	t.Parallel()
+
+	status, message := inspectExperienceReviewerReadiness(
+		[]experienceReviewerPresetCheck{
+			{CategoryCode: "software_dev", ModelID: 315100000000000007},
+			{CategoryCode: "game_dev", ModelID: 315100000000000008},
+		},
+		map[int64]experienceReviewerModelCheck{
+			315100000000000007: {Exists: true, Enabled: true, Name: "hunyuan-turbos"},
+			315100000000000008: {Exists: true, Enabled: true, Name: "Tencent HY 2.0 Instruct"},
+		},
+	)
+	if status != "ok" {
+		t.Fatalf("status = %s, want ok; message=%s", status, message)
+	}
+	for _, fragment := range []string{
+		"software_dev=hunyuan-turbos(315100000000000007)",
+		"game_dev=Tencent HY 2.0 Instruct(315100000000000008)",
+	} {
+		if !strings.Contains(message, fragment) {
+			t.Fatalf("message missing %q: %s", fragment, message)
+		}
+	}
+}
+
+func TestInspectExperienceReviewerReadinessMissingCategory(t *testing.T) {
+	t.Parallel()
+
+	status, message := inspectExperienceReviewerReadiness(
+		[]experienceReviewerPresetCheck{
+			{CategoryCode: "software_dev", ModelID: 315100000000000007},
+		},
+		map[int64]experienceReviewerModelCheck{
+			315100000000000007: {Exists: true, Enabled: true, Name: "hunyuan-turbos"},
+		},
+	)
+	if status != "error" {
+		t.Fatalf("status = %s, want error; message=%s", status, message)
+	}
+	if !strings.Contains(message, "game_dev 缺少 experience_reviewer/max 默认预设") {
+		t.Fatalf("unexpected message: %s", message)
+	}
+}
+
+func TestInspectExperienceReviewerReadinessInvalidModel(t *testing.T) {
+	t.Parallel()
+
+	status, message := inspectExperienceReviewerReadiness(
+		[]experienceReviewerPresetCheck{
+			{CategoryCode: "software_dev", ModelID: 0},
+			{CategoryCode: "game_dev", ModelID: 315100000000000007},
+		},
+		map[int64]experienceReviewerModelCheck{
+			315100000000000007: {Exists: true, Enabled: false, Name: "hunyuan-turbos"},
+		},
+	)
+	if status != "error" {
+		t.Fatalf("status = %s, want error; message=%s", status, message)
+	}
+	for _, fragment := range []string{
+		"software_dev 预设不可用：model_id=0",
+		"game_dev 预设不可用：model_id=315100000000000007 已禁用",
+	} {
+		if !strings.Contains(message, fragment) {
+			t.Fatalf("message missing %q: %s", fragment, message)
+		}
+	}
+}
+
 func TestSummarizeWorkflowEventConsumerSnapshotCreatedButNotStarted(t *testing.T) {
 	status, message := summarizeWorkflowEventConsumerSnapshot(eventstream.RuntimeSnapshot{
 		ConsumerCreated: true,

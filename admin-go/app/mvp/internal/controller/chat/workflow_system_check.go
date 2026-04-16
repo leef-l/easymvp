@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -23,6 +24,17 @@ var inspectWorkflowEventMetadataColumnsFn = func(ctx context.Context) error {
 
 var inspectWorkflowEventLedgerTableFn = func(ctx context.Context) error {
 	return repo.NewWorkflowEventLedgerRepo().InspectDurableColumns(ctx)
+}
+
+type experienceReviewerPresetCheck struct {
+	CategoryCode string
+	ModelID      int64
+}
+
+type experienceReviewerModelCheck struct {
+	Exists  bool
+	Enabled bool
+	Name    string
 }
 
 // SystemCheck 系统配置检测
@@ -83,6 +95,46 @@ func (c *cWorkflow) SystemCheck(ctx context.Context, req *v1.SystemCheckReq) (re
 	} else {
 		addItem("role_preset", "角色预设", "/mvp/role-preset", "ok",
 			fmt.Sprintf("架构师预设 %d 条，实施员预设 %d 条", architectCount, implementerCount))
+	}
+
+	experienceReviewerPresets, experienceReviewerErr := repo.ListRolePresets(ctx, repo.RolePresetQuery{
+		RoleType:    "experience_reviewer",
+		RoleLevel:   "max",
+		DefaultOnly: true,
+	})
+	if experienceReviewerErr != nil {
+		addItem("experience_reviewer", "体验评审师预设", "/mvp/role-preset", "error", "查询失败: "+experienceReviewerErr.Error())
+	} else {
+		checks := make([]experienceReviewerPresetCheck, 0, len(experienceReviewerPresets))
+		models := make(map[int64]experienceReviewerModelCheck)
+		seenModels := make(map[int64]struct{})
+		for _, row := range experienceReviewerPresets {
+			modelID := row["model_id"].Int64()
+			checks = append(checks, experienceReviewerPresetCheck{
+				CategoryCode: row["project_category"].String(),
+				ModelID:      modelID,
+			})
+			if modelID <= 0 {
+				continue
+			}
+			if _, seen := seenModels[modelID]; seen {
+				continue
+			}
+			seenModels[modelID] = struct{}{}
+
+			model, modelErr := repo.NewAIModelRepo().GetByID(ctx, modelID, "name", "status")
+			if modelErr != nil || len(model) == 0 {
+				models[modelID] = experienceReviewerModelCheck{}
+				continue
+			}
+			models[modelID] = experienceReviewerModelCheck{
+				Exists:  true,
+				Enabled: strings.TrimSpace(mapString(model, "status")) == "1",
+				Name:    mapString(model, "name"),
+			}
+		}
+		status, message := inspectExperienceReviewerReadiness(checks, models)
+		addItem("experience_reviewer", "体验评审师预设", "/mvp/role-preset", status, message)
 	}
 
 	count, e = repo.NewAIEngineRepo().CountEnabled(ctx)
@@ -517,4 +569,87 @@ func inspectWorkflowEventDurableSchema(ctx context.Context) (string, string) {
 	default:
 		return "warning", "workflow_event durable ledger 表未就绪: " + safeSystemCheckValue(ledgerErr.Error())
 	}
+}
+
+func inspectExperienceReviewerReadiness(presets []experienceReviewerPresetCheck, models map[int64]experienceReviewerModelCheck) (string, string) {
+	requiredCategories := []string{"game_dev", "software_dev"}
+	grouped := make(map[string][]experienceReviewerPresetCheck)
+	for _, preset := range presets {
+		categoryCode := strings.TrimSpace(preset.CategoryCode)
+		if categoryCode == "" {
+			continue
+		}
+		grouped[categoryCode] = append(grouped[categoryCode], preset)
+	}
+
+	ready := make([]string, 0, len(requiredCategories))
+	issues := make([]string, 0)
+	for _, categoryCode := range requiredCategories {
+		categoryPresets := grouped[categoryCode]
+		if len(categoryPresets) == 0 {
+			issues = append(issues, fmt.Sprintf("%s 缺少 experience_reviewer/max 默认预设", categoryCode))
+			continue
+		}
+
+		var (
+			categoryReady bool
+			reasons       []string
+		)
+		for _, preset := range categoryPresets {
+			switch {
+			case preset.ModelID <= 0:
+				reasons = append(reasons, "model_id=0")
+			default:
+				model, ok := models[preset.ModelID]
+				switch {
+				case !ok || !model.Exists:
+					reasons = append(reasons, fmt.Sprintf("model_id=%d 不存在", preset.ModelID))
+				case !model.Enabled:
+					reasons = append(reasons, fmt.Sprintf("model_id=%d 已禁用", preset.ModelID))
+				default:
+					modelLabel := strings.TrimSpace(model.Name)
+					if modelLabel == "" {
+						modelLabel = fmt.Sprintf("model_id=%d", preset.ModelID)
+					} else {
+						modelLabel = fmt.Sprintf("%s(%d)", modelLabel, preset.ModelID)
+					}
+					ready = append(ready, fmt.Sprintf("%s=%s", categoryCode, modelLabel))
+					categoryReady = true
+				}
+			}
+			if categoryReady {
+				break
+			}
+		}
+		if !categoryReady {
+			issues = append(issues, fmt.Sprintf("%s 预设不可用：%s", categoryCode, strings.Join(uniqueSortedSystemCheckStrings(reasons), "，")))
+		}
+	}
+
+	if len(issues) > 0 {
+		return "error", strings.Join(issues, "；")
+	}
+	sort.Strings(ready)
+	return "ok", "已就绪：" + strings.Join(ready, "；")
+}
+
+func uniqueSortedSystemCheckStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }

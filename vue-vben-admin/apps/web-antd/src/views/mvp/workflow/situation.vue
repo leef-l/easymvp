@@ -34,9 +34,12 @@ const histLoading = ref(false);
 
 const workflowRunId = ref<string>('');
 const projectId = ref<string>('');
+const taskId = ref<string>('');
 
 const situation = ref<null | SituationData>(null);
 const history = ref<SituationSnapshot[]>([]);
+let situationLoadVersion = 0;
+let historyLoadVersion = 0;
 
 // ========== 衍生计算 ==========
 
@@ -61,6 +64,26 @@ const utilizationPercent = computed(() =>
 );
 
 const anomalies = computed(() => situation.value?.anomalySignals ?? []);
+const hasTaskFocus = computed(() => Boolean(situation.value?.health?.focusedTaskId || taskId.value));
+const focusedTaskId = computed(() => situation.value?.health?.focusedTaskId || taskId.value || '');
+const workflowRetryTitle = computed(() => hasTaskFocus.value ? '工作流重试' : '重试次数');
+const workflowReworkTitle = computed(() => hasTaskFocus.value ? '工作流返工' : '返工轮次');
+const canLoadHistory = computed(() => Boolean(projectId.value && workflowRunId.value));
+const refreshLoading = computed(() => loading.value || histLoading.value);
+const historyEmptyText = computed(() => {
+  if (!workflowRunId.value) {
+    return '缺少 workflowRunId，未加载快照历史';
+  }
+  if (!projectId.value) {
+    return '缺少 projectId，未加载快照历史';
+  }
+  return hasTaskFocus.value ? '暂无该任务焦点快照' : '暂无快照历史';
+});
+const historyTitle = computed(() =>
+  hasTaskFocus.value
+    ? `快照历史（最近 20 条，任务 ${focusedTaskId.value} 焦点）`
+    : '快照历史（最近 20 条）',
+);
 
 function trendIcon(trend: string) {
   if (trend === 'rising') return '↑';
@@ -101,40 +124,87 @@ const historyColumns = [
 // ========== 数据加载 ==========
 
 async function loadSituation() {
-  if (!workflowRunId.value) return;
+  const currentWorkflowRunId = workflowRunId.value;
+  const currentTaskId = taskId.value;
+  if (!currentWorkflowRunId) {
+    situation.value = null;
+    return;
+  }
+  const requestVersion = ++situationLoadVersion;
   loading.value = true;
   try {
-    const res = await getSituation(workflowRunId.value);
+    const res = await getSituation(currentWorkflowRunId, currentTaskId || undefined);
+    if (
+      requestVersion !== situationLoadVersion
+      || currentWorkflowRunId !== workflowRunId.value
+      || currentTaskId !== taskId.value
+    ) return;
     situation.value = res.situation ?? null;
   } catch (error) {
     console.warn('[situation] loadSituation 失败:', error);
   } finally {
-    loading.value = false;
+    if (
+      requestVersion === situationLoadVersion
+      && currentWorkflowRunId === workflowRunId.value
+      && currentTaskId === taskId.value
+    ) {
+      loading.value = false;
+    }
   }
 }
 
 async function loadHistory() {
-  if (!projectId.value) return;
+  if (!canLoadHistory.value) {
+    history.value = [];
+    return;
+  }
+  const currentProjectId = projectId.value;
+  const currentWorkflowRunId = workflowRunId.value;
+  const currentTaskId = taskId.value;
+  const requestVersion = ++historyLoadVersion;
   histLoading.value = true;
   try {
-    const res = await getSituationHistory({ projectID: projectId.value, workflowRunID: workflowRunId.value || undefined, limit: 20 });
+    const res = await getSituationHistory({
+      projectID: currentProjectId,
+      taskID: currentTaskId || undefined,
+      workflowRunID: currentWorkflowRunId || undefined,
+      limit: 20,
+    });
+    if (
+      requestVersion !== historyLoadVersion
+      || currentProjectId !== projectId.value
+      || currentWorkflowRunId !== workflowRunId.value
+      || currentTaskId !== taskId.value
+    ) return;
     history.value = res.snapshots ?? [];
   } catch (error) {
     console.warn('[situation] loadHistory 失败:', error);
   } finally {
-    histLoading.value = false;
+    if (
+      requestVersion === historyLoadVersion
+      && currentProjectId === projectId.value
+      && currentWorkflowRunId === workflowRunId.value
+      && currentTaskId === taskId.value
+    ) {
+      histLoading.value = false;
+    }
   }
 }
 
+async function refreshDashboard() {
+  await Promise.all([loadSituation(), loadHistory()]);
+}
+
 watch(
-  [() => route.query.workflowRunId, () => route.query.projectId],
-  async ([nextWorkflowRunId, nextProjectId]) => {
+  [() => route.query.workflowRunId, () => route.query.projectId, () => route.query.taskId],
+  async ([nextWorkflowRunId, nextProjectId, nextTaskId]) => {
     try {
       workflowRunId.value = (nextWorkflowRunId as string) ?? '';
       projectId.value = (nextProjectId as string) ?? '';
+      taskId.value = (nextTaskId as string) ?? '';
       situation.value = null;
       history.value = [];
-      await Promise.all([loadSituation(), loadHistory()]);
+      await refreshDashboard();
     } catch (error) {
       console.warn('[situation] route 变更加载失败:', error);
     }
@@ -146,15 +216,24 @@ watch(
 <template>
   <Page title="态势感知仪表板">
     <Space style="margin-bottom: 16px">
-      <Button type="primary" :icon="h(ReloadOutlined)" :loading="loading" @click="loadSituation">
+      <Button type="primary" :icon="h(ReloadOutlined)" :loading="refreshLoading" @click="refreshDashboard">
         刷新态势
       </Button>
     </Space>
 
-    <Spin :spinning="loading">
-      <Empty v-if="!situation && !loading" description="暂无态势数据，请确认 workflowRunId 参数" />
+    <Spin :spinning="refreshLoading">
+      <Empty v-if="!situation && !refreshLoading" description="暂无态势数据，请确认 workflowRunId 参数" />
 
       <template v-if="situation">
+        <Alert
+          v-if="hasTaskFocus"
+          type="info"
+          show-icon
+          style="margin-bottom: 16px"
+          :message="`当前按任务 ${focusedTaskId} 聚焦查看预算`"
+          description="当前态势会同时展示 workflow 总量与该任务自己的 retry / rework 预算；下方快照历史仅展示带同任务焦点的记录。"
+        />
+
         <!-- 顶部状态概览 -->
         <Row :gutter="16" style="margin-bottom: 16px">
           <Col :span="6">
@@ -258,10 +337,16 @@ watch(
                   />
                 </Col>
                 <Col :span="12" style="margin-top: 12px">
-                  <Statistic title="重试次数" :value="situation.health?.retryCount ?? 0" />
+                  <Statistic :title="workflowRetryTitle" :value="situation.health?.retryCount ?? 0" />
                 </Col>
                 <Col :span="12" style="margin-top: 12px">
-                  <Statistic title="返工轮次" :value="situation.health?.reworkRounds ?? 0" :value-style="{ color: (situation.health?.reworkRounds ?? 0) >= 2 ? '#faad14' : '#888' }" />
+                  <Statistic :title="workflowReworkTitle" :value="situation.health?.reworkRounds ?? 0" :value-style="{ color: (situation.health?.reworkRounds ?? 0) >= 2 ? '#faad14' : '#888' }" />
+                </Col>
+                <Col v-if="hasTaskFocus" :span="12" style="margin-top: 12px">
+                  <Statistic title="当前任务重试" :value="situation.health?.taskRetryCount ?? 0" :value-style="{ color: (situation.health?.taskRetryCount ?? 0) >= 2 ? '#faad14' : '#888' }" />
+                </Col>
+                <Col v-if="hasTaskFocus" :span="12" style="margin-top: 12px">
+                  <Statistic title="当前任务返工" :value="situation.health?.taskReworkRounds ?? 0" :value-style="{ color: (situation.health?.taskReworkRounds ?? 0) >= 2 ? '#ff4d4f' : '#888' }" />
                 </Col>
                 <Col :span="12" style="margin-top: 12px">
                   <Statistic title="升级次数" :value="situation.health?.escalationCount ?? 0" />
@@ -332,12 +417,13 @@ watch(
     </Spin>
 
     <!-- 快照历史 -->
-    <Divider>快照历史（最近 20 条）</Divider>
+    <Divider>{{ historyTitle }}</Divider>
     <Table
       :loading="histLoading"
       :data-source="history"
       :columns="historyColumns"
       :pagination="false"
+      :locale="{ emptyText: historyEmptyText }"
       size="small"
       row-key="id"
     />

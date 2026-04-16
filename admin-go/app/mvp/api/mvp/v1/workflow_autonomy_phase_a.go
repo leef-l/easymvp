@@ -44,6 +44,7 @@ type WorkflowSaveObjectiveRes struct {
 type WorkflowSituationReq struct {
 	g.Meta        `path:"/workflow/situation" method:"get" tags:"自治L4" summary:"查询工作流当前态势"`
 	WorkflowRunID snowflake.JsonInt64 `json:"workflowRunID" v:"required" dc:"工作流运行ID"`
+	TaskID        snowflake.JsonInt64 `json:"taskID" dc:"任务ID(可选，传入后返回该任务焦点态势)"`
 }
 
 type WorkflowSituationRes struct {
@@ -56,6 +57,7 @@ type WorkflowSituationHistoryReq struct {
 	g.Meta        `path:"/workflow/situation-history" method:"get" tags:"自治L4" summary:"查询态势快照历史"`
 	ProjectID     snowflake.JsonInt64 `json:"projectID" v:"required" dc:"项目ID"`
 	WorkflowRunID snowflake.JsonInt64 `json:"workflowRunID" dc:"工作流运行ID(可选)"`
+	TaskID        snowflake.JsonInt64 `json:"taskID" dc:"任务ID(可选，仅返回该任务焦点快照)"`
 	Limit         int                 `json:"limit" dc:"数量限制"`
 }
 

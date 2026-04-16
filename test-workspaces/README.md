@@ -7,7 +7,7 @@
 配套清单见：
 
 - [regression-manifest.json](./regression-manifest.json)
-- [validate.sh](./validate.sh)
+- [validate.sh](./validate.sh)（仅供 GitHub Actions 调用）
 
 使用原则：
 
@@ -18,14 +18,13 @@
 
 一键校验：
 
-```bash
-bash ./test-workspaces/validate.sh
-```
+- 统一通过 `.github/workflows/backend-guard.yml` 触发
+- `validate.sh` 仅允许在 GitHub Actions 环境内执行，本机直接运行会被拒绝
 
 执行约束：
 
-1. `validate.sh` 会执行 `go run ./app/mvp/regressioncheck`
-2. 请在独立验证环境或临时工作区运行，不要在当前业务服务器直接执行
+1. `validate.sh` 会在 GitHub Actions 内执行 `go run ./app/mvp/regressioncheck`
+2. 本机、业务服务器和 AI 会话不允许直接执行这条 guard 链
 3. 成功输出会同时包含 `regression manifest OK` 与 `workspace delivery policies OK`
 
 当前校验覆盖：

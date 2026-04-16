@@ -7,8 +7,23 @@ set -e
 
 DEPLOY_DIR=/www/wwwroot/mvp.easytestdev.online
 DOMAIN=mvp.easytestdev.online
+SYSTEM_PORT=${SYSTEM_PORT:-10041}
+AI_PORT=${AI_PORT:-10042}
+MVP_PORT=${MVP_PORT:-10043}
 
 echo "===== EasyMVP 服务器初始化 ====="
+echo "目标端口：system=${SYSTEM_PORT} ai=${AI_PORT} mvp=${MVP_PORT}"
+
+if command -v ss >/dev/null 2>&1; then
+    echo "[0/3] 检查端口占用..."
+    for port in "$SYSTEM_PORT" "$AI_PORT" "$MVP_PORT"; do
+        if ss -ltn | awk 'NR>1 {print $4}' | grep -q ":${port}\$"; then
+            echo "  端口 ${port} 已被占用"
+        else
+            echo "  端口 ${port} 可用"
+        fi
+    done
+fi
 
 # 1. 创建部署目录
 echo "[1/3] 创建部署目录..."
@@ -19,16 +34,20 @@ done
 # 2. 创建 Systemd 服务
 echo "[2/3] 创建 Systemd 服务..."
 
-# mvp-system (port 41002)
-cat > /etc/systemd/system/mvp-system.service <<'EOF'
+# mvp-system
+cat > /etc/systemd/system/mvp-system.service <<EOF
 [Unit]
 Description=EasyMVP system
 After=network.target mysql.service
 
 [Service]
 Type=simple
-WorkingDirectory=/www/wwwroot/mvp.easytestdev.online/system
-ExecStart=/www/wwwroot/mvp.easytestdev.online/system/system
+WorkingDirectory=$DEPLOY_DIR/system
+Environment=GF_GCFG_PATH=$DEPLOY_DIR/system/manifest/config
+Environment=GF_GCFG_FILE=config.yaml
+Environment=GF_SERVER_ADDRESS=:$SYSTEM_PORT
+Environment=TZ=Asia/Shanghai
+ExecStart=$DEPLOY_DIR/system/system
 Restart=always
 RestartSec=5
 LimitNOFILE=65536
@@ -37,16 +56,20 @@ LimitNOFILE=65536
 WantedBy=multi-user.target
 EOF
 
-# mvp-ai (port 41003)
-cat > /etc/systemd/system/mvp-ai.service <<'EOF'
+# mvp-ai
+cat > /etc/systemd/system/mvp-ai.service <<EOF
 [Unit]
 Description=EasyMVP ai
 After=network.target mysql.service
 
 [Service]
 Type=simple
-WorkingDirectory=/www/wwwroot/mvp.easytestdev.online/ai
-ExecStart=/www/wwwroot/mvp.easytestdev.online/ai/ai
+WorkingDirectory=$DEPLOY_DIR/ai
+Environment=GF_GCFG_PATH=$DEPLOY_DIR/ai/manifest/config
+Environment=GF_GCFG_FILE=config.yaml
+Environment=GF_SERVER_ADDRESS=:$AI_PORT
+Environment=TZ=Asia/Shanghai
+ExecStart=$DEPLOY_DIR/ai/ai
 Restart=always
 RestartSec=5
 LimitNOFILE=65536
@@ -55,16 +78,20 @@ LimitNOFILE=65536
 WantedBy=multi-user.target
 EOF
 
-# mvp-mvp (port 41004)
-cat > /etc/systemd/system/mvp-mvp.service <<'EOF'
+# mvp-mvp
+cat > /etc/systemd/system/mvp-mvp.service <<EOF
 [Unit]
 Description=EasyMVP mvp
 After=network.target mysql.service
 
 [Service]
 Type=simple
-WorkingDirectory=/www/wwwroot/mvp.easytestdev.online/mvp
-ExecStart=/www/wwwroot/mvp.easytestdev.online/mvp/mvp
+WorkingDirectory=$DEPLOY_DIR/mvp
+Environment=GF_GCFG_PATH=$DEPLOY_DIR/mvp/manifest/config
+Environment=GF_GCFG_FILE=config.yaml
+Environment=GF_SERVER_ADDRESS=:$MVP_PORT
+Environment=TZ=Asia/Shanghai
+ExecStart=$DEPLOY_DIR/mvp/mvp
 Restart=always
 RestartSec=5
 LimitNOFILE=65536
@@ -76,9 +103,9 @@ EOF
 systemctl daemon-reload
 systemctl enable mvp-system mvp-ai mvp-mvp
 
-echo "  mvp-system (port 41002) ✓"
-echo "  mvp-ai     (port 41003) ✓"
-echo "  mvp-mvp    (port 41004) ✓"
+echo "  mvp-system (port ${SYSTEM_PORT}) ✓"
+echo "  mvp-ai     (port ${AI_PORT}) ✓"
+echo "  mvp-mvp    (port ${MVP_PORT}) ✓"
 
 # 3. 生成 Nginx 扩展配置（不覆盖宝塔主配置）
 echo "[3/3] 生成 Nginx 配置..."
@@ -86,11 +113,11 @@ echo "[3/3] 生成 Nginx 配置..."
 NGINX_EXT_DIR=/www/server/panel/vhost/nginx/extension/$DOMAIN
 mkdir -p $NGINX_EXT_DIR
 
-cat > $NGINX_EXT_DIR/proxy.conf <<'NGINX'
+cat > $NGINX_EXT_DIR/proxy.conf <<NGINX
 # EasyMVP 反向代理配置
-# system 服务 (port 41002)
+# system 服务
 location /api/system/ {
-    proxy_pass http://127.0.0.1:41002;
+    proxy_pass http://127.0.0.1:${SYSTEM_PORT};
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -100,9 +127,9 @@ location /api/system/ {
     proxy_send_timeout 120s;
 }
 
-# ai 服务 (port 41003)
+# ai 服务
 location /api/ai/ {
-    proxy_pass http://127.0.0.1:41003;
+    proxy_pass http://127.0.0.1:${AI_PORT};
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -112,9 +139,9 @@ location /api/ai/ {
     proxy_send_timeout 120s;
 }
 
-# mvp 服务 (port 41004) — SSE 需要长连接
+# mvp 服务 — SSE 需要长连接
 location /api/mvp/ {
-    proxy_pass http://127.0.0.1:41004;
+    proxy_pass http://127.0.0.1:${MVP_PORT};
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -146,9 +173,9 @@ echo ""
 echo "===== 初始化完成 ====="
 echo ""
 echo "端口分配："
-echo "  system : 41002 →  /api/system/"
-echo "  ai     : 41003 →  /api/ai/"
-echo "  mvp    : 41004 →  /api/mvp/"
+echo "  system : ${SYSTEM_PORT} →  /api/system/"
+echo "  ai     : ${AI_PORT} →  /api/ai/"
+echo "  mvp    : ${MVP_PORT} →  /api/mvp/"
 echo "  前端   : Nginx →  /admin/"
 echo ""
 echo "管理命令："

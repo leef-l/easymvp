@@ -195,6 +195,7 @@ func TestMainWritesSuccessOutput(t *testing.T) {
 		"GO_WANT_REGRESSIONCHECK_HELPER=1",
 		"REGRESSIONCHECK_HELPER_MODE=main",
 		"REGRESSIONCHECK_MANIFEST="+manifestPath,
+		"GITHUB_ACTIONS=true",
 	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

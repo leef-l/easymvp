@@ -1,8 +1,14 @@
-# Docker-First 验证修复
+# 验证修复与历史 Docker 方案归档
 
-更新日期：2026-04-10
+更新日期：2026-04-13
 
-本目录记录 EasyMVP 新增的 `verification_repair_run` 最小闭环实现。目标不是把 `workflow completed` 直接等同于“可生产发布”，而是在项目完成后支持人工或飞书触发一次 Docker-first 的项目验证，并把问题转回正式返工链。
+本目录记录 EasyMVP 的 `verification_repair_run` 闭环实现，同时归档早期 Docker-first 验证方案。自 2026-04-13 起，仓库现行铁律已经切换为“测试与编译统一只走 GitHub Actions”；本机、宿主机、AI 会话中的 `go test`、`go build`、`pnpm build`、`pnpm exec vite build`、`pnpm exec vue-tsc`、`npm/pnpm test`、`docker build` 都不再是允许的验收路径。
+
+## 当前口径
+
+- 验证阶段只读取 GitHub Actions workflow run 及 `.easymvp/ci/latest.json`，不再自动执行本机命令、Docker compose 或 Dockerfile 回退。
+- `.easymvp/verification.json` 与分类级 `verification_profile_json` 仍可作为配置输入，但 legacy `local / dockerfile / docker_compose / auto` 模式会被统一归一到 `github_actions`，并给出停用告警。
+- 正式验收只认 GitHub Actions 的 workflow run、日志与 artifact；脚本资产和历史 Docker 方案只作为归档资料。
 
 ## 当前能力
 
@@ -26,23 +32,30 @@
 
 ## 验证策略
 
-默认策略是 Docker-first：
+当前默认策略是 GitHub Actions-first：
 
 1. 优先读取项目根目录 `.easymvp/verification.json`
-2. 若项目未配置，则回退到项目分类 `verification_profile_json`
+2. 若项目未配置，则读取项目分类 `verification_profile_json`
 3. 分类级 `verification_gate_json` 会作为放行门，约束 runner、最少执行步数和必需检查类型
-4. 若仍未配置 profile，则自动检测 `compose.yaml` / `docker-compose.yml`
-5. 再次回退到 `Dockerfile`
-6. 最后回退到本机命令启发式验证
+4. 检测 `.github/workflows/*.yml` / `.github/workflows/*.yaml`
+5. 读取 `.easymvp/ci/latest.json`
+6. 将 `checks / checkKinds` 映射为 `test / build / browser` 等标准检查项，并据此生成验证结论
 
-自动检测会尝试：
+现行实现不会在验证阶段直接执行：
 
-- `docker compose up -d --build`
-- `docker compose ps`
 - `go test ./...`
-- Node 项目的 `lint` / `test` / `build`
+- `go build ./...`
+- Node 项目的 `lint / test / build / typecheck / bundle`
+- `docker compose up -d --build`
+- `docker build`
 
-上述命令现在会默认注入一组低配服务器保护参数，避免 `npm install`、`pnpm install`、`pnpm build`、`turbo build` 一类命令把宿主机资源打满。默认限制包括：
+如果 workflow 或 `latest.json` 缺失，系统会直接给出配置/证据缺口，不再回退到本机执行。
+
+## 历史 Docker 方案记录
+
+下述内容保留的是此前 Docker-first 方案的资源限制和排障结论，仅作为历史背景，不代表当前执行入口。
+
+上述历史命令当时会默认注入一组低配服务器保护参数，避免 `npm install`、`pnpm install`、`pnpm build`、`turbo build` 一类命令把宿主机资源打满。默认限制包括：
 
 - `NODE_OPTIONS=--max-old-space-size=1024`
 - `npm_config_maxsockets=4`
@@ -59,24 +72,38 @@
 
 本轮实测补充一个资源侧结论：
 
-- `web-antd` 这类体量的前端应用，完整 `vue-tsc --noEmit` 在 `768MiB` 内存上限下仍可能 OOM
-- 在当前这台 `3.6Gi RAM / 2 vCPU` 服务器上，`1024MB` 和 `1280MB` 堆上限也已实测 OOM
-- 同一台服务器在低优先级模式下，`1536MB` 堆上限可以跑完整个 `vue-tsc`，并返回真实类型错误列表
-- 因此低负载宿主机上的默认静态验证应优先跑定向 `eslint` / 关键路径检查
-- 若必须在当前宿主机执行全量类型检查，应通过受控脚本串行执行，例如 [scripts/web-antd-typecheck-safe.sh](../../scripts/web-antd-typecheck-safe.sh)
-- 更高内存的验证 worker 或独立 CI 机仍然更适合作为默认生产级验证位，而不是把这类重检查长期压在生产宿主机上
+- `web-antd` 专用受控脚本现已固定为 `1 core + 1G memory` 硬限制：
+  - [scripts/web-antd-typecheck-safe.sh](../../scripts/web-antd-typecheck-safe.sh)
+  - [scripts/web-antd-build-safe.sh](../../scripts/web-antd-build-safe.sh)
+  - [scripts/web-antd-verify-build-safe.sh](../../scripts/web-antd-verify-build-safe.sh)
+  - [scripts/web-antd-entry-bundle-safe.sh](../../scripts/web-antd-entry-bundle-safe.sh)
+  - [scripts/web-antd-workflow-entry-bundles-safe.sh](../../scripts/web-antd-workflow-entry-bundles-safe.sh)
+  - [scripts/web-antd-workflow-bundle-safe.sh](../../scripts/web-antd-workflow-bundle-safe.sh)
+  - [scripts/web-antd-entry-typecheck-safe.sh](../../scripts/web-antd-entry-typecheck-safe.sh)
+  - [scripts/web-antd-workflow-pages-typecheck-safe.sh](../../scripts/web-antd-workflow-pages-typecheck-safe.sh)
+- 具体口径是：`systemd-run --scope + AllowedCPUs=0 + CPUQuota=100% + MemoryMax=1G + MemorySwapMax=0 + NODE heap=768MB`
+- 在当前这台 `3.6Gi RAM / 2 vCPU` 服务器上，按这条硬限制实跑得到的结果是：
+  - `vue-tsc --noEmit` 在 `heap=768MB` 下直接触发 V8 OOM
+  - 同样保持 `1G cgroup`，把 heap 提到 `896MB` 后，进程会被 scope 直接终止
+  - `vite build --mode production` 在 `heap=768MB` 下会在 `transforming...` 阶段被 `1G` 限制终止，退出码 `143`
+- 这意味着：当前 `web-antd` 的 full typecheck/build 不是“还没跑”，而是“已确认无法在 1 core / 1G 限制下完整通过”
+- 在同一条硬限制下，`objective / situation / dashboard / execution / review / accept / verification / autonomy` 8 个 `workflow` 页面已通过单入口类型检查
+- 当前还额外具备 `workflow` 最小 bundle、单页面 bundle、轻量验证构建这三条静态补齐的构建验证入口；它们都应继续遵守同样的 `1 core / 1G` 硬限制
+- 其中轻量验证构建当前还会关闭附加插件，并禁用 `minify / cssMinify / reportCompressedSize / modulePreload / treeshake`，优先降低验证峰值
+- 这些拆分验证路径可作为当前 `workflow` 控制台改动的受限验证入口，但它们不能替代 full typecheck/build
+- 若后续必须坚持这条资源上限，下一步应继续降低 full typecheck/build 峰值，而不是恢复裸跑
 
-如果项目提供 `.easymvp/verification.json`，可以显式指定：
+当前 `.easymvp/verification.json` 建议只保留 GitHub Actions 验证模式声明，例如：
 
-- Docker compose 文件
-- env 文件
-- 自定义 setup / steps / teardown
-- `docker_exec` 容器内验证命令
+- `{"mode":"github_actions"}`
+- 与 `.easymvp/ci/latest.json` 对齐所需的兼容元信息
+- 不再新增本机 `steps / setup / teardown` 或 `docker_exec` 执行配置
 
-项目分类也可以提供默认验证模板和放行门：
+项目分类仍可提供默认验证模板和放行门：
 
 - `verification_profile_json`
-  - 作为该分类的默认 profile，在项目未提供 `.easymvp/verification.json` 时生效
+  - 作为该分类的默认 profile 输入，在项目未提供 `.easymvp/verification.json` 时生效
+  - 推荐只声明 `{"mode":"github_actions"}`
 - `verification_gate_json`
   - 当前支持 `allowedDecisions`、`minExecutedSteps`、`requiredCheckKinds`、`allowedRunnerTypes`
   - 典型用法：`software_dev` 至少要求执行 `test`；`game_dev` 可要求同时覆盖 `test + build`
@@ -130,10 +157,10 @@
 
 `accept` 阶段现在会按标准自动拉起一轮验证并等待结果，而不是只在界面里暴露一个手动入口。这样编码类项目进入验收时，会先完成标准化验证，再做最终裁决；缺少验证、验证未通过、缺少交互级证据、缺少标准要求的项目级体验评审角色，都会被标准规则直接拦住。
 
-当前系统也已内置首批分类 profile 模板：
+当前系统会把首批分类 profile 模板统一归一到 GitHub Actions：
 
-- `coding` 家族默认 `{"mode":"auto"}`，继续保留 Docker-first 自动探测
-- `analysis / creative` 家族默认 `{"mode":"local"}`，直接走本机验证/人工复核链，避免无意义的 Docker 探测
+- `coding` 家族默认按 `{"mode":"github_actions"}` 处理
+- `analysis / creative` 家族若仍保留 `{"mode":"local"}` 一类旧值，会在验证阶段被标记为停用 legacy 配置并归一到 `github_actions`
 
 ## 修复闭环
 
@@ -148,17 +175,17 @@
 
 ## 当前边界
 
-- 自动检测的 Docker 验证仍是“通用启发式”，不是项目定制化编排
-- 如果项目没有测试脚本，系统会进入 `manual_review` 倾向，而不是伪造“通过”
-- 容器内精确验证建议通过 `.easymvp/verification.json` 明确声明
+- 当前验证结果依赖 GitHub Actions workflow 与 `.easymvp/ci/latest.json` 的同步质量
+- 如果 `latest.json` 没有 `checks / checkKinds`，系统无法把 CI 结果映射到标准检查类型
+- 历史 Docker/profile 字段目前仅保留兼容读取与停用告警，不再触发本机执行
 
 ## 建议配置
 
 建议每个需要生产级验证的项目补充：
 
-- `.easymvp/verification.json`
+- `.github/workflows/backend-guard.yml`、`.github/workflows/web-antd-guard.yml`、`.github/workflows/deploy.yml` 一类权威 workflow
+- `.easymvp/ci/latest.json`
+- `.easymvp/verification.json` 中显式声明 `{"mode":"github_actions"}`
 - 项目所属分类的默认 `verification_profile_json / verification_gate_json`
-- 明确的 `docker compose` 启动入口
-- 后端测试命令
-- 前端测试与构建命令
-- 需要时的 `docker_exec` 步骤
+- 明确的 `checks / checkKinds` 输出，覆盖 `test / build / browser` 等标准检查类型
+- workflow run 对应的日志与 artifact，作为正式验收依据

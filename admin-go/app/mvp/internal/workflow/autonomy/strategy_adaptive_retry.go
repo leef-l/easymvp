@@ -37,22 +37,23 @@ func (s *AdaptiveRetryStrategy) Evaluate(ctx context.Context, sit *Situation, re
 	}
 
 	h := sit.Health
-	riskLevel := s.classifyRisk(sit, req)
+	budgetMetrics := resolveScopedBudgetMetrics(sit, req)
+	riskLevel := s.classifyRisk(sit, req, budgetMetrics)
 
 	switch riskLevel {
 	case RiskTransient:
-		return s.handleTransient(h, req)
+		return s.handleTransient(budgetMetrics, req)
 	case RiskStructural:
-		return s.handleStructural(h, req)
+		return s.handleStructural(h, budgetMetrics, req)
 	case RiskFatal:
 		return s.handleFatal(req)
 	default:
-		return s.handleTransient(h, req)
+		return s.handleTransient(budgetMetrics, req)
 	}
 }
 
 // classifyRisk 根据态势信号推断错误类型。
-func (s *AdaptiveRetryStrategy) classifyRisk(sit *Situation, req *DecisionRequest) string {
+func (s *AdaptiveRetryStrategy) classifyRisk(sit *Situation, req *DecisionRequest, budgetMetrics scopedBudgetMetrics) string {
 	// 存在 critical 异常信号 → 致命
 	if sit.HasCriticalAnomaly() {
 		return RiskFatal
@@ -70,18 +71,18 @@ func (s *AdaptiveRetryStrategy) classifyRisk(sit *Situation, req *DecisionReques
 	}
 
 	// 返工轮数 ≥ 2 → 结构性
-	if h.ReworkRounds >= 2 {
+	if budgetMetrics.reworkRounds >= 2 {
 		return RiskStructural
 	}
 
 	return RiskTransient
 }
 
-func (s *AdaptiveRetryStrategy) handleTransient(h *HealthMetrics, req *DecisionRequest) *ActionPlan {
+func (s *AdaptiveRetryStrategy) handleTransient(budgetMetrics scopedBudgetMetrics, req *DecisionRequest) *ActionPlan {
 	// 已重试多次，升级为 B 级需人工确认
 	level := consts.DecisionLevelA
 	confidence := 0.85
-	if h.RetryCount >= 2 {
+	if budgetMetrics.retryCount >= 2 {
 		level = consts.DecisionLevelB
 		confidence = 0.65
 	}
@@ -92,7 +93,7 @@ func (s *AdaptiveRetryStrategy) handleTransient(h *HealthMetrics, req *DecisionR
 		DecisionLevel:   level,
 		ActionType:      consts.ActionTypeRetryTask,
 		TargetID:        req.DomainTaskID,
-		Reasoning:       fmt.Sprintf("瞬态错误，建议重试（已重试 %d 次）", h.RetryCount),
+		Reasoning:       fmt.Sprintf("瞬态错误，建议重试（当前预算范围已重试 %d 次）", budgetMetrics.retryCount),
 		RollbackAction:  consts.ActionTypePauseWorkflow,
 		ExpectedOutcome: "任务重试后成功完成",
 		Meta: &DecisionMeta{
@@ -104,9 +105,9 @@ func (s *AdaptiveRetryStrategy) handleTransient(h *HealthMetrics, req *DecisionR
 	}
 }
 
-func (s *AdaptiveRetryStrategy) handleStructural(h *HealthMetrics, req *DecisionRequest) *ActionPlan {
+func (s *AdaptiveRetryStrategy) handleStructural(h *HealthMetrics, budgetMetrics scopedBudgetMetrics, req *DecisionRequest) *ActionPlan {
 	level := consts.DecisionLevelB
-	if h.ReworkRounds >= 2 {
+	if budgetMetrics.reworkRounds >= 2 {
 		level = consts.DecisionLevelC
 	}
 
@@ -116,7 +117,7 @@ func (s *AdaptiveRetryStrategy) handleStructural(h *HealthMetrics, req *Decision
 		DecisionLevel:   level,
 		ActionType:      consts.ActionTypeTriggerRework,
 		TargetID:        req.DomainTaskID,
-		Reasoning:       fmt.Sprintf("结构性错误：连续失败 %d 次，返工 %d 轮，建议返工修复", h.ConsecutiveFailures, h.ReworkRounds),
+		Reasoning:       fmt.Sprintf("结构性错误：连续失败 %d 次，当前预算范围返工 %d 轮，建议返工修复", h.ConsecutiveFailures, budgetMetrics.reworkRounds),
 		RollbackAction:  consts.ActionTypePauseWorkflow,
 		ExpectedOutcome: "通过返工修正方案缺陷",
 		Meta: &DecisionMeta{

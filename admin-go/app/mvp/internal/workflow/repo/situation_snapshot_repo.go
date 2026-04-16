@@ -39,12 +39,28 @@ func (r *SituationSnapshotRepo) GetLatestByWorkflowRunID(ctx context.Context, wo
 }
 
 func (r *SituationSnapshotRepo) ListByProjectID(ctx context.Context, projectID int64, limit int) ([]g.Map, error) {
+	return r.ListByProjectIDWindow(ctx, projectID, 0, 0, limit)
+}
+
+// ListByProjectIDWindow 按项目分页查询态势快照，并支持按工作流下推过滤。
+func (r *SituationSnapshotRepo) ListByProjectIDWindow(ctx context.Context, projectID, workflowRunID int64, offset, limit int) ([]g.Map, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	records, err := middleware.ApplyDataScope(ctx, r.model(ctx), "created_by", "dept_id").
-		Where("project_id", projectID).
+
+	if offset < 0 {
+		offset = 0
+	}
+
+	model := middleware.ApplyDataScope(ctx, r.model(ctx), "created_by", "dept_id").
+		Where("project_id", projectID)
+	if workflowRunID > 0 {
+		model = model.Where("workflow_run_id", workflowRunID)
+	}
+
+	records, err := model.
 		OrderDesc("created_at").
+		Offset(offset).
 		Limit(limit).
 		All()
 	if err != nil {

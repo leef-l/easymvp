@@ -80,7 +80,7 @@ func (s *PlanVersionService) CreateFromArchitectReply(
 	now := time.Now()
 	var versionNo int
 
-	err := g.DB().Transaction(ctx, func(ctx context.Context, _ gdb.TX) error {
+	err := repo.WithTx(ctx, func(ctx context.Context, _ gdb.TX) error {
 		// 1. 获取下一个 version_no
 		var err error
 		versionNo, err = s.planRepo.NextVersionNo(ctx, projectID)
@@ -217,7 +217,7 @@ func (s *PlanVersionService) ApplyTaskPatchesFromArchitectReply(
 	patchedCount := 0
 	resolvedRoleLevels := make(map[string]string, len(patches))
 
-	err = g.DB().Transaction(ctx, func(ctx context.Context, _ gdb.TX) error {
+	err = repo.WithTx(ctx, func(ctx context.Context, _ gdb.TX) error {
 		blueprints, bpErr := s.blueprintRepo.ListByPlanVersionStatuses(ctx, pvID,
 			[]string{consts.BlueprintStatusDraft, consts.BlueprintStatusConfirmed},
 			"id", "name", "role_type", "role_level")
@@ -465,7 +465,7 @@ func (s *PlanVersionService) SubmitForReview(ctx context.Context, projectID int6
 	}
 
 	// 3. 事务内完成所有状态迁移
-	err = g.DB().Transaction(ctx, func(ctx context.Context, _ gdb.TX) error {
+	err = repo.WithTx(ctx, func(ctx context.Context, _ gdb.TX) error {
 		// plan_version: draft → active（CAS）
 		pvRows, err := s.planRepo.UpdateFieldsIfStatuses(ctx, pvID, []string{consts.PlanVersionStatusDraft}, g.Map{
 			"status":     consts.PlanVersionStatusActive,
@@ -565,7 +565,7 @@ func (s *PlanVersionService) SubmitForReviewAsync(ctx context.Context, projectID
 	}
 
 	// 3. 事务内完成所有状态迁移（同步，快速）
-	err = g.DB().Transaction(ctx, func(ctx context.Context, _ gdb.TX) error {
+	err = repo.WithTx(ctx, func(ctx context.Context, _ gdb.TX) error {
 		pvRows, err := s.planRepo.UpdateFieldsIfStatuses(ctx, pvID, []string{consts.PlanVersionStatusDraft}, g.Map{
 			"status":     consts.PlanVersionStatusActive,
 			"updated_at": now,

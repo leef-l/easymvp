@@ -39,6 +39,9 @@ import {
 } from '#/api/mvp/workflow';
 
 const props = defineProps<{ projectId?: string }>();
+const emit = defineEmits<{
+  changed: [];
+}>();
 
 const route = useRoute();
 const projectID = computed(() => props.projectId || (route.query.projectId as string) || '');
@@ -83,6 +86,9 @@ const modeLoading = ref(false);
 const rejectReason = ref('');
 const rejectModalVisible = ref(false);
 const rejectTarget = ref<AutonomyCheckpointItem | null>(null);
+let decisionLoadVersion = 0;
+let historyLoadVersion = 0;
+let ruleLoadVersion = 0;
 
 function resetAutonomyState() {
   checkpoints.value = [];
@@ -91,7 +97,14 @@ function resetAutonomyState() {
   gateRules.value = [];
   policyRules.value = [];
   reports.value = [];
+  actionStatusFilter.value = undefined;
+  decisionTypeFilter.value = undefined;
+  reportTypeFilter.value = undefined;
   selectedReport.value = null;
+  reportDetailVisible.value = false;
+  rejectReason.value = '';
+  rejectModalVisible.value = false;
+  rejectTarget.value = null;
 }
 
 /** actionID → action 的快查表 */
@@ -105,45 +118,68 @@ const actionMap = computed(() => {
 
 /** 加载决策中心 + 报告 */
 async function loadData() {
-  if (!projectID.value) return;
+  const currentProjectId = projectID.value;
+  if (!currentProjectId) {
+    resetAutonomyState();
+    return;
+  }
+  const requestVersion = ++decisionLoadVersion;
   loading.value = true;
   try {
     const [checkpointsRes, reportsRes] = await Promise.all([
-      getAutonomyCheckpoints(projectID.value),
-      getProjectReports(projectID.value, reportTypeFilter.value),
+      getAutonomyCheckpoints(currentProjectId),
+      getProjectReports(currentProjectId, reportTypeFilter.value),
     ]);
+    if (requestVersion !== decisionLoadVersion || currentProjectId !== projectID.value) return;
     checkpoints.value = checkpointsRes?.checkpoints ?? [];
     pendingActions.value = checkpointsRes?.actions ?? [];
     reports.value = reportsRes?.reports ?? [];
   } catch {
     /* ignore */
   } finally {
-    loading.value = false;
+    if (requestVersion === decisionLoadVersion && currentProjectId === projectID.value) {
+      loading.value = false;
+    }
   }
 }
 
 /** 加载审计历史（独立刷新） */
 async function loadHistory() {
-  if (!projectID.value) return;
+  const currentProjectId = projectID.value;
+  if (!currentProjectId) {
+    allActions.value = [];
+    return;
+  }
+  const requestVersion = ++historyLoadVersion;
   historyLoading.value = true;
   try {
-    const res = await getAutonomyActions(projectID.value, actionStatusFilter.value, decisionTypeFilter.value);
+    const res = await getAutonomyActions(currentProjectId, actionStatusFilter.value, decisionTypeFilter.value);
+    if (requestVersion !== historyLoadVersion || currentProjectId !== projectID.value) return;
     allActions.value = res?.actions ?? [];
   } catch {
     /* ignore */
   } finally {
-    historyLoading.value = false;
+    if (requestVersion === historyLoadVersion && currentProjectId === projectID.value) {
+      historyLoading.value = false;
+    }
   }
 }
 
 /** 加载风险闸门 & 策略规则 */
 async function loadRules() {
-  if (!projectID.value) return;
+  const currentProjectId = projectID.value;
+  if (!currentProjectId) {
+    gateRules.value = [];
+    policyRules.value = [];
+    return;
+  }
+  const requestVersion = ++ruleLoadVersion;
   try {
     const [gateRes, policyRes] = await Promise.all([
-      getAutonomyGateRules(projectID.value),
-      getAutonomyPolicyRules(projectID.value),
+      getAutonomyGateRules(currentProjectId),
+      getAutonomyPolicyRules(currentProjectId),
     ]);
+    if (requestVersion !== ruleLoadVersion || currentProjectId !== projectID.value) return;
     gateRules.value = gateRes?.rules ?? [];
     policyRules.value = policyRes?.rules ?? [];
   } catch {
@@ -341,7 +377,8 @@ async function handleApprove(record: AutonomyCheckpointItem | Record<string, any
     onOk: async () => {
       await autonomyApprove(action.id);
       message.success('已批准');
-      loadData();
+      await loadData();
+      emit('changed');
     },
   });
 }
@@ -369,7 +406,8 @@ async function confirmReject() {
   message.success('已驳回');
   rejectModalVisible.value = false;
   rejectTarget.value = null;
-  loadData();
+  await loadData();
+  emit('changed');
 }
 
 async function handleTriggerReplan() {
@@ -379,7 +417,8 @@ async function handleTriggerReplan() {
     onOk: async () => {
       await triggerReplan(projectID.value);
       message.success('已触发重规划分析');
-      loadData();
+      await loadData();
+      emit('changed');
     },
   });
 }

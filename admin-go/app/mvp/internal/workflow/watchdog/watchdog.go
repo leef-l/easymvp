@@ -14,6 +14,7 @@ import (
 	"easymvp/app/mvp/internal/engine"
 	"easymvp/app/mvp/internal/workflow/autonomy"
 	domainTask "easymvp/app/mvp/internal/workflow/domain/task"
+	"easymvp/app/mvp/internal/workflow/repo"
 )
 
 // SchedulerCallback 调度器回调（避免循环依赖）。
@@ -71,6 +72,8 @@ type DomainTaskWatchdog struct {
 	pauseFn        PauseCallback
 	replanFn       ReplanCallback
 	circuitBreaker *autonomy.CircuitBreaker
+	taskRepo       *repo.DomainTaskRepo
+	workflowRepo   *repo.WorkflowRunRepo
 }
 
 // New 创建 V2 看门狗。
@@ -104,6 +107,8 @@ func New() *DomainTaskWatchdog {
 			MaxStaleCountCompat:     maxStaleCount,
 			MaxRetries:              maxRetries,
 		},
+		taskRepo:     repo.NewDomainTaskRepo(),
+		workflowRepo: repo.NewWorkflowRunRepo(),
 	}
 }
 
@@ -188,11 +193,7 @@ func (w *DomainTaskWatchdog) heartbeatLoop(ctx context.Context) {
 
 // checkRunningTasks 检测 running 状态的 domain_task。
 func (w *DomainTaskWatchdog) checkRunningTasks(ctx context.Context) {
-	tasks, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("status", domainTask.StatusRunning).
-		WhereNull("deleted_at").
-		Fields("id, workflow_run_id, heartbeat_at, started_at").
-		All()
+	tasks, err := w.taskRepo.ListByStatuses(ctx, []string{domainTask.StatusRunning}, "id", "workflow_run_id", "heartbeat_at", "started_at")
 	if err != nil {
 		w.mu.Lock()
 		w.stats.LastRunningCheckAt = time.Now().UTC()
@@ -215,8 +216,11 @@ func (w *DomainTaskWatchdog) checkRunningTasks(ctx context.Context) {
 	w.stats.LastRunningCheckAt = now
 	w.stats.LastRunningTaskCount = len(tasks)
 	for _, task := range tasks {
-		taskID := task["id"].Int64()
-		refRaw, refTime, ok := resolveRefTime(task["heartbeat_at"].String(), task["started_at"].String())
+		taskID := g.NewVar(task["id"]).Int64()
+		refRaw, refTime, ok := resolveRefTime(
+			g.NewVar(task["heartbeat_at"]).String(),
+			g.NewVar(task["started_at"]).String(),
+		)
 		if !ok {
 			w.stats.InvalidRefSkips++
 			continue
@@ -251,7 +255,7 @@ func (w *DomainTaskWatchdog) checkRunningTasks(ctx context.Context) {
 	// 清理不再 running 的跟踪记录
 	activeIDs := make(map[int64]bool)
 	for _, task := range tasks {
-		activeIDs[task["id"].Int64()] = true
+		activeIDs[g.NewVar(task["id"]).Int64()] = true
 	}
 	for id := range w.staleCount {
 		if !activeIDs[id] {
@@ -269,19 +273,15 @@ func (w *DomainTaskWatchdog) checkRunningTasks(ctx context.Context) {
 	// 锁外执行状态更新
 	for _, st := range staleTasks {
 		now := gtime.Now()
-		result, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-			Where("id", st.taskID).
-			Where("status", domainTask.StatusRunning).
-			Update(g.Map{
-				"status":     domainTask.StatusFailed,
-				"result":     "看门狗检测: " + st.reason,
-				"updated_at": now,
-			})
+		rows, err := w.taskRepo.UpdateFieldsIfStatus(ctx, st.taskID, domainTask.StatusRunning, g.Map{
+			"status":     domainTask.StatusFailed,
+			"result":     "看门狗检测: " + st.reason,
+			"updated_at": now,
+		})
 		if err != nil {
 			g.Log().Errorf(ctx, "[WatchdogV2] 标记任务 %d 失败出错: %v", st.taskID, err)
 			continue
 		}
-		rows, _ := result.RowsAffected()
 		if rows == 0 {
 			continue // 任务已不是 running
 		}
@@ -315,11 +315,7 @@ func (w *DomainTaskWatchdog) autoRetryLoop(ctx context.Context) {
 
 // checkFailedTasks 检测 failed 任务并自动重试。
 func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
-	tasks, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("status", domainTask.StatusFailed).
-		WhereNull("deleted_at").
-		Fields("id, workflow_run_id, retry_count").
-		All()
+	tasks, err := w.taskRepo.ListByStatuses(ctx, []string{domainTask.StatusFailed}, "id", "workflow_run_id", "retry_count")
 	if err != nil {
 		w.mu.Lock()
 		w.stats.LastFailedCheckAt = time.Now().UTC()
@@ -343,7 +339,7 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 	// 批量收集 workflow_run ID 并一次查询状态（避免 N+1）
 	wfRunIDs := make(map[int64]struct{})
 	for _, task := range tasks {
-		wfRunIDs[task["workflow_run_id"].Int64()] = struct{}{}
+		wfRunIDs[g.NewVar(task["workflow_run_id"]).Int64()] = struct{}{}
 	}
 	wfIDList := make([]int64, 0, len(wfRunIDs))
 	for wfID := range wfRunIDs {
@@ -351,28 +347,25 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 	}
 	activeWfRuns := make(map[int64]bool)
 	if len(wfIDList) > 0 {
-		wfRecords, wfErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-			WhereIn("id", wfIDList).
-			WhereIn("status", []string{"executing", "reworking"}).
-			Fields("id").All()
+		wfRecords, wfErr := w.workflowRepo.ListByIDsStatuses(ctx, wfIDList, []string{"executing", "reworking"}, "id")
 		if wfErr != nil {
 			g.Log().Warningf(ctx, "[WatchdogV2] 查询活跃 workflow_run 失败: err=%v", wfErr)
 		}
 		for _, r := range wfRecords {
-			activeWfRuns[r["id"].Int64()] = true
+			activeWfRuns[g.NewVar(r["id"]).Int64()] = true
 		}
 	}
 
 	var candidates []candidate
 	for _, task := range tasks {
-		wfRunID := task["workflow_run_id"].Int64()
+		wfRunID := g.NewVar(task["workflow_run_id"]).Int64()
 		if !activeWfRuns[wfRunID] {
 			continue
 		}
 		candidates = append(candidates, candidate{
-			taskID:        task["id"].Int64(),
+			taskID:        g.NewVar(task["id"]).Int64(),
 			workflowRunID: wfRunID,
-			retryCount:    task["retry_count"].Int(),
+			retryCount:    g.NewVar(task["retry_count"]).Int(),
 		})
 	}
 
@@ -405,25 +398,21 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 		g.Log().Infof(ctx, "[WatchdogV2] 自动重试任务 %d (第 %d/%d 次)", item.taskID, item.retryNo, w.maxRetries)
 
 		now := gtime.Now()
-		result, dbErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
-			Where("id", item.taskID).
-			Where("status", domainTask.StatusFailed).
-			Update(g.Map{
-				"status":           domainTask.StatusPending,
-				"retry_count":      item.retryNo,
-				"result":           nil,
-				"error_message":    nil,
-				"started_at":       nil,
-				"completed_at":     nil,
-				"heartbeat_at":     nil,
-				"locked_resources": nil,
-				"updated_at":       now,
-			})
+		rows, dbErr := w.taskRepo.UpdateFieldsIfStatus(ctx, item.taskID, domainTask.StatusFailed, g.Map{
+			"status":           domainTask.StatusPending,
+			"retry_count":      item.retryNo,
+			"result":           nil,
+			"error_message":    nil,
+			"started_at":       nil,
+			"completed_at":     nil,
+			"heartbeat_at":     nil,
+			"locked_resources": nil,
+			"updated_at":       now,
+		})
 		if dbErr != nil {
 			g.Log().Errorf(ctx, "[WatchdogV2] 重试任务 %d DB 更新失败: %v", item.taskID, dbErr)
 			continue
 		}
-		rows, _ := result.RowsAffected()
 		if rows == 0 {
 			continue
 		}
@@ -444,18 +433,14 @@ func (w *DomainTaskWatchdog) checkFailedTasks(ctx context.Context) {
 		g.Log().Errorf(ctx, "[WatchdogV2] 任务 %d 重试超限，升级为 escalated", item.taskID)
 
 		now := gtime.Now()
-		result, upErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
-			Where("id", item.taskID).
-			Where("status", domainTask.StatusFailed).
-			Update(g.Map{
-				"status":     domainTask.StatusEscalated,
-				"updated_at": now,
-			})
+		rows, upErr := w.taskRepo.UpdateFieldsIfStatus(ctx, item.taskID, domainTask.StatusFailed, g.Map{
+			"status":     domainTask.StatusEscalated,
+			"updated_at": now,
+		})
 		if upErr != nil {
 			g.Log().Errorf(ctx, "[WatchdogV2] 升级任务状态失败: task=%d err=%v", item.taskID, upErr)
 			continue
 		}
-		rows, _ := result.RowsAffected()
 		if rows == 0 {
 			continue
 		}
@@ -538,13 +523,12 @@ func (w *DomainTaskWatchdog) checkCircuitBreaker(ctx context.Context, wfIDs map[
 	}
 	wfProjectMap := make(map[int64]int64)
 	if len(wfIDList) > 0 {
-		wfRecords, wfErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-			WhereIn("id", wfIDList).Fields("id, project_id").All()
+		wfRecords, wfErr := w.workflowRepo.ListByIDs(ctx, wfIDList, "id", "project_id")
 		if wfErr != nil {
 			g.Log().Warningf(ctx, "[WatchdogV2] 批量查询 wfRun→projectID 失败: err=%v", wfErr)
 		}
 		for _, r := range wfRecords {
-			wfProjectMap[r["id"].Int64()] = r["project_id"].Int64()
+			wfProjectMap[g.NewVar(r["id"]).Int64()] = g.NewVar(r["project_id"]).Int64()
 		}
 	}
 

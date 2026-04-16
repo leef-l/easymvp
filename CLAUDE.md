@@ -375,10 +375,10 @@ mysql -u easymvp -pJKcHFJYXnkrB6BXE -h 127.0.0.1 -P 3306 easymvp
 ## 十二、常用命令
 
 ```bash
-# 后端编译
-cd admin-go && go build ./app/mvp/...
-cd admin-go && go build ./app/system/...
-cd admin-go && go build ./app/ai/...
+# 后端测试 / 编译
+# 统一走 GitHub Actions:
+# - .github/workflows/backend-guard.yml
+# - .github/workflows/deploy.yml
 
 # 生成 DAO
 cd admin-go/app/mvp && gf gen dao
@@ -500,7 +500,7 @@ cd vue-vben-admin && pnpm dev
 流程：
 1. 分析问题 → 写设计文档到 `docs/` 目录
 2. 按文档实施改动
-3. 编译通过 → git push
+3. 提交代码并等待 GitHub Actions 验证通过 → git push / 合并
 
 **删除策略**：
 - **单次性 bug 修复、小功能**：实施完成并 push 后可删除设计文档
@@ -543,7 +543,7 @@ cd vue-vben-admin && pnpm dev
 2. **超过 80 立即停止**：当负载超过 `80` 时，立即停止继续执行，不再启动测试、构建、扫描、批处理或其他重操作。
 3. **低于 50 才恢复**：停止后进入等待，只允许保留低开销只读观察；只有负载回落到 `50` 以下，才允许继续后续操作。
 4. **恢复前重新检查**：每次准备恢复执行前，必须重新检查一次负载；如果再次超过 `80`，立即再次停止。
-5. **默认从严执行**：未获人工明确许可时，禁止运行 `go test ./...`、全量构建、全仓扫描、批量脚本、长时间压测或其他高负载命令。
+5. **测试和编译统一交给 GitHub Actions**：未获人工明确许可时，禁止在当前机器直接运行任何 `go test`、`go build`、`npm/pnpm test`、`pnpm exec vue-tsc`、`pnpm build`、`pnpm exec vite build`、`docker build` 等测试或编译命令；需要验证时，只能修改或触发 `.github/workflows/`，并以 GitHub Actions 结果为准。
 
 ### 执行口径
 

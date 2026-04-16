@@ -7,7 +7,9 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/utility/snowflake"
 )
 
@@ -24,41 +26,25 @@ func (m *ResourceLockManager) AcquireLocks(ctx context.Context, workflowRunID, t
 		return nil
 	}
 	now := time.Now()
-	return g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		existingRecords, err := tx.Model("mvp_task_resource_lock").Ctx(ctx).
-			Where("task_id", taskID).
-			WhereIn("resource_path", normalized).
-			Fields("resource_path").
-			All()
+	lockRepo := repo.NewTaskResourceLockRepo()
+	return repo.WithTx(ctx, func(ctx context.Context, tx gdb.TX) error {
+		existingResources, err := lockRepo.ListHeldByTaskResourcesInTx(ctx, tx, taskID, normalized)
 		if err != nil {
 			return err
 		}
 
-		existingSet := make(map[string]struct{}, len(existingRecords))
-		existingResources := make([]string, 0, len(existingRecords))
-		for _, record := range existingRecords {
-			res := strings.TrimSpace(record["resource_path"].String())
-			if res == "" {
-				continue
-			}
-			if _, ok := existingSet[res]; ok {
-				continue
-			}
-			existingSet[res] = struct{}{}
-			existingResources = append(existingResources, res)
+		existingSet := make(map[string]struct{}, len(existingResources))
+		for _, resource := range existingResources {
+			existingSet[resource] = struct{}{}
 		}
 
 		if len(existingResources) > 0 {
-			if _, err := tx.Model("mvp_task_resource_lock").Ctx(ctx).
-				Where("task_id", taskID).
-				WhereIn("resource_path", existingResources).
-				Data(g.Map{
-					"workflow_run_id": workflowRunID,
-					"lock_status":     "held",
-					"locked_at":       now,
-					"released_at":     nil,
-				}).
-				Update(); err != nil {
+			if err := lockRepo.UpdateHeldInTx(ctx, tx, taskID, existingResources, g.Map{
+				"workflow_run_id": workflowRunID,
+				"lock_status":     "held",
+				"locked_at":       now,
+				"released_at":     nil,
+			}); err != nil {
 				return err
 			}
 		}
@@ -80,19 +66,13 @@ func (m *ResourceLockManager) AcquireLocks(ctx context.Context, workflowRunID, t
 		if len(batch) == 0 {
 			return nil
 		}
-		_, err = tx.Model("mvp_task_resource_lock").Ctx(ctx).Insert(batch)
-		return err
+		return lockRepo.BatchCreateInTx(ctx, tx, batch)
 	})
 }
 
 // ReleaseLocks 释放任务的所有资源锁。
 func (m *ResourceLockManager) ReleaseLocks(ctx context.Context, taskID int64) error {
-	_, err := g.DB().Model("mvp_task_resource_lock").Ctx(ctx).
-		Where("task_id", taskID).
-		Where("lock_status", "held").
-		Data(g.Map{"lock_status": "released", "released_at": time.Now()}).
-		Update()
-	return err
+	return repo.NewTaskResourceLockRepo().ReleaseHeldByTask(ctx, taskID, gtime.NewFromTime(time.Now()))
 }
 
 func normalizeResourcePaths(resources []string) []string {

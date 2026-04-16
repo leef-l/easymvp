@@ -193,10 +193,11 @@ type WorkflowProjectStatusRes struct {
 	ActiveRunningTasks int            `json:"activeRunningTasks"`
 	StalledTaskCount   int            `json:"stalledTaskCount"`
 	// V2 聚合字段
-	EngineVersion   string `json:"engineVersion,omitempty"`
-	WorkflowStatus  string `json:"workflowStatus,omitempty"`
-	CurrentStage    string `json:"currentStage,omitempty"`
-	ProgressPercent int    `json:"progressPercent,omitempty"`
+	WorkflowRunID   snowflake.JsonInt64 `json:"workflowRunID,omitempty"`
+	EngineVersion   string              `json:"engineVersion,omitempty"`
+	WorkflowStatus  string              `json:"workflowStatus,omitempty"`
+	CurrentStage    string              `json:"currentStage,omitempty"`
+	ProgressPercent int                 `json:"progressPercent,omitempty"`
 }
 
 // WorkflowParseTasksReq 手动解析架构师回复中的任务清单

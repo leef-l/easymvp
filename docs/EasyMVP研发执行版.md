@@ -46,7 +46,7 @@
 
 - 每个阶段都必须有可重复回归样例。
 
-### 2.1 当前落地进度（2026-04-09）
+### 2.1 当前落地进度（2026-04-12）
 
 截至当前代码状态，以下能力已完成首轮落地：
 
@@ -63,7 +63,9 @@
 - `C2`：任务级执行回放已可展示日志、事件、问题、证据、交接与动作
 - `C3`：项目级轨迹页已可展示交付闸门聚合与明细（待人工交付 / PR 草稿 / 待回写 / 高风险任务）
 - `C4`：内部评测样例清单已通过 `test-workspaces/regression-manifest.json`、校验接口和控制台“评测样例”面板接入
-- `F`：`web-antd` 已建立 GitHub Actions `1C/1G` 守卫基线，`verify-build / workflow-bundle / workflow entry bundles / 174-file full-source bundle shards` 已在 run [`24314526616`](https://github.com/leef-l/easymvp/actions/runs/24314526616) 通过
+- 工作流控制台已完成 `objective / situation / execution / dashboard` 这条联动的静态收口，项目切换刷新、父子面板同步、任务焦点态势与过期异步响应保护已补齐
+- `系统机制 / Watchdog / 直连 DB 收口` 三条治理线已从“待补齐”转入“已完成基线 + 防回退”状态
+- 当前剩余硬约束已收缩为 `web-antd` 已按 `1 core / 1G` 实跑，但当前仍无法在该限制下完成 full typecheck/build；作为拆分验证补充，`workflow` 控制台 8 个页面已通过单入口类型检查，轻量验证构建模式、`workflow` 最小 bundle 入口和单页面 bundle 入口都已静态补齐，且轻量验证模式已进一步关闭构建优化阶段以压低峰值
 
 当前数据库结构变更只允许通过 migration 交付，最新 migration 为：
 
@@ -77,10 +79,13 @@
 
 后续若继续推进，重点将从“补主链缺口”转为“扩充样例规模、补 CI 串联、真实运行型回归能力和线上配置治理”。
 
-补充说明：
+### 2.2 当前阶段修正（2026-04-12）
 
-- 受工具链内存峰值影响，`web-antd` 单次 full `vue-tsc/vite build` 不再作为 `1C/1G` 阶段验收口径
-- 当前统一按 GitHub Actions 的全源码分片 guard 收口，该 guard 已覆盖 `vue-vben-admin/apps/web-antd/src/**/*.{vue,ts,tsx}`
+当前计划需要明确做一次口径修正：
+
+- 主链第一轮实现已经完成，不再把 `workflow` 控制器拆分、provider 协议路由、worktree 回写策略等基础项写成“本周立即开工”
+- 近期计划应切到“受控验证路径继续细化 + 文档治理 + 剩余环境级验证补齐”，而不是继续把已落地主线重新规划一遍
+- 具体近期任务优先级，以本文件第 13 节和 [EasyMVP项目收尾计划与进度](./EasyMVP项目收尾计划与进度.md) 为准
 
 ## 3. 团队角色建议
 
@@ -214,6 +219,7 @@
 - 所有新增数据读写链路禁止在控制器、阶段服务、验收服务里直接碰 DB
 - 必须走 `service / repo interface / repo implementation` 的标准分层
 - 项目级角色定义统一收口到 `workflow.role_definitions`
+- 所有测试与编译统一交给 GitHub Actions，本机禁止直接执行 `go test`、`go build`、`pnpm build`、`pnpm exec vite build`、`pnpm exec vue-tsc`、`npm/pnpm test`
 - 详细约束见 [EasyMVP工程铁律](./EasyMVP工程铁律.md)
 
 涉及模块：
@@ -250,12 +256,6 @@
 - `admin-go/app/mvp/internal/**/*_test.go`
 - `test-workspaces/`
 - CI 脚本与回归脚本
-
-当前基线（2026-04-13）：
-
-- `.github/workflows/web-antd-guard.yml` 已覆盖 `verify-build`、`workflow-bundle`、`workflow entry bundles` 和 `174` 个 `web-antd` 源文件的 `6` 分片 verify bundle
-- 当前通过记录：[`Web Antd Guard #9`](https://github.com/leef-l/easymvp/actions/runs/24314526616)
-- `1C/1G` 下单次 full typecheck/build 不再作为本阶段阻塞项
 
 ## 6. 阶段一详细执行清单
 
@@ -465,8 +465,8 @@ DoD：
 - 已完成首轮落地：
   - `regression-manifest.json` 已升级到 `version = 2`，当前 4 个场景均为 `ready`
   - 已补 `readme_refresh / multi_task_dependency / manual_takeover` 三个规格目录
-  - 已新增 `go run ./app/mvp/regressioncheck` 与 `bash ./test-workspaces/validate.sh` 一键校验入口，可同时校验 manifest 与风险交付矩阵
-  - guard 脚本需在隔离验证环境执行，避免在业务服务器直接运行
+  - 已新增 `regressioncheck + validate.sh` 这条 guard 链路，并已收口到 `.github/workflows/backend-guard.yml`
+  - guard 校验统一在 GitHub Actions 内执行，不再允许在业务服务器或本地直接运行
   - 回归样例接口与控制台面板已可直接查看 manifest 校验状态和 ready/planned 统计
 
 ## 7. 阶段二详细执行清单
@@ -718,21 +718,20 @@ A5 回归样例
 2. 指标采集不完整
 3. 样例项目维护成本上升
 
-## 13. 本周可立即开工项
+## 13. 当前阶段可立即开工项
 
-如果按当前状态直接开工，建议第一周只做 5 件事：
+如果按当前状态继续推进，建议先做 4 件事：
 
-1. 建 `workflow` 控制器拆分目录和文件边界
-2. 设计 provider 协议级 endpoint 结构
-3. 写 worktree 回写策略草案
-4. 建最小回归样例集
-5. 补一条 `accept manual_review -> accept-approve -> complete` 自动回归
+1. 收口 `web-antd` 在 `1 core / 1G` 限制下的验证策略，当前先以单入口拆分验证覆盖 `workflow` 页面，并补 `workflow` 最小 bundle、单页面 bundle 与更轻的验证构建入口，再继续处理 full typecheck/build
+2. 持续整理 `docs/` 主入口和专项文档口径，确保“计划 / 现状 / 验证记录”不再串线
+3. 建立每周一次真实 workflow 回放与发布前核对清单
+4. 若守卫脚本或配置口径继续变化，更新 `.github/workflows/backend-guard.yml` 并在 GitHub Actions 内复跑 `validate.sh / regressioncheck`
 
 这样做的原因是：
 
-- 这 5 件事都在关键路径上
-- 它们不会因为后续方案变化而大幅返工
-- 做完后，阶段一的剩余任务会更容易分派和推进
+- 这 4 件事都直接对应当前剩余风险
+- 它们比继续堆新功能更接近“可交付、可验证、可维护”的完成态
+- 做完后，下一阶段才能在统一基线上继续扩展体验评审、治理面和多代理控制台
 
 ## 14. 结论
 

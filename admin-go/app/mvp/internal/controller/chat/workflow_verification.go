@@ -15,7 +15,7 @@ import (
 	"easymvp/utility/snowflake"
 )
 
-// VerificationStart 启动 Docker-first 项目验证。
+// VerificationStart 启动 GitHub Actions 结果驱动的项目验证。
 func (c *cWorkflow) VerificationStart(ctx context.Context, req *v1.WorkflowVerificationStartReq) (res *v1.WorkflowVerificationStartRes, err error) {
 	projectID := int64(req.ProjectID)
 	if err := checkProjectOwnership(ctx, projectID); err != nil {
@@ -33,7 +33,7 @@ func (c *cWorkflow) VerificationStart(ctx context.Context, req *v1.WorkflowVerif
 		VerificationRunID: snowflake.JsonInt64(runID),
 		WorkflowRunID:     snowflake.JsonInt64(workflowRunID),
 		Status:            "running",
-		Message:           "验证已启动，系统将优先尝试 Docker 环境并回写问题与证据",
+		Message:           "验证已启动，系统将读取 GitHub Actions 最新结果并回写问题与证据",
 	}, nil
 }
 

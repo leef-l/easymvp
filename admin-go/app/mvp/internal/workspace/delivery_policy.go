@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"encoding/json"
+	"path"
 	"strings"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -13,6 +14,8 @@ import (
 var workspaceDeliveryConfigString = func(ctx context.Context, key, yamlPath, defaultVal string) string {
 	return engine.GetConfigString(ctx, key, yamlPath, defaultVal)
 }
+
+var loadTaskDeliveryProfileFn = loadTaskDeliveryProfile
 
 type deliveryPolicy struct {
 	DeliveryMode string
@@ -29,11 +32,13 @@ type RiskDeliveryPolicy struct {
 type taskDeliveryProfile struct {
 	TaskKind          string
 	ExecutionMode     string
+	Name              string
+	Description       string
 	AffectedResources []string
 }
 
 func resolveDeliveryPolicy(ctx context.Context, taskID int64, req FinalizeRequest) deliveryPolicy {
-	profile := loadTaskDeliveryProfile(ctx, taskID)
+	profile := loadTaskDeliveryProfileFn(ctx, taskID)
 
 	policy := deliveryPolicy{
 		DeliveryMode: normalizeDeliveryMode(req.DeliveryMode),
@@ -98,6 +103,10 @@ func resolveDeliveryPolicy(ctx context.Context, taskID int64, req FinalizeReques
 
 	if policy.DeliveryMode == DeliveryModePR || policy.DeliveryMode == DeliveryModeManual {
 		policy.SyncStrategy = SyncStrategyManual
+	}
+	if strings.TrimSpace(req.SyncStrategy) == "" && shouldPreferAutoApply(profile, policy) {
+		policy.DeliveryMode = DeliveryModePatch
+		policy.SyncStrategy = SyncStrategyAutoApply
 	}
 
 	return policy
@@ -189,7 +198,7 @@ func loadTaskDeliveryProfile(ctx context.Context, taskID int64) *taskDeliveryPro
 	record, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
 		Where("id", taskID).
 		WhereNull("deleted_at").
-		Fields("task_kind, execution_mode, affected_resources").
+		Fields("task_kind, execution_mode, name, description, affected_resources").
 		One()
 	if err != nil || record.IsEmpty() {
 		return nil
@@ -204,6 +213,8 @@ func loadTaskDeliveryProfile(ctx context.Context, taskID int64) *taskDeliveryPro
 	return &taskDeliveryProfile{
 		TaskKind:          strings.ToLower(strings.TrimSpace(record["task_kind"].String())),
 		ExecutionMode:     strings.ToLower(strings.TrimSpace(record["execution_mode"].String())),
+		Name:              strings.TrimSpace(record["name"].String()),
+		Description:       strings.TrimSpace(record["description"].String()),
 		AffectedResources: affectedResources,
 	}
 }
@@ -284,5 +295,142 @@ func normalizeRiskLevel(raw string) string {
 		return RiskLevelHigh
 	default:
 		return ""
+	}
+}
+
+func shouldPreferAutoApply(profile *taskDeliveryProfile, policy deliveryPolicy) bool {
+	if profile == nil {
+		return false
+	}
+	if policy.DeliveryMode != DeliveryModePatch {
+		return false
+	}
+	if policy.SyncStrategy == SyncStrategyAutoApply {
+		return false
+	}
+	if !supportsExplicitAutoApply(profile) {
+		return false
+	}
+
+	resources := normalizeExplicitDeliveryResources(profile.AffectedResources)
+	if len(resources) == 0 {
+		return false
+	}
+
+	if looksLikeBootstrapTask(profile) && len(resources) <= 24 {
+		return true
+	}
+
+	if isNarrowBaselineScopedChange(resources) && len(resources) <= 12 {
+		return true
+	}
+
+	return false
+}
+
+func supportsExplicitAutoApply(profile *taskDeliveryProfile) bool {
+	switch strings.ToLower(strings.TrimSpace(profile.TaskKind)) {
+	case "failure_analysis", "bug_analysis", "audit":
+		return false
+	}
+
+	switch strings.ToLower(strings.TrimSpace(profile.ExecutionMode)) {
+	case "openhands":
+		return false
+	}
+
+	return true
+}
+
+func looksLikeBootstrapTask(profile *taskDeliveryProfile) bool {
+	text := strings.ToLower(strings.TrimSpace(profile.Name + " " + profile.Description))
+	if text == "" {
+		return false
+	}
+
+	keywords := []string{
+		"脚手架",
+		"初始化",
+		"bootstrap",
+		"scaffold",
+		"init project",
+		"init repo",
+		"项目骨架",
+		"基础框架",
+		"搭建骨架",
+		"创建前端",
+		"创建后端",
+		"create-vite",
+		"gf init",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(text, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeExplicitDeliveryResources(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+
+	for _, raw := range values {
+		item := path.Clean(strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/"))
+		switch {
+		case item == "", item == ".", item == "/":
+			continue
+		case strings.HasPrefix(item, "/"), strings.HasPrefix(item, "../"), item == "..", strings.Contains(item, "/../"):
+			return nil
+		}
+		if _, exists := seen[item]; exists {
+			continue
+		}
+		seen[item] = struct{}{}
+		result = append(result, item)
+	}
+
+	return result
+}
+
+func isNarrowBaselineScopedChange(resources []string) bool {
+	if len(resources) == 0 {
+		return false
+	}
+
+	hasRoot := false
+	scopes := make(map[string]struct{}, len(resources))
+	for _, resource := range resources {
+		scope := deliveryResourceScope(resource)
+		if scope == "" {
+			return false
+		}
+		if scope == "_root" {
+			hasRoot = true
+			continue
+		}
+		scopes[scope] = struct{}{}
+	}
+
+	if len(scopes) == 0 {
+		return hasRoot
+	}
+	if len(scopes) == 1 {
+		return true
+	}
+	return hasRoot && len(scopes) == 1
+}
+
+func deliveryResourceScope(resource string) string {
+	resource = path.Clean(strings.ReplaceAll(strings.TrimSpace(resource), "\\", "/"))
+	switch {
+	case resource == "", resource == ".", resource == "/":
+		return ""
+	case strings.HasPrefix(resource, "/"), strings.HasPrefix(resource, "../"), resource == "..", strings.Contains(resource, "/../"):
+		return ""
+	case !strings.Contains(resource, "/"):
+		return "_root"
+	default:
+		return strings.SplitN(resource, "/", 2)[0]
 	}
 }

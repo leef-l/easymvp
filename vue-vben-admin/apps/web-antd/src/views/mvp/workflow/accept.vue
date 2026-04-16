@@ -33,6 +33,9 @@ import {
 } from '#/api/mvp/workflow';
 
 const props = defineProps<{ projectId?: string }>();
+const emit = defineEmits<{
+  changed: [];
+}>();
 
 const route = useRoute();
 const projectID = computed(() => props.projectId || (route.query.projectId as string) || '');
@@ -47,26 +50,35 @@ const reworkReason = ref('');
 const rejectModalVisible = ref(false);
 const reworkModalVisible = ref(false);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+let loadRequestVersion = 0;
 
 const formatScore = (percent?: number) => `${(percent ?? 0).toFixed(1)}`;
 
 /** 加载全部数据 */
 async function loadData() {
-  if (!projectID.value) return;
+  const currentProjectId = projectID.value;
+  if (!currentProjectId) {
+    resetAcceptState();
+    return;
+  }
+  const requestVersion = ++loadRequestVersion;
   loading.value = true;
   try {
     const [statusRes, issuesRes, evidenceRes] = await Promise.all([
-      getAcceptStatus(projectID.value),
-      getAcceptIssues(projectID.value, severityFilter.value),
-      getAcceptEvidence(projectID.value),
+      getAcceptStatus(currentProjectId),
+      getAcceptIssues(currentProjectId, severityFilter.value),
+      getAcceptEvidence(currentProjectId),
     ]);
+    if (requestVersion !== loadRequestVersion || currentProjectId !== projectID.value) return;
     status.value = statusRes;
     issues.value = issuesRes?.issues ?? [];
     evidence.value = evidenceRes?.evidence ?? [];
   } catch {
     /* ignore */
   } finally {
-    loading.value = false;
+    if (requestVersion === loadRequestVersion && currentProjectId === projectID.value) {
+      loading.value = false;
+    }
   }
 }
 
@@ -204,7 +216,8 @@ async function handleApprove() {
     onOk: async () => {
       await acceptApprove(projectID.value, '管理员手动放行');
       message.success('已放行');
-      loadData();
+      await loadData();
+      emit('changed');
     },
   });
 }
@@ -219,7 +232,8 @@ async function handleReject() {
   message.success('已驳回');
   rejectModalVisible.value = false;
   rejectReason.value = '';
-  loadData();
+  await loadData();
+  emit('changed');
 }
 
 /** 重新验收 */
@@ -230,7 +244,8 @@ async function handleRerun() {
     onOk: async () => {
       await acceptRerun(projectID.value);
       message.success('已启动重新验收');
-      loadData();
+      await loadData();
+      emit('changed');
     },
   });
 }
@@ -245,7 +260,8 @@ async function handleRework() {
   message.success('已触发返工');
   reworkModalVisible.value = false;
   reworkReason.value = '';
-  loadData();
+  await loadData();
+  emit('changed');
 }
 
 function handleIssueRework(issue: AcceptIssueItem) {
@@ -255,7 +271,8 @@ function handleIssueRework(issue: AcceptIssueItem) {
     onOk: async () => {
       await acceptIssueRework(projectID.value, [issue.id]);
       message.success('已触发返工');
-      loadData();
+      await loadData();
+      emit('changed');
     },
   });
 }
@@ -284,6 +301,11 @@ function resetAcceptState() {
   status.value = null;
   issues.value = [];
   evidence.value = [];
+  severityFilter.value = undefined;
+  rejectReason.value = '';
+  reworkReason.value = '';
+  rejectModalVisible.value = false;
+  reworkModalVisible.value = false;
 }
 
 watch(

@@ -135,6 +135,16 @@ func (r *StageRunRepo) UpdateFieldsIfStatus(ctx context.Context, stageRunID int6
 	return rows, nil
 }
 
+// UpdateFields 按 ID 更新阶段字段。
+func (r *StageRunRepo) UpdateFields(ctx context.Context, stageRunID int64, data g.Map) error {
+	_, err := g.DB().Model(r.table()).Ctx(ctx).
+		Where("id", stageRunID).
+		WhereNull("deleted_at").
+		Data(data).
+		Update()
+	return err
+}
+
 // UpdateByIDs 批量更新给定阶段实例。
 func (r *StageRunRepo) UpdateByIDs(ctx context.Context, stageRunIDs []int64, data g.Map) error {
 	if len(stageRunIDs) == 0 {

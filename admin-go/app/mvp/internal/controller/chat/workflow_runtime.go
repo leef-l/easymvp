@@ -367,6 +367,7 @@ func projectStatusV2(ctx context.Context, project gdb.Record) (*v1.WorkflowProje
 		IsActuallyWorking:  activity.ActiveRunningTasks > 0,
 		ActiveRunningTasks: activity.ActiveRunningTasks,
 		StalledTaskCount:   activity.StalledTaskCount,
+		WorkflowRunID:      snowflake.JsonInt64(wfRun["id"].Int64()),
 		EngineVersion:      "workflow_v2",
 		WorkflowStatus:     wfStatus,
 		CurrentStage:       currentStage,

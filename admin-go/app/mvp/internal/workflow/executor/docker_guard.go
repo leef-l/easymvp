@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/gogf/gf/v2/frame/g"
+
+	"easymvp/app/mvp/internal/workflow/repo"
 )
 
 func commandTemplateUsesDocker(template string) bool {
@@ -21,18 +23,13 @@ func engineConfiguredWithDocker(ctx context.Context, engineCode string) bool {
 	if engineCode == "" {
 		return false
 	}
-	cfg, err := g.DB().Model("ai_engine_config").Ctx(ctx).
-		Fields("command_template").
-		Where("engine_code", engineCode).
-		Where("status", 1).
-		WhereNull("deleted_at").
-		One()
+	cfg, err := repo.NewAIEngineConfigRepo().GetEnabledByCode(ctx, engineCode, "command_template")
 	if err != nil {
 		g.Log().Warningf(ctx, "[DockerGuard] 查询引擎配置失败 engine=%s err=%v，按无 Docker 处理", engineCode, err)
 		return false
 	}
-	if cfg.IsEmpty() {
+	if len(cfg) == 0 {
 		return false
 	}
-	return commandTemplateUsesDocker(cfg["command_template"].String())
+	return commandTemplateUsesDocker(g.NewVar(cfg["command_template"]).String())
 }

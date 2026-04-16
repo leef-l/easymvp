@@ -165,6 +165,7 @@ export interface ProjectStatusResult {
   activeRunningTasks: number;
   stalledTaskCount: number;
   // V2 聚合字段
+  workflowRunID?: string;
   engineVersion?: string;
   workflowStatus?: string;
   currentStage?: string;
@@ -1098,8 +1099,11 @@ export interface HealthMetrics {
   avgTaskDuration: number;
   medianTaskDuration: number;
   retryCount: number;
+  taskRetryCount?: number;
   escalationCount: number;
   reworkRounds: number;
+  taskReworkRounds?: number;
+  focusedTaskId?: string;
   acceptRounds: number;
   replanCount: number;
   staleTaskCount: number;
@@ -1154,10 +1158,10 @@ export interface SituationSnapshot {
 }
 
 /** 查询当前态势 */
-export function getSituation(workflowRunID: string) {
+export function getSituation(workflowRunID: string, taskID?: string) {
   return requestClient.get<{ situation: SituationData }>(
     `${PREFIX}/situation`,
-    { params: { workflowRunID } },
+    { params: { workflowRunID, taskID } },
   );
 }
 
@@ -1165,6 +1169,7 @@ export function getSituation(workflowRunID: string) {
 export function getSituationHistory(params: {
   limit?: number;
   projectID: string;
+  taskID?: string;
   workflowRunID?: string;
 }) {
   return requestClient.get<{ snapshots: SituationSnapshot[] }>(
@@ -1190,7 +1195,17 @@ export interface ObjectiveData {
   maxStallMinutes: number;
   autonomyLevel: string;   // supervised / assisted / full_auto
   maxSideEffectLevel: string; // none / reversible / irreversible
+  technicalContract?: {
+    forbiddenTechnologies?: string[];
+    requiredTechnologies?: string[];
+  };
 }
+
+export type ObjectiveSavePayload = Partial<
+  Omit<ObjectiveData, 'projectId' | 'technicalContract'>
+> & {
+  projectID: string;
+};
 
 /** 查询项目目标约束 */
 export function getObjective(projectID: string) {
@@ -1201,7 +1216,7 @@ export function getObjective(projectID: string) {
 }
 
 /** 保存项目目标约束 */
-export function saveObjective(data: Partial<ObjectiveData> & { projectID: string }) {
+export function saveObjective(data: ObjectiveSavePayload) {
   return requestClient.post(`${PREFIX}/save-objective`, data);
 }
 

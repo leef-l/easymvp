@@ -70,7 +70,7 @@ func (s *WorkflowService) CreateRun(ctx context.Context, projectID int64) (int64
 	wfRunID := int64(snowflake.Generate())
 	stageRunID := int64(snowflake.Generate())
 
-	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+	err := repo.WithTx(ctx, func(ctx context.Context, tx gdb.TX) error {
 		// 1. 获取下一个 run_no
 		runNo, err := s.wfRepo.NextRunNoInTx(ctx, tx, projectID)
 		if err != nil {

@@ -61,3 +61,19 @@ func (r *ConversationRepo) GetFirstByProject(ctx context.Context, projectID int6
 	}
 	return record.Map(), nil
 }
+
+// GetLatestByTask 查询任务下最近一条对话。
+func (r *ConversationRepo) GetLatestByTask(ctx context.Context, taskID int64, fields ...string) (g.Map, error) {
+	model := g.DB().Model(r.table()).Ctx(ctx).
+		Where("task_id", taskID).
+		WhereNull("deleted_at").
+		OrderDesc("created_at")
+	if len(fields) > 0 {
+		model = model.Fields(strings.Join(fields, ","))
+	}
+	record, err := model.One()
+	if err != nil || record.IsEmpty() {
+		return nil, err
+	}
+	return record.Map(), nil
+}

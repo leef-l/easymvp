@@ -13,6 +13,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	"easymvp/app/mvp/internal/engine"
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/app/mvp/internal/workspace"
 )
 
@@ -42,26 +43,22 @@ func (e *ClaudeCodeExecutor) NeedsWorkspace() bool { return true }
 // Execute 执行 Claude Code 任务。
 func (e *ClaudeCodeExecutor) Execute(ctx context.Context, req *Request) *Result {
 	// 加载引擎配置
-	engineCfg, err := g.DB().Model("ai_engine_config").Ctx(ctx).
-		Where("engine_code", "claude_code").
-		Where("status", 1).
-		WhereNull("deleted_at").
-		One()
-	if err != nil || engineCfg.IsEmpty() {
+	engineCfg, err := repo.NewAIEngineConfigRepo().GetEnabledByCode(ctx, "claude_code")
+	if err != nil || len(engineCfg) == 0 {
 		return &Result{Success: false, Error: fmt.Errorf("Claude Code 引擎未配置或已禁用")}
 	}
 
-	timeoutSeconds := engineCfg["timeout_seconds"].Int()
+	timeoutSeconds := g.NewVar(engineCfg["timeout_seconds"]).Int()
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = 1800
 	}
 
 	// 确定工作目录
-	project, projErr := g.DB().Model("mvp_project").Ctx(ctx).Where("id", req.ProjectID).WhereNull("deleted_at").Fields("work_dir").One()
-	if projErr != nil || project.IsEmpty() {
+	project, projErr := repo.NewProjectRepo().GetByID(ctx, req.ProjectID, "work_dir")
+	if projErr != nil || len(project) == 0 {
 		return &Result{Success: false, Error: fmt.Errorf("项目 %d 不存在或查询失败: %v", req.ProjectID, projErr)}
 	}
-	workDir := project["work_dir"].String()
+	workDir := g.NewVar(project["work_dir"]).String()
 	if req.Workspace != nil {
 		workDir = req.Workspace.WorkspacePath
 		if mrErr := e.wsMgr.MarkRunning(ctx, req.TaskID); mrErr != nil {
@@ -99,7 +96,7 @@ func (e *ClaudeCodeExecutor) Execute(ctx context.Context, req *Request) *Result 
 	}
 
 	// 支持两种模式：command_template 或默认 claude CLI
-	cmdTemplate := engineCfg["command_template"].String()
+	cmdTemplate := g.NewVar(engineCfg["command_template"]).String()
 	var cmdStr string
 	if cmdTemplate != "" {
 		envVars := map[string]string{
@@ -110,7 +107,7 @@ func (e *ClaudeCodeExecutor) Execute(ctx context.Context, req *Request) *Result 
 		if req.ModelInfo != nil {
 			envVars["AI_MODEL_API_KEY"] = req.ModelInfo.APIKey
 			envVars["AI_MODEL_CODE"] = req.ModelInfo.ModelCode
-			envVars["AI_MODEL_BASE_URL"] = resolveProtocolBaseURL(req.ModelInfo, engineCfg["base_url"].String(), "anthropic")
+			envVars["AI_MODEL_BASE_URL"] = resolveProtocolBaseURL(req.ModelInfo, g.NewVar(engineCfg["base_url"]).String(), "anthropic")
 		}
 		cmdStr = renderCommandTemplate(cmdTemplate, envVars)
 	} else {
@@ -131,7 +128,7 @@ func (e *ClaudeCodeExecutor) Execute(ctx context.Context, req *Request) *Result 
 		if req.ModelInfo != nil && req.ModelInfo.APIKey != "" {
 			cmd.Env = append(cmd.Env, "ANTHROPIC_API_KEY="+req.ModelInfo.APIKey)
 		}
-		if baseURL := resolveProtocolBaseURL(req.ModelInfo, engineCfg["base_url"].String(), "anthropic"); baseURL != "" {
+		if baseURL := resolveProtocolBaseURL(req.ModelInfo, g.NewVar(engineCfg["base_url"]).String(), "anthropic"); baseURL != "" {
 			cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+baseURL)
 		}
 	}

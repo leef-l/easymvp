@@ -32,6 +32,9 @@ import {
 } from '#/api/mvp/workflow';
 
 const props = defineProps<{ projectId?: string }>();
+const emit = defineEmits<{
+  changed: [];
+}>();
 
 const route = useRoute();
 const projectID = computed(() => props.projectId || (route.query.projectId as string) || '');
@@ -47,6 +50,7 @@ const repairReason = ref('');
 const startModalVisible = ref(false);
 const repairModalVisible = ref(false);
 let pollTimer: null | ReturnType<typeof setInterval> = null;
+let loadRequestVersion = 0;
 
 const needsPolling = computed(
   () => status.value?.status === 'running',
@@ -67,15 +71,33 @@ function handleSelectionChange(keys: Array<number | string>) {
   selectedIssueIDs.value = keys.map(String);
 }
 
+function resetVerificationState() {
+  status.value = null;
+  issues.value = [];
+  evidence.value = [];
+  severityFilter.value = undefined;
+  selectedIssueIDs.value = [];
+  startReason.value = '';
+  repairReason.value = '';
+  startModalVisible.value = false;
+  repairModalVisible.value = false;
+}
+
 async function loadData() {
-  if (!projectID.value) return;
+  const currentProjectId = projectID.value;
+  if (!currentProjectId) {
+    resetVerificationState();
+    return;
+  }
+  const requestVersion = ++loadRequestVersion;
   loading.value = true;
   try {
     const [statusRes, issuesRes, evidenceRes] = await Promise.all([
-      getVerificationStatus(projectID.value),
-      getVerificationIssues(projectID.value, severityFilter.value),
-      getVerificationEvidence(projectID.value),
+      getVerificationStatus(currentProjectId),
+      getVerificationIssues(currentProjectId, severityFilter.value),
+      getVerificationEvidence(currentProjectId),
     ]);
+    if (requestVersion !== loadRequestVersion || currentProjectId !== projectID.value) return;
     status.value = statusRes?.status === 'none' ? null : statusRes;
     issues.value = issuesRes?.issues ?? [];
     evidence.value = evidenceRes?.evidence ?? [];
@@ -83,7 +105,9 @@ async function loadData() {
     const validSelection = new Set(openIssues.value.map((item) => item.id));
     selectedIssueIDs.value = selectedIssueIDs.value.filter((id) => validSelection.has(id));
   } finally {
-    loading.value = false;
+    if (requestVersion === loadRequestVersion && currentProjectId === projectID.value) {
+      loading.value = false;
+    }
   }
 }
 
@@ -105,7 +129,8 @@ function stopPolling() {
 watch(
   () => projectID.value,
   async () => {
-    selectedIssueIDs.value = [];
+    stopPolling();
+    resetVerificationState();
     await loadData();
   },
   { immediate: true },
@@ -191,6 +216,7 @@ async function handleStartVerification() {
     startModalVisible.value = false;
     startReason.value = '';
     await loadData();
+    emit('changed');
   } catch (error: any) {
     message.error(error?.message || '启动验证失败');
   }
@@ -212,6 +238,7 @@ async function handleRepairSelected() {
     repairReason.value = '';
     selectedIssueIDs.value = [];
     await loadData();
+    emit('changed');
   } catch (error: any) {
     message.error(error?.message || '触发返工失败');
   }
@@ -230,6 +257,7 @@ function handleIssueRepair(issue: Record<string, any> | VerificationIssueItem) {
       const res = await verificationRepair(projectID.value, [currentIssue.id]);
       message.success(res.message || '已触发返工');
       await loadData();
+      emit('changed');
     },
   });
 }

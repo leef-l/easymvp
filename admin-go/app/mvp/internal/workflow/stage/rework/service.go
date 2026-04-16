@@ -77,10 +77,23 @@ type Service struct {
 	stageCompleter StageCompleter
 	executeTrigger ExecuteTriggerFn
 	acceptTrigger  AcceptTriggerFn
+	stageRunRepo   *repo.StageRunRepo
+	taskRepo       *repo.DomainTaskRepo
+	handoffRepo    *repo.HandoffRecordRepo
+	convRepo       *repo.ConversationRepo
+	messageRepo    *repo.MessageRepo
 }
 
 // NewService 创建返工阶段服务。
-func NewService() *Service { return &Service{} }
+func NewService() *Service {
+	return &Service{
+		stageRunRepo: repo.NewStageRunRepo(),
+		taskRepo:     repo.NewDomainTaskRepo(),
+		handoffRepo:  repo.NewHandoffRecordRepo(),
+		convRepo:     repo.NewConversationRepo(),
+		messageRepo:  repo.NewMessageRepo(),
+	}
+}
 
 // SetStageCompleter 注册阶段完成回调。
 func (s *Service) SetStageCompleter(sc StageCompleter) { s.stageCompleter = sc }
@@ -101,24 +114,21 @@ func (s *Service) HandleRework(ctx context.Context, stageRunID int64, failedTask
 // HandleReworkWithSource 处理返工流程（指定来源阶段）。
 func (s *Service) HandleReworkWithSource(ctx context.Context, stageRunID int64, failedTaskID int64, sourceStage string) error {
 	// 1. 查询 stage_run 和 workflow_run 信息
-	stageRun, err := g.DB().Model("mvp_stage_run").Ctx(ctx).Where("id", stageRunID).WhereNull("deleted_at").One()
-	if err != nil || stageRun.IsEmpty() {
+	stageRun, err := s.stageRunRepo.GetByIDMap(ctx, stageRunID, "workflow_run_id")
+	if err != nil || len(stageRun) == 0 {
 		return fmt.Errorf("stage_run(%d) 不存在", stageRunID)
 	}
-	workflowRunID := stageRun["workflow_run_id"].Int64()
+	workflowRunID := g.NewVar(stageRun["workflow_run_id"]).Int64()
 
 	// 2. 查询失败任务详情
-	failedTask, err := g.DB().Model("mvp_domain_task").Ctx(ctx).Where("id", failedTaskID).WhereNull("deleted_at").One()
-	if err != nil || failedTask.IsEmpty() {
+	failedTask, err := s.taskRepo.GetRecordByID(ctx, failedTaskID)
+	if err != nil || failedTask == nil || failedTask.IsEmpty() {
 		return fmt.Errorf("failed domain_task(%d) 不存在", failedTaskID)
 	}
 
 	// 3. 检查返工轮次是否超限
 	maxRounds := engine.GetConfigInt(ctx, "failure_handoff.max_rounds", "engine.failureHandoff.maxRounds", 3)
-	reworkCount, countErr := g.DB().Model("mvp_handoff_record").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Where("from_task_id", failedTaskID).
-		Count()
+	reworkCount, countErr := s.handoffRepo.CountByWorkflowAndFromTask(ctx, workflowRunID, failedTaskID)
 	if countErr != nil {
 		g.Log().Warningf(ctx, "[ReworkStage] 查询返工次数失败: wfRun=%d task=%d err=%v", workflowRunID, failedTaskID, countErr)
 	}
@@ -140,7 +150,7 @@ func (s *Service) HandleReworkWithSource(ctx context.Context, stageRunID int64, 
 
 	now := gtime.Now()
 	scope := repo.GetProjectScopeByWorkflowRun(ctx, workflowRunID)
-	_, err = g.DB().Model("mvp_domain_task").Ctx(ctx).Insert(g.Map{
+	err = s.taskRepo.Insert(ctx, g.Map{
 		"id":              analysisTaskID,
 		"workflow_run_id": workflowRunID,
 		"stage_run_id":    stageRunID,
@@ -187,7 +197,7 @@ func (s *Service) HandleReworkWithSource(ctx context.Context, stageRunID int64, 
 	if payloadJSON == "" {
 		g.Log().Warningf(ctx, "[ReworkStage] 序列化 handoff payload 失败: sourceStage=%s", sourceStage)
 	}
-	if _, insErr := g.DB().Model("mvp_handoff_record").Ctx(ctx).Insert(g.Map{
+	if insErr := s.handoffRepo.Create(ctx, g.Map{
 		"id":              handoffID,
 		"workflow_run_id": workflowRunID,
 		"from_task_id":    failedTaskID,
@@ -210,8 +220,8 @@ func (s *Service) HandleReworkWithSource(ctx context.Context, stageRunID int64, 
 // 解析分析结果，回写原失败任务，推进回 execute stage。
 func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, analysisTaskID int64) error {
 	// 1. 获取分析任务
-	analysisTask, err := g.DB().Model("mvp_domain_task").Ctx(ctx).Where("id", analysisTaskID).WhereNull("deleted_at").One()
-	if err != nil || analysisTask.IsEmpty() {
+	analysisTask, err := s.taskRepo.GetRecordByID(ctx, analysisTaskID)
+	if err != nil || analysisTask == nil || analysisTask.IsEmpty() {
 		return fmt.Errorf("分析任务(%d) 不存在", analysisTaskID)
 	}
 
@@ -221,12 +231,8 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 		return fmt.Errorf("分析任务没有关联的来源任务")
 	}
 
-	failedTask, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("id", failedTaskID).
-		WhereNull("deleted_at").
-		Fields("id, name, affected_resources").
-		One()
-	if err != nil || failedTask.IsEmpty() {
+	failedTask, err := s.taskRepo.GetRecordByID(ctx, failedTaskID, "id", "name", "affected_resources")
+	if err != nil || failedTask == nil || failedTask.IsEmpty() {
 		return fmt.Errorf("原失败任务(%d) 不存在", failedTaskID)
 	}
 
@@ -267,27 +273,21 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 		}
 	}
 
-	res, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("id", failedTaskID).
-		WhereIn("status", g.Slice{domainTask.StatusFailed, domainTask.StatusEscalated}).
-		Update(updateData)
+	rows, err := s.taskRepo.UpdateFieldsIfStatuses(ctx, failedTaskID, []string{domainTask.StatusFailed, domainTask.StatusEscalated}, updateData)
 	if err != nil {
 		return fmt.Errorf("回写原任务失败: %w", err)
 	}
-	rows, _ := res.RowsAffected()
 	reconciledWithoutWrite := false
 	if rows == 0 {
-		currentStatus, statusErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
-			Where("id", failedTaskID).
-			WhereNull("deleted_at").
-			Value("status")
+		currentTask, statusErr := s.taskRepo.GetByIDMap(ctx, failedTaskID, "status")
 		if statusErr != nil {
 			return fmt.Errorf("查询原任务当前状态失败: %w", statusErr)
 		}
+		currentStatus := g.NewVar(currentTask["status"]).String()
 
-		_, alreadyRecovered := classifyOriginalTaskStatusForRework(currentStatus.String())
+		_, alreadyRecovered := classifyOriginalTaskStatusForRework(currentStatus)
 		if !alreadyRecovered {
-			reason := fmt.Sprintf("原任务(%d)状态异常(%s)，回写跳过", failedTaskID, currentStatus.String())
+			reason := fmt.Sprintf("原任务(%d)状态异常(%s)，回写跳过", failedTaskID, currentStatus)
 			g.Log().Warningf(ctx, "[ReworkStage] %s", reason)
 			if s.stageCompleter != nil {
 				_ = s.stageCompleter.FailStage(ctx, stageRunID, reason)
@@ -297,7 +297,7 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 
 		reconciledWithoutWrite = true
 		g.Log().Infof(ctx, "[ReworkStage] 原任务(%d)已由其他链路推进到 %s，视为返工已收敛",
-			failedTaskID, currentStatus.String())
+			failedTaskID, currentStatus)
 	}
 
 	// 5. 写 handoff_record（分析 → 原任务）
@@ -306,7 +306,7 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 		"content": patchContent,
 		"reason":  patch.Reason,
 	})
-	if _, insErr := g.DB().Model("mvp_handoff_record").Ctx(ctx).Insert(g.Map{
+	if insErr := s.handoffRepo.Create(ctx, g.Map{
 		"id":              handoffID,
 		"workflow_run_id": analysisTask["workflow_run_id"].Int64(),
 		"from_task_id":    analysisTaskID,
@@ -353,17 +353,12 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 
 // resolveSourceStage 从 handoff_record payload 中解析返工来源阶段。
 func (s *Service) resolveSourceStage(ctx context.Context, workflowRunID, failedTaskID int64) string {
-	payload, err := g.DB().Model("mvp_handoff_record").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Where("from_task_id", failedTaskID).
-		Where("handoff_type", "failure_escalation").
-		OrderDesc("created_at").
-		Value("payload")
-	if err != nil || payload.IsEmpty() {
+	payload, err := s.handoffRepo.GetLatestPayloadByWorkflowFromTaskType(ctx, workflowRunID, failedTaskID, "failure_escalation")
+	if err != nil || strings.TrimSpace(payload) == "" {
 		return "execute" // 默认回 execute
 	}
 	var data map[string]string
-	if json.Unmarshal([]byte(payload.String()), &data) == nil {
+	if json.Unmarshal([]byte(payload), &data) == nil {
 		if stage, ok := data["source_stage"]; ok && stage != "" {
 			return stage
 		}
@@ -409,23 +404,18 @@ func (s *Service) resolveAnalysisPatch(ctx context.Context, analysisTask gdb.Rec
 func (s *Service) loadLatestAnalysisReply(ctx context.Context, analysisTask gdb.Record) string {
 	conversationID := analysisTask["conversation_id"].Int64()
 	if conversationID == 0 {
-		conv, err := g.DB().Model("mvp_conversation").Ctx(ctx).
-			Where("task_id", analysisTask["id"].Int64()).
-			WhereNull("deleted_at").
-			OrderDesc("created_at").
-			Fields("id").
-			One()
-		if err != nil || conv.IsEmpty() {
+		conv, err := s.convRepo.GetLatestByTask(ctx, analysisTask["id"].Int64(), "id")
+		if err != nil || len(conv) == 0 {
 			return ""
 		}
-		conversationID = conv["id"].Int64()
+		conversationID = g.NewVar(conv["id"]).Int64()
 	}
 	if conversationID == 0 {
 		return ""
 	}
 
 	for i := 0; i < 20; i++ {
-		if reply := loadLatestAnalysisReplyContent(ctx, conversationID); reply != "" {
+		if reply := s.loadLatestAnalysisReplyContent(ctx, conversationID); reply != "" {
 			return reply
 		}
 		time.Sleep(500 * time.Millisecond)
@@ -433,20 +423,12 @@ func (s *Service) loadLatestAnalysisReply(ctx context.Context, analysisTask gdb.
 	return ""
 }
 
-func loadLatestAnalysisReplyContent(ctx context.Context, conversationID int64) string {
-	reply, err := g.DB().Model("mvp_message").Ctx(ctx).
-		Where("conversation_id", conversationID).
-		Where("role", "assistant").
-		Where("content <> ''").
-		WhereNull("deleted_at").
-		OrderDesc("created_at").
-		OrderDesc("id").
-		Fields("content").
-		One()
-	if err != nil || reply.IsEmpty() {
+func (s *Service) loadLatestAnalysisReplyContent(ctx context.Context, conversationID int64) string {
+	reply, err := s.messageRepo.GetLatestAssistantContentByConversation(ctx, conversationID)
+	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(reply["content"].String())
+	return reply
 }
 
 // taskPatch 架构师修复方案。

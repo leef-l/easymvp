@@ -2,8 +2,10 @@ package verification
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -144,9 +146,99 @@ func TestNormalizeVerificationGate(t *testing.T) {
 
 	assertCommandEqual(t, gate.AllowedDecisions, []string{"passed", "manual_review"})
 	assertCommandEqual(t, gate.RequiredCheckKinds, []string{"test", "build", "browser"})
-	assertCommandEqual(t, gate.AllowedRunnerTypes, []string{"docker_compose", "dockerfile"})
+	assertCommandEqual(t, gate.AllowedRunnerTypes, []string{"github_actions"})
 	if gate.MinExecutedSteps != 0 {
 		t.Fatalf("MinExecutedSteps = %d, want 0", gate.MinExecutedSteps)
+	}
+}
+
+func TestLoadLatestCIResultNormalizesGitHubActionsPayload(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	ciDir := filepath.Join(root, ".easymvp", "ci")
+	if err := os.MkdirAll(ciDir, 0o755); err != nil {
+		t.Fatalf("mkdir ci dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ciDir, "latest.json"), []byte(`{
+  "status":"success",
+  "tool":"GitHub_Actions",
+  "pipeline":"backend-guard",
+  "summary":"all green",
+  "checkKinds":["test","build"],
+  "checks":[
+    {"name":"backend unit test","kind":"test","status":"success","summary":"ok"},
+    {"name":"frontend bundle","kind":"build","status":"failure","summary":"red"}
+  ]
+}`), 0o644); err != nil {
+		t.Fatalf("write latest.json: %v", err)
+	}
+
+	result, path, raw, err := loadLatestCIResult(root)
+	if err != nil {
+		t.Fatalf("loadLatestCIResult() error = %v", err)
+	}
+	if path != filepath.Join(root, ".easymvp", "ci", "latest.json") {
+		t.Fatalf("unexpected latest path: %s", path)
+	}
+	if raw == "" {
+		t.Fatal("expected raw payload")
+	}
+	if result == nil {
+		t.Fatal("expected result")
+	}
+	if result.Status != "passed" {
+		t.Fatalf("Status = %q, want %q", result.Status, "passed")
+	}
+	if result.Tool != "github_actions" {
+		t.Fatalf("Tool = %q, want %q", result.Tool, "github_actions")
+	}
+	if len(result.Checks) != 2 {
+		t.Fatalf("Checks = %d, want 2", len(result.Checks))
+	}
+	if result.Checks[1].Status != "failed" {
+		t.Fatalf("Checks[1].Status = %q, want %q", result.Checks[1].Status, "failed")
+	}
+	if result.Checks[0].Runner != runnerGitHub {
+		t.Fatalf("Checks[0].Runner = %q, want %q", result.Checks[0].Runner, runnerGitHub)
+	}
+}
+
+func TestBuildGitHubActionsStepsUsesFallbackCheckKinds(t *testing.T) {
+	t.Parallel()
+
+	steps := buildGitHubActionsSteps(&ciLatestResult{
+		Status:     "passed",
+		Pipeline:   "backend-guard",
+		CheckKinds: []string{"build", "test"},
+		Checks:     nil,
+	})
+
+	if len(steps) != 2 {
+		t.Fatalf("buildGitHubActionsSteps() got %d steps, want 2", len(steps))
+	}
+	assertHasStep(t, steps, "github actions build", []string{"github_actions", "check", "build"})
+	assertHasStep(t, steps, "github actions test", []string{"github_actions", "check", "test"})
+}
+
+func TestBuildStepIssueUsesGitHubActionsSuggestion(t *testing.T) {
+	t.Parallel()
+
+	svc := NewService(nil, nil, nil)
+	issue := svc.buildStepIssue(
+		verificationStep{
+			Name:     "github actions test",
+			Runner:   runnerGitHub,
+			Expected: "GitHub Actions 检查通过",
+		},
+		"command",
+		"error",
+		commandResult{Err: errors.New("GitHub Actions status=failed"), ExitCode: 1},
+		"github_actions check test",
+	)
+
+	if !strings.Contains(issue.SuggestedAction, "GitHub Actions") {
+		t.Fatalf("SuggestedAction = %q, want GitHub Actions guidance", issue.SuggestedAction)
 	}
 }
 
@@ -178,6 +270,38 @@ func TestEvaluateVerificationGateFindsMissingRequiredKinds(t *testing.T) {
 	issues := evaluateVerificationGate(plan, 1, stepExecutions, nil)
 	if len(issues) != 3 {
 		t.Fatalf("evaluateVerificationGate() issues = %d, want 3; got=%+v", len(issues), issues)
+	}
+}
+
+func TestEvaluateVerificationGateUsesGitHubActionsSuggestions(t *testing.T) {
+	t.Parallel()
+
+	plan := &executionPlan{
+		RunnerType: modeGitHubActions,
+		Gate: &verificationGate{
+			RequiredCheckKinds: []string{"test", "build"},
+		},
+		GateSource: "category:interactive_delivery",
+		VerifySteps: []verificationStep{
+			{Name: "github actions test", Runner: runnerGitHub, Command: []string{"github_actions", "check", "test"}},
+		},
+	}
+	stepExecutions := []stepExecution{
+		{
+			Stage: "verify",
+			Step:  verificationStep{Name: "github actions test", Runner: runnerGitHub, Command: []string{"github_actions", "check", "test"}},
+			Result: commandResult{
+				ExitCode: 0,
+			},
+		},
+	}
+
+	issues := evaluateVerificationGate(plan, 1, stepExecutions, nil)
+	if len(issues) != 1 {
+		t.Fatalf("evaluateVerificationGate() issues = %d, want 1; got=%+v", len(issues), issues)
+	}
+	if !strings.Contains(issues[0].SuggestedAction, ".easymvp/ci/latest.json") {
+		t.Fatalf("SuggestedAction = %q, want CI latest guidance", issues[0].SuggestedAction)
 	}
 }
 

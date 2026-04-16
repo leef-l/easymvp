@@ -4,8 +4,11 @@ on:
   push:
     branches: [main]
     paths:
+      - '.github/workflows/deploy.yml'
       - 'admin-go/**'
+      - 'scripts/**'
       - 'vue-vben-admin/**'
+      - 'docker/prod/init-server.sh'
   workflow_dispatch:
     inputs:
       target:
@@ -22,18 +25,29 @@ env:
   SERVER_HOST: mvp.easytestdev.online
   SERVER_USER: root
   DEPLOY_DIR: /www/wwwroot/mvp.easytestdev.online
-  GO_VERSION: '1.25'
-  NODE_VERSION: '22'
+  GO_VERSION: '1.25.0'
+  NODE_VERSION: '22.18.0'
+  PNPM_VERSION: '10.32.1'
+  PNPM_NETWORK_CONCURRENCY: '3'
+  PNPM_CHILD_CONCURRENCY: '1'
+  FRONTEND_NODE_MAX_OLD_SPACE_SIZE: '4096'
+  BACKEND_SERVICE_TASKS_MAX: '512'
+  BACKEND_SERVICE_NICE: '5'
+  BACKEND_SERVICE_MEMORY_HIGH: '512M'
+  BACKEND_SERVICE_MEMORY_MAX: '768M'
+  BACKEND_SERVICE_CPU_QUOTA: '80%'
+  BACKEND_SERVICE_OOM_SCORE_ADJUST: '200'
+  SYSTEM_PORT: '10041'
+  AI_PORT: '10042'
+  MVP_PORT: '10043'
 
 jobs:
-  # ============================================
-  # Detect which components changed
-  # ============================================
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
       backend: ${{ steps.changes.outputs.backend }}
       frontend: ${{ steps.changes.outputs.frontend }}
+      infra: ${{ steps.changes.outputs.infra }}
       target: ${{ steps.target.outputs.value }}
     steps:
       - uses: actions/checkout@v4
@@ -47,267 +61,68 @@ jobs:
               - 'admin-go/**'
             frontend:
               - 'vue-vben-admin/**'
+            infra:
+              - '.github/workflows/deploy.yml'
+              - 'scripts/**'
+              - 'docker/prod/init-server.sh'
 
       - name: Determine deploy target
         id: target
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "value=${{ github.event.inputs.target }}" >> $GITHUB_OUTPUT
+            echo "value=${{ github.event.inputs.target }}" >> "$GITHUB_OUTPUT"
           else
-            echo "value=auto" >> $GITHUB_OUTPUT
+            echo "value=auto" >> "$GITHUB_OUTPUT"
           fi
 
-  # ============================================
-  # Build & Deploy system (port 41002)
-  # ============================================
-  deploy-system:
+  verify-backend:
     needs: detect-changes
     if: |
       needs.detect-changes.outputs.target == 'all' ||
       needs.detect-changes.outputs.target == 'backend' ||
-      (needs.detect-changes.outputs.target == 'auto' && needs.detect-changes.outputs.backend == 'true')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: admin-go/go.sum
-
-      - name: Build system
-        run: |
-          cd admin-go
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-            go build -ldflags "-s -w" -o system ./app/system/main.go
-
-      - name: Setup SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.MVP_DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H ${{ env.SERVER_HOST }} >> ~/.ssh/known_hosts
-
-      - name: Deploy system
-        env:
-          REMOTE: ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }}
-        run: |
-          ssh $REMOTE "mkdir -p /tmp/mvp_stage/system"
-          scp admin-go/system $REMOTE:/tmp/mvp_stage/system/system
-          scp -r admin-go/app/system/manifest $REMOTE:/tmp/mvp_stage/system/
-          ssh $REMOTE bash <<'EOF'
-          set -e
-          APP=system
-          DEPLOY_DIR=/www/wwwroot/mvp.easytestdev.online
-
-          echo "[$APP] Stopping service..."
-          systemctl stop mvp-$APP 2>/dev/null || true
-          for i in $(seq 1 10); do
-              if ! pgrep -f "mvp.easytestdev.online/$APP/$APP" >/dev/null 2>&1; then break; fi
-              sleep 1
-          done
-
-          echo "[$APP] Replacing binary..."
-          mkdir -p $DEPLOY_DIR/$APP
-          cp /tmp/mvp_stage/$APP/$APP $DEPLOY_DIR/$APP/$APP
-          chmod +x $DEPLOY_DIR/$APP/$APP
-
-          if [ ! -d $DEPLOY_DIR/$APP/manifest ]; then
-              cp -r /tmp/mvp_stage/$APP/manifest $DEPLOY_DIR/$APP/
-          else
-              mkdir -p $DEPLOY_DIR/$APP/manifest/config
-              cp /tmp/mvp_stage/$APP/manifest/config/config.yaml $DEPLOY_DIR/$APP/manifest/config/config.yaml
-          fi
-
-          echo "[$APP] Starting service..."
-          systemctl start mvp-$APP
-
-          for i in $(seq 1 8); do
-              status=$(systemctl is-active mvp-$APP 2>/dev/null || echo 'unknown')
-              if [ "$status" = "active" ]; then break; fi
-              sleep 1
-          done
-
-          status=$(systemctl is-active mvp-$APP 2>/dev/null || echo 'unknown')
-          echo "[$APP] Status: $status"
-          if [ "$status" != "active" ]; then exit 1; fi
-
-          rm -rf /tmp/mvp_stage/$APP
-          EOF
-
-  # ============================================
-  # Build & Deploy ai (port 41003)
-  # ============================================
-  deploy-ai:
-    needs: [detect-changes, deploy-system]
-    if: |
-      always() &&
-      (needs.deploy-system.result == 'success' || needs.deploy-system.result == 'skipped') &&
       (
-        needs.detect-changes.outputs.target == 'all' ||
-        needs.detect-changes.outputs.target == 'backend' ||
-        (needs.detect-changes.outputs.target == 'auto' && needs.detect-changes.outputs.backend == 'true')
+        needs.detect-changes.outputs.target == 'auto' &&
+        (
+          needs.detect-changes.outputs.backend == 'true' ||
+          needs.detect-changes.outputs.infra == 'true'
+        )
       )
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: admin-go/go.sum
+          cache-dependency-path: |
+            admin-go/go.sum
+            admin-go/codegen/go.sum
 
-      - name: Build ai
+      - name: Validate regression manifest and delivery policy
+        run: |
+          bash ./test-workspaces/validate.sh
+
+      - name: Test backend
         run: |
           cd admin-go
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-            go build -ldflags "-s -w" -o ai ./app/ai/main.go
+          go test ./...
 
-      - name: Setup SSH
+      - name: Test codegen
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.MVP_DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H ${{ env.SERVER_HOST }} >> ~/.ssh/known_hosts
+          cd admin-go/codegen
+          go test ./...
 
-      - name: Deploy ai
-        env:
-          REMOTE: ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }}
-        run: |
-          ssh $REMOTE "mkdir -p /tmp/mvp_stage/ai"
-          scp admin-go/ai $REMOTE:/tmp/mvp_stage/ai/ai
-          scp -r admin-go/app/ai/manifest $REMOTE:/tmp/mvp_stage/ai/
-          ssh $REMOTE bash <<'EOF'
-          set -e
-          APP=ai
-          DEPLOY_DIR=/www/wwwroot/mvp.easytestdev.online
-
-          echo "[$APP] Stopping service..."
-          systemctl stop mvp-$APP 2>/dev/null || true
-          for i in $(seq 1 10); do
-              if ! pgrep -f "mvp.easytestdev.online/$APP/$APP" >/dev/null 2>&1; then break; fi
-              sleep 1
-          done
-
-          echo "[$APP] Replacing binary..."
-          mkdir -p $DEPLOY_DIR/$APP
-          cp /tmp/mvp_stage/$APP/$APP $DEPLOY_DIR/$APP/$APP
-          chmod +x $DEPLOY_DIR/$APP/$APP
-
-          if [ ! -d $DEPLOY_DIR/$APP/manifest ]; then
-              cp -r /tmp/mvp_stage/$APP/manifest $DEPLOY_DIR/$APP/
-          else
-              mkdir -p $DEPLOY_DIR/$APP/manifest/config
-              cp /tmp/mvp_stage/$APP/manifest/config/config.yaml $DEPLOY_DIR/$APP/manifest/config/config.yaml
-          fi
-
-          echo "[$APP] Starting service..."
-          systemctl start mvp-$APP
-
-          for i in $(seq 1 8); do
-              status=$(systemctl is-active mvp-$APP 2>/dev/null || echo 'unknown')
-              if [ "$status" = "active" ]; then break; fi
-              sleep 1
-          done
-
-          status=$(systemctl is-active mvp-$APP 2>/dev/null || echo 'unknown')
-          echo "[$APP] Status: $status"
-          if [ "$status" != "active" ]; then exit 1; fi
-
-          rm -rf /tmp/mvp_stage/$APP
-          EOF
-
-  # ============================================
-  # Build & Deploy mvp (port 41004)
-  # ============================================
-  deploy-mvp:
-    needs: [detect-changes, deploy-ai]
+  verify-frontend:
+    needs: detect-changes
     if: |
-      always() &&
-      (needs.deploy-ai.result == 'success' || needs.deploy-ai.result == 'skipped') &&
+      needs.detect-changes.outputs.target == 'all' ||
+      needs.detect-changes.outputs.target == 'frontend' ||
       (
-        needs.detect-changes.outputs.target == 'all' ||
-        needs.detect-changes.outputs.target == 'backend' ||
-        (needs.detect-changes.outputs.target == 'auto' && needs.detect-changes.outputs.backend == 'true')
-      )
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: admin-go/go.sum
-
-      - name: Build mvp
-        run: |
-          cd admin-go
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-            go build -ldflags "-s -w" -o mvp ./app/mvp/main.go
-
-      - name: Setup SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.MVP_DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H ${{ env.SERVER_HOST }} >> ~/.ssh/known_hosts
-
-      - name: Deploy mvp
-        env:
-          REMOTE: ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }}
-        run: |
-          ssh $REMOTE "mkdir -p /tmp/mvp_stage/mvp"
-          scp admin-go/mvp $REMOTE:/tmp/mvp_stage/mvp/mvp
-          scp -r admin-go/app/mvp/manifest $REMOTE:/tmp/mvp_stage/mvp/
-          ssh $REMOTE bash <<'EOF'
-          set -e
-          APP=mvp
-          DEPLOY_DIR=/www/wwwroot/mvp.easytestdev.online
-
-          echo "[$APP] Stopping service..."
-          systemctl stop mvp-$APP 2>/dev/null || true
-          for i in $(seq 1 10); do
-              if ! pgrep -f "mvp.easytestdev.online/$APP/$APP" >/dev/null 2>&1; then break; fi
-              sleep 1
-          done
-
-          echo "[$APP] Replacing binary..."
-          mkdir -p $DEPLOY_DIR/$APP
-          cp /tmp/mvp_stage/$APP/$APP $DEPLOY_DIR/$APP/$APP
-          chmod +x $DEPLOY_DIR/$APP/$APP
-
-          if [ ! -d $DEPLOY_DIR/$APP/manifest ]; then
-              cp -r /tmp/mvp_stage/$APP/manifest $DEPLOY_DIR/$APP/
-          else
-              mkdir -p $DEPLOY_DIR/$APP/manifest/config
-              cp /tmp/mvp_stage/$APP/manifest/config/config.yaml $DEPLOY_DIR/$APP/manifest/config/config.yaml
-          fi
-
-          echo "[$APP] Starting service..."
-          systemctl start mvp-$APP
-
-          for i in $(seq 1 8); do
-              status=$(systemctl is-active mvp-$APP 2>/dev/null || echo 'unknown')
-              if [ "$status" = "active" ]; then break; fi
-              sleep 1
-          done
-
-          status=$(systemctl is-active mvp-$APP 2>/dev/null || echo 'unknown')
-          echo "[$APP] Status: $status"
-          if [ "$status" != "active" ]; then exit 1; fi
-
-          rm -rf /tmp/mvp_stage/$APP
-          EOF
-
-  # ============================================
-  # Build & Deploy frontend
-  # ============================================
-  deploy-frontend:
-    needs: [detect-changes, deploy-mvp]
-    if: |
-      always() &&
-      (needs.deploy-mvp.result == 'success' || needs.deploy-mvp.result == 'skipped') &&
-      (
-        needs.detect-changes.outputs.target == 'all' ||
-        needs.detect-changes.outputs.target == 'frontend' ||
-        (needs.detect-changes.outputs.target == 'auto' && needs.detect-changes.outputs.frontend == 'true')
+        needs.detect-changes.outputs.target == 'auto' &&
+        (
+          needs.detect-changes.outputs.frontend == 'true' ||
+          needs.detect-changes.outputs.infra == 'true'
+        )
       )
     runs-on: ubuntu-latest
     steps:
@@ -319,7 +134,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: ${{ env.PNPM_VERSION }}
 
       - name: Cache pnpm store
         uses: actions/cache@v4
@@ -328,11 +143,567 @@ jobs:
           key: pnpm-frontend-${{ hashFiles('vue-vben-admin/pnpm-lock.yaml') }}
           restore-keys: pnpm-frontend-
 
-      - name: Install & Build frontend
+      - name: Install frontend dependencies
         run: |
           cd vue-vben-admin
           pnpm install --frozen-lockfile
+
+      - name: Typecheck workflow console scope
+        run: |
+          cd vue-vben-admin
+          NODE_OPTIONS=--max-old-space-size=${{ env.FRONTEND_NODE_MAX_OLD_SPACE_SIZE }} \
+          pnpm exec vue-tsc --noEmit -p apps/web-antd/tsconfig.mvp-workflow.json
+
+      - name: Verify workflow frontend build
+        run: |
+          cd vue-vben-admin
+          CI=1 \
+          EASYMVP_WEB_ANTD_VERIFY_BUILD=1 \
+          NODE_OPTIONS=--max-old-space-size=${{ env.FRONTEND_NODE_MAX_OLD_SPACE_SIZE }} \
+          pnpm_config_child_concurrency=${{ env.PNPM_CHILD_CONCURRENCY }} \
+          pnpm_config_network_concurrency=${{ env.PNPM_NETWORK_CONCURRENCY }} \
+          pnpm --filter @vben/web-antd exec vite build --mode production
+
+  deploy-system:
+    needs: [detect-changes, verify-backend]
+    if: |
+      (needs.verify-backend.result == 'success' || needs.verify-backend.result == 'skipped') &&
+      (
+        needs.detect-changes.outputs.target == 'all' ||
+        needs.detect-changes.outputs.target == 'backend' ||
+        (
+          needs.detect-changes.outputs.target == 'auto' &&
+          (
+            needs.detect-changes.outputs.backend == 'true' ||
+            needs.detect-changes.outputs.infra == 'true'
+          )
+        )
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: admin-go/go.sum
+
+      - name: Build system
+        run: |
+          cd admin-go
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -ldflags "-s -w" -o system ./app/system/main.go
+
+      - name: Validate deploy SSH secret
+        run: |
+          test -n "${{ secrets.MVP_DEPLOY_SSH_KEY }}"
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.MVP_DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ env.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy system
+        env:
+          APP: system
+          PORT: ${{ env.SYSTEM_PORT }}
+          REMOTE: ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }}
+        run: |
+          ssh "$REMOTE" "mkdir -p /tmp/easymvp_stage/$APP"
+          scp "admin-go/$APP" "$REMOTE:/tmp/easymvp_stage/$APP/$APP"
+          scp -r "admin-go/app/$APP/manifest" "$REMOTE:/tmp/easymvp_stage/$APP/"
+          ssh "$REMOTE" "APP='$APP' PORT='$PORT' DEPLOY_DIR='${{ env.DEPLOY_DIR }}' bash -s" <<'EOF'
+          set -euo pipefail
+
+          SERVICE_NAME="mvp-$APP"
+          STAGE_DIR="/tmp/easymvp_stage/$APP"
+          APP_DIR="$DEPLOY_DIR/$APP"
+          APP_BIN="$APP_DIR/$APP"
+          APP_BIN_NEW="$APP_DIR/$APP.new"
+          MANIFEST_DIR="$APP_DIR/manifest"
+          CONFIG_DIR="$MANIFEST_DIR/config"
+          CONFIG_FILE="$CONFIG_DIR/config.yaml"
+
+          echo "[$APP] Preparing service..."
+          mkdir -p "$APP_DIR"
+          install -m 0755 "$STAGE_DIR/$APP" "$APP_BIN_NEW"
+
+          if [ ! -d "$MANIFEST_DIR" ]; then
+            cp -r "$STAGE_DIR/manifest" "$MANIFEST_DIR"
+          fi
+
+          mkdir -p "$CONFIG_DIR"
+          if [ ! -f "$CONFIG_FILE" ]; then
+            if [ -f "$STAGE_DIR/manifest/config/config.yaml" ]; then
+              cp "$STAGE_DIR/manifest/config/config.yaml" "$CONFIG_FILE"
+            elif [ -f "$STAGE_DIR/manifest/config/config.yaml.example" ]; then
+              cp "$STAGE_DIR/manifest/config/config.yaml.example" "$CONFIG_FILE"
+            fi
+          fi
+
+          printf '%s\n' \
+            '[Unit]' \
+            "Description=EasyMVP $APP" \
+            'After=network.target mysql.service redis.service' \
+            '' \
+            '[Service]' \
+            'Type=simple' \
+            "WorkingDirectory=$APP_DIR" \
+            "Environment=GF_GCFG_PATH=$CONFIG_DIR" \
+            'Environment=GF_GCFG_FILE=config.yaml' \
+            "Environment=GF_SERVER_ADDRESS=:$PORT" \
+            'Environment=REDIS_ADDR=127.0.0.1:6379' \
+            'Environment=TZ=Asia/Shanghai' \
+            "ExecStart=$APP_BIN" \
+            'MemoryAccounting=true' \
+            'CPUAccounting=true' \
+            'TasksAccounting=true' \
+            "MemoryHigh=${{ env.BACKEND_SERVICE_MEMORY_HIGH }}" \
+            "MemoryMax=${{ env.BACKEND_SERVICE_MEMORY_MAX }}" \
+            "CPUQuota=${{ env.BACKEND_SERVICE_CPU_QUOTA }}" \
+            "TasksMax=${{ env.BACKEND_SERVICE_TASKS_MAX }}" \
+            "Nice=${{ env.BACKEND_SERVICE_NICE }}" \
+            "OOMScoreAdjust=${{ env.BACKEND_SERVICE_OOM_SCORE_ADJUST }}" \
+            'Restart=always' \
+            'RestartSec=5' \
+            'LimitNOFILE=65536' \
+            '' \
+            '[Install]' \
+            'WantedBy=multi-user.target' \
+            > "/etc/systemd/system/$SERVICE_NAME.service"
+
+          systemctl daemon-reload
+          systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+
+          for i in $(seq 1 10); do
+            if ! pgrep -f -x "$APP_BIN" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+
+          if pgrep -f -x "$APP_BIN" >/dev/null 2>&1; then
+            pkill -TERM -f -x "$APP_BIN" 2>/dev/null || true
+            sleep 2
+          fi
+          if pgrep -f -x "$APP_BIN" >/dev/null 2>&1; then
+            pkill -KILL -f -x "$APP_BIN" 2>/dev/null || true
+            sleep 1
+          fi
+          if pgrep -f -x "$APP_BIN" >/dev/null 2>&1; then
+            echo "[$APP] Process still running after stop" >&2
+            exit 1
+          fi
+
+          mv -f "$APP_BIN_NEW" "$APP_BIN"
+
+          echo "[$APP] Starting service..."
+          systemctl enable "$SERVICE_NAME"
+          systemctl start "$SERVICE_NAME"
+
+          for i in $(seq 1 8); do
+            status=$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || echo 'unknown')
+            if [ "$status" = 'active' ]; then
+              break
+            fi
+            sleep 1
+          done
+
+          status=$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || echo 'unknown')
+          echo "[$APP] Status: $status"
+          if [ "$status" != 'active' ]; then
+            exit 1
+          fi
+
+          HEALTH_URL="http://127.0.0.1:$PORT/api.json"
+          echo "[$APP] Health check: $HEALTH_URL"
+          for i in $(seq 1 15); do
+            if curl --silent --show-error --fail "$HEALTH_URL" >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl --silent --show-error --fail "$HEALTH_URL" >/dev/null
+
+          rm -rf "$STAGE_DIR"
+          EOF
+
+  deploy-ai:
+    needs: [detect-changes, deploy-system]
+    if: |
+      always() &&
+      (needs.deploy-system.result == 'success' || needs.deploy-system.result == 'skipped') &&
+      (
+        needs.detect-changes.outputs.target == 'all' ||
+        needs.detect-changes.outputs.target == 'backend' ||
+        (
+          needs.detect-changes.outputs.target == 'auto' &&
+          (
+            needs.detect-changes.outputs.backend == 'true' ||
+            needs.detect-changes.outputs.infra == 'true'
+          )
+        )
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: admin-go/go.sum
+
+      - name: Build ai
+        run: |
+          cd admin-go
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -ldflags "-s -w" -o ai ./app/ai/main.go
+
+      - name: Validate deploy SSH secret
+        run: |
+          test -n "${{ secrets.MVP_DEPLOY_SSH_KEY }}"
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.MVP_DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ env.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy ai
+        env:
+          APP: ai
+          PORT: ${{ env.AI_PORT }}
+          REMOTE: ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }}
+        run: |
+          ssh "$REMOTE" "mkdir -p /tmp/easymvp_stage/$APP"
+          scp "admin-go/$APP" "$REMOTE:/tmp/easymvp_stage/$APP/$APP"
+          scp -r "admin-go/app/$APP/manifest" "$REMOTE:/tmp/easymvp_stage/$APP/"
+          ssh "$REMOTE" "APP='$APP' PORT='$PORT' DEPLOY_DIR='${{ env.DEPLOY_DIR }}' bash -s" <<'EOF'
+          set -euo pipefail
+
+          SERVICE_NAME="mvp-$APP"
+          STAGE_DIR="/tmp/easymvp_stage/$APP"
+          APP_DIR="$DEPLOY_DIR/$APP"
+          APP_BIN="$APP_DIR/$APP"
+          APP_BIN_NEW="$APP_DIR/$APP.new"
+          MANIFEST_DIR="$APP_DIR/manifest"
+          CONFIG_DIR="$MANIFEST_DIR/config"
+          CONFIG_FILE="$CONFIG_DIR/config.yaml"
+
+          echo "[$APP] Preparing service..."
+          mkdir -p "$APP_DIR"
+          install -m 0755 "$STAGE_DIR/$APP" "$APP_BIN_NEW"
+
+          if [ ! -d "$MANIFEST_DIR" ]; then
+            cp -r "$STAGE_DIR/manifest" "$MANIFEST_DIR"
+          fi
+
+          mkdir -p "$CONFIG_DIR"
+          if [ ! -f "$CONFIG_FILE" ]; then
+            if [ -f "$STAGE_DIR/manifest/config/config.yaml" ]; then
+              cp "$STAGE_DIR/manifest/config/config.yaml" "$CONFIG_FILE"
+            fi
+          fi
+
+          printf '%s\n' \
+            '[Unit]' \
+            "Description=EasyMVP $APP" \
+            'After=network.target mysql.service' \
+            '' \
+            '[Service]' \
+            'Type=simple' \
+            "WorkingDirectory=$APP_DIR" \
+            "Environment=GF_GCFG_PATH=$CONFIG_DIR" \
+            'Environment=GF_GCFG_FILE=config.yaml' \
+            "Environment=GF_SERVER_ADDRESS=:$PORT" \
+            'Environment=TZ=Asia/Shanghai' \
+            "ExecStart=$APP_BIN" \
+            'MemoryAccounting=true' \
+            'CPUAccounting=true' \
+            'TasksAccounting=true' \
+            "MemoryHigh=${{ env.BACKEND_SERVICE_MEMORY_HIGH }}" \
+            "MemoryMax=${{ env.BACKEND_SERVICE_MEMORY_MAX }}" \
+            "CPUQuota=${{ env.BACKEND_SERVICE_CPU_QUOTA }}" \
+            "TasksMax=${{ env.BACKEND_SERVICE_TASKS_MAX }}" \
+            "Nice=${{ env.BACKEND_SERVICE_NICE }}" \
+            "OOMScoreAdjust=${{ env.BACKEND_SERVICE_OOM_SCORE_ADJUST }}" \
+            'Restart=always' \
+            'RestartSec=5' \
+            'LimitNOFILE=65536' \
+            '' \
+            '[Install]' \
+            'WantedBy=multi-user.target' \
+            > "/etc/systemd/system/$SERVICE_NAME.service"
+
+          systemctl daemon-reload
+          systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+
+          for i in $(seq 1 10); do
+            if ! pgrep -f -x "$APP_BIN" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+
+          if pgrep -f -x "$APP_BIN" >/dev/null 2>&1; then
+            pkill -TERM -f -x "$APP_BIN" 2>/dev/null || true
+            sleep 2
+          fi
+          if pgrep -f -x "$APP_BIN" >/dev/null 2>&1; then
+            pkill -KILL -f -x "$APP_BIN" 2>/dev/null || true
+            sleep 1
+          fi
+          if pgrep -f -x "$APP_BIN" >/dev/null 2>&1; then
+            echo "[$APP] Process still running after stop" >&2
+            exit 1
+          fi
+
+          mv -f "$APP_BIN_NEW" "$APP_BIN"
+
+          echo "[$APP] Starting service..."
+          systemctl enable "$SERVICE_NAME"
+          systemctl start "$SERVICE_NAME"
+
+          for i in $(seq 1 8); do
+            status=$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || echo 'unknown')
+            if [ "$status" = 'active' ]; then
+              break
+            fi
+            sleep 1
+          done
+
+          status=$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || echo 'unknown')
+          echo "[$APP] Status: $status"
+          if [ "$status" != 'active' ]; then
+            exit 1
+          fi
+
+          HEALTH_URL="http://127.0.0.1:$PORT/api.json"
+          echo "[$APP] Health check: $HEALTH_URL"
+          for i in $(seq 1 15); do
+            if curl --silent --show-error --fail "$HEALTH_URL" >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl --silent --show-error --fail "$HEALTH_URL" >/dev/null
+
+          rm -rf "$STAGE_DIR"
+          EOF
+
+  deploy-mvp:
+    needs: [detect-changes, deploy-ai]
+    if: |
+      always() &&
+      (needs.deploy-ai.result == 'success' || needs.deploy-ai.result == 'skipped') &&
+      (
+        needs.detect-changes.outputs.target == 'all' ||
+        needs.detect-changes.outputs.target == 'backend' ||
+        (
+          needs.detect-changes.outputs.target == 'auto' &&
+          (
+            needs.detect-changes.outputs.backend == 'true' ||
+            needs.detect-changes.outputs.infra == 'true'
+          )
+        )
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: admin-go/go.sum
+
+      - name: Build mvp
+        run: |
+          cd admin-go
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -ldflags "-s -w" -o mvp ./app/mvp/main.go
+
+      - name: Validate deploy SSH secret
+        run: |
+          test -n "${{ secrets.MVP_DEPLOY_SSH_KEY }}"
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.MVP_DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ env.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy mvp
+        env:
+          APP: mvp
+          PORT: ${{ env.MVP_PORT }}
+          REMOTE: ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }}
+        run: |
+          ssh "$REMOTE" "mkdir -p /tmp/easymvp_stage/$APP"
+          scp "admin-go/$APP" "$REMOTE:/tmp/easymvp_stage/$APP/$APP"
+          scp -r "admin-go/app/$APP/manifest" "$REMOTE:/tmp/easymvp_stage/$APP/"
+          ssh "$REMOTE" "APP='$APP' PORT='$PORT' DEPLOY_DIR='${{ env.DEPLOY_DIR }}' bash -s" <<'EOF'
+          set -euo pipefail
+
+          SERVICE_NAME="mvp-$APP"
+          STAGE_DIR="/tmp/easymvp_stage/$APP"
+          APP_DIR="$DEPLOY_DIR/$APP"
+          APP_BIN="$APP_DIR/$APP"
+          APP_BIN_NEW="$APP_DIR/$APP.new"
+          MANIFEST_DIR="$APP_DIR/manifest"
+          CONFIG_DIR="$MANIFEST_DIR/config"
+          CONFIG_FILE="$CONFIG_DIR/config.yaml"
+
+          echo "[$APP] Preparing service..."
+          mkdir -p "$APP_DIR"
+          install -m 0755 "$STAGE_DIR/$APP" "$APP_BIN_NEW"
+
+          if [ ! -d "$MANIFEST_DIR" ]; then
+            cp -r "$STAGE_DIR/manifest" "$MANIFEST_DIR"
+          fi
+
+          mkdir -p "$CONFIG_DIR"
+          if [ ! -f "$CONFIG_FILE" ]; then
+            if [ -f "$STAGE_DIR/manifest/config/config.yaml" ]; then
+              cp "$STAGE_DIR/manifest/config/config.yaml" "$CONFIG_FILE"
+            fi
+          fi
+
+          printf '%s\n' \
+            '[Unit]' \
+            "Description=EasyMVP $APP" \
+            'After=network.target mysql.service' \
+            '' \
+            '[Service]' \
+            'Type=simple' \
+            "WorkingDirectory=$APP_DIR" \
+            "Environment=GF_GCFG_PATH=$CONFIG_DIR" \
+            'Environment=GF_GCFG_FILE=config.yaml' \
+            "Environment=GF_SERVER_ADDRESS=:$PORT" \
+            'Environment=TZ=Asia/Shanghai' \
+            "ExecStart=$APP_BIN" \
+            'MemoryAccounting=true' \
+            'CPUAccounting=true' \
+            'TasksAccounting=true' \
+            "MemoryHigh=${{ env.BACKEND_SERVICE_MEMORY_HIGH }}" \
+            "MemoryMax=${{ env.BACKEND_SERVICE_MEMORY_MAX }}" \
+            "CPUQuota=${{ env.BACKEND_SERVICE_CPU_QUOTA }}" \
+            "TasksMax=${{ env.BACKEND_SERVICE_TASKS_MAX }}" \
+            "Nice=${{ env.BACKEND_SERVICE_NICE }}" \
+            "OOMScoreAdjust=${{ env.BACKEND_SERVICE_OOM_SCORE_ADJUST }}" \
+            'Restart=always' \
+            'RestartSec=5' \
+            'LimitNOFILE=65536' \
+            '' \
+            '[Install]' \
+            'WantedBy=multi-user.target' \
+            > "/etc/systemd/system/$SERVICE_NAME.service"
+
+          systemctl daemon-reload
+          systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+
+          for i in $(seq 1 10); do
+            if ! pgrep -f -x "$APP_BIN" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+
+          if pgrep -f -x "$APP_BIN" >/dev/null 2>&1; then
+            pkill -TERM -f -x "$APP_BIN" 2>/dev/null || true
+            sleep 2
+          fi
+          if pgrep -f -x "$APP_BIN" >/dev/null 2>&1; then
+            pkill -KILL -f -x "$APP_BIN" 2>/dev/null || true
+            sleep 1
+          fi
+          if pgrep -f -x "$APP_BIN" >/dev/null 2>&1; then
+            echo "[$APP] Process still running after stop" >&2
+            exit 1
+          fi
+
+          mv -f "$APP_BIN_NEW" "$APP_BIN"
+
+          echo "[$APP] Starting service..."
+          systemctl enable "$SERVICE_NAME"
+          systemctl start "$SERVICE_NAME"
+
+          for i in $(seq 1 8); do
+            status=$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || echo 'unknown')
+            if [ "$status" = 'active' ]; then
+              break
+            fi
+            sleep 1
+          done
+
+          status=$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || echo 'unknown')
+          echo "[$APP] Status: $status"
+          if [ "$status" != 'active' ]; then
+            exit 1
+          fi
+
+          HEALTH_URL="http://127.0.0.1:$PORT/api.json"
+          echo "[$APP] Health check: $HEALTH_URL"
+          for i in $(seq 1 15); do
+            if curl --silent --show-error --fail "$HEALTH_URL" >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl --silent --show-error --fail "$HEALTH_URL" >/dev/null
+
+          rm -rf "$STAGE_DIR"
+          EOF
+
+  deploy-frontend:
+    needs: [detect-changes, deploy-mvp, verify-frontend]
+    if: |
+      always() &&
+      (needs.deploy-mvp.result == 'success' || needs.deploy-mvp.result == 'skipped') &&
+      (needs.verify-frontend.result == 'success' || needs.verify-frontend.result == 'skipped') &&
+      (
+        needs.detect-changes.outputs.target == 'all' ||
+        needs.detect-changes.outputs.target == 'frontend' ||
+        (
+          needs.detect-changes.outputs.target == 'auto' &&
+          (
+            needs.detect-changes.outputs.frontend == 'true' ||
+            needs.detect-changes.outputs.infra == 'true'
+          )
+        )
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-frontend-${{ hashFiles('vue-vben-admin/pnpm-lock.yaml') }}
+          restore-keys: pnpm-frontend-
+
+      - name: Install & build frontend
+        run: |
+          cd vue-vben-admin
+          pnpm install --frozen-lockfile
+          NODE_OPTIONS=--max-old-space-size=${{ env.FRONTEND_NODE_MAX_OLD_SPACE_SIZE }} \
           pnpm build:antd
+
+      - name: Validate deploy SSH secret
+        run: |
+          test -n "${{ secrets.MVP_DEPLOY_SSH_KEY }}"
 
       - name: Setup SSH
         run: |
@@ -346,27 +717,46 @@ jobs:
           REMOTE: ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }}
         run: |
           cd vue-vben-admin/apps/web-antd/dist
-          tar -czf /tmp/frontend.tar.gz .
-          echo "Frontend size: $(du -h /tmp/frontend.tar.gz | cut -f1)"
-          scp /tmp/frontend.tar.gz $REMOTE:/tmp/mvp_frontend.tar.gz
-          ssh $REMOTE bash <<'EOF'
-          set -e
-          DEPLOY_DIR=/www/wwwroot/mvp.easytestdev.online
-          mkdir -p $DEPLOY_DIR/admin
-          rm -rf $DEPLOY_DIR/admin/*
-          tar -xzf /tmp/mvp_frontend.tar.gz -C $DEPLOY_DIR/admin/
-          rm -f /tmp/mvp_frontend.tar.gz
-          echo "Frontend deployed"
+          tar -czf /tmp/easymvp-frontend.tar.gz .
+          echo "Frontend size: $(du -h /tmp/easymvp-frontend.tar.gz | cut -f1)"
+          scp /tmp/easymvp-frontend.tar.gz "$REMOTE:/tmp/easymvp-frontend.tar.gz"
+          ssh "$REMOTE" "DEPLOY_DIR='${{ env.DEPLOY_DIR }}' bash -s" <<'EOF'
+          set -euo pipefail
+
+          RELEASES_DIR="$DEPLOY_DIR/.releases/admin"
+          RELEASE_ID=$(date +%Y%m%d%H%M%S)
+          RELEASE_DIR="$RELEASES_DIR/$RELEASE_ID"
+          NEXT_LINK="$DEPLOY_DIR/admin.__new"
+
+          mkdir -p "$RELEASES_DIR"
+          rm -rf "$RELEASE_DIR"
+          mkdir -p "$RELEASE_DIR"
+          tar -xzf /tmp/easymvp-frontend.tar.gz -C "$RELEASE_DIR"
+          test -f "$RELEASE_DIR/index.html"
+
+          rm -f "$NEXT_LINK"
+          ln -s "$RELEASE_DIR" "$NEXT_LINK"
+
+          if [ -d "$DEPLOY_DIR/admin" ] && [ ! -L "$DEPLOY_DIR/admin" ]; then
+            LEGACY_BACKUP="$DEPLOY_DIR/.legacy-admin-$(date +%Y%m%d%H%M%S)"
+            mv "$DEPLOY_DIR/admin" "$LEGACY_BACKUP"
+          fi
+
+          mv -Tf "$NEXT_LINK" "$DEPLOY_DIR/admin"
+          ls -1dt "$RELEASES_DIR"/* 2>/dev/null | tail -n +6 | xargs -r rm -rf
+          rm -f /tmp/easymvp-frontend.tar.gz
+          echo "Frontend deployed to $RELEASE_DIR"
           EOF
 
-  # ============================================
-  # Final status report
-  # ============================================
   status-check:
     needs: [deploy-system, deploy-ai, deploy-mvp, deploy-frontend]
     if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Validate deploy SSH secret
+        run: |
+          test -n "${{ secrets.MVP_DEPLOY_SSH_KEY }}"
+
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -376,20 +766,21 @@ jobs:
 
       - name: Check service status
         run: |
-          ssh ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} bash <<'EOF'
+          ssh ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} 'bash -s' <<'EOF'
+          set -euo pipefail
           echo "===== Service Status ====="
           for app in system ai mvp; do
-              status=$(systemctl is-active mvp-$app 2>/dev/null || echo "unknown")
-              echo "mvp-$app: $status"
+            status=$(systemctl is-active "mvp-$app" 2>/dev/null || echo 'unknown')
+            echo "mvp-$app: $status"
           done
           EOF
 
       - name: Summary
         run: |
-          echo "## Deploy Results" >> $GITHUB_STEP_SUMMARY
-          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| system (41002) | ${{ needs.deploy-system.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| ai (41003) | ${{ needs.deploy-ai.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| mvp (41004) | ${{ needs.deploy-mvp.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Frontend | ${{ needs.deploy-frontend.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "## Deploy Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Component | Port | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----------|------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| system | ${{ env.SYSTEM_PORT }} | ${{ needs.deploy-system.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ai | ${{ env.AI_PORT }} | ${{ needs.deploy-ai.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| mvp | ${{ env.MVP_PORT }} | ${{ needs.deploy-mvp.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| frontend | /admin/ | ${{ needs.deploy-frontend.result }} |" >> "$GITHUB_STEP_SUMMARY"

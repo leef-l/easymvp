@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/gogf/gf/v2/frame/g"
+
+	"easymvp/app/mvp/internal/workflow/repo"
 )
 
 type issueTaskResolutionInput struct {
@@ -58,11 +60,7 @@ func ResolveIssueTaskID(ctx context.Context, workflowRunID, currentTaskID int64,
 }
 
 func loadTaskBindingCandidates(ctx context.Context, workflowRunID int64) ([]taskBindingCandidate, error) {
-	records, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		Fields("id, name, parent_task_id, affected_resources").
-		All()
+	records, err := repo.NewDomainTaskRepo().ListByWorkflowOrdered(ctx, workflowRunID, "id", "name", "parent_task_id", "affected_resources")
 	if err != nil {
 		return nil, err
 	}
@@ -71,13 +69,13 @@ func loadTaskBindingCandidates(ctx context.Context, workflowRunID int64) ([]task
 	parentMap := make(map[int64]int64, len(records))
 	for _, record := range records {
 		var resources []string
-		if raw := strings.TrimSpace(record["affected_resources"].String()); raw != "" {
+		if raw := strings.TrimSpace(g.NewVar(record["affected_resources"]).String()); raw != "" {
 			_ = json.Unmarshal([]byte(raw), &resources)
 		}
 		candidate := taskBindingCandidate{
-			ID:                record["id"].Int64(),
-			Name:              strings.TrimSpace(record["name"].String()),
-			ParentTaskID:      record["parent_task_id"].Int64(),
+			ID:                g.NewVar(record["id"]).Int64(),
+			Name:              strings.TrimSpace(g.NewVar(record["name"]).String()),
+			ParentTaskID:      g.NewVar(record["parent_task_id"]).Int64(),
 			AffectedResources: normalizeAffectedResources(resources),
 		}
 		candidates = append(candidates, candidate)

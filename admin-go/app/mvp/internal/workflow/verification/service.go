@@ -34,9 +34,11 @@ const (
 	modeDockerCompose = "docker_compose"
 	modeDockerfile    = "dockerfile"
 	modeLocal         = "local"
+	modeGitHubActions = "github_actions"
 
 	runnerLocal      = "local"
 	runnerDockerExec = "docker_exec"
+	runnerGitHub     = "github_actions"
 )
 
 // StartRequest 启动验证请求。
@@ -154,6 +156,31 @@ type executionPlan struct {
 	SetupSteps       []verificationStep
 	VerifySteps      []verificationStep
 	TeardownSteps    []verificationStep
+	CIResult         *ciLatestResult
+	CIResultRaw      string
+}
+
+type ciLatestResult struct {
+	Status     string          `json:"status"`
+	Tool       string          `json:"tool,omitempty"`
+	Pipeline   string          `json:"pipeline,omitempty"`
+	Summary    string          `json:"summary,omitempty"`
+	Workflow   string          `json:"workflow,omitempty"`
+	RunID      string          `json:"runId,omitempty"`
+	RunURL     string          `json:"runUrl,omitempty"`
+	CheckKinds []string        `json:"checkKinds,omitempty"`
+	Checks     []ciLatestCheck `json:"checks,omitempty"`
+}
+
+type ciLatestCheck struct {
+	Name     string `json:"name,omitempty"`
+	Kind     string `json:"kind,omitempty"`
+	Status   string `json:"status,omitempty"`
+	Summary  string `json:"summary,omitempty"`
+	Command  string `json:"command,omitempty"`
+	Runner   string `json:"runner,omitempty"`
+	Workflow string `json:"workflow,omitempty"`
+	Job      string `json:"job,omitempty"`
 }
 
 type issueDraft struct {
@@ -269,59 +296,63 @@ func (s *Service) executeRun(ctx context.Context, runID int64) error {
 
 	executedSteps := 0
 	stepExecutions := make([]stepExecution, 0, len(plan.SetupSteps)+len(plan.VerifySteps))
-	setupFailed := false
-	for _, step := range plan.SetupSteps {
-		result, commandText := s.executeStep(ctx, meta.WorkDir, plan.Profile, step)
-		evidence = append(evidence, s.buildStepEvidence(meta, "command", step, commandText, result))
-		stepExecutions = append(stepExecutions, stepExecution{Stage: "setup", Step: step, Result: result})
-		if !result.Skipped {
-			executedSteps++
-		}
-		if result.Err != nil && !step.Optional {
-			setupFailed = true
-			issues = append(issues, s.buildStepIssue(step, "environment", "blocker", result, commandText))
-		} else if result.Err != nil {
-			issues = append(issues, s.buildStepIssue(step, "environment", "warn", result, commandText))
-		}
-	}
-
-	for _, step := range plan.VerifySteps {
-		if setupFailed && step.Runner == runnerDockerExec {
-			skipped := commandResult{Skipped: true}
-			commandText := describeStepCommand(step)
-			evidence = append(evidence, s.buildStepEvidence(meta, "command", step, commandText, skipped))
-			issues = append(issues, issueDraft{
-				IssueType:       "environment",
-				Severity:        "warn",
-				Title:           fmt.Sprintf("跳过验证步骤: %s", step.Name),
-				Detail:          "Docker 环境启动失败，容器内验证步骤被跳过。",
-				ExpectedValue:   "环境启动成功并继续执行容器内验证步骤",
-				ActualValue:     "环境启动失败，步骤被跳过",
-				SuggestedAction: "修复 compose/Dockerfile 或在 .easymvp/verification.json 中指定可执行的本机回退步骤",
-				DomainTaskID:    step.DomainTaskID,
-				ResourceRef:     step.ResourceRef,
-			})
-			continue
+	if plan.RunnerType == modeGitHubActions {
+		executedSteps, stepExecutions, issues, evidence = s.collectGitHubActionsEvidence(meta, plan, issues, evidence)
+	} else {
+		setupFailed := false
+		for _, step := range plan.SetupSteps {
+			result, commandText := s.executeStep(ctx, meta.WorkDir, plan.Profile, step)
+			evidence = append(evidence, s.buildStepEvidence(meta, "command", step, commandText, result))
+			stepExecutions = append(stepExecutions, stepExecution{Stage: "setup", Step: step, Result: result})
+			if !result.Skipped {
+				executedSteps++
+			}
+			if result.Err != nil && !step.Optional {
+				setupFailed = true
+				issues = append(issues, s.buildStepIssue(step, "environment", "blocker", result, commandText))
+			} else if result.Err != nil {
+				issues = append(issues, s.buildStepIssue(step, "environment", "warn", result, commandText))
+			}
 		}
 
-		result, commandText := s.executeStep(ctx, meta.WorkDir, plan.Profile, step)
-		evidence = append(evidence, s.buildStepEvidence(meta, "command", step, commandText, result))
-		stepExecutions = append(stepExecutions, stepExecution{Stage: "verify", Step: step, Result: result})
-		if !result.Skipped {
-			executedSteps++
-		}
-		if result.Err != nil && !step.Optional {
-			issues = append(issues, s.buildStepIssue(step, "command", "error", result, commandText))
-		} else if result.Err != nil {
-			issues = append(issues, s.buildStepIssue(step, "command", "warn", result, commandText))
-		}
-	}
+		for _, step := range plan.VerifySteps {
+			if setupFailed && step.Runner == runnerDockerExec {
+				skipped := commandResult{Skipped: true}
+				commandText := describeStepCommand(step)
+				evidence = append(evidence, s.buildStepEvidence(meta, "command", step, commandText, skipped))
+				issues = append(issues, issueDraft{
+					IssueType:       "environment",
+					Severity:        "warn",
+					Title:           fmt.Sprintf("跳过验证步骤: %s", step.Name),
+					Detail:          "检测到 legacy Docker runner 启动失败，兼容验证步骤已被跳过。",
+					ExpectedValue:   "环境启动成功并继续执行容器内验证步骤",
+					ActualValue:     "环境启动失败，步骤被跳过",
+					SuggestedAction: "移除 legacy Docker 验证配置，改由 GitHub Actions workflow 执行对应检查",
+					DomainTaskID:    step.DomainTaskID,
+					ResourceRef:     step.ResourceRef,
+				})
+				continue
+			}
 
-	for _, step := range plan.TeardownSteps {
-		result, commandText := s.executeStep(ctx, meta.WorkDir, plan.Profile, step)
-		evidence = append(evidence, s.buildStepEvidence(meta, "command", step, commandText, result))
-		if result.Err != nil {
-			issues = append(issues, s.buildStepIssue(step, "runtime", "warn", result, commandText))
+			result, commandText := s.executeStep(ctx, meta.WorkDir, plan.Profile, step)
+			evidence = append(evidence, s.buildStepEvidence(meta, "command", step, commandText, result))
+			stepExecutions = append(stepExecutions, stepExecution{Stage: "verify", Step: step, Result: result})
+			if !result.Skipped {
+				executedSteps++
+			}
+			if result.Err != nil && !step.Optional {
+				issues = append(issues, s.buildStepIssue(step, "command", "error", result, commandText))
+			} else if result.Err != nil {
+				issues = append(issues, s.buildStepIssue(step, "command", "warn", result, commandText))
+			}
+		}
+
+		for _, step := range plan.TeardownSteps {
+			result, commandText := s.executeStep(ctx, meta.WorkDir, plan.Profile, step)
+			evidence = append(evidence, s.buildStepEvidence(meta, "command", step, commandText, result))
+			if result.Err != nil {
+				issues = append(issues, s.buildStepIssue(step, "runtime", "warn", result, commandText))
+			}
 		}
 	}
 
@@ -332,10 +363,10 @@ func (s *Service) executeRun(ctx context.Context, runID int64) error {
 			IssueType:       "config",
 			Severity:        "warn",
 			Title:           "未执行任何验证步骤",
-			Detail:          "系统没有检测到可执行的验证命令，当前结果不足以判断项目是否可发布。",
+			Detail:          "系统没有读取到已完成的 GitHub Actions 检查结果，当前结果不足以判断项目是否可发布。",
 			ExpectedValue:   "至少执行 1 个有效验证步骤",
 			ActualValue:     "执行步骤数为 0",
-			SuggestedAction: "在项目根目录补充 .easymvp/verification.json，显式声明 Docker 启动和验证命令",
+			SuggestedAction: "等待 GitHub Actions 完成并同步最新 CI 结果后重新发起验证",
 		})
 	}
 
@@ -415,7 +446,7 @@ func (s *Service) loadRunMeta(ctx context.Context, runID int64) (*runMeta, error
 }
 
 func (s *Service) buildExecutionPlan(ctx context.Context, meta *runMeta) (*executionPlan, []issueDraft, []evidenceDraft, error) {
-	plan := &executionPlan{Mode: modeLocal, RunnerType: modeLocal}
+	plan := &executionPlan{Mode: modeGitHubActions, RunnerType: modeGitHubActions}
 	issues := make([]issueDraft, 0, 4)
 	evidence := make([]evidenceDraft, 0, 4)
 
@@ -429,7 +460,7 @@ func (s *Service) buildExecutionPlan(ctx context.Context, meta *runMeta) (*execu
 			ActualValue:     "work_dir 为空",
 			SuggestedAction: "为项目补充仓库工作目录后重新发起验证",
 		})
-		plan.ConfigSnapshot = `{"mode":"local","reason":"missing_workdir"}`
+		plan.ConfigSnapshot = `{"mode":"github_actions","reason":"missing_workdir"}`
 		plan.DetectionSummary = "项目未配置工作目录"
 		return plan, issues, evidence, nil
 	}
@@ -443,7 +474,7 @@ func (s *Service) buildExecutionPlan(ctx context.Context, meta *runMeta) (*execu
 			ActualValue:     err.Error(),
 			SuggestedAction: "修复工作目录映射或重新绑定仓库路径",
 		})
-		plan.ConfigSnapshot = fmt.Sprintf(`{"mode":"local","workDir":%q}`, meta.WorkDir)
+		plan.ConfigSnapshot = fmt.Sprintf(`{"mode":"github_actions","workDir":%q}`, meta.WorkDir)
 		plan.DetectionSummary = "工作目录不存在"
 		return plan, issues, evidence, nil
 	}
@@ -484,39 +515,20 @@ func (s *Service) buildExecutionPlan(ctx context.Context, meta *runMeta) (*execu
 		plan.GateSource = categoryConfig.Source
 	}
 
-	composeFile, _ := findComposeFile(meta.WorkDir)
-	dockerfile, _ := findDockerfile(meta.WorkDir)
-	autoSetupSteps := s.discoverLocalSetupSteps(ctx, meta, meta.WorkDir)
-	autoSteps := s.discoverLocalSteps(ctx, meta, meta.WorkDir)
-
-	mode := modeAuto
+	requestedMode := modeGitHubActions
 	if profile != nil && strings.TrimSpace(profile.Mode) != "" {
-		mode = normalizeMode(profile.Mode)
+		requestedMode = strings.TrimSpace(strings.ToLower(profile.Mode))
 	}
-	if mode == modeAuto {
-		switch {
-		case composeFile != "":
-			mode = modeDockerCompose
-		case dockerfile != "":
-			mode = modeDockerfile
-		default:
-			mode = modeLocal
-		}
-	}
-	plan.Mode = mode
-	plan.RunnerType = mode
+	plan.Mode = normalizeMode(requestedMode)
+	plan.RunnerType = plan.Mode
 
-	var customSetup []verificationStep
-	var customSteps []verificationStep
-	var customTeardown []verificationStep
-	if profile != nil {
-		customSetup = s.normalizeSteps(ctx, meta, profile.SetupSteps)
-		customSteps = s.normalizeSteps(ctx, meta, profile.Steps)
-		customTeardown = s.normalizeSteps(ctx, meta, profile.TeardownSteps)
-	}
+	workflowFiles, _ := findGitHubWorkflowFiles(meta.WorkDir)
+	latestCIResult, latestCIPath, latestCIRaw, latestCIErr := loadLatestCIResult(meta.WorkDir)
+	plan.CIResult = latestCIResult
+	plan.CIResultRaw = latestCIRaw
 
 	detection := map[string]interface{}{
-		"mode":          mode,
+		"mode":          plan.Mode,
 		"workDir":       meta.WorkDir,
 		"configPath":    configPath,
 		"profileSource": profileSource,
@@ -533,17 +545,21 @@ func (s *Service) buildExecutionPlan(ctx context.Context, meta *runMeta) (*execu
 			"source":      categoryConfig.Source,
 		}
 	}
-	if composeFile != "" {
-		detection["composeFile"] = composeFile
+	detection["githubActionsWorkflowCount"] = len(workflowFiles)
+	if len(workflowFiles) > 0 {
+		detection["githubActionsWorkflows"] = workflowFiles
 	}
-	if dockerfile != "" {
-		detection["dockerfile"] = dockerfile
+	if latestCIPath != "" {
+		detection["ciLatestPath"] = latestCIPath
 	}
 	if profileRaw != "" {
-		detection["profile"] = json.RawMessage(profileRaw)
+		detection["profile"] = snapshotJSONValue(profileRaw)
+	}
+	if latestCIRaw != "" {
+		detection["ciLatest"] = snapshotJSONValue(latestCIRaw)
 	}
 	if categoryConfig != nil && categoryConfig.GateRaw != "" {
-		detection["gate"] = json.RawMessage(categoryConfig.GateRaw)
+		detection["gate"] = snapshotJSONValue(categoryConfig.GateRaw)
 	}
 	signals := qualitygate.DetectProjectSignals(
 		meta.WorkDir,
@@ -568,183 +584,74 @@ func (s *Service) buildExecutionPlan(ctx context.Context, meta *runMeta) (*execu
 			"reasons":              signals.Reasons,
 		},
 	}
-
-	switch mode {
-	case modeDockerCompose:
-		composePath := composeFile
-		projectName := ""
-		envFile := ""
-		buildEnabled := true
-		downAfter := true
-		if profile != nil && profile.Docker != nil {
-			if profile.Docker.ComposeFile != "" {
-				if resolved, err := resolveWithinRoot(meta.WorkDir, profile.Docker.ComposeFile); err == nil {
-					composePath = resolved
-				} else {
-					issues = append(issues, issueDraft{
-						IssueType:       "config",
-						Severity:        "error",
-						Title:           "验证 composeFile 无效",
-						Detail:          err.Error(),
-						ExpectedValue:   "composeFile 位于项目目录内",
-						ActualValue:     profile.Docker.ComposeFile,
-						SuggestedAction: "修正 .easymvp/verification.json 中的 docker.composeFile",
-					})
-				}
-			}
-			if profile.Docker.EnvFile != "" {
-				if resolved, err := resolveWithinRoot(meta.WorkDir, profile.Docker.EnvFile); err == nil {
-					envFile = resolved
-				} else {
-					issues = append(issues, issueDraft{
-						IssueType:       "config",
-						Severity:        "error",
-						Title:           "验证 envFile 无效",
-						Detail:          err.Error(),
-						ExpectedValue:   "envFile 位于项目目录内",
-						ActualValue:     profile.Docker.EnvFile,
-						SuggestedAction: "修正 .easymvp/verification.json 中的 docker.envFile",
-					})
-				}
-			}
-			projectName = strings.TrimSpace(profile.Docker.ProjectName)
-			if profile.Docker.Build != nil {
-				buildEnabled = *profile.Docker.Build
-			}
-		}
-		if profile != nil && profile.DownAfter != nil {
-			downAfter = *profile.DownAfter
-		}
-
-		prefix, dockerErr := detectComposePrefix()
-		if composePath == "" {
-			issues = append(issues, issueDraft{
-				IssueType:       "environment",
-				Severity:        "blocker",
-				Title:           "未找到 docker compose 文件",
-				Detail:          "自动检测和配置都没有找到 compose.yaml / docker-compose.yml。",
-				ExpectedValue:   "项目包含可启动的 compose 文件",
-				ActualValue:     "compose 文件缺失",
-				SuggestedAction: "补充 compose 文件或改用 .easymvp/verification.json 指定本机验证命令",
-			})
-			plan.RunnerType = modeLocal
-		} else if dockerErr != nil {
-			issues = append(issues, issueDraft{
-				IssueType:       "environment",
-				Severity:        "blocker",
-				Title:           "Docker Compose 不可用",
-				Detail:          dockerErr.Error(),
-				ExpectedValue:   "宿主机可执行 docker compose",
-				ActualValue:     dockerErr.Error(),
-				SuggestedAction: "安装 docker compose，或在验证配置中提供不依赖 Docker 的回退步骤",
-			})
-			plan.RunnerType = modeLocal
-		} else {
-			composeArgs := append([]string{}, prefix...)
-			composeArgs = append(composeArgs, "-f", composePath, "--project-name", projectName)
-			if envFile != "" {
-				composeArgs = append(composeArgs, "--env-file", envFile)
-			}
-			up := append([]string{}, composeArgs...)
-			up = append(up, "up", "-d")
-			if buildEnabled {
-				up = append(up, "--build")
-			}
-			plan.SetupSteps = append(plan.SetupSteps, verificationStep{
-				Name:           "docker compose up",
-				Runner:         runnerLocal,
-				Command:        up,
-				WorkDir:        ".",
-				TimeoutSeconds: 900,
-				ResourceRef:    ".",
-				Expected:       "Docker compose 环境成功启动",
-			})
-			ps := append([]string{}, composeArgs...)
-			ps = append(ps, "ps")
-			plan.VerifySteps = append(plan.VerifySteps, verificationStep{
-				Name:           "docker compose ps",
-				Runner:         runnerLocal,
-				Command:        ps,
-				WorkDir:        ".",
-				TimeoutSeconds: 120,
-				ResourceRef:    ".",
-				Expected:       "服务容器均处于 running/healthy 状态",
-			})
-			if downAfter {
-				down := append([]string{}, composeArgs...)
-				down = append(down, "down", "--remove-orphans")
-				plan.TeardownSteps = append(plan.TeardownSteps, verificationStep{
-					Name:           "docker compose down",
-					Runner:         runnerLocal,
-					Command:        down,
-					WorkDir:        ".",
-					TimeoutSeconds: 300,
-					Optional:       true,
-					ResourceRef:    ".",
-				})
-			}
-		}
-	case modeDockerfile:
-		dockerPath, dockerErr := exec.LookPath("docker")
-		buildPath := dockerfile
-		buildEnabled := true
-		if profile != nil && profile.Docker != nil {
-			if profile.Docker.Build != nil {
-				buildEnabled = *profile.Docker.Build
-			}
-		}
-		if buildPath == "" {
-			issues = append(issues, issueDraft{
-				IssueType:       "environment",
-				Severity:        "blocker",
-				Title:           "未找到 Dockerfile",
-				Detail:          "项目未检测到可用于构建验证镜像的 Dockerfile。",
-				ExpectedValue:   "项目包含 Dockerfile",
-				ActualValue:     "Dockerfile 缺失",
-				SuggestedAction: "补充 Dockerfile 或改用 .easymvp/verification.json 声明验证方案",
-			})
-			plan.RunnerType = modeLocal
-		} else if dockerErr != nil {
-			issues = append(issues, issueDraft{
-				IssueType:       "environment",
-				Severity:        "blocker",
-				Title:           "Docker 不可用",
-				Detail:          dockerErr.Error(),
-				ExpectedValue:   "宿主机可执行 docker build",
-				ActualValue:     dockerErr.Error(),
-				SuggestedAction: "安装 Docker，或在验证配置中声明可执行的本机验证步骤",
-			})
-			plan.RunnerType = modeLocal
-		} else if buildEnabled {
-			buildCmd := []string{
-				dockerPath,
-				"build",
-				"-f", buildPath,
-				"-t", fmt.Sprintf("easymvp-verify-%d-%d", meta.ProjectID, meta.RunID),
-				meta.WorkDir,
-			}
-			plan.SetupSteps = append(plan.SetupSteps, verificationStep{
-				Name:           "docker build",
-				Runner:         runnerLocal,
-				Command:        buildCmd,
-				WorkDir:        ".",
-				TimeoutSeconds: 900,
-				ResourceRef:    ".",
-				Expected:       "Docker 镜像成功构建",
-			})
-		}
-	default:
-		plan.RunnerType = modeLocal
+	if profileRequestsLocalExecution(profile) {
+		issues = append(issues, issueDraft{
+			IssueType:       "config",
+			Severity:        "warn",
+			Title:           "检测到已停用的本机验证配置",
+			Detail:          "当前 verification profile 仍包含本机 steps / docker / downAfter / legacy mode 配置，但工程铁律已要求测试与编译统一交给 GitHub Actions。",
+			ExpectedValue:   `{"mode":"github_actions"}`,
+			ActualValue:     valueOrDefault(strings.TrimSpace(profileRaw), "检测到 legacy verification profile"),
+			SuggestedAction: "移除本机验证命令与 Docker 回退配置，改由 GitHub Actions 执行后回写 .easymvp/ci/latest.json",
+		})
 	}
-
-	plan.SetupSteps = append(plan.SetupSteps, customSetup...)
-	if len(customSteps) > 0 {
-		plan.VerifySteps = append(plan.VerifySteps, customSteps...)
+	if len(workflowFiles) == 0 {
+		issues = append(issues, issueDraft{
+			IssueType:       "config",
+			Severity:        "error",
+			Title:           "未检测到 GitHub Actions 工作流",
+			Detail:          "项目目录下没有发现 .github/workflows/*.yml 或 *.yaml，无法按当前铁律完成测试与编译验证。",
+			ExpectedValue:   "项目仓库包含 GitHub Actions workflow",
+			ActualValue:     "workflow 文件缺失",
+			SuggestedAction: "补齐 GitHub Actions workflow，并通过 workflow run 产出 CI 结果",
+		})
+	}
+	if latestCIErr != nil {
+		issues = append(issues, issueDraft{
+			IssueType:       "config",
+			Severity:        "error",
+			Title:           "CI 结果文件解析失败",
+			Detail:          fmt.Sprintf("%s 解析失败: %v", latestCIPath, latestCIErr),
+			ExpectedValue:   ".easymvp/ci/latest.json 为合法 JSON",
+			ActualValue:     latestCIErr.Error(),
+			SuggestedAction: "修复 latest.json 内容，或重新由 GitHub Actions 生成最新结果文件",
+		})
+	}
+	if latestCIResult == nil {
+		issues = append(issues, issueDraft{
+			IssueType:       "config",
+			Severity:        "warn",
+			Title:           "未找到 GitHub Actions 最新结果",
+			Detail:          "当前项目尚未提供 .easymvp/ci/latest.json，验证阶段无法读取 GitHub Actions 的最新测试/编译结果。",
+			ExpectedValue:   ".easymvp/ci/latest.json 包含最新 workflow run 结果",
+			ActualValue:     "CI 结果文件缺失",
+			SuggestedAction: "先触发对应的 GitHub Actions guard workflow，并把最新结果同步到 .easymvp/ci/latest.json",
+		})
 	} else {
-		plan.SetupSteps = append(plan.SetupSteps, autoSetupSteps...)
-		plan.VerifySteps = append(plan.VerifySteps, autoSteps...)
+		plan.VerifySteps = buildGitHubActionsSteps(latestCIResult)
+		if len(plan.VerifySteps) == 0 {
+			issues = append(issues, issueDraft{
+				IssueType:       "config",
+				Severity:        "warn",
+				Title:           "CI 结果未声明检查项",
+				Detail:          "latest.json 已存在，但没有 checks 或 checkKinds，系统无法把 GitHub Actions 结果映射到 test/build/browser 等标准检查类型。",
+				ExpectedValue:   "latest.json 至少包含 checks 或 checkKinds",
+				ActualValue:     "检查项为空",
+				SuggestedAction: "在 CI 结果中补充 checks/checkKinds 字段，明确每个 GitHub Actions 检查的类型与状态",
+			})
+		}
+		if tool := strings.TrimSpace(strings.ToLower(latestCIResult.Tool)); tool != "" && tool != runnerGitHub {
+			issues = append(issues, issueDraft{
+				IssueType:       "config",
+				Severity:        "error",
+				Title:           "CI 结果来源不符合铁律",
+				Detail:          fmt.Sprintf("latest.json 声明的 tool=%s，不是 github_actions。", latestCIResult.Tool),
+				ExpectedValue:   "tool=github_actions",
+				ActualValue:     latestCIResult.Tool,
+				SuggestedAction: "仅接受 GitHub Actions 作为测试与编译来源，请修正 CI 结果输出",
+			})
+		}
 	}
-	plan.TeardownSteps = append(plan.TeardownSteps, customTeardown...)
 	plan.Gate = mergeVerificationStandardIntoGate(plan.Gate, standard)
 	plan.GateSource = mergeGateSource(plan.GateSource, standard.Code)
 
@@ -752,11 +659,11 @@ func (s *Service) buildExecutionPlan(ctx context.Context, meta *runMeta) (*execu
 		issues = append(issues, issueDraft{
 			IssueType:       "config",
 			Severity:        "warn",
-			Title:           "未检测到验证命令",
-			Detail:          "自动检测未找到 go test / npm lint / npm test / npm build 等可执行步骤。",
-			ExpectedValue:   "至少存在 1 个验证命令",
+			Title:           "未检测到可用的 GitHub Actions 验证结果",
+			Detail:          "系统没有读取到可映射为标准检查项的 GitHub Actions 结果，当前结果不足以判断项目是否可发布。",
+			ExpectedValue:   "至少存在 1 个 GitHub Actions 检查结果",
 			ActualValue:     "检测结果为空",
-			SuggestedAction: "在 .easymvp/verification.json 中声明 steps，或补充测试/构建脚本",
+			SuggestedAction: "通过 GitHub Actions 执行验证，并在 .easymvp/ci/latest.json 中声明 checks/checkKinds",
 		})
 	}
 
@@ -765,12 +672,12 @@ func (s *Service) buildExecutionPlan(ctx context.Context, meta *runMeta) (*execu
 		plan.ConfigSnapshot = string(encoded)
 	}
 	plan.DetectionSummary = fmt.Sprintf(
-		"mode=%s profileSource=%s gateSource=%s compose=%t dockerfile=%t steps=%d",
+		"mode=%s profileSource=%s gateSource=%s workflows=%d ci=%t steps=%d",
 		plan.RunnerType,
 		profileSource,
 		valueOrDefault(plan.GateSource, "none"),
-		composeFile != "",
-		dockerfile != "",
+		len(workflowFiles),
+		latestCIResult != nil,
 		len(plan.VerifySteps),
 	)
 	evidence = append(evidence, evidenceDraft{
@@ -781,6 +688,301 @@ func (s *Service) buildExecutionPlan(ctx context.Context, meta *runMeta) (*execu
 		Summary:      plan.DetectionSummary,
 	})
 	return plan, issues, evidence, nil
+}
+
+func (s *Service) collectGitHubActionsEvidence(
+	meta *runMeta,
+	plan *executionPlan,
+	issues []issueDraft,
+	evidence []evidenceDraft,
+) (int, []stepExecution, []issueDraft, []evidenceDraft) {
+	stepExecutions := make([]stepExecution, 0, len(plan.VerifySteps))
+	if plan == nil || plan.CIResult == nil {
+		return 0, stepExecutions, issues, evidence
+	}
+
+	result := plan.CIResult
+	if raw := strings.TrimSpace(plan.CIResultRaw); raw != "" {
+		evidence = append(evidence, evidenceDraft{
+			EvidenceType: "ci",
+			SourceType:   "verification_run",
+			SourceID:     meta.RunID,
+			ContentRef:   raw,
+			Summary:      buildCISnapshotSummary(result),
+		})
+	}
+
+	executedSteps := 0
+	for idx, step := range plan.VerifySteps {
+		checkStatus := normalizeCIStatus(result.Status)
+		checkSummary := strings.TrimSpace(result.Summary)
+		if idx < len(result.Checks) {
+			check := result.Checks[idx]
+			if normalized := normalizeCIStatus(check.Status); normalized != "" {
+				checkStatus = normalized
+			}
+			if summary := strings.TrimSpace(check.Summary); summary != "" {
+				checkSummary = summary
+			}
+		}
+
+		commandText := describeStepCommand(step)
+		commandResult := commandResult{
+			ExitCode: 0,
+			Output:   checkSummary,
+		}
+
+		switch checkStatus {
+		case "passed":
+			executedSteps++
+		case "failed":
+			executedSteps++
+			commandResult.ExitCode = 1
+			commandResult.Err = fmt.Errorf("GitHub Actions status=%s", checkStatus)
+		default:
+			commandResult.Skipped = true
+			commandResult.Output = valueOrDefault(checkSummary, "GitHub Actions 检查尚未完成")
+			issues = append(issues, issueDraft{
+				IssueType:       "ci",
+				Severity:        "warn",
+				Title:           fmt.Sprintf("GitHub Actions 检查未完成: %s", step.Name),
+				Detail:          fmt.Sprintf("当前检查状态为 %s，验证阶段尚未拿到可判定的最终结果。", valueOrDefault(checkStatus, "pending")),
+				ExpectedValue:   "GitHub Actions check 已完成且通过",
+				ActualValue:     valueOrDefault(checkStatus, "pending"),
+				SuggestedAction: "等待 workflow run 完成并回写 .easymvp/ci/latest.json 后重新发起验证",
+				DomainTaskID:    step.DomainTaskID,
+				ResourceRef:     step.ResourceRef,
+			})
+		}
+
+		evidence = append(evidence, s.buildStepEvidence(meta, "command", step, commandText, commandResult))
+		stepExecutions = append(stepExecutions, stepExecution{Stage: "verify", Step: step, Result: commandResult})
+		if commandResult.Err != nil {
+			issues = append(issues, s.buildStepIssue(step, "ci", "error", commandResult, commandText))
+		}
+	}
+
+	return executedSteps, stepExecutions, issues, evidence
+}
+
+func buildGitHubActionsSteps(result *ciLatestResult) []verificationStep {
+	if result == nil {
+		return nil
+	}
+
+	steps := make([]verificationStep, 0, len(result.Checks))
+	for _, check := range result.Checks {
+		name := strings.TrimSpace(check.Name)
+		kind := normalizeCheckKind(check.Kind)
+		if name == "" {
+			if kind != "" {
+				name = "github actions " + kind
+			} else {
+				name = "github actions check"
+			}
+		}
+		steps = append(steps, verificationStep{
+			Name:           name,
+			Runner:         runnerGitHub,
+			Command:        buildGitHubActionsCommand(check, kind),
+			WorkDir:        ".",
+			ResourceRef:    ".",
+			TimeoutSeconds: 0,
+			Expected:       "GitHub Actions 检查通过",
+		})
+	}
+
+	if len(steps) > 0 {
+		return steps
+	}
+
+	label := strings.TrimSpace(result.Pipeline)
+	if label == "" {
+		label = "github actions pipeline"
+	}
+	return []verificationStep{{
+		Name:        label,
+		Runner:      runnerGitHub,
+		Command:     []string{"github_actions", "pipeline", normalizeCIStatus(result.Status)},
+		WorkDir:     ".",
+		ResourceRef: ".",
+		Expected:    "GitHub Actions workflow 通过",
+	}}
+}
+
+func buildGitHubActionsCommand(check ciLatestCheck, kind string) []string {
+	command := make([]string, 0, 5)
+	command = append(command, "github_actions", "check")
+	switch {
+	case kind != "":
+		command = append(command, kind)
+	case strings.TrimSpace(check.Command) != "":
+		command = append(command, strings.Fields(check.Command)...)
+	default:
+		command = append(command, "unknown")
+	}
+	if status := normalizeCIStatus(check.Status); status != "" {
+		command = append(command, "status="+status)
+	}
+	return command
+}
+
+func buildCISnapshotSummary(result *ciLatestResult) string {
+	if result == nil {
+		return "GitHub Actions CI 结果"
+	}
+	parts := make([]string, 0, 4)
+	if status := normalizeCIStatus(result.Status); status != "" {
+		parts = append(parts, "status="+status)
+	}
+	if tool := strings.TrimSpace(result.Tool); tool != "" {
+		parts = append(parts, "tool="+tool)
+	}
+	if pipeline := strings.TrimSpace(result.Pipeline); pipeline != "" {
+		parts = append(parts, "pipeline="+pipeline)
+	}
+	if summary := strings.TrimSpace(result.Summary); summary != "" {
+		parts = append(parts, "summary="+summary)
+	}
+	if len(parts) == 0 {
+		return "GitHub Actions CI 结果"
+	}
+	return "CI 结果：" + strings.Join(parts, " ")
+}
+
+func loadLatestCIResult(root string) (*ciLatestResult, string, string, error) {
+	path := filepath.Join(root, ".easymvp", "ci", "latest.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, path, "", nil
+		}
+		return nil, path, "", err
+	}
+
+	var result ciLatestResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, path, string(data), err
+	}
+	result.Status = normalizeCIStatus(result.Status)
+	result.Tool = strings.TrimSpace(strings.ToLower(result.Tool))
+	result.Pipeline = strings.TrimSpace(result.Pipeline)
+	result.Summary = strings.TrimSpace(result.Summary)
+	result.Workflow = strings.TrimSpace(result.Workflow)
+	result.RunID = strings.TrimSpace(result.RunID)
+	result.RunURL = strings.TrimSpace(result.RunURL)
+
+	result.CheckKinds = normalizeCIResultCheckKinds(result.CheckKinds)
+	result.Checks = normalizeCIResultChecks(result.Checks, result.CheckKinds)
+	return &result, path, string(data), nil
+}
+
+func normalizeCIResultCheckKinds(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		kind := normalizeCheckKind(value)
+		if kind == "" {
+			continue
+		}
+		if _, ok := seen[kind]; ok {
+			continue
+		}
+		seen[kind] = struct{}{}
+		result = append(result, kind)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func normalizeCIResultChecks(checks []ciLatestCheck, fallbackKinds []string) []ciLatestCheck {
+	result := make([]ciLatestCheck, 0, len(checks)+len(fallbackKinds))
+	for _, check := range checks {
+		check.Name = strings.TrimSpace(check.Name)
+		check.Kind = normalizeCheckKind(check.Kind)
+		check.Status = normalizeCIStatus(check.Status)
+		check.Summary = strings.TrimSpace(check.Summary)
+		check.Command = strings.TrimSpace(check.Command)
+		check.Runner = runnerGitHub
+		check.Workflow = strings.TrimSpace(check.Workflow)
+		check.Job = strings.TrimSpace(check.Job)
+		result = append(result, check)
+	}
+	if len(result) == 0 {
+		for _, kind := range fallbackKinds {
+			result = append(result, ciLatestCheck{
+				Name:   "github actions " + kind,
+				Kind:   kind,
+				Runner: runnerGitHub,
+			})
+		}
+	}
+	return result
+}
+
+func normalizeCIStatus(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "success", "succeeded", "passed", "pass", "completed":
+		return "passed"
+	case "failure", "failed", "error", "cancelled", "canceled", "timed_out":
+		return "failed"
+	case "", "queued", "queue", "running", "in_progress", "pending", "requested", "waiting":
+		return "pending"
+	default:
+		return strings.TrimSpace(strings.ToLower(value))
+	}
+}
+
+func profileRequestsLocalExecution(profile *verificationProfile) bool {
+	if profile == nil {
+		return false
+	}
+	if len(profile.SetupSteps) > 0 || len(profile.Steps) > 0 || len(profile.TeardownSteps) > 0 {
+		return true
+	}
+	if profile.Docker != nil || profile.DownAfter != nil {
+		return true
+	}
+	switch strings.TrimSpace(strings.ToLower(profile.Mode)) {
+	case "", modeAuto, modeGitHubActions:
+		return false
+	default:
+		return true
+	}
+}
+
+func findGitHubWorkflowFiles(root string) ([]string, error) {
+	workflowDir := filepath.Join(root, ".github", "workflows")
+	entries, err := os.ReadDir(workflowDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	files := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := strings.ToLower(entry.Name())
+		if strings.HasSuffix(name, ".yml") || strings.HasSuffix(name, ".yaml") {
+			files = append(files, filepath.ToSlash(filepath.Join(".github", "workflows", entry.Name())))
+		}
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+func snapshotJSONValue(raw string) interface{} {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return ""
+	}
+	if json.Valid([]byte(text)) {
+		return json.RawMessage(text)
+	}
+	return text
 }
 
 func (s *Service) discoverLocalSetupSteps(ctx context.Context, meta *runMeta, root string) []verificationStep {
@@ -1007,6 +1209,10 @@ func (s *Service) buildStepIssue(step verificationStep, issueType, severity stri
 	if trimmed := strings.TrimSpace(result.Output); trimmed != "" {
 		detail += "\n\n输出：\n" + trimmed
 	}
+	suggestedAction := "修复步骤对应的代码、配置或 CI 结果后重新发起验证"
+	if step.Runner == runnerGitHub {
+		suggestedAction = "修复 GitHub Actions 失败项并重新执行 workflow，待最新结果回写后重新发起验证"
+	}
 	return issueDraft{
 		IssueType:       issueType,
 		Severity:        severity,
@@ -1014,7 +1220,7 @@ func (s *Service) buildStepIssue(step verificationStep, issueType, severity stri
 		Detail:          detail,
 		ExpectedValue:   valueOrDefault(step.Expected, "命令执行成功"),
 		ActualValue:     actual,
-		SuggestedAction: "修复步骤对应的代码、配置或 Docker 环境后重新发起验证",
+		SuggestedAction: suggestedAction,
 		DomainTaskID:    step.DomainTaskID,
 		ResourceRef:     step.ResourceRef,
 	}
@@ -1310,12 +1516,12 @@ func normalizePlanRunnerTypeList(values []string) ([]string, error) {
 
 func normalizePlanRunnerType(value string) string {
 	switch strings.ReplaceAll(strings.TrimSpace(strings.ToLower(value)), "-", "_") {
+	case modeGitHubActions, "github", "github_action", "gha":
+		return modeGitHubActions
 	case modeLocal:
-		return modeLocal
 	case modeDockerCompose, "compose":
-		return modeDockerCompose
 	case modeDockerfile:
-		return modeDockerfile
+		return modeGitHubActions
 	default:
 		return ""
 	}
@@ -1355,7 +1561,7 @@ func evaluateVerificationGate(plan *executionPlan, executedSteps int, stepExecut
 			Detail:          fmt.Sprintf("%s 要求 runner_type 属于 %s，但本次验证使用的是 %s。", gateSource, strings.Join(gate.AllowedRunnerTypes, ", "), plan.RunnerType),
 			ExpectedValue:   strings.Join(gate.AllowedRunnerTypes, ", "),
 			ActualValue:     plan.RunnerType,
-			SuggestedAction: "调整项目分类 verification_gate_json，或补充适配该分类的验证运行方式",
+			SuggestedAction: "调整项目分类 verification_gate_json，确保 allowedRunnerTypes 与 github_actions 一致",
 		})
 	}
 
@@ -1367,7 +1573,7 @@ func evaluateVerificationGate(plan *executionPlan, executedSteps int, stepExecut
 			Detail:          fmt.Sprintf("%s 要求至少执行 %d 个验证步骤，本次仅执行 %d 个。", gateSource, gate.MinExecutedSteps, executedSteps),
 			ExpectedValue:   fmt.Sprintf("执行步骤 >= %d", gate.MinExecutedSteps),
 			ActualValue:     fmt.Sprintf("执行步骤 = %d", executedSteps),
-			SuggestedAction: "补充该分类要求的验证步骤，或调整 verification_gate_json 的最小执行步数",
+			SuggestedAction: "补齐 GitHub Actions checks/checkKinds 或调整 verification_gate_json 的 minExecutedSteps",
 		})
 	}
 
@@ -1383,7 +1589,7 @@ func evaluateVerificationGate(plan *executionPlan, executedSteps int, stepExecut
 					Detail:          fmt.Sprintf("%s 要求包含 %s 检查，但当前验证计划没有生成对应步骤。", gateSource, kind),
 					ExpectedValue:   fmt.Sprintf("计划中包含 %s 检查", kind),
 					ActualValue:     "未生成对应步骤",
-					SuggestedAction: "在项目级 .easymvp/verification.json 或分类默认验证配置中补充对应验证步骤",
+					SuggestedAction: "在 GitHub Actions workflow 与 .easymvp/ci/latest.json 中补充对应检查类型",
 				})
 				continue
 			}
@@ -1395,7 +1601,7 @@ func evaluateVerificationGate(plan *executionPlan, executedSteps int, stepExecut
 					Detail:          fmt.Sprintf("%s 要求执行 %s 检查，但本次没有实际执行到对应步骤。", gateSource, kind),
 					ExpectedValue:   fmt.Sprintf("已执行 %s 检查", kind),
 					ActualValue:     "未执行",
-					SuggestedAction: "修复环境启动/命令配置问题，确保该分类要求的验证步骤能够实际执行",
+					SuggestedAction: "确认 GitHub Actions workflow 已执行对应检查，并把最终状态回写到 .easymvp/ci/latest.json",
 				})
 			}
 		}
@@ -1410,7 +1616,7 @@ func evaluateVerificationGate(plan *executionPlan, executedSteps int, stepExecut
 			Detail:          fmt.Sprintf("%s 允许的结果是 %s，但本次预判结果为 %s。", gateSource, strings.Join(gate.AllowedDecisions, ", "), currentDecision),
 			ExpectedValue:   strings.Join(gate.AllowedDecisions, ", "),
 			ActualValue:     currentDecision,
-			SuggestedAction: "修复验证问题，或调整分类 verification_gate_json 的 allowedDecisions",
+			SuggestedAction: "修复 GitHub Actions 失败项，或调整分类 verification_gate_json 的 allowedDecisions",
 		})
 	}
 
@@ -1698,19 +1904,21 @@ func relativePath(root, dir string) string {
 
 func normalizeMode(mode string) string {
 	switch strings.TrimSpace(strings.ToLower(mode)) {
+	case modeGitHubActions, "github", "github_action", "gha":
+		return modeGitHubActions
 	case modeDockerCompose:
-		return modeDockerCompose
 	case modeDockerfile:
-		return modeDockerfile
 	case modeLocal:
-		return modeLocal
+		return modeGitHubActions
 	default:
-		return modeAuto
+		return modeGitHubActions
 	}
 }
 
 func normalizeRunner(runner string) string {
 	switch strings.TrimSpace(strings.ToLower(runner)) {
+	case runnerGitHub, "github", "github_action", "gha":
+		return runnerGitHub
 	case "docker", runnerDockerExec:
 		return runnerDockerExec
 	case "", runnerLocal:

@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"easymvp/app/mvp/internal/workflow/contract"
 	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/utility/snowflake"
 )
@@ -32,13 +33,8 @@ func (s *TaskService) InstantiateFromBlueprint(ctx context.Context, planVersionI
 	now := time.Now()
 
 	// 1. 查询所有已确认的蓝图
-	blueprints, err := g.DB().Model("mvp_task_blueprint").Ctx(ctx).
-		Where("plan_version_id", planVersionID).
-		Where("blueprint_status", "confirmed").
-		WhereNull("deleted_at").
-		OrderAsc("batch_no").
-		OrderAsc("sort").
-		All()
+	blueprints, err := repo.NewBlueprintRepo().ListByPlanVersionStatuses(ctx, planVersionID, []string{"confirmed"},
+		"id", "name", "description", "role_type", "role_level", "batch_no", "sort", "affected_resources", "depends_on_blueprint_ids")
 	if err != nil {
 		return 0, fmt.Errorf("查询蓝图失败: %w", err)
 	}
@@ -47,16 +43,21 @@ func (s *TaskService) InstantiateFromBlueprint(ctx context.Context, planVersionI
 	}
 
 	// 查项目 ID（从 workflow_run 获取）
-	projectID, pidErr := g.DB().Model("mvp_workflow_run").Ctx(ctx).
-		Where("id", workflowRunID).Value("project_id")
+	workflowRun, pidErr := repo.NewWorkflowRunRepo().GetByIDMap(ctx, workflowRunID, "project_id")
 	if pidErr != nil {
 		return 0, fmt.Errorf("查询 workflow_run 的 project_id 失败: %w", pidErr)
 	}
+	projectID := g.NewVar(workflowRun["project_id"]).Int64()
+	projectContract, contractErr := contract.Load(ctx, projectID)
+	if contractErr != nil {
+		g.Log().Warningf(ctx, "[TaskService] 加载项目级硬约束失败: projectID=%d err=%v", projectID, contractErr)
+		projectContract = &contract.ProjectContract{}
+	}
 
 	// 查项目角色配置（获取 execution_mode 和 model_id），缺失的自动从默认预设补齐
-	roleConfigs, rcErr := repo.GetProjectRolesMap(ctx, projectID.Int64())
+	roleConfigs, rcErr := repo.GetProjectRolesMap(ctx, projectID)
 	if rcErr != nil {
-		g.Log().Warningf(ctx, "[TaskService] 查询项目角色配置失败: projectID=%d err=%v", projectID.Int64(), rcErr)
+		g.Log().Warningf(ctx, "[TaskService] 查询项目角色配置失败: projectID=%d err=%v", projectID, rcErr)
 	}
 
 	// 2. 获取项目归属字段（继承到领域任务）
@@ -68,11 +69,11 @@ func (s *TaskService) InstantiateFromBlueprint(ctx context.Context, planVersionI
 
 	for _, bp := range blueprints {
 		taskID := int64(snowflake.Generate())
-		bpID := bp["id"].Int64()
+		bpID := g.NewVar(bp["id"]).Int64()
 		bpIDToTaskID[bpID] = taskID
 
-		roleType := bp["role_type"].String()
-		roleLevel := bp["role_level"].String()
+		roleType := g.NewVar(bp["role_type"]).String()
+		roleLevel := g.NewVar(bp["role_level"]).String()
 		roleKey := roleType + "/" + roleLevel
 
 		// 从角色配置获取 execution_mode 和 model_id
@@ -89,10 +90,10 @@ func (s *TaskService) InstantiateFromBlueprint(ctx context.Context, planVersionI
 			}
 		}
 		if !resolvedExactRole || modelID == 0 {
-			roleRecord, roleErr := repo.GetProjectRoleByLevel(ctx, projectID.Int64(), roleType, roleLevel)
+			roleRecord, roleErr := repo.GetProjectRoleByLevel(ctx, projectID, roleType, roleLevel)
 			if roleErr != nil {
 				g.Log().Warningf(ctx, "[TaskService] 解析角色回退配置失败: projectID=%d role=%s/%s err=%v",
-					projectID.Int64(), roleType, roleLevel, roleErr)
+					projectID, roleType, roleLevel, roleErr)
 			} else if roleRecord != nil {
 				if resolvedLevel := roleRecord["role_level"].String(); resolvedLevel != "" {
 					roleLevel = resolvedLevel
@@ -116,16 +117,16 @@ func (s *TaskService) InstantiateFromBlueprint(ctx context.Context, planVersionI
 			"plan_version_id":    planVersionID,
 			"blueprint_id":       bpID,
 			"task_kind":          "implement",
-			"name":               bp["name"].String(),
-			"description":        bp["description"].String(),
+			"name":               g.NewVar(bp["name"]).String(),
+			"description":        contract.AppendConstraintBlock(g.NewVar(bp["description"]).String(), projectContract),
 			"role_type":          roleType,
 			"role_level":         roleLevel,
 			"execution_mode":     executionMode,
 			"status":             StatusPending,
 			"model_id":           modelID,
-			"batch_no":           bp["batch_no"].Int(),
-			"sort":               bp["sort"].Int(),
-			"affected_resources": bp["affected_resources"].String(),
+			"batch_no":           g.NewVar(bp["batch_no"]).Int(),
+			"sort":               g.NewVar(bp["sort"]).Int(),
+			"affected_resources": g.NewVar(bp["affected_resources"]).String(),
 			"created_by":         scope.CreatedBy,
 			"dept_id":            scope.DeptID,
 			"created_at":         now,
@@ -134,8 +135,7 @@ func (s *TaskService) InstantiateFromBlueprint(ctx context.Context, planVersionI
 	}
 
 	// 3. 批量插入领域任务
-	_, err = g.DB().Model("mvp_domain_task").Ctx(ctx).Insert(taskInserts)
-	if err != nil {
+	if err = s.taskRepo.BatchCreate(ctx, taskInserts); err != nil {
 		return 0, fmt.Errorf("批量创建领域任务失败: %w", err)
 	}
 
@@ -143,7 +143,7 @@ func (s *TaskService) InstantiateFromBlueprint(ctx context.Context, planVersionI
 	// 存在 parent_task_id 字段用于简单依赖，复杂依赖用独立查询
 	for _, bp := range blueprints {
 		var depBpIDs []int64
-		depJSON := bp["depends_on_blueprint_ids"].String()
+		depJSON := g.NewVar(bp["depends_on_blueprint_ids"]).String()
 		if depJSON == "" || depJSON == "[]" || depJSON == "null" {
 			continue
 		}
@@ -166,19 +166,17 @@ func (s *TaskService) InstantiateFromBlueprint(ctx context.Context, planVersionI
 		}
 
 		// 完整依赖列表写入 depends_on_task_ids，parent_task_id 保留第一个（向后兼容）
-		taskID := bpIDToTaskID[bp["id"].Int64()]
+		taskID := bpIDToTaskID[g.NewVar(bp["id"]).Int64()]
 		depJSON2, jsonErr := json.Marshal(depTaskIDs)
 		if jsonErr != nil {
 			g.Log().Errorf(ctx, "[TaskService] 序列化依赖任务ID失败: task=%d err=%v", taskID, jsonErr)
 			continue
 		}
-		if _, upErr := g.DB().Model("mvp_domain_task").Ctx(ctx).
-			Where("id", taskID).
-			Update(g.Map{
-				"parent_task_id":      depTaskIDs[0],
-				"depends_on_task_ids": string(depJSON2),
-				"updated_at":          now,
-			}); upErr != nil {
+		if upErr := s.taskRepo.UpdateFields(ctx, taskID, g.Map{
+			"parent_task_id":      depTaskIDs[0],
+			"depends_on_task_ids": string(depJSON2),
+			"updated_at":          now,
+		}); upErr != nil {
 			g.Log().Errorf(ctx, "[TaskService] 更新任务依赖关系失败: task=%d err=%v", taskID, upErr)
 		}
 	}
@@ -256,19 +254,13 @@ func (s *TaskService) Escalate(ctx context.Context, taskID int64) error {
 
 // GetPendingByBatch 获取指定批次的 pending 任务。
 func (s *TaskService) GetPendingByBatch(ctx context.Context, workflowRunID int64, batchNo int) ([]map[string]interface{}, error) {
-	tasks, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Where("batch_no", batchNo).
-		Where("status", StatusPending).
-		WhereNull("deleted_at").
-		OrderAsc("sort").
-		All()
+	tasks, err := s.taskRepo.ListByWorkflowFiltered(ctx, workflowRunID, StatusPending, batchNo)
 	if err != nil {
 		return nil, err
 	}
 	result := make([]map[string]interface{}, 0, len(tasks))
 	for _, t := range tasks {
-		result = append(result, t.Map())
+		result = append(result, t)
 	}
 	return result, nil
 }

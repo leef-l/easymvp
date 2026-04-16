@@ -1,6 +1,6 @@
 # EasyMVP工程铁律
 
-更新日期：2026-04-11
+更新日期：2026-04-13
 
 这份文档不是建议，是 EasyMVP 主项目后续开发与验收的硬约束。
 
@@ -65,8 +65,35 @@
 
 未满足上述铁律的改动，不得视为生产级完成。
 
-## 铁律 4：重验证必须资源受控
+## 铁律 4：测试与编译统一交给 GitHub Actions
 
-- 当前宿主机允许执行重型静态检查，但必须串行、低优先级、带堆上限运行。
-- `web-antd` 全量类型检查统一走 [scripts/web-antd-typecheck-safe.sh](../scripts/web-antd-typecheck-safe.sh)。
-- 不允许在生产宿主机上直接裸跑高并发 `vue-tsc`、`pnpm build`、`turbo build` 一类命令。
+- 后端测试、前端测试、lint、typecheck、bundle、生产构建、Go 二进制编译、镜像构建，统一只允许在 GitHub Actions 内执行。
+- 禁止在宿主机、本地开发机、线上机器、AI 执行会话中直接执行任何 `go test`、`go build`、`pnpm test`、`npm test`、`pnpm build`、`pnpm exec vite build`、`pnpm exec vue-tsc`、`docker build` 等测试或编译命令。
+- 需要新增验证项时，必须先修改 `.github/workflows/` 或其调用脚本，再通过 `push`、`pull_request` 或 `workflow_dispatch` 触发，不允许回退到“先本机跑一下”。
+- 正式验收口径只认 GitHub Actions 的 workflow run、日志和 artifact，不再接受“本机跑过”“受控脚本跑过”作为通过依据。
+- 仓库中的 `scripts/web-antd-*-safe.sh` 等本机受控脚本只保留为历史资产或 CI 迁移参考，不再作为默认或允许的人工验证入口。
+
+当前主入口：
+
+- 后端守卫链：`.github/workflows/backend-guard.yml`
+- 后端与部署链：`.github/workflows/deploy.yml`
+- `web-antd` 守卫链：`.github/workflows/web-antd-guard.yml`
+
+## 铁律 5：服务器负载保护
+
+- 当前宿主机默认只允许低开销只读检查、代码编辑、日志排查与文档更新。
+- 未获人工明确许可时，不得在宿主机启动任何测试、编译、批处理、长时间扫描或其他重操作。
+- 若 GitHub Actions 不可用，默认暂停验证与编译，不回退到本机执行。
+
+### 核心原则
+
+- 先看负载再执行：开始任何可能消耗资源的操作前，先检查当前服务器负载。
+- 超过 `80` 立即停止：当负载超过 `80` 时，立即停止继续执行，不再启动扫描、批处理或其他重操作。
+- 低于 `50` 才恢复：停止后进入等待，只允许保留低开销只读观察；只有负载回落到 `50` 以下，才允许继续后续操作。
+- 恢复前重新检查：每次准备恢复执行前，必须重新检查一次负载；如果再次超过 `80`，立即再次停止。
+
+### 执行口径
+
+- 默认以 `CPU busy` 作为负载主口径，辅助参考 `load average` 与可用内存。
+- 常用检查命令：`top -bn1 | head -n 5`、`uptime`、`free -h`
+- 如果人工临时指定了更严格的资源限制，以人工要求为准。

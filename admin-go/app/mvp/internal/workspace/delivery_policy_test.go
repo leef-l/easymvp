@@ -91,12 +91,15 @@ func TestDefaultDeliveryPolicyByRiskDefaults(t *testing.T) {
 
 func TestResolveDeliveryPolicyUsesRiskMatrixForImplicitDecision(t *testing.T) {
 	prev := workspaceDeliveryConfigString
+	prevProfileLoader := loadTaskDeliveryProfileFn
 	t.Cleanup(func() {
 		workspaceDeliveryConfigString = prev
+		loadTaskDeliveryProfileFn = prevProfileLoader
 	})
 	workspaceDeliveryConfigString = func(_ context.Context, _, _, defaultVal string) string {
 		return defaultVal
 	}
+	loadTaskDeliveryProfileFn = func(context.Context, int64) *taskDeliveryProfile { return nil }
 
 	policy := resolveDeliveryPolicy(context.Background(), 0, FinalizeRequest{})
 	if policy.RiskLevel != RiskLevelMedium {
@@ -104,6 +107,103 @@ func TestResolveDeliveryPolicyUsesRiskMatrixForImplicitDecision(t *testing.T) {
 	}
 	if policy.DeliveryMode != DeliveryModePatch || policy.SyncStrategy != SyncStrategyManual {
 		t.Fatalf("unexpected implicit policy: %+v", policy)
+	}
+}
+
+func TestResolveDeliveryPolicyPrefersAutoApplyForBootstrapTasks(t *testing.T) {
+	prevConfig := workspaceDeliveryConfigString
+	prevProfileLoader := loadTaskDeliveryProfileFn
+	t.Cleanup(func() {
+		workspaceDeliveryConfigString = prevConfig
+		loadTaskDeliveryProfileFn = prevProfileLoader
+	})
+
+	workspaceDeliveryConfigString = func(_ context.Context, _, _, defaultVal string) string {
+		return defaultVal
+	}
+	loadTaskDeliveryProfileFn = func(context.Context, int64) *taskDeliveryProfile {
+		return &taskDeliveryProfile{
+			TaskKind:      "implement",
+			ExecutionMode: "auto",
+			Name:          "初始化前后端脚手架",
+			Description:   "使用 create-vite 与 gf init 完成基础项目骨架",
+			AffectedResources: []string{
+				"frontend/package.json",
+				"backend/go.mod",
+				"README.md",
+				".gitignore",
+			},
+		}
+	}
+
+	policy := resolveDeliveryPolicy(context.Background(), 101, FinalizeRequest{})
+	if policy.DeliveryMode != DeliveryModePatch || policy.SyncStrategy != SyncStrategyAutoApply {
+		t.Fatalf("bootstrap task should prefer auto apply, got %+v", policy)
+	}
+}
+
+func TestResolveDeliveryPolicyPrefersAutoApplyForSingleScopeChanges(t *testing.T) {
+	prevConfig := workspaceDeliveryConfigString
+	prevProfileLoader := loadTaskDeliveryProfileFn
+	t.Cleanup(func() {
+		workspaceDeliveryConfigString = prevConfig
+		loadTaskDeliveryProfileFn = prevProfileLoader
+	})
+
+	workspaceDeliveryConfigString = func(_ context.Context, _, _, defaultVal string) string {
+		return defaultVal
+	}
+	loadTaskDeliveryProfileFn = func(context.Context, int64) *taskDeliveryProfile {
+		return &taskDeliveryProfile{
+			TaskKind:      "implement",
+			ExecutionMode: "codex_cli",
+			Name:          "补齐前端页面与状态管理",
+			Description:   "只修改 frontend 目录下的显式文件",
+			AffectedResources: []string{
+				"frontend/src/App.tsx",
+				"frontend/src/main.tsx",
+				"frontend/src/store/game.ts",
+				"frontend/src/hooks/useLoop.ts",
+				"frontend/src/pages/Home.tsx",
+				"frontend/package.json",
+			},
+		}
+	}
+
+	policy := resolveDeliveryPolicy(context.Background(), 202, FinalizeRequest{})
+	if policy.DeliveryMode != DeliveryModePatch || policy.SyncStrategy != SyncStrategyAutoApply {
+		t.Fatalf("single-scope task should prefer auto apply, got %+v", policy)
+	}
+}
+
+func TestResolveDeliveryPolicyKeepsManualForOpenHands(t *testing.T) {
+	prevConfig := workspaceDeliveryConfigString
+	prevProfileLoader := loadTaskDeliveryProfileFn
+	t.Cleanup(func() {
+		workspaceDeliveryConfigString = prevConfig
+		loadTaskDeliveryProfileFn = prevProfileLoader
+	})
+
+	workspaceDeliveryConfigString = func(_ context.Context, _, _, defaultVal string) string {
+		return defaultVal
+	}
+	loadTaskDeliveryProfileFn = func(context.Context, int64) *taskDeliveryProfile {
+		return &taskDeliveryProfile{
+			TaskKind:      "implement",
+			ExecutionMode: "openhands",
+			Name:          "初始化复杂环境",
+			Description:   "创建基础脚手架",
+			AffectedResources: []string{
+				"backend/go.mod",
+				"backend/cmd/server/main.go",
+				"README.md",
+			},
+		}
+	}
+
+	policy := resolveDeliveryPolicy(context.Background(), 303, FinalizeRequest{})
+	if policy.SyncStrategy != SyncStrategyManual {
+		t.Fatalf("openhands task should remain manual, got %+v", policy)
 	}
 }
 
@@ -150,6 +250,20 @@ func TestNormalizeDeliveryPolicyFields(t *testing.T) {
 	}
 	if got := normalizeDeliveryMode("unknown"); got != "" {
 		t.Fatalf("expected empty delivery mode, got %q", got)
+	}
+}
+
+func TestDeliveryResourceScope(t *testing.T) {
+	t.Parallel()
+
+	if got := deliveryResourceScope("README.md"); got != "_root" {
+		t.Fatalf("root file scope = %q", got)
+	}
+	if got := deliveryResourceScope("frontend/src/App.tsx"); got != "frontend" {
+		t.Fatalf("nested file scope = %q", got)
+	}
+	if got := deliveryResourceScope("../outside"); got != "" {
+		t.Fatalf("escape path should be rejected, got %q", got)
 	}
 }
 

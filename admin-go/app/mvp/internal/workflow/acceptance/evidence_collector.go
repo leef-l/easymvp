@@ -96,23 +96,23 @@ func (c *EvidenceCollector) Collect(ctx context.Context, in *AcceptContext) ([]E
 
 // collectTaskOutputs 收集领域任务的执行结果。
 func (c *EvidenceCollector) collectTaskOutputs(ctx context.Context, workflowRunID int64) ([]EvidenceItem, error) {
-	tasks, err := g.DB().Model("mvp_domain_task").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		Fields("id, name, status, result, task_kind").
-		All()
+	tasks, err := repo.NewDomainTaskRepo().ListByWorkflowOrdered(ctx, workflowRunID, "id", "name", "status", "result", "task_kind")
 	if err != nil {
 		return nil, err
 	}
 
 	var items []EvidenceItem
 	for _, t := range tasks {
-		summary := fmt.Sprintf("[%s] %s: status=%s", t["task_kind"].String(), t["name"].String(), t["status"].String())
+		summary := fmt.Sprintf("[%s] %s: status=%s",
+			g.NewVar(t["task_kind"]).String(),
+			g.NewVar(t["name"]).String(),
+			g.NewVar(t["status"]).String(),
+		)
 		items = append(items, EvidenceItem{
 			EvidenceType: "task_output",
 			SourceType:   "domain_task",
-			SourceID:     t["id"].Int64(),
-			ContentRef:   t["result"].String(),
+			SourceID:     g.NewVar(t["id"]).Int64(),
+			ContentRef:   g.NewVar(t["result"]).String(),
 			Summary:      summary,
 		})
 	}
@@ -121,23 +121,18 @@ func (c *EvidenceCollector) collectTaskOutputs(ctx context.Context, workflowRunI
 
 // collectStageOutputs 收集阶段运行记录。
 func (c *EvidenceCollector) collectStageOutputs(ctx context.Context, workflowRunID int64) ([]EvidenceItem, error) {
-	stages, err := g.DB().Model("mvp_stage_run").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		Fields("id, stage_type, status, error_message").
-		OrderAsc("stage_no").
-		All()
+	stages, err := repo.NewStageRunRepo().ListByWorkflowMaps(ctx, workflowRunID, "id", "stage_type", "status", "error_message")
 	if err != nil {
 		return nil, err
 	}
 
 	var items []EvidenceItem
 	for _, s := range stages {
-		summary := fmt.Sprintf("stage=%s status=%s", s["stage_type"].String(), s["status"].String())
+		summary := fmt.Sprintf("stage=%s status=%s", g.NewVar(s["stage_type"]).String(), g.NewVar(s["status"]).String())
 		items = append(items, EvidenceItem{
 			EvidenceType: "stage_output",
 			SourceType:   "stage_run",
-			SourceID:     s["id"].Int64(),
+			SourceID:     g.NewVar(s["id"]).Int64(),
 			Summary:      summary,
 		})
 	}
@@ -146,22 +141,23 @@ func (c *EvidenceCollector) collectStageOutputs(ctx context.Context, workflowRun
 
 // collectHandoffs 收集返工交接记录。
 func (c *EvidenceCollector) collectHandoffs(ctx context.Context, workflowRunID int64) ([]EvidenceItem, error) {
-	records, err := g.DB().Model("mvp_handoff_record").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		Fields("id, from_task_id, to_task_id, handoff_type, reason").
-		All()
+	records, err := repo.NewHandoffRecordRepo().ListByWorkflow(ctx, workflowRunID, "id", "from_task_id", "to_task_id", "handoff_type", "reason")
 	if err != nil {
 		return nil, err
 	}
 
 	var items []EvidenceItem
 	for _, r := range records {
-		summary := fmt.Sprintf("handoff: %s from=%d to=%d", r["handoff_type"].String(), r["from_task_id"].Int64(), r["to_task_id"].Int64())
+		summary := fmt.Sprintf("handoff: %s from=%d to=%d",
+			g.NewVar(r["handoff_type"]).String(),
+			g.NewVar(r["from_task_id"]).Int64(),
+			g.NewVar(r["to_task_id"]).Int64(),
+		)
 		items = append(items, EvidenceItem{
 			EvidenceType: "handoff",
 			SourceType:   "handoff_record",
-			SourceID:     r["id"].Int64(),
-			ContentRef:   r["reason"].String(),
+			SourceID:     g.NewVar(r["id"]).Int64(),
+			ContentRef:   g.NewVar(r["reason"]).String(),
 			Summary:      summary,
 		})
 	}
@@ -224,34 +220,7 @@ func (c *EvidenceCollector) collectWorkspaceArtifacts(ctx context.Context, workf
 }
 
 func queryWorkspaceArtifactRecords(ctx context.Context, workflowRunID int64) (gdb.Result, error) {
-	records, err := g.DB().Model("mvp_task_workspace").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		Fields("id, task_id, delivery_mode, delivery_status, sync_status, patch_ref, delivery_ref, delivery_title, diff_summary").
-		OrderAsc("task_id").
-		All()
-	if err == nil || !isUnknownWorkspaceArtifactColumnErr(err) {
-		return records, err
-	}
-
-	if isDeliveryReferenceArtifactColumnErr(err) {
-		records, err = g.DB().Model("mvp_task_workspace").Ctx(ctx).
-			Where("workflow_run_id", workflowRunID).
-			WhereNull("deleted_at").
-			Fields("id, task_id, delivery_mode, delivery_status, sync_status, patch_ref, diff_summary").
-			OrderAsc("task_id").
-			All()
-		if err == nil || !isUnknownWorkspaceArtifactColumnErr(err) {
-			return records, err
-		}
-	}
-
-	return g.DB().Model("mvp_task_workspace").Ctx(ctx).
-		Where("workflow_run_id", workflowRunID).
-		WhereNull("deleted_at").
-		Fields("id, task_id, diff_summary").
-		OrderAsc("task_id").
-		All()
+	return repo.NewTaskWorkspaceRepo().ListArtifactRecordsByWorkflow(ctx, workflowRunID)
 }
 
 func isUnknownWorkspaceArtifactColumnErr(err error) bool {
@@ -273,31 +242,23 @@ func (c *EvidenceCollector) collectCIArtifacts(ctx context.Context, in *AcceptCo
 	items := make([]EvidenceItem, 0)
 	items = append(items, collectCIArtifactFiles(in.WorkDir)...)
 
-	logRecords, err := g.DB().Model("mvp_task_log tl").Ctx(ctx).
-		InnerJoin("mvp_domain_task dt", "dt.id = tl.task_id").
-		Where("dt.workflow_run_id", in.WorkflowRunID).
-		WhereNull("tl.deleted_at").
-		WhereNull("dt.deleted_at").
-		Fields("tl.id, tl.task_id, tl.action, tl.message, tl.created_at").
-		OrderDesc("tl.created_at").
-		Limit(200).
-		All()
+	logRecords, err := repo.NewTaskLogRepo().ListRecentByWorkflow(ctx, in.WorkflowRunID, 200, "tl.id", "tl.task_id", "tl.action", "tl.message", "tl.created_at")
 	if err != nil {
 		return items, err
 	}
 
 	for _, record := range logRecords {
-		action := record["action"].String()
-		message := record["message"].String()
+		action := g.NewVar(record["action"]).String()
+		message := g.NewVar(record["message"]).String()
 		if !isCIRelatedLog(action, message) {
 			continue
 		}
 
-		summary := fmt.Sprintf("[task=%d action=%s] %s", record["task_id"].Int64(), action, trimSummary(message, 160))
+		summary := fmt.Sprintf("[task=%d action=%s] %s", g.NewVar(record["task_id"]).Int64(), action, trimSummary(message, 160))
 		items = append(items, EvidenceItem{
 			EvidenceType: "ci",
 			SourceType:   "task_log",
-			SourceID:     record["id"].Int64(),
+			SourceID:     g.NewVar(record["id"]).Int64(),
 			ContentRef:   trimSummary(message, 500),
 			Summary:      summary,
 		})

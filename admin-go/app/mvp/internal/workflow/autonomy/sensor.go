@@ -24,6 +24,15 @@ func NewSensor(snapshotRepo *repo.SituationSnapshotRepo) *Sensor {
 
 // Perceive 读取 workflow 当前态势。
 func (s *Sensor) Perceive(ctx context.Context, workflowRunID int64) (*Situation, error) {
+	return s.perceive(ctx, workflowRunID, 0)
+}
+
+// PerceiveForTask 读取带任务焦点的 workflow 态势。
+func (s *Sensor) PerceiveForTask(ctx context.Context, workflowRunID, taskID int64) (*Situation, error) {
+	return s.perceive(ctx, workflowRunID, taskID)
+}
+
+func (s *Sensor) perceive(ctx context.Context, workflowRunID, focusTaskID int64) (*Situation, error) {
 	if workflowRunID == 0 {
 		return nil, nil
 	}
@@ -50,7 +59,7 @@ func (s *Sensor) Perceive(ctx context.Context, workflowRunID int64) (*Situation,
 		}
 	}
 
-	tasks, err := repo.NewDomainTaskRepo().ListByWorkflowOrdered(ctx, workflowRunID, "status", "batch_no", "retry_count", "affected_resources", "started_at", "completed_at", "heartbeat_at")
+	tasks, err := repo.NewDomainTaskRepo().ListByWorkflowOrdered(ctx, workflowRunID, "id", "status", "batch_no", "retry_count", "affected_resources", "started_at", "completed_at", "heartbeat_at")
 	if err != nil {
 		return nil, err
 	}
@@ -76,6 +85,7 @@ func (s *Sensor) Perceive(ctx context.Context, workflowRunID int64) (*Situation,
 	consecutiveFailures := 0
 
 	for _, task := range tasks {
+		taskID := gconv.Int64(task["id"])
 		status := gconv.String(task["status"])
 		statusCount[status]++
 		progress.TotalTasks++
@@ -87,6 +97,10 @@ func (s *Sensor) Perceive(ctx context.Context, workflowRunID int64) (*Situation,
 			currentBatch = batchNo
 		}
 		health.RetryCount += gconv.Int(task["retry_count"])
+		if focusTaskID > 0 && taskID == focusTaskID {
+			health.FocusedTaskID = taskID
+			health.TaskRetryCount = gconv.Int(task["retry_count"])
+		}
 
 		if gconv.String(task["affected_resources"]) != "" && gconv.String(task["affected_resources"]) != "[]" {
 			lockedResources++
@@ -168,6 +182,14 @@ func (s *Sensor) Perceive(ctx context.Context, workflowRunID int64) (*Situation,
 			health.ReworkRounds++
 		case "accept":
 			health.AcceptRounds++
+		}
+	}
+	if focusTaskID > 0 && health.FocusedTaskID == focusTaskID {
+		taskReworkRounds, hrErr := repo.NewHandoffRecordRepo().CountByWorkflowAndFromTask(ctx, workflowRunID, focusTaskID)
+		if hrErr != nil {
+			g.Log().Warningf(ctx, "[Sensor] 查询任务返工轮次失败: wfRunID=%d taskID=%d err=%v", workflowRunID, focusTaskID, hrErr)
+		} else {
+			health.TaskReworkRounds = taskReworkRounds
 		}
 	}
 

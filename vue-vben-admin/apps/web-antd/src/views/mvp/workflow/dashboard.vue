@@ -56,6 +56,7 @@ const projectId = ref<string>('');
 const statusData = ref<ProjectStatusResult | null>(null);
 const stages = ref<StageHistoryItem[]>([]);
 const summary = ref<CompletionSummaryResult | null>(null);
+let dashboardLoadVersion = 0;
 
 const currentStatus = computed(() => statusData.value?.workflowStatus || statusData.value?.status || '');
 const isCompleted = computed(() => currentStatus.value === 'completed');
@@ -64,18 +65,28 @@ const isCompleted = computed(() => currentStatus.value === 'completed');
 const failedTasks = ref<DomainTaskItem[]>([]);
 
 // Load failed tasks when in execute/rework/paused state
-async function loadFailedTasks() {
-  if (!projectId.value) {
+async function loadFailedTasks(requestVersion?: number) {
+  const currentProjectId = projectId.value;
+  if (!currentProjectId) {
     failedTasks.value = [];
     return;
   }
   try {
-    const res = await getExecutionStatus(projectId.value);
+    const res = await getExecutionStatus(currentProjectId);
+    if (
+      currentProjectId !== projectId.value
+      || (requestVersion !== undefined && requestVersion !== dashboardLoadVersion)
+    ) return;
     failedTasks.value = (res.tasks || []).filter(
       (t: DomainTaskItem) => t.status === 'failed' || t.status === 'escalated'
     );
   } catch {
-    failedTasks.value = [];
+    if (
+      currentProjectId === projectId.value
+      && (requestVersion === undefined || requestVersion === dashboardLoadVersion)
+    ) {
+      failedTasks.value = [];
+    }
   }
 }
 
@@ -155,7 +166,7 @@ async function handleManualReject() {
 async function handleRetryTask(task: DomainTaskItem) {
   await retryTask({ projectID: projectId.value, taskID: task.id });
   message.success(`任务「${task.name}」已重新排队`);
-  await loadFailedTasks();
+  await loadAll();
 }
 
 async function handleSkipTask(task: DomainTaskItem) {
@@ -166,7 +177,7 @@ async function handleSkipTask(task: DomainTaskItem) {
     async onOk() {
       await skipTask({ projectID: projectId.value, taskID: task.id, reason: '人工跳过' });
       message.success(`任务「${task.name}」已跳过`);
-      await loadFailedTasks();
+      await loadAll();
     },
   });
 }
@@ -188,7 +199,7 @@ async function handleRetryAll() {
       }
       hide();
       message.success(`已重置 ${count} 个任务，调度器将按批次顺序依次执行`);
-      await loadFailedTasks();
+      await loadAll();
     },
   });
 }
@@ -211,7 +222,7 @@ async function handleSkipAll() {
       }
       hide();
       message.success(`已跳过 ${count} 个任务`);
-      await loadFailedTasks();
+      await loadAll();
     },
   });
 }
@@ -302,22 +313,26 @@ function resetDashboardState() {
 }
 
 async function loadAll() {
-  if (!projectId.value) {
+  const currentProjectId = projectId.value;
+  if (!currentProjectId) {
     resetDashboardState();
     return;
   }
+  const requestVersion = ++dashboardLoadVersion;
   loading.value = true;
   try {
     const [statusRes, stageRes] = await Promise.all([
-      getProjectStatus(projectId.value),
-      getStageHistory(projectId.value),
+      getProjectStatus(currentProjectId),
+      getStageHistory(currentProjectId),
     ]);
+    if (requestVersion !== dashboardLoadVersion || currentProjectId !== projectId.value) return;
     statusData.value = statusRes;
     stages.value = stageRes.stages || [];
 
     // Load failed tasks if in relevant state
     if (['executing', 'reworking', 'paused'].includes(statusRes.workflowStatus || statusRes.status || '')) {
-      await loadFailedTasks();
+      await loadFailedTasks(requestVersion);
+      if (requestVersion !== dashboardLoadVersion || currentProjectId !== projectId.value) return;
     } else {
       failedTasks.value = [];
     }
@@ -325,7 +340,9 @@ async function loadAll() {
     // 已完成时加载总结
     if (statusRes.workflowStatus === 'completed' || statusRes.status === 'completed') {
       try {
-        summary.value = await getCompletionSummary(projectId.value);
+        const summaryRes = await getCompletionSummary(currentProjectId);
+        if (requestVersion !== dashboardLoadVersion || currentProjectId !== projectId.value) return;
+        summary.value = summaryRes;
       } catch {
         // 总结可能尚未生成
       }
@@ -333,7 +350,9 @@ async function loadAll() {
       summary.value = null;
     }
   } finally {
-    loading.value = false;
+    if (requestVersion === dashboardLoadVersion && currentProjectId === projectId.value) {
+      loading.value = false;
+    }
   }
 }
 
@@ -341,6 +360,7 @@ watch(
   () => route.query.projectId,
   async (value) => {
     projectId.value = (value as string) ?? '';
+    resetDashboardState();
     await loadAll();
   },
   { immediate: true },
@@ -354,6 +374,17 @@ function goToFeishu() {
 }
 function goToChat() {
   router.push({ path: '/mvp/chat', query: { projectId: projectId.value } });
+}
+function goToObjective() {
+  router.push({ path: '/mvp/workflow/objective', query: { projectId: projectId.value } });
+}
+function goToSituation() {
+  const workflowRunID = statusData.value?.workflowRunID;
+  if (!workflowRunID) return;
+  router.push({
+    path: '/mvp/workflow/situation',
+    query: { projectId: projectId.value, workflowRunId: workflowRunID },
+  });
 }
 function goToMetaCognition() {
   router.push({ path: '/mvp/workflow/meta-cognition', query: { projectID: projectId.value } });
@@ -503,6 +534,8 @@ watch(currentStatus, (status) => {
         <Card class="mb-4" size="small">
           <Space wrap>
             <Button @click="goToChat">进入对话</Button>
+            <Button @click="goToObjective">目标约束</Button>
+            <Button :disabled="!statusData?.workflowRunID" @click="goToSituation">态势仪表板</Button>
             <Button @click="goToMetaCognition">元认知</Button>
             <Button @click="goToFeishu">飞书协作</Button>
           </Space>
@@ -596,22 +629,22 @@ watch(currentStatus, (status) => {
         <!-- 功能面板 -->
         <Tabs v-model:activeKey="activeTab" class="mb-4" type="card">
           <TabPane key="execution" tab="执行控制台">
-            <ExecutionPanel :project-id="projectId" />
+            <ExecutionPanel :project-id="projectId" @changed="loadAll" />
           </TabPane>
           <TabPane key="review" tab="审核工作台">
-            <ReviewPanel :project-id="projectId" />
+            <ReviewPanel :project-id="projectId" @changed="loadAll" />
           </TabPane>
           <TabPane key="rework" tab="返工记录">
             <ReworkPanel :project-id="projectId" />
           </TabPane>
           <TabPane key="accept" tab="验收控制台">
-            <AcceptPanel :project-id="projectId" />
+            <AcceptPanel :project-id="projectId" @changed="loadAll" />
           </TabPane>
           <TabPane key="verification" tab="验证控制台">
-            <VerificationPanel :project-id="projectId" />
+            <VerificationPanel :project-id="projectId" @changed="loadAll" />
           </TabPane>
           <TabPane key="autonomy" tab="自治控制台">
-            <AutonomyPanel :project-id="projectId" />
+            <AutonomyPanel :project-id="projectId" @changed="loadAll" />
           </TabPane>
           <TabPane key="timeline" tab="事件时间线">
             <TimelinePanel :project-id="projectId" />

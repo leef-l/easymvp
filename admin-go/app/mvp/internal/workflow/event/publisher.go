@@ -7,6 +7,7 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 
+	"easymvp/app/mvp/internal/workflow/repo"
 	"easymvp/utility/snowflake"
 )
 
@@ -15,8 +16,7 @@ var beginPublishEventClaimFn = func(ctx context.Context, evt Event) (DurableEven
 }
 
 var insertWorkflowEventRecordFn = func(ctx context.Context, data g.Map) error {
-	_, err := g.DB().Model("mvp_workflow_event").Ctx(ctx).Insert(data)
-	return err
+	return repo.NewWorkflowEventRepo().Insert(ctx, data)
 }
 
 var persistWorkflowEventFn = func(ctx context.Context, evt Event, recordID int64, createdAt time.Time) error {

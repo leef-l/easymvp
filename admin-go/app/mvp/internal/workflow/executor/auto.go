@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/gogf/gf/v2/frame/g"
+
+	"easymvp/app/mvp/internal/workflow/repo"
 )
 
 // autoPreference auto 模式的执行器优先级（按推荐度从高到低）。
@@ -36,14 +38,10 @@ func (e *AutoExecutor) NeedsWorkspace() bool { return true }
 func (e *AutoExecutor) Execute(ctx context.Context, req *Request) *Result {
 	// 查询已启用的执行器配置
 	enabledEngines := make(map[string]bool)
-	rows, err := g.DB().Model("ai_engine_config").Ctx(ctx).
-		Fields("engine_code").
-		Where("status", 1).
-		WhereNull("deleted_at").
-		All()
+	rows, err := repo.NewAIEngineConfigRepo().ListEnabledCodes(ctx)
 	if err == nil {
-		for _, row := range rows {
-			enabledEngines[row["engine_code"].String()] = true
+		for _, code := range rows {
+			enabledEngines[code] = true
 		}
 	}
 
