@@ -18,6 +18,7 @@ export default defineConfig(async () => {
   const verifyEntry = workflowBundle
     ? 'src/verify/workflow-bundle.ts'
     : bundleEntry || 'src/main.ts';
+  const guardHtmlEntry = resolve(process.cwd(), 'index.guard.html');
   const isVerifyExternal = (id: string) => {
     if (
       id.startsWith('\0')
@@ -83,10 +84,14 @@ export default defineConfig(async () => {
   const guardFullBuildOptions = guardFullBuild
     ? {
         copyPublicDir: false,
+        emptyOutDir: true,
         cssMinify: false,
         minify: false,
         modulePreload: false,
         reportCompressedSize: false,
+        rollupOptions: {
+          input: guardHtmlEntry,
+        },
       }
     : {};
   const build = verifyBuild
