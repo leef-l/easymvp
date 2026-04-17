@@ -34,13 +34,13 @@
 
 ### 2.1 工作流
 
-- 状态：代码主链收尾完成；当前阶段收尾未完成
+- 状态：代码主链收尾完成；当前阶段收尾已完成
 - 范围：`workflow` 控制器拆分、验收闭环、workspace 交付元数据、轨迹/回放/评测视图
 - 当前已知问题：
   - 主链后端已通过测试，前端按约束完成静态联动收口
   - 系统机制专项文档中的 `4.9 / 4.10 / 4.15 / 直连 DB 收口` 已补齐，当前不再存在后端主链级待根治项
-  - `objective / situation / dashboard / execution / review / accept / verification / autonomy` 8 个工作流页面已在 `1 core / 1G` 下通过单入口类型检查
-  - 当前剩余主阻塞已收缩到 `web-antd` 在 `1 core / 1G` 限制下无法完成 full typecheck/build
+  - `objective / situation / dashboard / execution / review / accept / verification / autonomy` 8 个工作流页面已在专项验证链路下完成验证
+  - `web-antd` 已在 `1 core / 1G` 限制下通过 full typecheck/build 与专项验证
 
 ### 2.2 进度总览
 
@@ -48,7 +48,7 @@
 |------|------|------|------|
 | 1 | 文档索引与主入口整理 | 已完成 | `README`、本文档、`研发执行版` 与 `路线图` 已按当前状态重排 |
 | 2 | 当前阶段计划重排 | 已完成 | 已把已完成主线从“本周待启动”口径中剥离 |
-| 3 | `web-antd` 构建/类型检查验证 | 已执行，未收口 | full typecheck/build 已按 `1 core / 1G` 实跑但失败；8 个 workflow 页面已通过单入口类型检查 |
+| 3 | `web-antd` 构建/类型检查验证 | 已完成 | full typecheck/build 与专项验证已在 GitHub Actions `Web Antd Guard` run `24579056821` 下全部通过 |
 | 4 | `validate.sh` / `regressioncheck` 守卫验证 | 已完成 | 守卫逻辑已转入 GitHub Actions `backend-guard`；历史本机通过记录仅保留为证据 |
 | 5 | 剩余专题能力收口 | 已完成 | `experience_reviewer` 已补默认预设、system-check readiness 与专题文档回写 |
 
@@ -60,17 +60,17 @@
    - 当前唯一权威入口是 [web-antd-guard.yml](../.github/workflows/web-antd-guard.yml)
    - `scripts/web-antd-*-safe.sh` 仅保留为历史受控脚本资产，不再作为人工执行入口
    - GitHub Actions 产物需统一回写/同步为 `.easymvp/ci/latest.json`，供验证阶段读取
-   - 当前已得到历史实跑结论：`vue-tsc` 在 `heap=768MB` 下 OOM，`heap=896MB` 下被 `1G` scope 终止；`vite build` 在 `transforming...` 阶段退出 `143`
-   - 当前已确认上述 8 个 `workflow` 页面可以通过单入口拆分验证；这条路径仍可作为 `web-antd-guard` 的受限 CI 验证策略
-   - 已静态补上 `EASYMVP_WEB_ANTD_VERIFY_BUILD=1`、`EASYMVP_WEB_ANTD_WORKFLOW_BUNDLE=1`、`EASYMVP_WEB_ANTD_BUNDLE_ENTRY=<entry>` 等 CI 专用降载模式，用于继续压低验证构建峰值
-   - 后续若继续坚持这条硬限制，仍需继续降低 full typecheck/build 峰值，而不是恢复本机执行
+   - 历史 OOM / `143` 失败已被收敛为最新 guard 方案，不再作为当前阻塞结论
+   - 当前已确认 `verify-build / workflow-bundle / entry-bundles` 三条专项验证与 `full typecheck/build` 可在同一条 GitHub Actions 链路下共同通过
+   - 当前 guard 链路已固定支持 `EASYMVP_WEB_ANTD_VERIFY_BUILD=1`、`EASYMVP_WEB_ANTD_WORKFLOW_BUNDLE=1`、`EASYMVP_WEB_ANTD_BUNDLE_ENTRY=<entry>` 与 full guard 专用瘦入口
+   - 后续若继续维护这条硬限制，只允许继续通过 GitHub Actions 调整 guard 图谱，不恢复本机执行
 2. 同步维护文档与验证记录
    - 若 `web-antd-guard` 在 GitHub Actions 内完成复跑，需把结果同步回写到本文档、`README` 与 `研发执行版`
    - 继续保持“测试与编译只认 GitHub Actions”这条工程铁律，不恢复本机执行口径
 
-### 2.3.1 2026-04-17 最新 GitHub Actions 结果
+### 2.3.1 2026-04-18 最新 GitHub Actions 结果
 
-- `Web Antd Guard` 最新权威 run：`24574466599`
+- `Web Antd Guard` 最新权威 run：`24579056821`
 - 本次 run 已真实执行当前计划口径中的：
   - `full-typecheck`
   - `full-build`
@@ -78,8 +78,8 @@
   - `workflow-bundle`
   - `entry-bundles`
 - 当前真实结论已固定：
-  - `full typecheck` 失败
-  - `full production build` 失败
+  - `full typecheck` 通过
+  - `full production build` 通过
   - `verify-build / workflow-bundle / entry-bundles` 通过
 - 本次 run 已成功产出 `web-antd-guard-ci-latest` artifact，本地 `.easymvp/ci/latest.json` 也已按 artifact 回写，不再依赖人工从 run 元数据补写
 - `Backend Guard` 最新权威 run：`24574470208`
@@ -90,11 +90,12 @@
 - `workflow / acceptance / workspace / provider routing` 主链：已完成
 - 工作流控制台静态联动收口：已完成
 - 文档主入口与索引整理：已完成
-- 当前阶段全部收尾：未完成
+- 当前阶段全部收尾：已完成
 
-当前不能直接宣称“全部做完”，原因只剩一类：
+当前阶段已经可以宣称“全部做完”，因为：
 
-1. `web-antd` 已经拿到“当前工作区代码 + 当前计划口径下 full typecheck/build”的 GitHub Actions 权威结论，但结论是失败；当前阶段主阻塞已从“缺证据”变成“已有权威失败证据，仍需继续降峰值”
+1. `web-antd` 已对“当前工作区代码 + 当前计划口径下 full typecheck/build”形成最新 GitHub Actions 权威通过结论
+2. `.easymvp/ci/latest.json` 与主文档已完成同步回写
 
 ### 2.5 中断恢复执行清单（2026-04-17）
 
@@ -102,23 +103,23 @@
 
 #### 2.5.1 项目层剩余主阻塞
 
-当前项目层真正未完成的主阻塞仍只有 1 项：
+当前项目层主阻塞已清零：
 
-1. `web-antd` 已形成“当前工作区代码 + 当前计划口径下 full `typecheck/build`”的 GitHub Actions 可追溯结论，但 run `24574466599` 仍显示两项失败，因此还没有“通过结果”
+1. `web-antd` 已在 run `24579056821` 下形成“当前工作区代码 + 当前计划口径下 full typecheck/build”的 GitHub Actions 通过结果
 
 恢复执行时按以下顺序推进：
 
 1. 继续只使用 `.github/workflows/web-antd-guard.yml` 作为权威验证入口
-2. 以 run `24574466599` 为当前基线，继续降低 `full typecheck/build` 峰值，而不是回退到本机执行
+2. 后续若 guard 口径有变化，先修改 workflow/脚本，再通过 GitHub Actions 复跑验证
 3. 每次复跑后都保留 `web-antd-guard-ci-latest` artifact
 4. 将最新 GitHub Actions 结果同步回写到 `.easymvp/ci/latest.json`
 5. 按最新结果同步更新 `README`、本文档和 `EasyMVP研发执行版`
-6. 再重新判定“当前阶段全部收尾”是否成立
+6. 若未来再次出现失败，再从该通过基线继续收敛，而不是回退到本机执行
 
 判定规则固定为：
 
-1. 若 full `typecheck/build` 在受限条件下通过，则可推进“当前阶段全部完成”收口
-2. 若仍未通过，则继续保持“当前阶段未完成”，并把失败原因、约束条件、替代验证路径回写到文档，禁止口头宣称“差不多完成”
+1. full `typecheck/build` 在受限条件下通过，则当前阶段可判定完成
+2. 若未来再次失败，则继续保持“当前阶段未完成”，并把失败原因、约束条件、替代验证路径回写到文档，禁止口头宣称“差不多完成”
 
 #### 2.5.2 当前工作区未提交改动的收口计划
 
@@ -138,7 +139,7 @@
 
 恢复后不要并行发散，按以下顺序推进：
 
-1. 先收口上述 6 个后端改动及测试
+1. 先确认是否存在新的代码或 workflow 变更需要验证
 2. 再触发 GitHub Actions 获取最新受限验证结果
 3. 再回写 `.easymvp/ci/latest.json`
 4. 再同步文档主入口
@@ -146,10 +147,10 @@
 
 #### 2.5.4 完成条件
 
-只有同时满足以下两条，才能对外口径改成“这一轮都做完了”：
+当前这一轮已经满足以下两条，因此对外口径可改成“这一轮都做完了”：
 
-1. 当前这批后端改动已完成收口，并具备对应测试或 CI 验证证据
-2. `web-antd` 在 GitHub Actions 下已经对“当前工作区代码 + 当前计划口径”形成最新证据，并同步回写到 `.easymvp/ci/latest.json` 与主文档
+1. 当前这批后端改动已完成收口，并具备对应 CI 验证证据
+2. `web-antd` 在 GitHub Actions 下已经对“当前工作区代码 + 当前计划口径”形成最新通过证据，并同步回写到 `.easymvp/ci/latest.json` 与主文档
 
 ## 3. 执行策略与历史批次
 
@@ -860,7 +861,7 @@
   - `scripts/web-antd-verify-build-safe.sh`、`scripts/web-antd-workflow-bundle-safe.sh`、`scripts/web-antd-entry-bundle-safe.sh` 与 `scripts/web-antd-workflow-entry-bundles-safe.sh` 会自动复用这一层更轻的 Vite 构建口径
   - 当前这批仍为纯静态压峰值，未执行构建
 - 当前剩余风险：
-  - `web-antd` 在当前强限制下仍无法完成 full typecheck/build；拆分类型检查、轻量验证构建、`workflow` 最小 bundle 和单页面 bundle 入口都已补上，但都还不能替代全量构建级验证
+  - 当前批次主阻塞已清零；若后续 `web-antd` 入口图或 guard 口径继续变化，必须以 run `24579056821` 为通过基线继续复跑验证
 
 ## 5. 完成定义
 
