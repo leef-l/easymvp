@@ -5,6 +5,7 @@ package rework
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -256,10 +257,27 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 	if resolution.SplitPlan != nil {
 		reconciledWithoutWrite, handoffPayload, err = s.applySplitPlan(ctx, analysisTask, failedTaskID, resolution.SplitPlan)
 		if err != nil {
-			if s.stageCompleter != nil {
-				_ = s.stageCompleter.FailStage(ctx, stageRunID, err.Error())
+			var guardErr *splitPlanGuardExceededError
+			if errors.As(err, &guardErr) {
+				g.Log().Warningf(ctx, "[ReworkStage] 拆分守卫生效，回退为单任务 patch: task=%d reason=%s", failedTaskID, guardErr.Reason)
+				resolution.Patch = guardErr.Patch
+				resolution.SplitPlan = nil
+				reconciledWithoutWrite, err = s.applyTaskPatch(ctx, failedTaskID, failedTask, resolution.Patch)
+				if err != nil {
+					if s.stageCompleter != nil {
+						_ = s.stageCompleter.FailStage(ctx, stageRunID, err.Error())
+					}
+					return nil
+				}
+				handoffPayload["mode"] = "split_fallback_patch"
+				handoffPayload["content"] = resolution.Content
+				handoffPayload["reason"] = guardErr.Reason
+			} else {
+				if s.stageCompleter != nil {
+					_ = s.stageCompleter.FailStage(ctx, stageRunID, err.Error())
+				}
+				return nil
 			}
-			return nil
 		}
 	} else {
 		reconciledWithoutWrite, err = s.applyTaskPatch(ctx, failedTaskID, failedTask, resolution.Patch)
@@ -450,6 +468,15 @@ type planTaskPatch struct {
 type taskSplitPlan struct {
 	Tasks  []splitTaskSpec
 	Reason string
+}
+
+type splitPlanGuardExceededError struct {
+	Reason string
+	Patch  *taskPatch
+}
+
+func (e *splitPlanGuardExceededError) Error() string {
+	return e.Reason
 }
 
 type splitTaskSpec struct {
@@ -699,6 +726,36 @@ func buildTaskPatchFromSplitPlan(plan *taskSplitPlan) *taskPatch {
 	return patch
 }
 
+func buildFallbackPatchFromSplitPlan(plan *taskSplitPlan, reason string) *taskPatch {
+	patch := buildTaskPatchFromSplitPlan(plan)
+	if patch == nil {
+		return &taskPatch{Reason: strings.TrimSpace(reason)}
+	}
+	baseReason := strings.TrimSpace(reason)
+	if baseReason == "" {
+		baseReason = strings.TrimSpace(plan.Reason)
+	}
+	if baseReason == "" {
+		baseReason = "返工拆分超出守卫限制，已回退为单任务收缩 patch"
+	}
+	patch.Reason = baseReason
+	return patch
+}
+
+func normalizeReworkSplitDepthLimit(limit int) int {
+	if limit < 1 {
+		return 1
+	}
+	return limit
+}
+
+func normalizeReworkSplitTaskBudget(limit int) int {
+	if limit < 2 {
+		return 2
+	}
+	return limit
+}
+
 func sanitizeAffectedResources(resources []string) []string {
 	seen := make(map[string]struct{}, len(resources))
 	result := make([]string, 0, len(resources))
@@ -887,6 +944,9 @@ func (s *Service) applySplitPlan(ctx context.Context, analysisTask gdb.Record, f
 		if rootTaskID == 0 {
 			rootTaskID = failedTaskID
 		}
+		if guardErr := guardSplitPlanBudget(ctx, tx, failedTaskID, failedTask["workflow_run_id"].Int64(), rootTaskID, len(plan.Tasks), plan); guardErr != nil {
+			return guardErr
+		}
 		baseSort := failedTask["sort"].Int()
 		if baseSort < 1 {
 			baseSort = 100
@@ -1009,6 +1069,92 @@ func (s *Service) applySplitPlan(ctx context.Context, analysisTask gdb.Record, f
 		"created_task_names": createdTaskNames,
 		"source_task_id":     failedTaskID,
 	}, nil
+}
+
+func guardSplitPlanBudget(ctx context.Context, tx gdb.TX, failedTaskID, workflowRunID, rootTaskID int64, newTaskCount int, plan *taskSplitPlan) error {
+	maxDepth := normalizeReworkSplitDepthLimit(engine.GetConfigInt(
+		ctx,
+		"failure_handoff.max_split_depth",
+		"engine.failureHandoff.maxSplitDepth",
+		2,
+	))
+	currentDepth, err := computeTaskSplitDepthTx(ctx, tx, failedTaskID)
+	if err != nil {
+		return fmt.Errorf("计算拆分深度失败: %w", err)
+	}
+	nextDepth := currentDepth + 1
+	if nextDepth > maxDepth {
+		reason := fmt.Sprintf("任务 %d 的返工拆分深度将达到 %d，已超过上限 %d，禁止继续递归拆分",
+			failedTaskID, nextDepth, maxDepth)
+		return &splitPlanGuardExceededError{
+			Reason: reason,
+			Patch:  buildFallbackPatchFromSplitPlan(plan, reason),
+		}
+	}
+
+	maxTasksPerRoot := normalizeReworkSplitTaskBudget(engine.GetConfigInt(
+		ctx,
+		"failure_handoff.max_tasks_per_root",
+		"engine.failureHandoff.maxTasksPerRoot",
+		16,
+	))
+	currentCount, err := countTasksByWorkflowAndRootTaskTx(ctx, tx, workflowRunID, rootTaskID)
+	if err != nil {
+		return fmt.Errorf("统计拆分任务预算失败: %w", err)
+	}
+	projectedCount := currentCount + newTaskCount
+	if projectedCount > maxTasksPerRoot {
+		reason := fmt.Sprintf("根任务 %d 当前已累计 %d 个关联任务，本次再拆分 %d 个后将达到 %d，超过上限 %d，禁止继续递归拆分",
+			rootTaskID, currentCount, newTaskCount, projectedCount, maxTasksPerRoot)
+		return &splitPlanGuardExceededError{
+			Reason: reason,
+			Patch:  buildFallbackPatchFromSplitPlan(plan, reason),
+		}
+	}
+	return nil
+}
+
+func countTasksByWorkflowAndRootTaskTx(ctx context.Context, tx gdb.TX, workflowRunID, rootTaskID int64) (int, error) {
+	return tx.Model("mvp_domain_task").Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		Where("root_task_id", rootTaskID).
+		WhereNull("deleted_at").
+		Count()
+}
+
+func computeTaskSplitDepthTx(ctx context.Context, tx gdb.TX, taskID int64) (int, error) {
+	depth := 0
+	currentID := taskID
+	visited := make(map[int64]struct{}, 8)
+	for currentID > 0 {
+		if _, exists := visited[currentID]; exists {
+			return 0, fmt.Errorf("任务链存在循环引用: %d", currentID)
+		}
+		visited[currentID] = struct{}{}
+
+		record, err := tx.Model("mvp_domain_task").Ctx(ctx).
+			Where("id", currentID).
+			WhereNull("deleted_at").
+			Fields("id", "source_task_id", "root_task_id").
+			One()
+		if err != nil {
+			return 0, err
+		}
+		if record == nil || record.IsEmpty() {
+			return 0, fmt.Errorf("任务 %d 不存在", currentID)
+		}
+		sourceTaskID := record["source_task_id"].Int64()
+		rootTaskID := record["root_task_id"].Int64()
+		if sourceTaskID == 0 {
+			return depth, nil
+		}
+		depth++
+		if rootTaskID > 0 && sourceTaskID == rootTaskID {
+			return depth, nil
+		}
+		currentID = sourceTaskID
+	}
+	return depth, nil
 }
 
 func decodeDependsOnTaskIDs(raw string, fallbackParentID int64) ([]int64, error) {

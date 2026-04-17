@@ -184,6 +184,49 @@ func TestParseAnalysisResolutionSupportsSplitPlan(t *testing.T) {
 	}
 }
 
+func TestBuildFallbackPatchFromSplitPlan(t *testing.T) {
+	t.Parallel()
+
+	plan := &taskSplitPlan{
+		Reason: "原始拆分方案",
+		Tasks: []splitTaskSpec{
+			{Name: "Task A", Description: "只做 A", AffectedResources: []string{"a.ts"}},
+			{Name: "Task B", Description: "只做 B", AffectedResources: []string{"b.ts"}},
+		},
+	}
+
+	patch := buildFallbackPatchFromSplitPlan(plan, "超过拆分预算")
+	if patch == nil {
+		t.Fatal("expected fallback patch")
+	}
+	if patch.Reason != "超过拆分预算" {
+		t.Fatalf("unexpected reason: %q", patch.Reason)
+	}
+	if !strings.Contains(patch.Description, "步骤1：Task A") {
+		t.Fatalf("unexpected description: %q", patch.Description)
+	}
+	if len(patch.AffectedResources) != 2 {
+		t.Fatalf("unexpected resources: %+v", patch.AffectedResources)
+	}
+}
+
+func TestNormalizeReworkSplitLimits(t *testing.T) {
+	t.Parallel()
+
+	if got := normalizeReworkSplitDepthLimit(0); got != 1 {
+		t.Fatalf("normalizeReworkSplitDepthLimit(0) = %d, want 1", got)
+	}
+	if got := normalizeReworkSplitDepthLimit(3); got != 3 {
+		t.Fatalf("normalizeReworkSplitDepthLimit(3) = %d, want 3", got)
+	}
+	if got := normalizeReworkSplitTaskBudget(0); got != 2 {
+		t.Fatalf("normalizeReworkSplitTaskBudget(0) = %d, want 2", got)
+	}
+	if got := normalizeReworkSplitTaskBudget(8); got != 8 {
+		t.Fatalf("normalizeReworkSplitTaskBudget(8) = %d, want 8", got)
+	}
+}
+
 func TestFindNextEscalatedTaskSelectionOrder(t *testing.T) {
 	t.Parallel()
 
