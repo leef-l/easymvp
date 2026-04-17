@@ -153,7 +153,7 @@ func TestParseTaskPatchSupportsPlanTasksEnvelope(t *testing.T) {
 	if len(patch.AffectedResources) != 2 {
 		t.Fatalf("unexpected affected resources: %+v", patch.AffectedResources)
 	}
-	if !strings.Contains(patch.Reason, "plan-style tasks") {
+	if !strings.Contains(patch.Reason, "同批次子任务") {
 		t.Fatalf("unexpected patch reason: %+v", patch)
 	}
 }
