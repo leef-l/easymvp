@@ -35,6 +35,8 @@ func TestRecoverWorkflowRunReconcilesCompletedExecuteStageWithoutRestart(t *test
 		taskIDs       = []int64{int64(snowflake.Generate()), int64(snowflake.Generate())}
 	)
 
+	requireWorkflowTestDB(t, ctx)
+
 	insertRecoveryWorkflowFixtures(t, ctx, workflowRunID, projectID, stageRunID, taskIDs)
 	t.Cleanup(func() {
 		cleanupWorkflowRecoveryFixtures(ctx, workflowRunID, taskIDs)
@@ -305,6 +307,18 @@ func insertRecoveryWorkflowFixtures(t *testing.T, ctx context.Context, workflowR
 	}
 	if _, err := g.DB().Model("mvp_domain_task").Ctx(ctx).Data(taskRows).Insert(); err != nil {
 		t.Fatalf("insert domain_task fixtures failed: %v", err)
+	}
+}
+
+func requireWorkflowTestDB(t *testing.T, ctx context.Context) {
+	t.Helper()
+
+	if _, err := g.DB().PingMaster(); err != nil {
+		t.Skipf("mysql integration unavailable: %v", err)
+	}
+
+	if _, err := g.DB().Exec(ctx, "SELECT 1"); err != nil {
+		t.Skipf("mysql integration unavailable: %v", err)
 	}
 }
 

@@ -796,6 +796,25 @@ func buildGitHubActionsSteps(result *ciLatestResult) []verificationStep {
 		return steps
 	}
 
+	for _, kindValue := range result.CheckKinds {
+		kind := normalizeCheckKind(kindValue)
+		if kind == "" {
+			continue
+		}
+		steps = append(steps, verificationStep{
+			Name:           "github actions " + kind,
+			Runner:         runnerGitHub,
+			Command:        []string{"github_actions", "check", kind},
+			WorkDir:        ".",
+			ResourceRef:    ".",
+			TimeoutSeconds: 0,
+			Expected:       "GitHub Actions 检查通过",
+		})
+	}
+	if len(steps) > 0 {
+		return steps
+	}
+
 	label := strings.TrimSpace(result.Pipeline)
 	if label == "" {
 		label = "github actions pipeline"
@@ -1593,11 +1612,11 @@ func normalizePlanRunnerType(value string) string {
 	case modeGitHubActions, "github", "github_action", "gha":
 		return modeGitHubActions
 	case modeLocal:
-		return modeLocal
+		return modeGitHubActions
 	case modeDockerCompose, "compose":
-		return modeDockerCompose
+		return modeGitHubActions
 	case modeDockerfile:
-		return modeDockerfile
+		return modeGitHubActions
 	default:
 		return ""
 	}
@@ -1983,11 +2002,11 @@ func normalizeMode(mode string) string {
 	case modeGitHubActions, "github", "github_action", "gha":
 		return modeGitHubActions
 	case modeDockerCompose:
-		return modeDockerCompose
+		return modeGitHubActions
 	case modeDockerfile:
-		return modeDockerfile
+		return modeGitHubActions
 	case modeLocal:
-		return modeLocal
+		return modeGitHubActions
 	default:
 		return modeGitHubActions
 	}
