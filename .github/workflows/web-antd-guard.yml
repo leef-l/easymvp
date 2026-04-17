@@ -171,22 +171,22 @@ jobs:
         run: |
           mkdir -p .tmp/web-antd-guard
           python3 - <<'PY'
-import json
-import os
+          import json
+          import os
 
-path = os.path.join(".tmp", "web-antd-guard", f"{os.environ['CHECK_MODE']}.json")
-payload = {
-    "name": os.environ["CHECK_NAME"],
-    "kind": os.environ["CHECK_KIND"],
-    "status": os.environ["CHECK_STATUS"],
-    "summary": f"{os.environ['CHECK_NAME']}; job_result={os.environ['CHECK_STATUS']}",
-    "workflow": "web-antd-guard",
-    "job": os.environ["CHECK_MODE"],
-}
-with open(path, "w", encoding="utf-8") as fh:
-    json.dump(payload, fh, ensure_ascii=False, indent=2)
-    fh.write("\n")
-PY
+          path = os.path.join(".tmp", "web-antd-guard", f"{os.environ['CHECK_MODE']}.json")
+          payload = {
+              "name": os.environ["CHECK_NAME"],
+              "kind": os.environ["CHECK_KIND"],
+              "status": os.environ["CHECK_STATUS"],
+              "summary": f"{os.environ['CHECK_NAME']}; job_result={os.environ['CHECK_STATUS']}",
+              "workflow": "web-antd-guard",
+              "job": os.environ["CHECK_MODE"],
+          }
+          with open(path, "w", encoding="utf-8") as fh:
+              json.dump(payload, fh, ensure_ascii=False, indent=2)
+              fh.write("\n")
+          PY
 
       - name: Upload CI check result
         if: always() && steps.selection.outputs.selected == 'true'
@@ -230,18 +230,18 @@ PY
         run: |
           checks_json="$(
             python3 - <<'PY'
-import glob
-import json
+          import glob
+          import json
 
-checks = []
-for path in sorted(glob.glob(".tmp/web-antd-guard/*.json")):
-    with open(path, "r", encoding="utf-8") as fh:
-        payload = json.load(fh)
-    if isinstance(payload, dict):
-        checks.append(payload)
+          checks = []
+          for path in sorted(glob.glob(".tmp/web-antd-guard/*.json")):
+              with open(path, "r", encoding="utf-8") as fh:
+                  payload = json.load(fh)
+              if isinstance(payload, dict):
+                  checks.append(payload)
 
-print(json.dumps(checks, ensure_ascii=False))
-PY
+          print(json.dumps(checks, ensure_ascii=False))
+            PY
           )"
           if [ "$checks_json" = "[]" ]; then
             echo "No web-antd checks were selected for this run; skip latest.json generation."

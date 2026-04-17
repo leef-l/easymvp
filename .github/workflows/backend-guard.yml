@@ -122,10 +122,10 @@ jobs:
 
       - name: Build backend latest.json
         env:
-          VALIDATE_RESULT: ${{ needs.validate-regression.result }}
-          TEST_BACKEND_RESULT: ${{ needs.test-backend.result }}
-          TEST_CODEGEN_RESULT: ${{ needs.test-codegen.result }}
-          BUILD_SERVICES_RESULT: ${{ needs.build-services.result }}
+          VALIDATE_RESULT: ${{ needs['validate-regression'].result }}
+          TEST_BACKEND_RESULT: ${{ needs['test-backend'].result }}
+          TEST_CODEGEN_RESULT: ${{ needs['test-codegen'].result }}
+          BUILD_SERVICES_RESULT: ${{ needs['build-services'].result }}
           EASYMVP_CI_OUTPUT: .easymvp/ci/latest.json
           EASYMVP_CI_WORKFLOW: ${{ github.workflow }}
           EASYMVP_CI_PIPELINE: backend-guard
@@ -135,43 +135,43 @@ jobs:
         run: |
           checks_json="$(
             python3 - <<'PY'
-import json
-import os
+          import json
+          import os
 
 
-def map_result(value: str) -> str:
-    text = (value or "").strip().lower()
-    if text == "success":
-        return "passed"
-    if text in {"failure", "cancelled"}:
-        return "failed"
-    return "pending"
+          def map_result(value: str) -> str:
+              text = (value or "").strip().lower()
+              if text == "success":
+                  return "passed"
+              if text in {"failure", "cancelled"}:
+                  return "failed"
+              return "pending"
 
 
-checks = []
-for job, name, kind, result, summary, command in [
-    ("validate-regression", "validate regression manifest and delivery policy", "runtime", os.environ.get("VALIDATE_RESULT"), "bash ./test-workspaces/validate.sh", "bash ./test-workspaces/validate.sh"),
-    ("test-backend", "backend go test ./...", "test", os.environ.get("TEST_BACKEND_RESULT"), "cd admin-go && go test ./...", "go test ./..."),
-    ("test-codegen", "codegen go test ./...", "test", os.environ.get("TEST_CODEGEN_RESULT"), "cd admin-go/codegen && go test ./...", "go test ./..."),
-    ("build-services", "build system/ai/mvp", "build", os.environ.get("BUILD_SERVICES_RESULT"), "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build system ai mvp", "go build system ai mvp"),
-]:
-    normalized = (result or "").strip().lower()
-    if not normalized or normalized == "skipped":
-        continue
-    checks.append(
-        {
-            "name": name,
-            "kind": kind,
-            "status": map_result(normalized),
-            "summary": f"{summary}; job_result={normalized}",
-            "command": command,
-            "workflow": "backend-guard",
-            "job": job,
-        }
-    )
+          checks = []
+          for job, name, kind, result, summary, command in [
+              ("validate-regression", "validate regression manifest and delivery policy", "runtime", os.environ.get("VALIDATE_RESULT"), "bash ./test-workspaces/validate.sh", "bash ./test-workspaces/validate.sh"),
+              ("test-backend", "backend go test ./...", "test", os.environ.get("TEST_BACKEND_RESULT"), "cd admin-go && go test ./...", "go test ./..."),
+              ("test-codegen", "codegen go test ./...", "test", os.environ.get("TEST_CODEGEN_RESULT"), "cd admin-go/codegen && go test ./...", "go test ./..."),
+              ("build-services", "build system/ai/mvp", "build", os.environ.get("BUILD_SERVICES_RESULT"), "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build system ai mvp", "go build system ai mvp"),
+          ]:
+              normalized = (result or "").strip().lower()
+              if not normalized or normalized == "skipped":
+                  continue
+              checks.append(
+                  {
+                      "name": name,
+                      "kind": kind,
+                      "status": map_result(normalized),
+                      "summary": f"{summary}; job_result={normalized}",
+                      "command": command,
+                      "workflow": "backend-guard",
+                      "job": job,
+                  }
+              )
 
-print(json.dumps(checks, ensure_ascii=False))
-PY
+          print(json.dumps(checks, ensure_ascii=False))
+            PY
           )"
           if [ "$checks_json" = "[]" ]; then
             echo "No backend checks were selected for this run; skip latest.json generation."
