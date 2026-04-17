@@ -191,9 +191,13 @@ func ResolveVerificationStandard(signals ProjectSignals) VerificationStandard {
 			}
 		}
 		if signals.HasFrontendApp {
-			required := []string{CheckKindBuild, CheckKindBrowser}
+			required := []string{CheckKindBuild}
 			if signals.HasGoModules {
 				required = append(required, CheckKindTest)
+			}
+			requireBrowserVerification := signals.HasBrowserAutomation
+			if requireBrowserVerification {
+				required = append(required, CheckKindBrowser)
 			}
 			profile := resolveExperienceReviewProfile(signals)
 			code := "coding.interactive_delivery"
@@ -207,8 +211,8 @@ func ResolveVerificationStandard(signals ProjectSignals) VerificationStandard {
 				DisplayName:               displayName,
 				RequiredCheckKinds:        uniqueSortedStrings(required),
 				RequirePassedVerification: true,
-				RequireBrowserPlan:        true,
-				RequireBrowserEvidence:    true,
+				RequireBrowserPlan:        requireBrowserVerification,
+				RequireBrowserEvidence:    requireBrowserVerification,
 				RequiredProjectRoles:      buildExperienceReviewerRequirements(profile),
 			}
 		}

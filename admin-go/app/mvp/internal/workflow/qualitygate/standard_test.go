@@ -61,7 +61,13 @@ func TestResolveVerificationStandard(t *testing.T) {
 		t.Fatalf("backend required kinds = %+v", backend.RequiredCheckKinds)
 	}
 
-	interactive := ResolveVerificationStandard(ProjectSignals{FamilyCode: "coding", ProjectTypeCode: "software_dev", HasFrontendApp: true, HasGoModules: true})
+	interactive := ResolveVerificationStandard(ProjectSignals{
+		FamilyCode:           "coding",
+		ProjectTypeCode:      "software_dev",
+		HasFrontendApp:       true,
+		HasGoModules:         true,
+		HasBrowserAutomation: true,
+	})
 	if interactive.Code != "coding.interactive_delivery" {
 		t.Fatalf("interactive standard = %+v", interactive)
 	}
@@ -70,6 +76,29 @@ func TestResolveVerificationStandard(t *testing.T) {
 	}
 	if len(interactive.RequiredProjectRoles) != 1 || interactive.RequiredProjectRoles[0].RoleType != RoleTypeExperienceReviewer {
 		t.Fatalf("interactive standard missing experience reviewer role: %+v", interactive.RequiredProjectRoles)
+	}
+}
+
+func TestResolveVerificationStandardSkipsBrowserRequirementWithoutAutomation(t *testing.T) {
+	t.Parallel()
+
+	interactive := ResolveVerificationStandard(ProjectSignals{
+		FamilyCode:      "coding",
+		ProjectTypeCode: "software_dev",
+		HasFrontendApp:  true,
+		HasGoModules:    true,
+	})
+	if interactive.Code != "coding.interactive_delivery" {
+		t.Fatalf("interactive standard = %+v", interactive)
+	}
+	if interactive.RequireBrowserPlan || interactive.RequireBrowserEvidence {
+		t.Fatalf("interactive standard should not require browser verification without automation: %+v", interactive)
+	}
+	if len(interactive.RequiredCheckKinds) != 2 {
+		t.Fatalf("interactive required kinds = %+v", interactive.RequiredCheckKinds)
+	}
+	if interactive.RequiredCheckKinds[0] != CheckKindBuild || interactive.RequiredCheckKinds[1] != CheckKindTest {
+		t.Fatalf("interactive required kinds = %+v, want [build test]", interactive.RequiredCheckKinds)
 	}
 }
 

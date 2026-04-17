@@ -1,6 +1,6 @@
 # EasyMVP项目收尾计划与进度
 
-> 更新时间：2026-04-13
+> 更新时间：2026-04-17
 >
 > 目的：记录当前收尾状态、验证约束、文档治理结果与下一批次排期，避免在长链路推进中丢失上下文。
 >
@@ -68,6 +68,20 @@
    - 若 `web-antd-guard` 在 GitHub Actions 内完成复跑，需把结果同步回写到本文档、`README` 与 `研发执行版`
    - 继续保持“测试与编译只认 GitHub Actions”这条工程铁律，不恢复本机执行口径
 
+### 2.3.1 2026-04-17 最新 GitHub Actions 结果
+
+- 已通过 GitHub Actions `workflow_dispatch` 触发 `Web Antd Guard`，run id=`24572203264`
+- 本次 run 总结论：`success`
+- 当前远端 `origin/main` 实际注册的 `web-antd-guard` 仍是旧版 shard 工作流，执行项为：
+  - `verify-build`
+  - `workflow-bundle`
+  - `entry-bundles`
+  - `source-bundles` 6 分片
+- 本次 run 中，上述 job 全部通过
+- 但当前远端工作流并没有执行“full `typecheck` / full production `build`”这两个本地计划中的目标，也没有上传 `web-antd-guard-ci-latest` artifact
+- 因此，当前已经拿到“远端旧版受限验证链路通过”的最新证据，但还没有拿到“当前工作区代码 + 当前计划口径下 full `typecheck/build`”的 GitHub Actions 结论
+- 由于 artifact 缺失，当前本地 `.easymvp/ci/latest.json` 已按本次 run 元数据手工同步，供验证/验收链路读取；该文件代表的是远端 `origin/main` 当前已执行结果，不代表本地未推送改动已经通过验证
+
 ### 2.4 当前状态判定
 
 - `workflow / acceptance / workspace / provider routing` 主链：已完成
@@ -77,7 +91,79 @@
 
 当前不能直接宣称“全部做完”，原因只剩一类：
 
-1. `web-antd` 已有受限拆分验证路径，但 full typecheck/build 当前仍无法在 `1 core / 1G` 限制下完整通过
+1. `web-antd` 的 GitHub Actions 受限验证已经有最新成功记录，但远端实际跑的是旧版 shard 工作流；当前仍未形成“当前工作区代码 + full typecheck/build”这一层的权威验证结论
+
+### 2.5 中断恢复执行清单（2026-04-17）
+
+为避免对话、会话或执行链路中断后再次回到“还剩什么没做完”的模糊状态，当前恢复顺序固定如下；恢复时优先看本节，不再重新从历史批次倒推。
+
+#### 2.5.1 项目层剩余主阻塞
+
+当前项目层真正未完成的主阻塞仍只有 1 项：
+
+1. `web-antd` 仍未形成“当前工作区代码 + 当前计划口径下 full `typecheck/build`”的 GitHub Actions 可追溯通过结果
+
+恢复执行时按以下顺序推进：
+
+1. 只使用 `.github/workflows/web-antd-guard.yml` 作为权威验证入口
+2. 先把本地 `.github/workflows/web-antd-guard.yml` 与远端 `origin/main` 注册版本对齐，再在 GitHub Actions 内复跑
+3. 复跑后优先拿到最新一轮 full `typecheck/build` 真实结果
+4. 确保 workflow artifact 中实际产出 `web-antd-guard-ci-latest`，不要继续只靠人工从 run 元数据反写
+5. 将 GitHub Actions 结果统一回写到 `.easymvp/ci/latest.json`
+6. 按最新结果同步更新 `README`、本文档和 `EasyMVP研发执行版`
+7. 再重新判定“当前阶段全部收尾”是否成立
+
+判定规则固定为：
+
+1. 若 full `typecheck/build` 在受限条件下通过，则可推进“当前阶段全部完成”收口
+2. 若仍未通过，则继续保持“当前阶段未完成”，并把失败原因、约束条件、替代验证路径回写到文档，禁止口头宣称“差不多完成”
+
+#### 2.5.2 当前工作区未提交改动的收口计划
+
+截至 2026-04-17，工作区还有一批后端改动未收口；这批改动不改变“项目层唯一主阻塞”的定义，但属于当前手头需要继续做完的代码项。涉及文件如下：
+
+- `admin-go/app/mvp/internal/workflow/acceptance/evidence_collector.go`
+- `admin-go/app/mvp/internal/workflow/acceptance/evidence_collector_test.go`
+- `admin-go/app/mvp/internal/workflow/qualitygate/standard.go`
+- `admin-go/app/mvp/internal/workflow/qualitygate/standard_test.go`
+- `admin-go/app/mvp/internal/workflow/verification/service.go`
+- `admin-go/app/mvp/internal/workflow/verification/service_test.go`
+
+当前这批改动的目标固定为两类：
+
+1. 补 `.easymvp/ci/latest.json` 的回退读取逻辑
+2. 在缺少 browser automation 时放宽 browser verification 强制要求
+
+恢复执行时按以下顺序收口：
+
+1. `acceptance/evidence_collector*`
+   - 目标：验收证据可从当前目录、repo root、主仓 worktree 根回退查找 `.easymvp/ci/latest.json`
+   - 验收点：普通子目录场景可读；`.mvp-worktrees/...` 场景可回退到主仓；候选路径去重，不产生重复证据
+2. `verification/service*`
+   - 目标：验证阶段读取 latest CI 结果时复用同类回退逻辑，避免“验收能读到、验证读不到”
+   - 验收点：读取顺序与验收侧一致；文件不存在时稳定返回；JSON 非法时行为可预期
+3. `qualitygate/standard*`
+   - 目标：无 browser automation 时，不再强制要求 browser plan/evidence
+   - 验收点：`HasFrontendApp=true` 且 `HasBrowserAutomation=false` 时，只保留 build，若有 Go 再加 test；有 browser automation 时仍保持 browser 要求
+4. 整体回归与整理
+   - 验收点：相关测试补齐；`git diff --check` 通过；若因现行铁律不在本机执行完整测试，则明确列出需进入 GitHub Actions 的验证项
+
+#### 2.5.3 推荐执行顺序
+
+恢复后不要并行发散，按以下顺序推进：
+
+1. 先收口上述 6 个后端改动及测试
+2. 再触发 GitHub Actions 获取最新受限验证结果
+3. 再回写 `.easymvp/ci/latest.json`
+4. 再同步文档主入口
+5. 最后重新判定“当前阶段全部完成”是否成立
+
+#### 2.5.4 完成条件
+
+只有同时满足以下两条，才能对外口径改成“这一轮都做完了”：
+
+1. 当前这批后端改动已完成收口，并具备对应测试或 CI 验证证据
+2. `web-antd` 在 GitHub Actions 下已经对“当前工作区代码 + 当前计划口径”形成最新证据，并同步回写到 `.easymvp/ci/latest.json` 与主文档
 
 ## 3. 执行策略与历史批次
 

@@ -851,30 +851,104 @@ func buildCISnapshotSummary(result *ciLatestResult) string {
 }
 
 func loadLatestCIResult(root string) (*ciLatestResult, string, string, error) {
-	path := filepath.Join(root, ".easymvp", "ci", "latest.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, path, "", nil
+	paths := candidateLatestCIPaths(root)
+	primaryPath := filepath.Join(root, ".easymvp", "ci", "latest.json")
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, path, "", err
 		}
-		return nil, path, "", err
+
+		var result ciLatestResult
+		if err := json.Unmarshal(data, &result); err != nil {
+			return nil, path, string(data), err
+		}
+		result.Status = normalizeCIStatus(result.Status)
+		result.Tool = strings.TrimSpace(strings.ToLower(result.Tool))
+		result.Pipeline = strings.TrimSpace(result.Pipeline)
+		result.Summary = strings.TrimSpace(result.Summary)
+		result.Workflow = strings.TrimSpace(result.Workflow)
+		result.RunID = strings.TrimSpace(result.RunID)
+		result.RunURL = strings.TrimSpace(result.RunURL)
+
+		result.CheckKinds = normalizeCIResultCheckKinds(result.CheckKinds)
+		result.Checks = normalizeCIResultChecks(result.Checks, result.CheckKinds)
+		return &result, path, string(data), nil
+	}
+	return nil, primaryPath, "", nil
+}
+
+func candidateLatestCIPaths(root string) []string {
+	cleanRoot := filepath.Clean(strings.TrimSpace(root))
+	if cleanRoot == "" || cleanRoot == "." {
+		cleanRoot = "."
 	}
 
-	var result ciLatestResult
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, path, string(data), err
+	seen := make(map[string]struct{}, 4)
+	paths := make([]string, 0, 4)
+	appendPath := func(base string) {
+		base = filepath.Clean(strings.TrimSpace(base))
+		if base == "" {
+			return
+		}
+		path := filepath.Join(base, ".easymvp", "ci", "latest.json")
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
 	}
-	result.Status = normalizeCIStatus(result.Status)
-	result.Tool = strings.TrimSpace(strings.ToLower(result.Tool))
-	result.Pipeline = strings.TrimSpace(result.Pipeline)
-	result.Summary = strings.TrimSpace(result.Summary)
-	result.Workflow = strings.TrimSpace(result.Workflow)
-	result.RunID = strings.TrimSpace(result.RunID)
-	result.RunURL = strings.TrimSpace(result.RunURL)
 
-	result.CheckKinds = normalizeCIResultCheckKinds(result.CheckKinds)
-	result.Checks = normalizeCIResultChecks(result.Checks, result.CheckKinds)
-	return &result, path, string(data), nil
+	appendPath(cleanRoot)
+
+	if repoRoot := findGitRepoRoot(cleanRoot); repoRoot != "" {
+		appendPath(repoRoot)
+	}
+
+	if mainWorkDir := resolveMainWorkDirForLatestCI(cleanRoot); mainWorkDir != "" {
+		appendPath(mainWorkDir)
+		if repoRoot := findGitRepoRoot(mainWorkDir); repoRoot != "" {
+			appendPath(repoRoot)
+		}
+	}
+
+	return paths
+}
+
+func resolveMainWorkDirForLatestCI(path string) string {
+	cleanPath := filepath.Clean(strings.TrimSpace(path))
+	if cleanPath == "" {
+		return ""
+	}
+	marker := string(filepath.Separator) + ".mvp-worktrees" + string(filepath.Separator)
+	idx := strings.Index(cleanPath, marker)
+	if idx < 0 {
+		return ""
+	}
+	return cleanPath[:idx]
+}
+
+func findGitRepoRoot(start string) string {
+	current := filepath.Clean(strings.TrimSpace(start))
+	if current == "" {
+		return ""
+	}
+	for {
+		gitPath := filepath.Join(current, ".git")
+		if info, err := os.Stat(gitPath); err == nil {
+			if info.IsDir() || info.Mode().IsRegular() {
+				return current
+			}
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return ""
+		}
+		current = parent
+	}
 }
 
 func normalizeCIResultCheckKinds(values []string) []string {

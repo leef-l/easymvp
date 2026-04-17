@@ -50,6 +50,64 @@ func TestCollectCIArtifactFilesDetectsKnownFiles(t *testing.T) {
 	}
 }
 
+func TestCollectCIArtifactFilesFallsBackToRepoRootLatestJSON(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	ciDir := filepath.Join(root, ".easymvp", "ci")
+	if err := os.MkdirAll(ciDir, 0o755); err != nil {
+		t.Fatalf("mkdir ci dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ciDir, "latest.json"), []byte(`{"status":"passed","tool":"github_actions","pipeline":"backend"}`), 0o644); err != nil {
+		t.Fatalf("write latest.json: %v", err)
+	}
+
+	workDir := filepath.Join(root, "frontend", "apps", "web")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir work dir: %v", err)
+	}
+
+	items := collectCIArtifactFiles(workDir)
+	if len(items) == 0 {
+		t.Fatal("expected CI evidence items")
+	}
+	if items[0].ContentRef != filepath.Join(root, ".easymvp", "ci", "latest.json") {
+		t.Fatalf("ContentRef = %q, want repo root latest.json", items[0].ContentRef)
+	}
+}
+
+func TestCollectCIArtifactFilesFallsBackFromWorktreeToMainRepoLatestJSON(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	ciDir := filepath.Join(root, ".easymvp", "ci")
+	if err := os.MkdirAll(ciDir, 0o755); err != nil {
+		t.Fatalf("mkdir ci dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ciDir, "latest.json"), []byte(`{"status":"passed","tool":"github_actions","pipeline":"web-antd-guard"}`), 0o644); err != nil {
+		t.Fatalf("write latest.json: %v", err)
+	}
+
+	worktreePath := filepath.Join(root, ".mvp-worktrees", "task-42")
+	if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+		t.Fatalf("mkdir worktree path: %v", err)
+	}
+
+	items := collectCIArtifactFiles(worktreePath)
+	if len(items) == 0 {
+		t.Fatal("expected CI evidence items")
+	}
+	if items[0].ContentRef != filepath.Join(root, ".easymvp", "ci", "latest.json") {
+		t.Fatalf("ContentRef = %q, want main repo latest.json", items[0].ContentRef)
+	}
+}
+
 func TestSummarizeCIJSONFallsBackOnInvalidPayload(t *testing.T) {
 	t.Parallel()
 

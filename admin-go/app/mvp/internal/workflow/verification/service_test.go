@@ -204,6 +204,70 @@ func TestLoadLatestCIResultNormalizesGitHubActionsPayload(t *testing.T) {
 	}
 }
 
+func TestLoadLatestCIResultFallsBackToGitRepoRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	ciDir := filepath.Join(root, ".easymvp", "ci")
+	if err := os.MkdirAll(ciDir, 0o755); err != nil {
+		t.Fatalf("mkdir ci dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ciDir, "latest.json"), []byte(`{"status":"passed","tool":"github_actions"}`), 0o644); err != nil {
+		t.Fatalf("write latest.json: %v", err)
+	}
+
+	subdir := filepath.Join(root, "frontend", "apps", "web")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatalf("mkdir subdir: %v", err)
+	}
+
+	result, path, _, err := loadLatestCIResult(subdir)
+	if err != nil {
+		t.Fatalf("loadLatestCIResult() error = %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected result")
+	}
+	if path != filepath.Join(root, ".easymvp", "ci", "latest.json") {
+		t.Fatalf("path = %q, want repo root latest.json", path)
+	}
+}
+
+func TestLoadLatestCIResultFallsBackFromWorktreeToMainRepo(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	ciDir := filepath.Join(root, ".easymvp", "ci")
+	if err := os.MkdirAll(ciDir, 0o755); err != nil {
+		t.Fatalf("mkdir ci dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ciDir, "latest.json"), []byte(`{"status":"passed","tool":"github_actions","pipeline":"backend-guard"}`), 0o644); err != nil {
+		t.Fatalf("write latest.json: %v", err)
+	}
+
+	worktreePath := filepath.Join(root, ".mvp-worktrees", "task-123")
+	if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+
+	result, path, _, err := loadLatestCIResult(worktreePath)
+	if err != nil {
+		t.Fatalf("loadLatestCIResult() error = %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected result")
+	}
+	if path != filepath.Join(root, ".easymvp", "ci", "latest.json") {
+		t.Fatalf("path = %q, want main repo latest.json", path)
+	}
+}
+
 func TestBuildGitHubActionsStepsUsesFallbackCheckKinds(t *testing.T) {
 	t.Parallel()
 

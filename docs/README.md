@@ -1,6 +1,6 @@
 # EasyMVP 文档目录
 
-> 更新日期：2026-04-13
+> 更新日期：2026-04-17
 
 仓库内保留的文档已经按“当前主入口”“使用与运维”“架构与实现”“治理与专项闭环”“专题规划”“专项验证记录”六组整理。
 
@@ -13,7 +13,10 @@
 ## 当前状态
 
 - 当前代码主链收尾已完成，当前阶段仍未完成。
-- 当前唯一剩余主阻塞是：`web-antd` 的 full typecheck/build 已按 `1 core / 1G` 受控资源口径实跑，但仍无法在该限制下完整通过。
+- 当前唯一剩余主阻塞是：`web-antd` 仍未形成“当前工作区代码 + 当前计划口径下 full typecheck/build”的 GitHub Actions 权威结论。
+- 2026-04-17 已触发 GitHub Actions `Web Antd Guard`，run id=`24572203264`，远端 `origin/main` 旧版 shard 工作流结论为 `success`。
+- 该 run 实际执行的是 `verify-build / workflow-bundle / entry-bundles / source-bundles`，并非当前本地计划中的 full typecheck/full build。
+- 该 run 未上传 `web-antd-guard-ci-latest` artifact；当前本地 `.easymvp/ci/latest.json` 已按 GitHub Actions run 元数据同步，仅代表远端 `origin/main` 当前结果。
 - 当前测试与编译的新铁律是：统一只走 GitHub Actions，不再接受本机执行。
 - 当前权威验证入口：
   - `.github/workflows/backend-guard.yml`

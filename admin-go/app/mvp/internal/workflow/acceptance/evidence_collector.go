@@ -272,14 +272,13 @@ func collectCIArtifactFiles(workDir string) []EvidenceItem {
 		return nil
 	}
 
-	candidates := []string{
-		filepath.Join(workDir, ".easymvp", "ci", "latest.json"),
+	candidates := append(ciLatestJSONCandidates(workDir),
 		filepath.Join(workDir, ".easymvp", "ci", "latest.log"),
 		filepath.Join(workDir, ".easymvp", "ci", "latest.txt"),
 		filepath.Join(workDir, ".gitlab-ci.yml"),
 		filepath.Join(workDir, "Jenkinsfile"),
 		filepath.Join(workDir, ".circleci", "config.yml"),
-	}
+	)
 
 	items := make([]EvidenceItem, 0)
 	for _, path := range candidates {
@@ -322,6 +321,76 @@ func collectCIArtifactFiles(workDir string) []EvidenceItem {
 	}
 
 	return items
+}
+
+func ciLatestJSONCandidates(workDir string) []string {
+	cleanRoot := filepath.Clean(strings.TrimSpace(workDir))
+	if cleanRoot == "" || cleanRoot == "." {
+		cleanRoot = "."
+	}
+
+	seen := make(map[string]struct{}, 4)
+	paths := make([]string, 0, 4)
+	appendPath := func(base string) {
+		base = filepath.Clean(strings.TrimSpace(base))
+		if base == "" {
+			return
+		}
+		path := filepath.Join(base, ".easymvp", "ci", "latest.json")
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
+
+	appendPath(cleanRoot)
+
+	if repoRoot := findGitRepoRootForCI(cleanRoot); repoRoot != "" {
+		appendPath(repoRoot)
+	}
+
+	if mainWorkDir := resolveMainWorkDirForCI(cleanRoot); mainWorkDir != "" {
+		appendPath(mainWorkDir)
+		if repoRoot := findGitRepoRootForCI(mainWorkDir); repoRoot != "" {
+			appendPath(repoRoot)
+		}
+	}
+
+	return paths
+}
+
+func resolveMainWorkDirForCI(path string) string {
+	cleanPath := filepath.Clean(strings.TrimSpace(path))
+	if cleanPath == "" {
+		return ""
+	}
+	marker := string(filepath.Separator) + ".mvp-worktrees" + string(filepath.Separator)
+	idx := strings.Index(cleanPath, marker)
+	if idx < 0 {
+		return ""
+	}
+	return cleanPath[:idx]
+}
+
+func findGitRepoRootForCI(start string) string {
+	current := filepath.Clean(strings.TrimSpace(start))
+	if current == "" {
+		return ""
+	}
+	for {
+		gitPath := filepath.Join(current, ".git")
+		if info, err := os.Stat(gitPath); err == nil {
+			if info.IsDir() || info.Mode().IsRegular() {
+				return current
+			}
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return ""
+		}
+		current = parent
+	}
 }
 
 func summarizeCIJSON(path string) string {

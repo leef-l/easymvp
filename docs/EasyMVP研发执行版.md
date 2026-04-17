@@ -1,6 +1,6 @@
 # EasyMVP研发执行版
 
-> 更新日期：2026-04-13
+> 更新日期：2026-04-17
 >
 > 用途：用于研发排期、任务分配、阶段验收与周会跟踪。
 
@@ -65,7 +65,7 @@
 - `C4`：内部评测样例清单已通过 `test-workspaces/regression-manifest.json`、校验接口和控制台“评测样例”面板接入
 - 工作流控制台已完成 `objective / situation / execution / dashboard` 这条联动的静态收口，项目切换刷新、父子面板同步、任务焦点态势与过期异步响应保护已补齐
 - `系统机制 / Watchdog / 直连 DB 收口` 三条治理线已从“待补齐”转入“已完成基线 + 防回退”状态
-- 当前剩余硬约束已收缩为 `web-antd` 已按 `1 core / 1G` 实跑，但当前仍无法在该限制下完成 full typecheck/build；作为拆分验证补充，`workflow` 控制台 8 个页面已通过单入口类型检查，轻量验证构建模式、`workflow` 最小 bundle 入口和单页面 bundle 入口都已静态补齐，且轻量验证模式已进一步关闭构建优化阶段以压低峰值
+- 当前剩余硬约束已收缩为：`web-antd` 尚未形成“当前工作区代码 + 当前计划口径下 full typecheck/build”的 GitHub Actions 权威结论；2026-04-17 触发的 `Web Antd Guard` run `24572203264` 已证明远端 `origin/main` 旧版 shard 工作流可通过，但该工作流实际执行项仍是 `verify-build / workflow-bundle / entry-bundles / source-bundles`，并未覆盖当前本地计划中的 full typecheck/full build，也未产出 `web-antd-guard-ci-latest` artifact
 
 当前数据库结构变更只允许通过 migration 交付，最新 migration 为：
 
