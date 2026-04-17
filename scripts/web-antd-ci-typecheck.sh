@@ -6,7 +6,7 @@ APP_DIR="$ROOT_DIR/vue-vben-admin"
 
 HEAP_MB="${EASYMVP_TYPECHECK_HEAP_MB:-768}"
 TYPECHECK_LABEL="${EASYMVP_TYPECHECK_LABEL:-web-antd full typecheck}"
-TYPECHECK_PROJECT="${EASYMVP_TYPECHECK_PROJECT:-apps/web-antd/tsconfig.json}"
+TYPECHECK_PROJECT="${EASYMVP_TYPECHECK_PROJECT:-apps/web-antd/tsconfig.guard.json}"
 
 if ! [[ "$HEAP_MB" =~ ^[0-9]+$ ]]; then
   echo "EASYMVP_TYPECHECK_HEAP_MB must be an integer, got: $HEAP_MB" >&2
