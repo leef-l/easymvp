@@ -105,11 +105,15 @@ jobs:
       - name: Test backend
         run: |
           cd admin-go
+          export GF_LOG_PATH="$RUNNER_TEMP/easymvp-logs"
+          mkdir -p "$GF_LOG_PATH"
           go test ./...
 
       - name: Test codegen
         run: |
           cd admin-go/codegen
+          export GF_LOG_PATH="$RUNNER_TEMP/easymvp-logs"
+          mkdir -p "$GF_LOG_PATH"
           go test ./...
 
   verify-frontend:
@@ -333,8 +337,7 @@ jobs:
   deploy-ai:
     needs: [detect-changes, deploy-system]
     if: |
-      always() &&
-      (needs.deploy-system.result == 'success' || needs.deploy-system.result == 'skipped') &&
+      needs.deploy-system.result == 'success' &&
       (
         needs.detect-changes.outputs.target == 'all' ||
         needs.detect-changes.outputs.target == 'backend' ||
@@ -497,8 +500,7 @@ jobs:
   deploy-mvp:
     needs: [detect-changes, deploy-ai]
     if: |
-      always() &&
-      (needs.deploy-ai.result == 'success' || needs.deploy-ai.result == 'skipped') &&
+      needs.deploy-ai.result == 'success' &&
       (
         needs.detect-changes.outputs.target == 'all' ||
         needs.detect-changes.outputs.target == 'backend' ||
