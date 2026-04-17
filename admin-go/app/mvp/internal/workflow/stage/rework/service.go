@@ -761,12 +761,12 @@ func (s *Service) findNextEscalatedTask(ctx context.Context, workflowRunID, excl
 	bestID := int64(0)
 	found := false
 	for _, record := range records {
-		taskID := record["id"].Int64()
+		taskID := g.NewVar(record["id"]).Int64()
 		if taskID == 0 || taskID == excludeTaskID {
 			continue
 		}
-		batchNo := record["batch_no"].Int()
-		sortNo := record["sort"].Int()
+		batchNo := g.NewVar(record["batch_no"]).Int()
+		sortNo := g.NewVar(record["sort"]).Int()
 		if !found || batchNo < bestBatch || (batchNo == bestBatch && sortNo < bestSort) || (batchNo == bestBatch && sortNo == bestSort && taskID < bestID) {
 			bestBatch = batchNo
 			bestSort = sortNo
@@ -859,7 +859,7 @@ func (s *Service) applySplitPlan(ctx context.Context, analysisTask gdb.Record, f
 
 	createdTaskIDs := make([]int64, 0, len(plan.Tasks))
 	createdTaskNames := make([]string, 0, len(plan.Tasks))
-	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+	err = repo.WithTx(ctx, func(ctx context.Context, tx gdb.TX) error {
 		createdTaskIDs = createdTaskIDs[:0]
 		createdTaskNames = createdTaskNames[:0]
 		record, txErr := tx.Model("mvp_domain_task").Ctx(ctx).
