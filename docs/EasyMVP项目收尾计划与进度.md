@@ -191,9 +191,58 @@
    - 当前结果：`project-status` 已变成 `status=failed`、`workflowStatus=failed`、`currentStage=rework`
    - 影响：这次不是单纯执行器任务失败，而是返工阶段自身失去可继续自动推进的修复方案，导致整条工作流停机
    - 恢复提示：后续所有失败分析任务都必须把“可解析 JSON patch”作为硬约束校验项，不能只看分析任务是否 `completed`
-9. 当前系统虽然已有 compact retry，但对“任务设计过大”的预防还不够前置
+9. `plan-style tasks[]` 返工输出现在已被解析兼容，但新分析结果仍可能带出不符合铁律的执行要求
+   - 已处理：`rework/service.go` 已兼容 `plan_meta + tasks[]` 输出，工作流已从 `rework failed` 恢复到 `execute`
+   - 当前新状态：`Canvas Renderer and VFX` 已重新启动，范围已收敛到单文件 `frontend/src/renderers/canvas-renderer.ts`
+   - 新暴露问题：分析结果把“每阶段完成后运行 npm run build 验证”写回了任务描述，这与“测试与编译统一走 GitHub Actions、本机禁止 pnpm/npm/node 构建验证”的铁律冲突
+   - 恢复提示：后续需要给返工 patch 再加一层规则过滤，禁止把本机构建/测试命令写回任务描述
+10. `Canvas Renderer and VFX` 已在单文件收缩后成功，但 `UI Panels and Theme` 返工回写出了比原任务更大的文件集合
+   - 当前结果：`task 320667615200546822` 已在单文件 `frontend/src/renderers/canvas-renderer.ts` 下完成
+   - 新暴露问题：`UI Panels and Theme` 失败分析回写后，资源范围从原来的 6 个文件扩大成了 11 个文件，包含 `styles/animations.css`、`hooks/useTheme.ts`、`components/ThemeProvider.tsx`、`hooks/usePanelManager.ts`、`components/index.ts`
+   - 影响：返工 patch 不仅没有收缩任务，反而放大了上下文规模，后续再次触发 token limit 的概率更高
+   - 恢复提示：返工回写链需要增加“只能收缩、不能扩容”的约束，至少对高风险前端任务不允许把文件集越改越大
+11. execute 阶段再次出现了异常并行推进迹象
+   - 真实现象：数据库当前显示 `task 320667615200546823 = running`，同时 `task 320667615200546824 = running`
+   - 日志里还出现了：
+     - `handleFailure 更新状态失败: task=320667615200546824 ... context canceled`
+     - `OnTaskFailed 查询 workflow_run_id 失败: task=320667615200546824 ... context canceled`
+   - 影响：这说明当前恢复链里可能又出现了批次内双任务并行和失败状态写回竞争，和前面已收敛到串行的目标不一致
+   - 恢复提示：后续若再出现这类迹象，优先检查调度器在 `rework -> execute` 回流后是否重新放开了并行度，或是否有 context cancel 导致状态写回失真
+12. `UI Panels and Theme` 返工后仍然失败，并且失败分析没有真正收缩任务规模
+   - 当前结果：`task 320667615200546823` 已正式落成 `failed`
+   - 真实现象：第一次返工后把文件集扩到 11 个文件，随后仍在 `token limit` 后失败
+   - 影响：说明当前返工分析不仅可能扩容任务，而且扩容后仍不能解决问题
+   - 恢复提示：后续对 UI 类任务需要改成“面板拆分 + 样式拆分”的更细颗粒，而不是继续把 `theme/panels/hooks/provider/index` 混成一个任务
+13. `Controls Audio and Assets` 不是按正常批次顺推启动，而是被 watchdog 作为卡死任务重试拉起
+   - 真实现象：`task 320667615200546824` 先出现 `context canceled` 状态写回失败，随后被 `WatchdogV2` 判定卡死并触发 `retry=1/3`
+   - 当前结果：该任务现处于 `running`
+   - 影响：这说明批次推进和 watchdog 恢复正在交叉生效，状态来源已经不再单一
+   - 恢复提示：后续看执行进度时，必须区分“正常调度推进”和“watchdog 恢复拉起”，否则容易误判系统健康度
+14. `WatchdogV2` 的返工/重试预算口径再次失真，出现了“上限 3，却报 6 轮返工”的异常
+   - 真实现象：日志已出现 `熔断触发: workflowRun=320666565479501824 reason=返工已达 6 轮（上限 3）`
+   - 影响：这说明 watchdog 统计口径可能把不同任务、不同阶段或历史返工累计进了同一预算，熔断理由已经不可信
+   - 恢复提示：后续需要单独核查 watchdog 的返工轮次统计是否按“任务级 / 当前问题链路”隔离，而不是项目级混算
+15. `UI Panels and Theme` 与 `Controls Audio and Assets` 出现了交替抢跑
+   - 真实现象：`823` 失败后 `824` 被 watchdog 拉起；随后 `823` 又被 watchdog 自动重试到 `retry=3/3`，而 `824` 被回退成 `pending`
+   - 当前状态：现在变成 `823=running`、`824=pending`
+   - 影响：这进一步说明恢复链里正常调度、watchdog 兜底、返工回流三套机制在交叉改写同一批任务状态
+   - 恢复提示：后续不能只看某一时刻的数据库状态，要同时结合日志看任务是谁拉起、为什么回退
+16. 当前系统虽然已有 compact retry，但对“任务设计过大”的预防还不够前置
    - 已验证的有效策略：缩文件集合、缩任务描述、把大任务拆成文件级步骤、减少重试时携带的历史上下文
    - 恢复提示：如果后续再次命中 token limit，不要只继续重试；优先进入失败分析，把任务拆成更小的 implementer 步骤
+17. 当前返工拆分链路虽然已经能通过 `source_task_id` 建立“原任务 -> 新子任务”追踪，但展示层仍不够直观
+   - 当前现状：回放和排障时可以靠 `source_task_id` 反查拆分出来的新任务，但没有一层明确的 `rework_split` 关系记录或专门查询接口
+   - 影响：当一个大任务被拆成同批次 `N` 个子任务后，状态、日志、验收证据和回放视图都还需要靠字段侧推断，追踪成本偏高
+   - 恢复提示：后续最好补一层显式 `rework_split` 关系记录或查询接口，把“原任务 -> 拆分出的 N 个子任务”直接展示出来
+18. 当前 workflow 已进入“执行阶段空转”状态
+   - 真实现象：`project-status` 显示 `workflowStatus=executing / currentStage=execute / activeBatch=0 / activeRunningTasks=0 / isActuallyWorking=false`，但 `execution-status` 同时显示 `stageStatus=running / activeBatch=4 / pendingTasks=8 / escalatedTasks=1`
+   - 当前状态：`Implement Frontend UI Panels and Theme = escalated`，`Implement Frontend Controls Audio and Assets = completed`，后续 `batch 4` 任务仍全是 `pending`
+   - 影响：这说明编排器在“存在 escalated 任务 + 没有 running task”时没有自动进入新的返工、人工介入或下一批次推进，工作流表面还在 `executing`，实际上已经停住
+   - 恢复提示：后续不能只看 `workflowStatus=executing`；必须额外识别“无活跃任务但阶段仍 running”的半停滞态，并优先排查 `escalated` 任务为什么没有触发下一步链路
+19. 进一步排查已确认这次空转的精确根因
+   - 真实现象：`UI Panels and Theme(823)` 的 `task.escalated -> rework` 实际发生过两轮，对应 rework stage `320682770978312192`、`320684586164031488`；之后 `Controls Audio and Assets(824)` 又触发了新的 `rework -> execute`，把工作流推进到 execute stage `320685913778688000`
+   - 当前不一致：`823` 仍停在 batch 3 的 `escalated`，而 `824` 已完成；调度器批次门控会把 `escalated` 视为“前序未完成”，因此 batch 4 不放行，但工作流状态机又没有把这种状态收成 failed / rework，最终表现成 `executing` 空转
+   - 恢复提示：后续要重点检查两件事：一是旧 `escalated` 任务在新 execute stage 启动前是否必须先强制收口；二是批次门控和 workflow 运行态对 `escalated` 的定义必须统一，否则还会重复出现“前序卡死但全局仍显示 executing”
 
 ## 3. 执行策略与历史批次
 

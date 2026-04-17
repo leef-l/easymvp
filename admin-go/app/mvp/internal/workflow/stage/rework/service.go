@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -161,8 +162,11 @@ func (s *Service) HandleReworkWithSource(ctx context.Context, stageRunID int64, 
 				"必须明确指出失败是由哪条命令、哪条路径、哪个资源冲突、哪次越界修改或哪个依赖缺失引起；不要只给泛泛结论。\n\n"+
 				"关联任务ID：%d\n角色：%s\n错误信息：\n%s\n\n"+
 				"原任务名称：%s\n原任务描述：\n%s\n\n"+
+				"如果失败原因是 token limit、上下文过大、任务范围过宽或单任务文件集过大，禁止继续把原任务揉成一个更长描述；必须重新设计为 N 个更小的同批次子任务，并显式给出 depends_on 关系。\n"+
 				"修复方案不得新增 .gitignore 这类仓库级控制文件，除非原任务 affected_resources 已明确包含该文件。\n"+
 				"修复方案必须严格围绕当前任务，不能改变原任务目标、不能脱离原有任务设定、不能把范围扩展到无关任务。\n"+
+				"推荐输出多任务重设计 JSON：\n"+
+				"{\"plan_meta\":{\"plan_id\":\"repair-保持一致\",\"declared_total\":3},\"tasks\":[{\"name\":\"子任务1\",\"description\":\"更小可执行任务\",\"role_type\":\"implementer\",\"role_level\":\"pro\",\"batch_no\":原任务批次,\"affected_resources\":[\"路径\"],\"depends_on\":[]},{\"name\":\"子任务2\",\"description\":\"后续子任务\",\"role_type\":\"implementer\",\"role_level\":\"pro\",\"batch_no\":原任务批次,\"affected_resources\":[\"路径\"],\"depends_on\":[\"子任务1\"]}]}\n\n"+
 				"推荐输出任务级修复 JSON：\n"+
 				"{\"task_repair\":{\"task_name\":%q,\"description\":\"修订后的任务描述\",\"affected_resources\":[\"路径\"],\"reason\":\"修订原因，必须写清具体失败原因\"}}\n\n"+
 				"兼容旧格式：也可以直接输出\n"+
@@ -237,7 +241,7 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 	}
 
 	// 3. 解析架构师修复方案
-	patch, patchContent, err := s.resolveAnalysisPatch(ctx, analysisTask, failedTask)
+	resolution, err := s.resolveAnalysisResolution(ctx, analysisTask, failedTask)
 	if err != nil {
 		g.Log().Warningf(ctx, "[ReworkStage] 解析修复方案失败: task=%d err=%v", analysisTaskID, err)
 		// 解析失败也要完成 rework stage
@@ -247,72 +251,38 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 		return nil
 	}
 
-	// 4. 回写原失败任务
-	updateData := g.Map{
-		"status":     domainTask.StatusPending,
-		"result":     nil,
-		"started_at": nil,
-		"updated_at": gtime.Now(),
-	}
-	if strings.TrimSpace(patch.Description) != "" {
-		updateData["description"] = patch.Description
-	}
-	if len(patch.AffectedResources) > 0 {
-		currentResources, decodeErr := decodeAffectedResourcesJSON(failedTask["affected_resources"].String())
-		if decodeErr != nil {
-			return fmt.Errorf("解析原任务 affected_resources 失败: %w", decodeErr)
-		}
-		if introduced := resourcepath.FindNewlyIntroducedGovernedRootFiles(currentResources, patch.AffectedResources); len(introduced) > 0 {
-			return fmt.Errorf("返工 patch 不允许新增受治理仓库文件: %s", strings.Join(introduced, ", "))
-		}
-		resJSON, jsonErr := json.Marshal(patch.AffectedResources)
-		if jsonErr != nil {
-			g.Log().Warningf(ctx, "[ReworkStage] 序列化 affected_resources 失败: %v", jsonErr)
-		} else {
-			updateData["affected_resources"] = string(resJSON)
-		}
-	}
-
-	rows, err := s.taskRepo.UpdateFieldsIfStatuses(ctx, failedTaskID, []string{domainTask.StatusFailed, domainTask.StatusEscalated}, updateData)
-	if err != nil {
-		return fmt.Errorf("回写原任务失败: %w", err)
-	}
 	reconciledWithoutWrite := false
-	if rows == 0 {
-		currentTask, statusErr := s.taskRepo.GetByIDMap(ctx, failedTaskID, "status")
-		if statusErr != nil {
-			return fmt.Errorf("查询原任务当前状态失败: %w", statusErr)
-		}
-		currentStatus := g.NewVar(currentTask["status"]).String()
-
-		_, alreadyRecovered := classifyOriginalTaskStatusForRework(currentStatus)
-		if !alreadyRecovered {
-			reason := fmt.Sprintf("原任务(%d)状态异常(%s)，回写跳过", failedTaskID, currentStatus)
-			g.Log().Warningf(ctx, "[ReworkStage] %s", reason)
+	handoffPayload := map[string]interface{}{}
+	if resolution.SplitPlan != nil {
+		reconciledWithoutWrite, handoffPayload, err = s.applySplitPlan(ctx, analysisTask, failedTaskID, resolution.SplitPlan)
+		if err != nil {
 			if s.stageCompleter != nil {
-				_ = s.stageCompleter.FailStage(ctx, stageRunID, reason)
+				_ = s.stageCompleter.FailStage(ctx, stageRunID, err.Error())
 			}
 			return nil
 		}
-
-		reconciledWithoutWrite = true
-		g.Log().Infof(ctx, "[ReworkStage] 原任务(%d)已由其他链路推进到 %s，视为返工已收敛",
-			failedTaskID, currentStatus)
+	} else {
+		reconciledWithoutWrite, err = s.applyTaskPatch(ctx, failedTaskID, failedTask, resolution.Patch)
+		if err != nil {
+			if s.stageCompleter != nil {
+				_ = s.stageCompleter.FailStage(ctx, stageRunID, err.Error())
+			}
+			return nil
+		}
+		handoffPayload["content"] = resolution.Content
+		handoffPayload["reason"] = resolution.Patch.Reason
 	}
 
 	// 5. 写 handoff_record（分析 → 原任务）
 	handoffID := int64(snowflake.Generate())
-	payloadJSON := marshalHandoffPayload(map[string]interface{}{
-		"content": patchContent,
-		"reason":  patch.Reason,
-	})
+	payloadJSON := marshalHandoffPayload(handoffPayload)
 	if insErr := s.handoffRepo.Create(ctx, g.Map{
 		"id":              handoffID,
 		"workflow_run_id": analysisTask["workflow_run_id"].Int64(),
 		"from_task_id":    analysisTaskID,
 		"to_task_id":      failedTaskID,
 		"handoff_type":    "rework",
-		"reason":          patch.Reason,
+		"reason":          resolveHandoffReason(resolution.Patch, resolution.SplitPlan),
 		"payload":         payloadJSON,
 		"created_at":      gtime.Now(),
 	}); insErr != nil {
@@ -320,9 +290,19 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 	}
 
 	if reconciledWithoutWrite {
-		g.Log().Infof(ctx, "[ReworkStage] 返工收敛完成: analysis=%d target=%d reason=%s", analysisTaskID, failedTaskID, patch.Reason)
+		g.Log().Infof(ctx, "[ReworkStage] 返工收敛完成: analysis=%d target=%d reason=%s", analysisTaskID, failedTaskID, resolveHandoffReason(resolution.Patch, resolution.SplitPlan))
 	} else {
-		g.Log().Infof(ctx, "[ReworkStage] 回写完成: analysis=%d → original=%d reason=%s", analysisTaskID, failedTaskID, patch.Reason)
+		g.Log().Infof(ctx, "[ReworkStage] 回写完成: analysis=%d → original=%d reason=%s", analysisTaskID, failedTaskID, resolveHandoffReason(resolution.Patch, resolution.SplitPlan))
+	}
+
+	workflowRunID := analysisTask["workflow_run_id"].Int64()
+	if nextEscalatedTaskID, nextFound, nextErr := s.findNextEscalatedTask(ctx, workflowRunID, failedTaskID); nextErr != nil {
+		return fmt.Errorf("查询后续 escalated 任务失败: %w", nextErr)
+	} else if nextFound {
+		sourceStage := s.resolveSourceStage(ctx, workflowRunID, nextEscalatedTaskID)
+		g.Log().Infof(ctx, "[ReworkStage] 当前返工已收敛，继续接管剩余 escalated 任务: workflowRunID=%d nextTask=%d sourceStage=%s",
+			workflowRunID, nextEscalatedTaskID, sourceStage)
+		return s.HandleReworkWithSource(ctx, stageRunID, nextEscalatedTaskID, sourceStage)
 	}
 
 	// 6. 完成 rework stage
@@ -331,7 +311,6 @@ func (s *Service) OnAnalysisCompleted(ctx context.Context, stageRunID int64, ana
 	}
 
 	// 7. 按来源阶段决定回流目标
-	workflowRunID := analysisTask["workflow_run_id"].Int64()
 	sourceStage := s.resolveSourceStage(ctx, workflowRunID, failedTaskID)
 
 	if sourceStage == "accept" && s.acceptTrigger != nil && workflowRunID > 0 {
@@ -366,7 +345,7 @@ func (s *Service) resolveSourceStage(ctx context.Context, workflowRunID, failedT
 	return "execute"
 }
 
-func (s *Service) resolveAnalysisPatch(ctx context.Context, analysisTask gdb.Record, failedTask gdb.Record) (*taskPatch, string, error) {
+func (s *Service) resolveAnalysisResolution(ctx context.Context, analysisTask gdb.Record, failedTask gdb.Record) (*analysisResolution, error) {
 	taskName := failedTask["name"].String()
 	candidates := make([]string, 0, 2)
 
@@ -389,16 +368,17 @@ func (s *Service) resolveAnalysisPatch(ctx context.Context, analysisTask gdb.Rec
 
 	var lastErr error
 	for _, candidate := range candidates {
-		patch, err := parseTaskPatch(candidate, taskName)
+		resolution, err := parseAnalysisResolution(candidate, taskName)
 		if err == nil {
-			return patch, candidate, nil
+			resolution.Content = candidate
+			return resolution, nil
 		}
 		lastErr = err
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("未找到可解析的修复方案")
 	}
-	return nil, "", lastErr
+	return nil, lastErr
 }
 
 func (s *Service) loadLatestAnalysisReply(ctx context.Context, analysisTask gdb.Record) string {
@@ -438,6 +418,12 @@ type taskPatch struct {
 	Reason            string   `json:"reason"`
 }
 
+type analysisResolution struct {
+	Patch     *taskPatch
+	SplitPlan *taskSplitPlan
+	Content   string
+}
+
 type taskPatchEnvelope struct {
 	TaskPatches []engine.ArchitectTaskPatch `json:"task_patches"`
 }
@@ -453,11 +439,43 @@ type planTaskEnvelope struct {
 type planTaskPatch struct {
 	Name              string   `json:"name"`
 	Description       string   `json:"description"`
+	RoleType          string   `json:"role_type"`
+	RoleLevel         string   `json:"role_level"`
+	BatchNo           *int     `json:"batch_no"`
+	Sort              *int     `json:"sort"`
 	AffectedResources []string `json:"affected_resources"`
+	DependsOn         []string `json:"depends_on"`
+}
+
+type taskSplitPlan struct {
+	Tasks  []splitTaskSpec
+	Reason string
+}
+
+type splitTaskSpec struct {
+	Name              string
+	Description       string
+	RoleType          string
+	RoleLevel         string
+	BatchNo           *int
+	Sort              *int
+	AffectedResources []string
+	DependsOn         []string
 }
 
 // parseTaskPatch 解析架构师输出的 JSON patch。
 func parseTaskPatch(content string, taskName string) (*taskPatch, error) {
+	resolution, err := parseAnalysisResolution(content, taskName)
+	if err != nil {
+		return nil, err
+	}
+	if resolution.SplitPlan != nil {
+		return buildTaskPatchFromSplitPlan(resolution.SplitPlan), nil
+	}
+	return resolution.Patch, nil
+}
+
+func parseAnalysisResolution(content string, taskName string) (*analysisResolution, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return nil, fmt.Errorf("架构师输出为空")
@@ -469,14 +487,14 @@ func parseTaskPatch(content string, taskName string) (*taskPatch, error) {
 	}
 
 	for _, candidate := range candidates {
-		if patch, err := parseTaskPatchPayload(candidate, taskName); err == nil {
-			return patch, nil
+		if resolution, err := parseTaskPatchPayload(candidate, taskName); err == nil {
+			return resolution, nil
 		}
 		re := reworkJsonBlockRe
 		match := re.FindStringSubmatch(candidate)
 		if len(match) == 2 {
-			if patch, err := parseTaskPatchPayload(match[1], taskName); err == nil {
-				return patch, nil
+			if resolution, err := parseTaskPatchPayload(match[1], taskName); err == nil {
+				return resolution, nil
 			}
 		}
 	}
@@ -510,7 +528,7 @@ func decodeAffectedResourcesJSON(raw string) ([]string, error) {
 	return resources, nil
 }
 
-func parseTaskPatchPayload(content string, taskName string) (*taskPatch, error) {
+func parseTaskPatchPayload(content string, taskName string) (*analysisResolution, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return nil, fmt.Errorf("patch 内容为空")
@@ -518,16 +536,16 @@ func parseTaskPatchPayload(content string, taskName string) (*taskPatch, error) 
 
 	var patch taskPatch
 	if err := json.Unmarshal([]byte(content), &patch); err == nil && taskPatchHasContent(&patch) {
-		return &patch, nil
+		return &analysisResolution{Patch: &patch}, nil
 	}
 
 	var repair taskRepairEnvelope
 	if err := json.Unmarshal([]byte(content), &repair); err == nil && architectTaskPatchMatchesTask(repair.TaskRepair, taskName) {
-		return &taskPatch{
+		return &analysisResolution{Patch: &taskPatch{
 			Description:       repair.TaskRepair.Description,
 			AffectedResources: repair.TaskRepair.AffectedResources,
 			Reason:            repair.TaskRepair.Reason,
-		}, nil
+		}}, nil
 	}
 
 	var envelope taskPatchEnvelope
@@ -536,18 +554,21 @@ func parseTaskPatchPayload(content string, taskName string) (*taskPatch, error) 
 		if !ok {
 			return nil, fmt.Errorf("task_patches 中未找到任务 %q 的修订项", taskName)
 		}
-		return &taskPatch{
+		return &analysisResolution{Patch: &taskPatch{
 			Description:       selected.Description,
 			AffectedResources: selected.AffectedResources,
 			Reason:            selected.Reason,
-		}, nil
+		}}, nil
 	}
 
 	var planEnvelope planTaskEnvelope
 	if err := json.Unmarshal([]byte(content), &planEnvelope); err == nil && len(planEnvelope.Tasks) > 0 {
+		if splitPlan := buildTaskSplitPlanFromPlanTasks(planEnvelope.Tasks, taskName); splitPlan != nil {
+			return &analysisResolution{SplitPlan: splitPlan}, nil
+		}
 		patch := buildTaskPatchFromPlanTasks(planEnvelope.Tasks)
 		if taskPatchHasContent(patch) {
-			return patch, nil
+			return &analysisResolution{Patch: patch}, nil
 		}
 	}
 
@@ -633,4 +654,457 @@ func buildTaskPatchFromPlanTasks(tasks []planTaskPatch) *taskPatch {
 		AffectedResources: resources,
 		Reason:            fmt.Sprintf("失败分析返回了 plan-style tasks，共 %d 个子步骤，已自动折叠回单任务返工 patch", len(tasks)),
 	}
+}
+
+func buildTaskSplitPlanFromPlanTasks(tasks []planTaskPatch, taskName string) *taskSplitPlan {
+	if len(tasks) <= 1 {
+		return nil
+	}
+
+	specs := make([]splitTaskSpec, 0, len(tasks))
+	for _, item := range tasks {
+		specs = append(specs, splitTaskSpec{
+			Name:              strings.TrimSpace(item.Name),
+			Description:       strings.TrimSpace(item.Description),
+			RoleType:          strings.TrimSpace(item.RoleType),
+			RoleLevel:         strings.TrimSpace(item.RoleLevel),
+			BatchNo:           item.BatchNo,
+			Sort:              item.Sort,
+			AffectedResources: sanitizeAffectedResources(item.AffectedResources),
+			DependsOn:         sanitizeDependsOn(item.DependsOn),
+		})
+	}
+	return &taskSplitPlan{
+		Tasks:  specs,
+		Reason: fmt.Sprintf("任务 %q 命中 token limit/范围过大，返工分析已重设计为 %d 个同批次子任务", taskName, len(specs)),
+	}
+}
+
+func buildTaskPatchFromSplitPlan(plan *taskSplitPlan) *taskPatch {
+	if plan == nil {
+		return nil
+	}
+	planTasks := make([]planTaskPatch, 0, len(plan.Tasks))
+	for _, task := range plan.Tasks {
+		planTasks = append(planTasks, planTaskPatch{
+			Name:              task.Name,
+			Description:       task.Description,
+			AffectedResources: task.AffectedResources,
+		})
+	}
+	patch := buildTaskPatchFromPlanTasks(planTasks)
+	if patch != nil && strings.TrimSpace(plan.Reason) != "" {
+		patch.Reason = plan.Reason
+	}
+	return patch
+}
+
+func sanitizeAffectedResources(resources []string) []string {
+	seen := make(map[string]struct{}, len(resources))
+	result := make([]string, 0, len(resources))
+	for _, resource := range resources {
+		resource = strings.TrimSpace(resource)
+		if resource == "" {
+			continue
+		}
+		if _, exists := seen[resource]; exists {
+			continue
+		}
+		seen[resource] = struct{}{}
+		result = append(result, resource)
+	}
+	return result
+}
+
+func sanitizeDependsOn(dependsOn []string) []string {
+	seen := make(map[string]struct{}, len(dependsOn))
+	result := make([]string, 0, len(dependsOn))
+	for _, dep := range dependsOn {
+		dep = strings.TrimSpace(dep)
+		if dep == "" {
+			continue
+		}
+		if _, exists := seen[dep]; exists {
+			continue
+		}
+		seen[dep] = struct{}{}
+		result = append(result, dep)
+	}
+	return result
+}
+
+func resolveHandoffReason(patch *taskPatch, splitPlan *taskSplitPlan) string {
+	if splitPlan != nil {
+		return splitPlan.Reason
+	}
+	if patch != nil {
+		return patch.Reason
+	}
+	return ""
+}
+
+func (s *Service) findNextEscalatedTask(ctx context.Context, workflowRunID, excludeTaskID int64) (int64, bool, error) {
+	if workflowRunID == 0 {
+		return 0, false, nil
+	}
+	records, err := s.taskRepo.ListByWorkflowAndStatuses(ctx, workflowRunID, []string{domainTask.StatusEscalated},
+		"id", "batch_no", "sort", "updated_at", "created_at")
+	if err != nil {
+		return 0, false, err
+	}
+	if len(records) == 0 {
+		return 0, false, nil
+	}
+
+	bestBatch := 0
+	bestSort := 0
+	bestID := int64(0)
+	found := false
+	for _, record := range records {
+		taskID := record["id"].Int64()
+		if taskID == 0 || taskID == excludeTaskID {
+			continue
+		}
+		batchNo := record["batch_no"].Int()
+		sortNo := record["sort"].Int()
+		if !found || batchNo < bestBatch || (batchNo == bestBatch && sortNo < bestSort) || (batchNo == bestBatch && sortNo == bestSort && taskID < bestID) {
+			bestBatch = batchNo
+			bestSort = sortNo
+			bestID = taskID
+			found = true
+		}
+	}
+	if !found {
+		return 0, false, nil
+	}
+	return bestID, true, nil
+}
+
+func (s *Service) applyTaskPatch(ctx context.Context, failedTaskID int64, failedTask gdb.Record, patch *taskPatch) (bool, error) {
+	updateData := g.Map{
+		"status":     domainTask.StatusPending,
+		"result":     nil,
+		"started_at": nil,
+		"updated_at": gtime.Now(),
+	}
+	if strings.TrimSpace(patch.Description) != "" {
+		updateData["description"] = patch.Description
+	}
+	if len(patch.AffectedResources) > 0 {
+		currentResources, decodeErr := decodeAffectedResourcesJSON(failedTask["affected_resources"].String())
+		if decodeErr != nil {
+			return false, fmt.Errorf("解析原任务 affected_resources 失败: %w", decodeErr)
+		}
+		if introduced := resourcepath.FindNewlyIntroducedGovernedRootFiles(currentResources, patch.AffectedResources); len(introduced) > 0 {
+			return false, fmt.Errorf("返工 patch 不允许新增受治理仓库文件: %s", strings.Join(introduced, ", "))
+		}
+		resJSON, jsonErr := json.Marshal(patch.AffectedResources)
+		if jsonErr != nil {
+			g.Log().Warningf(ctx, "[ReworkStage] 序列化 affected_resources 失败: %v", jsonErr)
+		} else {
+			updateData["affected_resources"] = string(resJSON)
+		}
+	}
+
+	rows, err := s.taskRepo.UpdateFieldsIfStatuses(ctx, failedTaskID, []string{domainTask.StatusFailed, domainTask.StatusEscalated}, updateData)
+	if err != nil {
+		return false, fmt.Errorf("回写原任务失败: %w", err)
+	}
+	if rows > 0 {
+		return false, nil
+	}
+	return s.resolveAlreadyRecovered(ctx, failedTaskID)
+}
+
+func (s *Service) resolveAlreadyRecovered(ctx context.Context, failedTaskID int64) (bool, error) {
+	currentTask, statusErr := s.taskRepo.GetByIDMap(ctx, failedTaskID, "status")
+	if statusErr != nil {
+		return false, fmt.Errorf("查询原任务当前状态失败: %w", statusErr)
+	}
+	currentStatus := g.NewVar(currentTask["status"]).String()
+
+	_, alreadyRecovered := classifyOriginalTaskStatusForRework(currentStatus)
+	if !alreadyRecovered {
+		return false, fmt.Errorf("原任务(%d)状态异常(%s)，回写跳过", failedTaskID, currentStatus)
+	}
+
+	g.Log().Infof(ctx, "[ReworkStage] 原任务(%d)已由其他链路推进到 %s，视为返工已收敛",
+		failedTaskID, currentStatus)
+	return true, nil
+}
+
+func (s *Service) applySplitPlan(ctx context.Context, analysisTask gdb.Record, failedTaskID int64, plan *taskSplitPlan) (bool, map[string]interface{}, error) {
+	if plan == nil || len(plan.Tasks) == 0 {
+		return false, nil, fmt.Errorf("拆分方案为空")
+	}
+
+	failedTask, err := s.taskRepo.GetRecordByID(ctx, failedTaskID,
+		"id", "workflow_run_id", "plan_version_id", "blueprint_id", "parent_task_id", "depends_on_task_ids",
+		"root_task_id", "task_kind", "name", "description", "role_type", "role_level", "execution_mode",
+		"model_id", "batch_no", "sort", "created_by", "dept_id", "affected_resources",
+	)
+	if err != nil || failedTask == nil || failedTask.IsEmpty() {
+		return false, nil, fmt.Errorf("原失败任务(%d) 不存在", failedTaskID)
+	}
+
+	currentResources, decodeErr := decodeAffectedResourcesJSON(failedTask["affected_resources"].String())
+	if decodeErr != nil {
+		return false, nil, fmt.Errorf("解析原任务 affected_resources 失败: %w", decodeErr)
+	}
+	for _, task := range plan.Tasks {
+		if introduced := resourcepath.FindNewlyIntroducedGovernedRootFiles(currentResources, task.AffectedResources); len(introduced) > 0 {
+			return false, nil, fmt.Errorf("返工拆分任务 %q 不允许新增受治理仓库文件: %s", task.Name, strings.Join(introduced, ", "))
+		}
+	}
+
+	createdTaskIDs := make([]int64, 0, len(plan.Tasks))
+	createdTaskNames := make([]string, 0, len(plan.Tasks))
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		createdTaskIDs = createdTaskIDs[:0]
+		createdTaskNames = createdTaskNames[:0]
+		record, txErr := tx.Model("mvp_domain_task").Ctx(ctx).
+			Where("id", failedTaskID).
+			WhereNull("deleted_at").
+			Fields("status").
+			One()
+		if txErr != nil {
+			return fmt.Errorf("查询原任务状态失败: %w", txErr)
+		}
+		status := record["status"].String()
+		if status != domainTask.StatusFailed && status != domainTask.StatusEscalated {
+			_, alreadyRecovered := classifyOriginalTaskStatusForRework(status)
+			if alreadyRecovered {
+				return nil
+			}
+			return fmt.Errorf("原任务(%d)状态异常(%s)，拆分跳过", failedTaskID, status)
+		}
+
+		baseDeps, depErr := decodeDependsOnTaskIDs(failedTask["depends_on_task_ids"].String(), failedTask["parent_task_id"].Int64())
+		if depErr != nil {
+			return fmt.Errorf("解析原任务依赖失败: %w", depErr)
+		}
+		rootTaskID := failedTask["root_task_id"].Int64()
+		if rootTaskID == 0 {
+			rootTaskID = failedTaskID
+		}
+		baseSort := failedTask["sort"].Int()
+		if baseSort < 1 {
+			baseSort = 100
+		}
+		now := gtime.Now()
+		nameToID := make(map[string]int64, len(plan.Tasks))
+		childDependsOnNames := make(map[int64][]string, len(plan.Tasks))
+
+		for idx, task := range plan.Tasks {
+			taskID := int64(snowflake.Generate())
+			taskName := firstNonEmpty(task.Name, fmt.Sprintf("%s / split-%d", failedTask["name"].String(), idx+1))
+			roleType := firstNonEmpty(task.RoleType, failedTask["role_type"].String())
+			roleLevel := firstNonEmpty(task.RoleLevel, failedTask["role_level"].String())
+			batchNo := failedTask["batch_no"].Int()
+			if batchNo < 1 {
+				batchNo = 1
+			}
+			sortValue := baseSort*100 + idx + 1
+			if task.Sort != nil && *task.Sort > 0 {
+				sortValue = baseSort*100 + *task.Sort
+			}
+			resourcesJSON := "[]"
+			if len(task.AffectedResources) > 0 {
+				data, jsonErr := json.Marshal(task.AffectedResources)
+				if jsonErr != nil {
+					return fmt.Errorf("序列化拆分任务资源失败: %w", jsonErr)
+				}
+				resourcesJSON = string(data)
+			}
+			if _, insErr := tx.Model("mvp_domain_task").Ctx(ctx).Insert(g.Map{
+				"id":                 taskID,
+				"workflow_run_id":    failedTask["workflow_run_id"].Int64(),
+				"stage_run_id":       analysisTask["stage_run_id"].Int64(),
+				"plan_version_id":    failedTask["plan_version_id"].Int64(),
+				"blueprint_id":       failedTask["blueprint_id"].Int64(),
+				"source_task_id":     failedTaskID,
+				"root_task_id":       rootTaskID,
+				"task_kind":          failedTask["task_kind"].String(),
+				"name":               taskName,
+				"description":        firstNonEmpty(task.Description, failedTask["description"].String()),
+				"role_type":          roleType,
+				"role_level":         roleLevel,
+				"execution_mode":     failedTask["execution_mode"].String(),
+				"status":             domainTask.StatusPending,
+				"model_id":           failedTask["model_id"].Int64(),
+				"batch_no":           batchNo,
+				"sort":               sortValue,
+				"affected_resources": resourcesJSON,
+				"retry_count":        0,
+				"created_by":         failedTask["created_by"].Int64(),
+				"dept_id":            failedTask["dept_id"].Int64(),
+				"created_at":         now,
+				"updated_at":         now,
+			}); insErr != nil {
+				return fmt.Errorf("创建拆分任务失败: %w", insErr)
+			}
+			nameToID[taskName] = taskID
+			createdTaskIDs = append(createdTaskIDs, taskID)
+			createdTaskNames = append(createdTaskNames, taskName)
+			childDependsOnNames[taskID] = append([]string{}, task.DependsOn...)
+		}
+
+		for _, taskID := range createdTaskIDs {
+			deps := append([]int64{}, baseDeps...)
+			for _, depName := range childDependsOnNames[taskID] {
+				if depID, ok := nameToID[depName]; ok {
+					deps = append(deps, depID)
+				}
+			}
+			deps = uniqueInt64s(deps)
+			parentTaskID := int64(0)
+			if len(deps) > 0 {
+				parentTaskID = deps[0]
+			}
+			depsJSON, jsonErr := json.Marshal(deps)
+			if jsonErr != nil {
+				return fmt.Errorf("序列化拆分任务依赖失败: %w", jsonErr)
+			}
+			if _, upErr := tx.Model("mvp_domain_task").Ctx(ctx).
+				Where("id", taskID).
+				WhereNull("deleted_at").
+				Data(g.Map{
+					"parent_task_id":      parentTaskID,
+					"depends_on_task_ids": string(depsJSON),
+					"updated_at":          now,
+				}).Update(); upErr != nil {
+				return fmt.Errorf("更新拆分任务依赖失败: %w", upErr)
+			}
+		}
+
+		if err := rewriteDependentTasksForSplit(ctx, tx, failedTask["workflow_run_id"].Int64(), failedTaskID, createdTaskIDs, now); err != nil {
+			return err
+		}
+
+		if _, upErr := tx.Model("mvp_domain_task").Ctx(ctx).
+			Where("id", failedTaskID).
+			WhereIn("status", []string{domainTask.StatusFailed, domainTask.StatusEscalated}).
+			WhereNull("deleted_at").
+			Data(g.Map{
+				"status":       domainTask.StatusCompleted,
+				"result":       fmt.Sprintf("reworked_split:%v", createdTaskIDs),
+				"completed_at": now,
+				"updated_at":   now,
+			}).Update(); upErr != nil {
+			return fmt.Errorf("标记原任务为已拆分完成失败: %w", upErr)
+		}
+		return nil
+	})
+	if err != nil {
+		return false, nil, err
+	}
+	if len(createdTaskIDs) == 0 {
+		reconciled, err := s.resolveAlreadyRecovered(ctx, failedTaskID)
+		return reconciled, nil, err
+	}
+	return false, map[string]interface{}{
+		"mode":               "split_tasks",
+		"reason":             plan.Reason,
+		"created_task_ids":   createdTaskIDs,
+		"created_task_names": createdTaskNames,
+		"source_task_id":     failedTaskID,
+	}, nil
+}
+
+func decodeDependsOnTaskIDs(raw string, fallbackParentID int64) ([]int64, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" || raw == "[]" {
+		if fallbackParentID > 0 {
+			return []int64{fallbackParentID}, nil
+		}
+		return nil, nil
+	}
+	var depIDs []int64
+	if err := json.Unmarshal([]byte(raw), &depIDs); err != nil {
+		return nil, err
+	}
+	if len(depIDs) == 0 && fallbackParentID > 0 {
+		return []int64{fallbackParentID}, nil
+	}
+	return uniqueInt64s(depIDs), nil
+}
+
+func rewriteDependentTasksForSplit(ctx context.Context, tx gdb.TX, workflowRunID, failedTaskID int64, childTaskIDs []int64, now *gtime.Time) error {
+	records, err := tx.Model("mvp_domain_task").Ctx(ctx).
+		Where("workflow_run_id", workflowRunID).
+		Where("id <> ?", failedTaskID).
+		WhereNull("deleted_at").
+		Fields("id", "parent_task_id", "depends_on_task_ids").
+		All()
+	if err != nil {
+		return fmt.Errorf("查询待重挂依赖任务失败: %w", err)
+	}
+	for _, record := range records {
+		taskID := record["id"].Int64()
+		parentTaskID := record["parent_task_id"].Int64()
+		deps, depErr := decodeDependsOnTaskIDs(record["depends_on_task_ids"].String(), parentTaskID)
+		if depErr != nil {
+			return fmt.Errorf("解析依赖任务 %d 失败: %w", taskID, depErr)
+		}
+		if !slices.Contains(deps, failedTaskID) && parentTaskID != failedTaskID {
+			continue
+		}
+		rewritten := make([]int64, 0, len(deps)+len(childTaskIDs))
+		for _, depID := range deps {
+			if depID == failedTaskID {
+				rewritten = append(rewritten, childTaskIDs...)
+				continue
+			}
+			rewritten = append(rewritten, depID)
+		}
+		if !slices.Contains(deps, failedTaskID) {
+			rewritten = append(rewritten, childTaskIDs...)
+		}
+		rewritten = uniqueInt64s(rewritten)
+		parentTaskID = 0
+		if len(rewritten) > 0 {
+			parentTaskID = rewritten[0]
+		}
+		depsJSON, jsonErr := json.Marshal(rewritten)
+		if jsonErr != nil {
+			return fmt.Errorf("序列化重挂依赖失败: %w", jsonErr)
+		}
+		if _, upErr := tx.Model("mvp_domain_task").Ctx(ctx).
+			Where("id", taskID).
+			WhereNull("deleted_at").
+			Data(g.Map{
+				"parent_task_id":      parentTaskID,
+				"depends_on_task_ids": string(depsJSON),
+				"updated_at":          now,
+			}).Update(); upErr != nil {
+			return fmt.Errorf("重挂依赖失败: task=%d err=%w", taskID, upErr)
+		}
+	}
+	return nil
+}
+
+func uniqueInt64s(items []int64) []int64 {
+	seen := make(map[int64]struct{}, len(items))
+	result := make([]int64, 0, len(items))
+	for _, item := range items {
+		if item == 0 {
+			continue
+		}
+		if _, exists := seen[item]; exists {
+			continue
+		}
+		seen[item] = struct{}{}
+		result = append(result, item)
+	}
+	return result
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

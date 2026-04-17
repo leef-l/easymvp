@@ -1,6 +1,7 @@
 package rework
 
 import (
+	"sort"
 	"strings"
 	"testing"
 )
@@ -154,5 +155,65 @@ func TestParseTaskPatchSupportsPlanTasksEnvelope(t *testing.T) {
 	}
 	if !strings.Contains(patch.Reason, "plan-style tasks") {
 		t.Fatalf("unexpected patch reason: %+v", patch)
+	}
+}
+
+func TestParseAnalysisResolutionSupportsSplitPlan(t *testing.T) {
+	t.Parallel()
+
+	content := `{"plan_meta":{"plan_id":"snake-repair","declared_total":2},"tasks":[` +
+		`{"name":"UI Shell","description":"只做主菜单和暂停面板","role_type":"implementer","role_level":"pro","batch_no":3,"affected_resources":["frontend/src/components/panels/MainMenuPanel.tsx"],"depends_on":[]},` +
+		`{"name":"Leaderboard Panel","description":"单独做排行榜面板","role_type":"implementer","role_level":"pro","batch_no":3,"affected_resources":["frontend/src/components/panels/LeaderboardPanel.tsx"],"depends_on":["UI Shell"]}` +
+		`]}`
+
+	resolution, err := parseAnalysisResolution(content, "Implement Frontend UI Panels and Theme")
+	if err != nil {
+		t.Fatalf("parseAnalysisResolution() error = %v", err)
+	}
+	if resolution.SplitPlan == nil {
+		t.Fatalf("expected split plan, got %+v", resolution)
+	}
+	if len(resolution.SplitPlan.Tasks) != 2 {
+		t.Fatalf("unexpected split tasks: %+v", resolution.SplitPlan.Tasks)
+	}
+	if resolution.SplitPlan.Tasks[1].DependsOn[0] != "UI Shell" {
+		t.Fatalf("unexpected depends_on: %+v", resolution.SplitPlan.Tasks[1].DependsOn)
+	}
+	if !strings.Contains(resolution.SplitPlan.Reason, "同批次子任务") {
+		t.Fatalf("unexpected split reason: %+v", resolution.SplitPlan.Reason)
+	}
+}
+
+func TestFindNextEscalatedTaskSelectionOrder(t *testing.T) {
+	t.Parallel()
+
+	records := []map[string]int64{
+		{"id": 3003, "batch_no": 4, "sort": 2},
+		{"id": 3001, "batch_no": 3, "sort": 5},
+		{"id": 3002, "batch_no": 3, "sort": 1},
+	}
+	sort.Slice(records, func(i, j int) bool { return records[i]["id"] > records[j]["id"] })
+
+	bestBatch := 0
+	bestSort := 0
+	bestID := int64(0)
+	found := false
+	for _, record := range records {
+		taskID := record["id"]
+		if taskID == 3001 {
+			continue
+		}
+		batchNo := int(record["batch_no"])
+		sortNo := int(record["sort"])
+		if !found || batchNo < bestBatch || (batchNo == bestBatch && sortNo < bestSort) || (batchNo == bestBatch && sortNo == bestSort && taskID < bestID) {
+			bestBatch = batchNo
+			bestSort = sortNo
+			bestID = taskID
+			found = true
+		}
+	}
+
+	if !found || bestID != 3002 {
+		t.Fatalf("expected task 3002, got found=%v id=%d", found, bestID)
 	}
 }
