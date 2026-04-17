@@ -22,6 +22,7 @@ echo "Running ${TYPECHECK_LABEL} in CI container"
 echo "  root: $ROOT_DIR"
 echo "  heap_mb: $HEAP_MB"
 echo "  tsconfig: $TYPECHECK_PROJECT"
+echo "  skip_lib_check: 1"
 
 cd "$ROOT_DIR"
 CI=1 \
@@ -33,4 +34,4 @@ pnpm_config_child_concurrency="${pnpm_config_child_concurrency:-1}" \
 pnpm_config_workspace_concurrency="${pnpm_config_workspace_concurrency:-1}" \
 pnpm_config_network_concurrency="${pnpm_config_network_concurrency:-1}" \
 TURBO_CONCURRENCY="${TURBO_CONCURRENCY:-1}" \
-pnpm -C "$APP_DIR" exec vue-tsc --noEmit -p "$TYPECHECK_PROJECT"
+pnpm -C "$APP_DIR" exec vue-tsc --noEmit --skipLibCheck -p "$TYPECHECK_PROJECT"

@@ -10,6 +10,8 @@ export default defineConfig(async () => {
   const mvpProxyTarget =
     process.env.VITE_PROXY_MVP_TARGET ?? 'http://localhost:41004';
   const verifyBuild = process.env.EASYMVP_WEB_ANTD_VERIFY_BUILD === '1';
+  const guardFullBuild =
+    process.env.EASYMVP_WEB_ANTD_GUARD_FULL_BUILD === '1';
   const workflowBundle = process.env.EASYMVP_WEB_ANTD_WORKFLOW_BUNDLE === '1';
   const bundleEntry = process.env.EASYMVP_WEB_ANTD_BUNDLE_ENTRY?.trim();
   const bundleOutDir = process.env.EASYMVP_WEB_ANTD_BUNDLE_OUT_DIR?.trim();
@@ -48,6 +50,16 @@ export default defineConfig(async () => {
         pwa: false,
         vxeTableLazyImport: false,
       }
+    : guardFullBuild
+      ? {
+          archiver: false,
+          compress: false,
+          extraAppConfig: false,
+          injectAppLoading: false,
+          injectMetadata: false,
+          license: false,
+          pwa: false,
+        }
     : {};
   const verifyBuildOptions = verifyBuild
     ? {
@@ -66,6 +78,15 @@ export default defineConfig(async () => {
           },
         },
         target: 'esnext',
+      }
+    : {};
+  const guardFullBuildOptions = guardFullBuild
+    ? {
+        copyPublicDir: false,
+        cssMinify: false,
+        minify: false,
+        modulePreload: false,
+        reportCompressedSize: false,
       }
     : {};
   const build = verifyBuild
@@ -88,7 +109,9 @@ export default defineConfig(async () => {
               ? 'dist-entry-verify'
               : 'dist-verify'),
       }
-    : undefined;
+    : guardFullBuild
+      ? guardFullBuildOptions
+      : undefined;
 
   return {
     application,
