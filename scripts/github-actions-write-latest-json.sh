@@ -41,7 +41,8 @@ pipeline = os.environ.get("EASYMVP_CI_PIPELINE", "").strip() or workflow
 summary = os.environ.get("EASYMVP_CI_SUMMARY", "").strip()
 run_id = os.environ.get("EASYMVP_CI_RUN_ID", "").strip()
 run_url = os.environ.get("EASYMVP_CI_RUN_URL", "").strip()
-status = normalize_status(os.environ.get("EASYMVP_CI_STATUS", ""))
+status_raw = os.environ.get("EASYMVP_CI_STATUS", "").strip()
+status = normalize_status(status_raw) if status_raw else ""
 
 checks_raw = os.environ.get("EASYMVP_CI_CHECKS_JSON", "").strip() or "[]"
 try:
