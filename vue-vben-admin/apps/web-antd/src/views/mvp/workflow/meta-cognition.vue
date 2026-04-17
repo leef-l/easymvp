@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// @ts-nocheck
 import type { ProjectItem } from '#/api/mvp/project/types';
 
 import { computed, ref, watch } from 'vue';

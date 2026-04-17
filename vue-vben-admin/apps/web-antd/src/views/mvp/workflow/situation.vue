@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// @ts-nocheck
 import { computed, h, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 

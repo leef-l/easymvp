@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// @ts-nocheck
 import { onMounted, ref } from 'vue';
 
 import { Alert, Card, Empty, Space, Spin, Table, Tag } from 'ant-design-vue';

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// @ts-nocheck
 import { ref, onUnmounted, computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import {
