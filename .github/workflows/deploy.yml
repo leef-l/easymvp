@@ -107,6 +107,14 @@ jobs:
           cd admin-go
           export GF_LOG_PATH="$RUNNER_TEMP/easymvp-logs"
           mkdir -p "$GF_LOG_PATH"
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          path = Path("app/mvp/manifest/config/config.yaml")
+          text = path.read_text()
+          text = text.replace('/www/wwwroot/project/easymvp/admin-go/logs/mvp', os.environ["GF_LOG_PATH"])
+          path.write_text(text)
+          PY
           go test ./...
 
       - name: Test codegen
