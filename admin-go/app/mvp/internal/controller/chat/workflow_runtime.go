@@ -67,7 +67,7 @@ func loadLatestWorkflowRuns(ctx context.Context, projectIDs []int64) (map[int64]
 		return result, nil
 	}
 
-	records, err := repo.NewWorkflowRunRepo().ListLatestByProjects(ctx, projectIDs, "wr.id", "wr.project_id", "wr.current_stage", "wr.status")
+	records, err := repo.NewWorkflowRunRepo().ListLatestByProjects(ctx, projectIDs, "id", "project_id", "current_stage", "status")
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func loadLatestSituationSnapshots(ctx context.Context, workflowRunIDs []int64) (
 		return result, nil
 	}
 
-	snapshots, err := repo.NewSituationSnapshotRepo().ListLatestByWorkflowRunIDs(ctx, workflowRunIDs, "ss.id", "ss.workflow_run_id", "ss.snapshot_data", "ss.created_at")
+	snapshots, err := repo.NewSituationSnapshotRepo().ListLatestByWorkflowRunIDs(ctx, workflowRunIDs, "id", "workflow_run_id", "snapshot_data", "created_at")
 	if err != nil {
 		return nil, err
 	}
