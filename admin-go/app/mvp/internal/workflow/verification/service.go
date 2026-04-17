@@ -1593,9 +1593,11 @@ func normalizePlanRunnerType(value string) string {
 	case modeGitHubActions, "github", "github_action", "gha":
 		return modeGitHubActions
 	case modeLocal:
+		return modeLocal
 	case modeDockerCompose, "compose":
+		return modeDockerCompose
 	case modeDockerfile:
-		return modeGitHubActions
+		return modeDockerfile
 	default:
 		return ""
 	}
@@ -1981,9 +1983,11 @@ func normalizeMode(mode string) string {
 	case modeGitHubActions, "github", "github_action", "gha":
 		return modeGitHubActions
 	case modeDockerCompose:
+		return modeDockerCompose
 	case modeDockerfile:
+		return modeDockerfile
 	case modeLocal:
-		return modeGitHubActions
+		return modeLocal
 	default:
 		return modeGitHubActions
 	}

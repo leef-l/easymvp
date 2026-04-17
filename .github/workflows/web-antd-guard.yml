@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/web-antd-guard.yml'
+      - 'scripts/github-actions-collect-checks.py'
       - 'scripts/github-actions-write-latest-json.sh'
       - 'scripts/web-antd-*.sh'
       - 'vue-vben-admin/**'
   pull_request:
     paths:
       - '.github/workflows/web-antd-guard.yml'
+      - 'scripts/github-actions-collect-checks.py'
       - 'scripts/github-actions-write-latest-json.sh'
       - 'scripts/web-antd-*.sh'
       - 'vue-vben-admin/**'
@@ -228,21 +230,7 @@ jobs:
           EASYMVP_CI_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EASYMVP_CI_SUMMARY: web-antd-guard GitHub Actions 结果
         run: |
-          checks_json="$(
-            python3 - <<'PY'
-          import glob
-          import json
-
-          checks = []
-          for path in sorted(glob.glob(".tmp/web-antd-guard/*.json")):
-              with open(path, "r", encoding="utf-8") as fh:
-                  payload = json.load(fh)
-              if isinstance(payload, dict):
-                  checks.append(payload)
-
-          print(json.dumps(checks, ensure_ascii=False))
-            PY
-          )"
+          checks_json="$(python3 ./scripts/github-actions-collect-checks.py web-antd-artifacts)"
           if [ "$checks_json" = "[]" ]; then
             echo "No web-antd checks were selected for this run; skip latest.json generation."
             exit 0

@@ -6,6 +6,7 @@ on:
       - '.github/workflows/backend-guard.yml'
       - '.github/workflows/deploy.yml'
       - 'admin-go/**'
+      - 'scripts/github-actions-collect-checks.py'
       - 'scripts/github-actions-only.sh'
       - 'scripts/github-actions-write-latest-json.sh'
       - 'test-workspaces/**'
@@ -61,6 +62,9 @@ jobs:
 
       - name: Test backend
         run: |
+          sudo mkdir -p /www/wwwroot/project/easymvp/admin-go/logs/mvp
+          sudo mkdir -p /www/wwwroot/project/easymvp/admin-go/logs/ai
+          sudo mkdir -p /www/wwwroot/project/easymvp/admin-go/logs/system
           cd admin-go
           go test ./...
 
@@ -133,46 +137,7 @@ jobs:
           EASYMVP_CI_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EASYMVP_CI_SUMMARY: backend-guard GitHub Actions 结果
         run: |
-          checks_json="$(
-            python3 - <<'PY'
-          import json
-          import os
-
-
-          def map_result(value: str) -> str:
-              text = (value or "").strip().lower()
-              if text == "success":
-                  return "passed"
-              if text in {"failure", "cancelled"}:
-                  return "failed"
-              return "pending"
-
-
-          checks = []
-          for job, name, kind, result, summary, command in [
-              ("validate-regression", "validate regression manifest and delivery policy", "runtime", os.environ.get("VALIDATE_RESULT"), "bash ./test-workspaces/validate.sh", "bash ./test-workspaces/validate.sh"),
-              ("test-backend", "backend go test ./...", "test", os.environ.get("TEST_BACKEND_RESULT"), "cd admin-go && go test ./...", "go test ./..."),
-              ("test-codegen", "codegen go test ./...", "test", os.environ.get("TEST_CODEGEN_RESULT"), "cd admin-go/codegen && go test ./...", "go test ./..."),
-              ("build-services", "build system/ai/mvp", "build", os.environ.get("BUILD_SERVICES_RESULT"), "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build system ai mvp", "go build system ai mvp"),
-          ]:
-              normalized = (result or "").strip().lower()
-              if not normalized or normalized == "skipped":
-                  continue
-              checks.append(
-                  {
-                      "name": name,
-                      "kind": kind,
-                      "status": map_result(normalized),
-                      "summary": f"{summary}; job_result={normalized}",
-                      "command": command,
-                      "workflow": "backend-guard",
-                      "job": job,
-                  }
-              )
-
-          print(json.dumps(checks, ensure_ascii=False))
-            PY
-          )"
+          checks_json="$(python3 ./scripts/github-actions-collect-checks.py backend-env)"
           if [ "$checks_json" = "[]" ]; then
             echo "No backend checks were selected for this run; skip latest.json generation."
             exit 0
