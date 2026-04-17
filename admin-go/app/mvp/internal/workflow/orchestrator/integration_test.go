@@ -313,7 +313,7 @@ func insertRecoveryWorkflowFixtures(t *testing.T, ctx context.Context, workflowR
 func requireWorkflowTestDB(t *testing.T, ctx context.Context) {
 	t.Helper()
 
-	if _, err := g.DB().PingMaster(); err != nil {
+	if err := g.DB().PingMaster(); err != nil {
 		t.Skipf("mysql integration unavailable: %v", err)
 	}
 
