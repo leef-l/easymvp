@@ -70,17 +70,20 @@
 
 ### 2.3.1 2026-04-17 最新 GitHub Actions 结果
 
-- 已通过 GitHub Actions `workflow_dispatch` 触发 `Web Antd Guard`，run id=`24572203264`
-- 本次 run 总结论：`success`
-- 当前远端 `origin/main` 实际注册的 `web-antd-guard` 仍是旧版 shard 工作流，执行项为：
+- `Web Antd Guard` 最新权威 run：`24574466599`
+- 本次 run 已真实执行当前计划口径中的：
+  - `full-typecheck`
+  - `full-build`
   - `verify-build`
   - `workflow-bundle`
   - `entry-bundles`
-  - `source-bundles` 6 分片
-- 本次 run 中，上述 job 全部通过
-- 但当前远端工作流并没有执行“full `typecheck` / full production `build`”这两个本地计划中的目标，也没有上传 `web-antd-guard-ci-latest` artifact
-- 因此，当前已经拿到“远端旧版受限验证链路通过”的最新证据，但还没有拿到“当前工作区代码 + 当前计划口径下 full `typecheck/build`”的 GitHub Actions 结论
-- 由于 artifact 缺失，当前本地 `.easymvp/ci/latest.json` 已按本次 run 元数据手工同步，供验证/验收链路读取；该文件代表的是远端 `origin/main` 当前已执行结果，不代表本地未推送改动已经通过验证
+- 当前真实结论已固定：
+  - `full typecheck` 失败
+  - `full production build` 失败
+  - `verify-build / workflow-bundle / entry-bundles` 通过
+- 本次 run 已成功产出 `web-antd-guard-ci-latest` artifact，本地 `.easymvp/ci/latest.json` 也已按 artifact 回写，不再依赖人工从 run 元数据补写
+- `Backend Guard` 最新权威 run：`24574470208`
+- 本次 backend run 结论：`validate-regression / test-backend / test-codegen / build-services` 全部通过，并已成功产出 `backend-guard-ci-latest` artifact
 
 ### 2.4 当前状态判定
 
@@ -91,7 +94,7 @@
 
 当前不能直接宣称“全部做完”，原因只剩一类：
 
-1. `web-antd` 的 GitHub Actions 受限验证已经有最新成功记录，但远端实际跑的是旧版 shard 工作流；当前仍未形成“当前工作区代码 + full typecheck/build”这一层的权威验证结论
+1. `web-antd` 已经拿到“当前工作区代码 + 当前计划口径下 full typecheck/build”的 GitHub Actions 权威结论，但结论是失败；当前阶段主阻塞已从“缺证据”变成“已有权威失败证据，仍需继续降峰值”
 
 ### 2.5 中断恢复执行清单（2026-04-17）
 
@@ -101,17 +104,16 @@
 
 当前项目层真正未完成的主阻塞仍只有 1 项：
 
-1. `web-antd` 仍未形成“当前工作区代码 + 当前计划口径下 full `typecheck/build`”的 GitHub Actions 可追溯通过结果
+1. `web-antd` 已形成“当前工作区代码 + 当前计划口径下 full `typecheck/build`”的 GitHub Actions 可追溯结论，但 run `24574466599` 仍显示两项失败，因此还没有“通过结果”
 
 恢复执行时按以下顺序推进：
 
-1. 只使用 `.github/workflows/web-antd-guard.yml` 作为权威验证入口
-2. 先把本地 `.github/workflows/web-antd-guard.yml` 与远端 `origin/main` 注册版本对齐，再在 GitHub Actions 内复跑
-3. 复跑后优先拿到最新一轮 full `typecheck/build` 真实结果
-4. 确保 workflow artifact 中实际产出 `web-antd-guard-ci-latest`，不要继续只靠人工从 run 元数据反写
-5. 将 GitHub Actions 结果统一回写到 `.easymvp/ci/latest.json`
-6. 按最新结果同步更新 `README`、本文档和 `EasyMVP研发执行版`
-7. 再重新判定“当前阶段全部收尾”是否成立
+1. 继续只使用 `.github/workflows/web-antd-guard.yml` 作为权威验证入口
+2. 以 run `24574466599` 为当前基线，继续降低 `full typecheck/build` 峰值，而不是回退到本机执行
+3. 每次复跑后都保留 `web-antd-guard-ci-latest` artifact
+4. 将最新 GitHub Actions 结果同步回写到 `.easymvp/ci/latest.json`
+5. 按最新结果同步更新 `README`、本文档和 `EasyMVP研发执行版`
+6. 再重新判定“当前阶段全部收尾”是否成立
 
 判定规则固定为：
 
@@ -120,33 +122,17 @@
 
 #### 2.5.2 当前工作区未提交改动的收口计划
 
-截至 2026-04-17，工作区还有一批后端改动未收口；这批改动不改变“项目层唯一主阻塞”的定义，但属于当前手头需要继续做完的代码项。涉及文件如下：
-
-- `admin-go/app/mvp/internal/workflow/acceptance/evidence_collector.go`
-- `admin-go/app/mvp/internal/workflow/acceptance/evidence_collector_test.go`
-- `admin-go/app/mvp/internal/workflow/qualitygate/standard.go`
-- `admin-go/app/mvp/internal/workflow/qualitygate/standard_test.go`
-- `admin-go/app/mvp/internal/workflow/verification/service.go`
-- `admin-go/app/mvp/internal/workflow/verification/service_test.go`
-
-当前这批改动的目标固定为两类：
-
-1. 补 `.easymvp/ci/latest.json` 的回退读取逻辑
-2. 在缺少 browser automation 时放宽 browser verification 强制要求
-
-恢复执行时按以下顺序收口：
+截至 2026-04-17，上一轮后端改动已经收口并进入 GitHub Actions 验证完成状态。已完成项包括：
 
 1. `acceptance/evidence_collector*`
-   - 目标：验收证据可从当前目录、repo root、主仓 worktree 根回退查找 `.easymvp/ci/latest.json`
-   - 验收点：普通子目录场景可读；`.mvp-worktrees/...` 场景可回退到主仓；候选路径去重，不产生重复证据
+   - 已支持从当前目录、repo root、主仓 worktree 根回退查找 `.easymvp/ci/latest.json`
 2. `verification/service*`
-   - 目标：验证阶段读取 latest CI 结果时复用同类回退逻辑，避免“验收能读到、验证读不到”
-   - 验收点：读取顺序与验收侧一致；文件不存在时稳定返回；JSON 非法时行为可预期
+   - 已复用同类回退读取逻辑，并补齐 GitHub Actions fallback step / runner type 归一化
 3. `qualitygate/standard*`
-   - 目标：无 browser automation 时，不再强制要求 browser plan/evidence
-   - 验收点：`HasFrontendApp=true` 且 `HasBrowserAutomation=false` 时，只保留 build，若有 Go 再加 test；有 browser automation 时仍保持 browser 要求
-4. 整体回归与整理
-   - 验收点：相关测试补齐；`git diff --check` 通过；若因现行铁律不在本机执行完整测试，则明确列出需进入 GitHub Actions 的验证项
+   - 已在缺少 browser automation 时放宽 browser verification 强制要求
+4. `backend-guard`
+   - 已修复 `publish-ci-result`、日志目录前置准备、集成测试 DB 条件化与最新 `latest.json` 生成链路
+   - 最新通过 run：`24574470208`
 
 #### 2.5.3 推荐执行顺序
 

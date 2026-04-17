@@ -13,10 +13,12 @@
 ## 当前状态
 
 - 当前代码主链收尾已完成，当前阶段仍未完成。
-- 当前唯一剩余主阻塞是：`web-antd` 仍未形成“当前工作区代码 + 当前计划口径下 full typecheck/build”的 GitHub Actions 权威结论。
-- 2026-04-17 已触发 GitHub Actions `Web Antd Guard`，run id=`24572203264`，远端 `origin/main` 旧版 shard 工作流结论为 `success`。
-- 该 run 实际执行的是 `verify-build / workflow-bundle / entry-bundles / source-bundles`，并非当前本地计划中的 full typecheck/full build。
-- 该 run 未上传 `web-antd-guard-ci-latest` artifact；当前本地 `.easymvp/ci/latest.json` 已按 GitHub Actions run 元数据同步，仅代表远端 `origin/main` 当前结果。
+- 当前唯一剩余主阻塞是：`web-antd` 虽已形成“当前工作区代码 + 当前计划口径下 full typecheck/build”的 GitHub Actions 权威结论，但该结论仍是失败。
+- 2026-04-17 最新 `Web Antd Guard` run 为 `24574466599`。
+- 该 run 已真实执行 `full-typecheck / full-build / verify-build / workflow-bundle / entry-bundles`。
+- 该 run 当前真实结果为：`full typecheck` 失败、`full build` 失败，`verify-build / workflow-bundle / entry-bundles` 通过。
+- 该 run 已成功上传 `web-antd-guard-ci-latest` artifact；当前本地 `.easymvp/ci/latest.json` 已按该 artifact 同步。
+- 2026-04-17 最新 `Backend Guard` run 为 `24574470208`，`validate-regression / test-backend / test-codegen / build-services` 已全部通过，并成功上传 `backend-guard-ci-latest` artifact。
 - 当前测试与编译的新铁律是：统一只走 GitHub Actions，不再接受本机执行。
 - 当前权威验证入口：
   - `.github/workflows/backend-guard.yml`
