@@ -131,3 +131,28 @@ func TestParseTaskPatchRejectsInvalidContent(t *testing.T) {
 		t.Fatal("expected invalid content to fail")
 	}
 }
+
+func TestParseTaskPatchSupportsPlanTasksEnvelope(t *testing.T) {
+	t.Parallel()
+
+	content := "分析任务失败原因：\n\n```json\n" +
+		"{\"plan_meta\":{\"plan_id\":\"snake-repair\",\"declared_total\":3},\"tasks\":[" +
+		"{\"name\":\"Implement Frontend Canvas Renderer Core (MVP)\",\"description\":\"创建 Canvas 渲染器基类，实现 60fps requestAnimationFrame 循环。\",\"affected_resources\":[\"frontend/src/renderers/canvas-renderer-core.ts\"]}," +
+		"{\"name\":\"Implement Cyberpunk Visual Theme\",\"description\":\"扩展主题配置对象和霓虹配色系统。\",\"affected_resources\":[\"frontend/src/renderers/canvas-renderer-core.ts\"]}," +
+		"{\"name\":\"Implement Dynamic VFX System\",\"description\":\"补充 pulse 动画、死亡粒子和性能降级逻辑。\",\"affected_resources\":[\"frontend/src/renderers/canvas-renderer-core.ts\",\"frontend/src/utils/perf-monitor.ts\"]}" +
+		"]}\n```"
+
+	patch, err := parseTaskPatch(content, "Implement Frontend Canvas Renderer and VFX")
+	if err != nil {
+		t.Fatalf("parseTaskPatch() error = %v", err)
+	}
+	if !strings.Contains(patch.Description, "步骤1：Implement Frontend Canvas Renderer Core (MVP)") {
+		t.Fatalf("unexpected patch description: %+v", patch)
+	}
+	if len(patch.AffectedResources) != 2 {
+		t.Fatalf("unexpected affected resources: %+v", patch.AffectedResources)
+	}
+	if !strings.Contains(patch.Reason, "plan-style tasks") {
+		t.Fatalf("unexpected patch reason: %+v", patch)
+	}
+}

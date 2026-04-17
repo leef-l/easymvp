@@ -446,6 +446,16 @@ type taskRepairEnvelope struct {
 	TaskRepair engine.ArchitectTaskPatch `json:"task_repair"`
 }
 
+type planTaskEnvelope struct {
+	Tasks []planTaskPatch `json:"tasks"`
+}
+
+type planTaskPatch struct {
+	Name              string   `json:"name"`
+	Description       string   `json:"description"`
+	AffectedResources []string `json:"affected_resources"`
+}
+
 // parseTaskPatch 解析架构师输出的 JSON patch。
 func parseTaskPatch(content string, taskName string) (*taskPatch, error) {
 	content = strings.TrimSpace(content)
@@ -533,6 +543,14 @@ func parseTaskPatchPayload(content string, taskName string) (*taskPatch, error) 
 		}, nil
 	}
 
+	var planEnvelope planTaskEnvelope
+	if err := json.Unmarshal([]byte(content), &planEnvelope); err == nil && len(planEnvelope.Tasks) > 0 {
+		patch := buildTaskPatchFromPlanTasks(planEnvelope.Tasks)
+		if taskPatchHasContent(patch) {
+			return patch, nil
+		}
+	}
+
 	return nil, fmt.Errorf("未解析到有效 JSON patch")
 }
 
@@ -574,4 +592,45 @@ func selectTaskPatch(patches []engine.ArchitectTaskPatch, taskName string) (engi
 		}
 	}
 	return engine.ArchitectTaskPatch{}, false
+}
+
+func buildTaskPatchFromPlanTasks(tasks []planTaskPatch) *taskPatch {
+	if len(tasks) == 0 {
+		return nil
+	}
+
+	var descriptionParts []string
+	seenResources := make(map[string]struct{}, len(tasks))
+	resources := make([]string, 0, len(tasks))
+
+	for idx, item := range tasks {
+		name := strings.TrimSpace(item.Name)
+		desc := strings.TrimSpace(item.Description)
+		switch {
+		case name != "" && desc != "":
+			descriptionParts = append(descriptionParts, fmt.Sprintf("步骤%d：%s。%s", idx+1, name, desc))
+		case name != "":
+			descriptionParts = append(descriptionParts, fmt.Sprintf("步骤%d：%s。", idx+1, name))
+		case desc != "":
+			descriptionParts = append(descriptionParts, fmt.Sprintf("步骤%d：%s", idx+1, desc))
+		}
+
+		for _, resource := range item.AffectedResources {
+			resource = strings.TrimSpace(resource)
+			if resource == "" {
+				continue
+			}
+			if _, exists := seenResources[resource]; exists {
+				continue
+			}
+			seenResources[resource] = struct{}{}
+			resources = append(resources, resource)
+		}
+	}
+
+	return &taskPatch{
+		Description:       strings.Join(descriptionParts, "\n"),
+		AffectedResources: resources,
+		Reason:            fmt.Sprintf("失败分析返回了 plan-style tasks，共 %d 个子步骤，已自动折叠回单任务返工 patch", len(tasks)),
+	}
 }

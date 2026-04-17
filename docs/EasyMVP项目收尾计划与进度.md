@@ -152,6 +152,49 @@
 1. 当前这批后端改动已完成收口，并具备对应 CI 验证证据
 2. `web-antd` 在 GitHub Actions 下已经对“当前工作区代码 + 当前计划口径”形成最新通过证据，并同步回写到 `.easymvp/ci/latest.json` 与主文档
 
+#### 2.5.5 2026-04-18 新建贪吃蛇项目实跑问题清单
+
+本节记录 `projectID=320666565290758144`、`workflowRunID=320666565479501824` 这轮真实全流程回放里已经暴露出来的问题，恢复时优先按本节处理，不要只看任务是否仍在 `running`。
+
+1. `project-status / execution-status / stage-history` 曾因运行态查询字段带别名而直接失效
+   - 真实问题：`workflow_runtime.go` 里把无别名查询写成了 `wr.id / ss.id` 形式，导致运行态接口超时或 SQL 错
+   - 已处理：`controller/chat/workflow_runtime.go` 已修正字段选择，后端已通过部署 run `24582591208` 上线
+   - 恢复提示：如果后续再次出现运行态接口异常，优先核对查询字段是否又引入了表别名口径漂移
+2. 执行阶段初始并发 `3` 会把多条 `aider` 任务一起压进内存高压区
+   - 真实问题：首批 `Init React Frontend Scaffold / Init GoFrame Backend Scaffold / Init Docs Scripts and CI Scaffold` 并发运行时，进程长期卡在 `mem_cgroup_handle_over_high`
+   - 已处理：数据库配置中的 `scheduler.max_concurrent` 与 `workflow.scheduler.max_concurrency` 已手工收敛到 `1`，并通过 `pause -> resume` 恢复串行推进
+   - 恢复提示：后续若再做真实样例重放，默认先核对调度并发是否仍为 `1`，不要直接恢复高并发
+3. 文档与 CI 骨架任务曾因 `affected_resources` 过宽而越界修改整个 `.github/`
+   - 真实问题：`Init Docs Scripts and CI Scaffold` 第一次执行时把 `.github/` 整体纳入修改范围，触发越界拦截
+   - 已处理：系统已自动生成失败分析任务，并把资源范围收窄为 `docs/README.md`、`scripts/.gitkeep`、`.github/workflows/ci.yml`
+   - 恢复提示：类似“初始化脚手架”任务必须坚持文件级资源范围，不能给目录级占位
+4. `Implement Frontend Core Game Logic` 真实打到了 `token limit`
+   - 真实问题：`useSnakeGame.ts + types.ts + constants.ts + storage.ts` 的组合在首次执行中触发 `token limit`
+   - 已处理：系统先走 compact retry，再在 `retry=1` 这一轮成功完成
+   - 恢复提示：前端逻辑类任务即使只改 4 个文件，也可能因任务描述过长或历史上下文过重而触发 token limit，优先保留最小文件集
+5. `Implement Backend Service and API` 连续三次触发 `token limit`，已经证明“整条后端链路一把写完”不可持续
+   - 真实问题：任务要求单次同时产出 `model / dao / service / controller / cmd / config / 路由 / 中间件`，连续三轮在 `token limit` 后失败
+   - 已处理：系统已自动生成失败分析任务 `320674332336459776`，并把原任务回写为更小的文件级执行范围
+   - 当前收缩后的文件集：`internal/model/score.go`、`internal/dao/score_dao.go`、`internal/service/score_service.go`、`internal/controller/score_controller.go`、`cmd/cmd.go`
+   - 恢复提示：后续后端业务任务默认要按“单层或单文件”切，不再接受一次覆盖完整业务链
+6. `Implement Frontend Canvas Renderer and VFX` 在返工收缩后仍然 `token limit`，说明“前端重渲染/动效”类任务也会稳定打爆上下文
+   - 真实问题：原始 4 文件任务 `GameCanvas.tsx / snakeRenderer.ts / foodRenderer.ts / effectRenderer.ts` 连续三轮 `token limit`
+   - 已处理：系统已自动生成失败分析任务 `320676341546487808`，把任务收缩为 `renderers/canvas-renderer.ts`、`types/renderer.ts`、`utils/perf-monitor.ts`
+   - 当前结果：收缩后再次失败，任务 `320667615200546822` 已落成正式 `failed`
+   - 恢复提示：前端渲染/VFX 任务不能只按“文件数量”拆，后续要进一步按“基础渲染循环 / 主题色板 / 性能监控 / 特效系统”拆成更细步骤
+7. 当前批次里已经出现“单任务 failed，但调度继续推进到后续任务”的真实行为
+   - 真实问题：`Implement Frontend Canvas Renderer and VFX` 失败后，系统继续启动了 `Implement Frontend UI Panels and Theme`
+   - 当前状态：`task 320667615200546822 = failed`，`task 320667615200546823 = running`
+   - 恢复提示：恢复时不要只盯 `running` 任务，也要同时检查本批次是否已有 `failed` 任务被留在后面，避免误判为“整批都正常推进”
+8. `Frontend Canvas Renderer and VFX` 的第二轮失败分析没有产出可解析的 JSON patch，工作流直接停在 `rework failed`
+   - 真实问题：第二个分析任务 `320678104559259648` 已完成，但 `ReworkStage` 记录 `解析修复方案失败: 未解析到有效 JSON patch`
+   - 当前结果：`project-status` 已变成 `status=failed`、`workflowStatus=failed`、`currentStage=rework`
+   - 影响：这次不是单纯执行器任务失败，而是返工阶段自身失去可继续自动推进的修复方案，导致整条工作流停机
+   - 恢复提示：后续所有失败分析任务都必须把“可解析 JSON patch”作为硬约束校验项，不能只看分析任务是否 `completed`
+9. 当前系统虽然已有 compact retry，但对“任务设计过大”的预防还不够前置
+   - 已验证的有效策略：缩文件集合、缩任务描述、把大任务拆成文件级步骤、减少重试时携带的历史上下文
+   - 恢复提示：如果后续再次命中 token limit，不要只继续重试；优先进入失败分析，把任务拆成更小的 implementer 步骤
+
 ## 3. 执行策略与历史批次
 
 1. 以编译和测试结果为主线，不靠人工猜测“可能完成”
