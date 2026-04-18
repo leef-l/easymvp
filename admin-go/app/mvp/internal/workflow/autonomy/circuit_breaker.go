@@ -35,6 +35,7 @@ type CircuitBreaker struct {
 	config         *CircuitBreakerConfig
 	decisionRepo   *repo.AutonomyDecisionRepo
 	domainTaskRepo *repo.DomainTaskRepo
+	handoffRepo    *repo.HandoffRecordRepo
 	stageRunRepo   *repo.StageRunRepo
 	acceptRunRepo  *repo.AcceptRunRepo
 }
@@ -48,6 +49,7 @@ func NewCircuitBreaker(decisionRepo *repo.AutonomyDecisionRepo, config *CircuitB
 		config:         config,
 		decisionRepo:   decisionRepo,
 		domainTaskRepo: repo.NewDomainTaskRepo(),
+		handoffRepo:    repo.NewHandoffRecordRepo(),
 		stageRunRepo:   repo.NewStageRunRepo(),
 		acceptRunRepo:  repo.NewAcceptRunRepo(),
 	}
@@ -189,11 +191,84 @@ func (cb *CircuitBreaker) currentBatchFailureRate(ctx context.Context, workflowR
 
 // countReworkRounds 统计 rework 阶段轮次。
 func (cb *CircuitBreaker) countReworkRounds(ctx context.Context, workflowRunID int64) int {
+	if cb.handoffRepo != nil {
+		handoffs, err := cb.handoffRepo.ListByWorkflowAndType(ctx, workflowRunID, "failure_escalation")
+		if err == nil {
+			if rounds := cb.countMaxChainReworkRounds(ctx, handoffs); rounds > 0 {
+				return rounds
+			}
+		}
+	}
 	count, err := cb.stageRunRepo.CountByWorkflowAndType(ctx, workflowRunID, "rework")
 	if err != nil {
 		return 0
 	}
 	return count
+}
+
+func (cb *CircuitBreaker) countMaxChainReworkRounds(ctx context.Context, handoffs []g.Map) int {
+	chainCounts := countReworkRoundsByChainKey(handoffs, cb.loadTaskChainKeys(ctx, handoffs))
+	maxRounds := 0
+	for _, rounds := range chainCounts {
+		if rounds > maxRounds {
+			maxRounds = rounds
+		}
+	}
+	return maxRounds
+}
+
+func (cb *CircuitBreaker) loadTaskChainKeys(ctx context.Context, handoffs []g.Map) map[int64]int64 {
+	taskIDs := make([]int64, 0, len(handoffs))
+	seen := make(map[int64]struct{}, len(handoffs))
+	for _, record := range handoffs {
+		taskID := mapInt64(record, "from_task_id")
+		if taskID <= 0 {
+			continue
+		}
+		if _, exists := seen[taskID]; exists {
+			continue
+		}
+		seen[taskID] = struct{}{}
+		taskIDs = append(taskIDs, taskID)
+	}
+	if len(taskIDs) == 0 || cb.domainTaskRepo == nil {
+		return nil
+	}
+
+	records, err := cb.domainTaskRepo.ListByIDs(ctx, taskIDs, "id", "source_task_id", "root_task_id")
+	if err != nil {
+		return nil
+	}
+
+	result := make(map[int64]int64, len(records))
+	for _, record := range records {
+		taskID := mapInt64(record, "id")
+		if taskID <= 0 {
+			continue
+		}
+		rootTaskID := mapInt64(record, "root_task_id")
+		if rootTaskID <= 0 {
+			rootTaskID = taskID
+		}
+		result[taskID] = rootTaskID
+	}
+	return result
+}
+
+func countReworkRoundsByChainKey(handoffs []g.Map, chainKeys map[int64]int64) map[int64]int {
+	counts := make(map[int64]int, len(handoffs))
+	for _, record := range handoffs {
+		taskID := mapInt64(record, "from_task_id")
+		if taskID <= 0 {
+			continue
+		}
+		chainKey := taskID
+		if key, ok := chainKeys[taskID]; ok && key > 0 {
+			chainKey = key
+		}
+		counts[chainKey]++
+	}
+	return counts
 }
 
 // countAcceptRounds 统计验收不通过轮次。

@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -498,14 +499,17 @@ func (c *cWorkflow) TaskReplay(ctx context.Context, req *v1.WorkflowTaskReplayRe
 	handoffRecords, handoffErr := handoffRecordRepo.ListByWorkflowAndTask(ctx, workflowRunID, taskID)
 	if handoffErr == nil {
 		for _, record := range handoffRecords {
+			mode, createdTaskIDs := decodeTaskReplayHandoffPayload(g.NewVar(record["payload"]).String())
 			res.Handoffs = append(res.Handoffs, v1.TaskReplayHandoffItem{
-				ID:          snowflake.JsonInt64(g.NewVar(record["id"]).Int64()),
-				HandoffType: g.NewVar(record["handoff_type"]).String(),
-				FromTaskID:  snowflake.JsonInt64(g.NewVar(record["from_task_id"]).Int64()),
-				ToTaskID:    snowflake.JsonInt64(g.NewVar(record["to_task_id"]).Int64()),
-				Reason:      g.NewVar(record["reason"]).String(),
-				Payload:     g.NewVar(record["payload"]).String(),
-				CreatedAt:   normalizeDBUTCGTime(g.NewVar(record["created_at"]).GTime()),
+				ID:             snowflake.JsonInt64(g.NewVar(record["id"]).Int64()),
+				HandoffType:    g.NewVar(record["handoff_type"]).String(),
+				FromTaskID:     snowflake.JsonInt64(g.NewVar(record["from_task_id"]).Int64()),
+				ToTaskID:       snowflake.JsonInt64(g.NewVar(record["to_task_id"]).Int64()),
+				Mode:           mode,
+				CreatedTaskIDs: createdTaskIDs,
+				Reason:         g.NewVar(record["reason"]).String(),
+				Payload:        g.NewVar(record["payload"]).String(),
+				CreatedAt:      normalizeDBUTCGTime(g.NewVar(record["created_at"]).GTime()),
 			})
 		}
 	}
@@ -526,6 +530,29 @@ func mapToDBRecord(data g.Map) gdb.Record {
 		record[key] = g.NewVar(value)
 	}
 	return record
+}
+
+func decodeTaskReplayHandoffPayload(payload string) (string, []snowflake.JsonInt64) {
+	payload = strings.TrimSpace(payload)
+	if payload == "" || !json.Valid([]byte(payload)) {
+		return "", nil
+	}
+
+	var decoded struct {
+		Mode           string  `json:"mode"`
+		CreatedTaskIDs []int64 `json:"created_task_ids"`
+	}
+	if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
+		return "", nil
+	}
+	taskIDs := make([]snowflake.JsonInt64, 0, len(decoded.CreatedTaskIDs))
+	for _, taskID := range decoded.CreatedTaskIDs {
+		if taskID <= 0 {
+			continue
+		}
+		taskIDs = append(taskIDs, snowflake.JsonInt64(taskID))
+	}
+	return strings.TrimSpace(decoded.Mode), taskIDs
 }
 
 func buildTimelineEvent(record gdb.Record) v1.TimelineEvent {

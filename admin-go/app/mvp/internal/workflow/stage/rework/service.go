@@ -24,6 +24,7 @@ import (
 )
 
 var reworkJsonBlockRe = regexp.MustCompile("(?s)```json\\s*(\\{.*?\\})\\s*```")
+var reworkLocalVerificationPatternRe = regexp.MustCompile(`(?i)\b(?:npm|pnpm|yarn|node|go|cargo|mvn|gradle)\b[^\n。；;]*\b(?:build|test|lint|check|verify)\b[^\n。；;]*`)
 
 func marshalHandoffPayload(payload interface{}) string {
 	switch v := payload.(type) {
@@ -773,6 +774,54 @@ func sanitizeAffectedResources(resources []string) []string {
 	return result
 }
 
+func findExpandedTaskResources(existingResources []string, nextResources []string) []string {
+	allowed := make(map[string]struct{}, len(existingResources))
+	for _, resource := range existingResources {
+		resource = strings.TrimSpace(resource)
+		if resource == "" {
+			continue
+		}
+		allowed[resource] = struct{}{}
+	}
+
+	result := make([]string, 0, len(nextResources))
+	seen := make(map[string]struct{}, len(nextResources))
+	for _, resource := range nextResources {
+		resource = strings.TrimSpace(resource)
+		if resource == "" {
+			continue
+		}
+		if _, exists := seen[resource]; exists {
+			continue
+		}
+		seen[resource] = struct{}{}
+		if _, ok := allowed[resource]; !ok {
+			result = append(result, resource)
+		}
+	}
+	return result
+}
+
+func sanitizeReworkDescription(description string) string {
+	description = strings.TrimSpace(description)
+	if description == "" {
+		return ""
+	}
+	sanitized := reworkLocalVerificationPatternRe.ReplaceAllString(description, "")
+	sanitized = strings.ReplaceAll(sanitized, "每阶段完成后运行  验证", "")
+	sanitized = strings.ReplaceAll(sanitized, "每个阶段完成后运行  验证", "")
+	lines := strings.Split(sanitized, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
+}
+
 func sanitizeDependsOn(dependsOn []string) []string {
 	seen := make(map[string]struct{}, len(dependsOn))
 	result := make([]string, 0, len(dependsOn))
@@ -844,13 +893,16 @@ func (s *Service) applyTaskPatch(ctx context.Context, failedTaskID int64, failed
 		"started_at": nil,
 		"updated_at": gtime.Now(),
 	}
-	if strings.TrimSpace(patch.Description) != "" {
-		updateData["description"] = patch.Description
+	if sanitizedDesc := sanitizeReworkDescription(patch.Description); sanitizedDesc != "" {
+		updateData["description"] = sanitizedDesc
 	}
 	if len(patch.AffectedResources) > 0 {
 		currentResources, decodeErr := decodeAffectedResourcesJSON(failedTask["affected_resources"].String())
 		if decodeErr != nil {
 			return false, fmt.Errorf("解析原任务 affected_resources 失败: %w", decodeErr)
+		}
+		if expanded := findExpandedTaskResources(currentResources, patch.AffectedResources); len(expanded) > 0 {
+			return false, fmt.Errorf("返工 patch 不允许扩容 affected_resources: %s", strings.Join(expanded, ", "))
 		}
 		if introduced := resourcepath.FindNewlyIntroducedGovernedRootFiles(currentResources, patch.AffectedResources); len(introduced) > 0 {
 			return false, fmt.Errorf("返工 patch 不允许新增受治理仓库文件: %s", strings.Join(introduced, ", "))
@@ -909,6 +961,9 @@ func (s *Service) applySplitPlan(ctx context.Context, analysisTask gdb.Record, f
 		return false, nil, fmt.Errorf("解析原任务 affected_resources 失败: %w", decodeErr)
 	}
 	for _, task := range plan.Tasks {
+		if expanded := findExpandedTaskResources(currentResources, task.AffectedResources); len(expanded) > 0 {
+			return false, nil, fmt.Errorf("返工拆分任务 %q 不允许扩容 affected_resources: %s", task.Name, strings.Join(expanded, ", "))
+		}
 		if introduced := resourcepath.FindNewlyIntroducedGovernedRootFiles(currentResources, task.AffectedResources); len(introduced) > 0 {
 			return false, nil, fmt.Errorf("返工拆分任务 %q 不允许新增受治理仓库文件: %s", task.Name, strings.Join(introduced, ", "))
 		}
@@ -986,7 +1041,7 @@ func (s *Service) applySplitPlan(ctx context.Context, analysisTask gdb.Record, f
 				"root_task_id":       rootTaskID,
 				"task_kind":          failedTask["task_kind"].String(),
 				"name":               taskName,
-				"description":        firstNonEmpty(task.Description, failedTask["description"].String()),
+				"description":        firstNonEmpty(sanitizeReworkDescription(task.Description), failedTask["description"].String()),
 				"role_type":          roleType,
 				"role_level":         roleLevel,
 				"execution_mode":     failedTask["execution_mode"].String(),
@@ -1034,6 +1089,29 @@ func (s *Service) applySplitPlan(ctx context.Context, analysisTask gdb.Record, f
 					"updated_at":          now,
 				}).Update(); upErr != nil {
 				return fmt.Errorf("更新拆分任务依赖失败: %w", upErr)
+			}
+		}
+
+		for idx, taskID := range createdTaskIDs {
+			payloadJSON := marshalHandoffPayload(map[string]interface{}{
+				"mode":             "rework_split",
+				"source_task_id":   failedTaskID,
+				"child_task_id":    taskID,
+				"child_task_name":  createdTaskNames[idx],
+				"source_analysis":  analysisTask["id"].Int64(),
+				"split_task_index": idx + 1,
+			})
+			if insErr := s.handoffRepo.CreateInTx(ctx, tx, g.Map{
+				"id":              int64(snowflake.Generate()),
+				"workflow_run_id": failedTask["workflow_run_id"].Int64(),
+				"from_task_id":    failedTaskID,
+				"to_task_id":      taskID,
+				"handoff_type":    "rework_split",
+				"reason":          plan.Reason,
+				"payload":         payloadJSON,
+				"created_at":      now,
+			}); insErr != nil {
+				return fmt.Errorf("写入拆分关系失败: %w", insErr)
 			}
 		}
 
@@ -1115,11 +1193,16 @@ func guardSplitPlanBudget(ctx context.Context, tx gdb.TX, failedTaskID, workflow
 }
 
 func countTasksByWorkflowAndRootTaskTx(ctx context.Context, tx gdb.TX, workflowRunID, rootTaskID int64) (int, error) {
+	whereExpr, whereArgs := buildRootTaskBudgetWhere(rootTaskID)
 	return tx.Model("mvp_domain_task").Ctx(ctx).
 		Where("workflow_run_id", workflowRunID).
-		Where("root_task_id", rootTaskID).
+		Where(whereExpr, whereArgs...).
 		WhereNull("deleted_at").
 		Count()
+}
+
+func buildRootTaskBudgetWhere(rootTaskID int64) (string, []interface{}) {
+	return "(id = ? OR root_task_id = ?)", []interface{}{rootTaskID, rootTaskID}
 }
 
 func computeTaskSplitDepthTx(ctx context.Context, tx gdb.TX, taskID int64) (int, error) {

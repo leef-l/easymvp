@@ -692,13 +692,15 @@ type TaskReplayLogItem struct {
 
 // TaskReplayHandoffItem 任务交接条目
 type TaskReplayHandoffItem struct {
-	ID          snowflake.JsonInt64 `json:"id"`
-	HandoffType string              `json:"handoffType"`
-	FromTaskID  snowflake.JsonInt64 `json:"fromTaskID,omitempty"`
-	ToTaskID    snowflake.JsonInt64 `json:"toTaskID,omitempty"`
-	Reason      string              `json:"reason,omitempty"`
-	Payload     string              `json:"payload,omitempty"`
-	CreatedAt   *gtime.Time         `json:"createdAt,omitempty"`
+	ID             snowflake.JsonInt64   `json:"id"`
+	HandoffType    string                `json:"handoffType"`
+	FromTaskID     snowflake.JsonInt64   `json:"fromTaskID,omitempty"`
+	ToTaskID       snowflake.JsonInt64   `json:"toTaskID,omitempty"`
+	Mode           string                `json:"mode,omitempty"`
+	CreatedTaskIDs []snowflake.JsonInt64 `json:"createdTaskIDs,omitempty"`
+	Reason         string                `json:"reason,omitempty"`
+	Payload        string                `json:"payload,omitempty"`
+	CreatedAt      *gtime.Time           `json:"createdAt,omitempty"`
 }
 
 // WorkflowTaskReplayRes 任务执行回放响应

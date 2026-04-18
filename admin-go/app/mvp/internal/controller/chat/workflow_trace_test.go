@@ -44,3 +44,24 @@ func TestDeliveryReviewRiskRank(t *testing.T) {
 		t.Fatalf("unexpected rank for unknown risk: %d", deliveryReviewRiskRank("unknown"))
 	}
 }
+
+func TestDecodeTaskReplayHandoffPayloadParsesSplitChildren(t *testing.T) {
+	t.Parallel()
+
+	mode, taskIDs := decodeTaskReplayHandoffPayload(`{"mode":"split_tasks","created_task_ids":[101,102,0]}`)
+	if mode != "split_tasks" {
+		t.Fatalf("unexpected mode: %q", mode)
+	}
+	if len(taskIDs) != 2 || int64(taskIDs[0]) != 101 || int64(taskIDs[1]) != 102 {
+		t.Fatalf("unexpected task ids: %+v", taskIDs)
+	}
+}
+
+func TestDecodeTaskReplayHandoffPayloadIgnoresInvalidJSON(t *testing.T) {
+	t.Parallel()
+
+	mode, taskIDs := decodeTaskReplayHandoffPayload("not-json")
+	if mode != "" || len(taskIDs) != 0 {
+		t.Fatalf("expected empty payload decode, got mode=%q ids=%+v", mode, taskIDs)
+	}
+}

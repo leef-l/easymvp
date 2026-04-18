@@ -227,6 +227,45 @@ func TestNormalizeReworkSplitLimits(t *testing.T) {
 	}
 }
 
+func TestFindExpandedTaskResources(t *testing.T) {
+	t.Parallel()
+
+	got := findExpandedTaskResources(
+		[]string{"frontend/src/a.ts", "frontend/src/b.ts"},
+		[]string{"frontend/src/b.ts", "frontend/src/c.ts", "frontend/src/c.ts"},
+	)
+	if len(got) != 1 || got[0] != "frontend/src/c.ts" {
+		t.Fatalf("findExpandedTaskResources() = %+v", got)
+	}
+}
+
+func TestSanitizeReworkDescriptionRemovesLocalBuildInstructions(t *testing.T) {
+	t.Parallel()
+
+	got := sanitizeReworkDescription("保持现有面板逻辑。\n每阶段完成后运行 npm run build 验证。\n补齐主题切换状态。")
+	if strings.Contains(strings.ToLower(got), "npm run build") {
+		t.Fatalf("sanitizeReworkDescription() still contains local build command: %q", got)
+	}
+	if !strings.Contains(got, "保持现有面板逻辑") || !strings.Contains(got, "补齐主题切换状态") {
+		t.Fatalf("sanitizeReworkDescription() removed too much: %q", got)
+	}
+}
+
+func TestBuildRootTaskBudgetWhereIncludesRootTaskItself(t *testing.T) {
+	t.Parallel()
+
+	expr, args := buildRootTaskBudgetWhere(42)
+	if expr != "(id = ? OR root_task_id = ?)" {
+		t.Fatalf("unexpected expr: %q", expr)
+	}
+	if len(args) != 2 {
+		t.Fatalf("unexpected args length: %d", len(args))
+	}
+	if args[0] != int64(42) || args[1] != int64(42) {
+		t.Fatalf("unexpected args: %+v", args)
+	}
+}
+
 func TestFindNextEscalatedTaskSelectionOrder(t *testing.T) {
 	t.Parallel()
 

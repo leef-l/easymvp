@@ -38,7 +38,7 @@ func (c *cWorkflow) ExecutionStatus(ctx context.Context, req *v1.WorkflowExecuti
 	wfRunID := wfRun["id"].Int64()
 	res.WorkflowRunID = snowflake.JsonInt64(wfRunID)
 
-	stageRun, stageErr := stageRunRepo.GetLatestByWorkflowAndType(ctx, wfRunID, "execute")
+	stageRun, stageErr := resolveExecutionStageRun(ctx, stageRunRepo, wfRun)
 	if stageErr != nil {
 		g.Log().Warningf(ctx, "[ExecutionStatus] 查询 stage_run 失败: wfRun=%d err=%v", wfRunID, stageErr)
 	}
@@ -112,6 +112,41 @@ func (c *cWorkflow) ExecutionStatus(ctx context.Context, req *v1.WorkflowExecuti
 	}
 
 	return res, nil
+}
+
+func resolveExecutionStageRun(ctx context.Context, stageRunRepo *repo.StageRunRepo, wfRun gdb.Record) (gdb.Record, error) {
+	if stageRunRepo == nil || wfRun == nil || wfRun.IsEmpty() {
+		return nil, nil
+	}
+	if wfRun["current_stage"].String() != "execute" {
+		return nil, nil
+	}
+
+	var currentStageRun gdb.Record
+	currentStageRunID := wfRun["current_stage_run_id"].Int64()
+	if currentStageRunID > 0 {
+		record, err := stageRunRepo.GetByIDMap(ctx, currentStageRunID, "id", "stage_type", "status")
+		if err != nil {
+			return nil, err
+		}
+		currentStageRun = mapToDBRecord(record)
+	}
+
+	latestExecute, err := stageRunRepo.GetLatestByWorkflowAndType(ctx, wfRun["id"].Int64(), "execute", "id", "stage_type", "status")
+	if err != nil {
+		return nil, err
+	}
+	return selectExecutionStageRunRecord(wfRun, currentStageRun, latestExecute), nil
+}
+
+func selectExecutionStageRunRecord(wfRun gdb.Record, currentStageRun gdb.Record, latestExecute gdb.Record) gdb.Record {
+	if wfRun == nil || wfRun.IsEmpty() || wfRun["current_stage"].String() != "execute" {
+		return nil
+	}
+	if currentStageRun != nil && !currentStageRun.IsEmpty() && currentStageRun["stage_type"].String() == "execute" {
+		return currentStageRun
+	}
+	return latestExecute
 }
 
 // DomainTasks 领域任务列表

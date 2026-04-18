@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 )
 
@@ -17,6 +18,12 @@ func (r *HandoffRecordRepo) table() string { return "mvp_handoff_record" }
 // Create 创建交接记录。
 func (r *HandoffRecordRepo) Create(ctx context.Context, data g.Map) error {
 	_, err := g.DB().Model(r.table()).Ctx(ctx).Insert(data)
+	return err
+}
+
+// CreateInTx 在事务中创建交接记录。
+func (r *HandoffRecordRepo) CreateInTx(ctx context.Context, tx gdb.TX, data g.Map) error {
+	_, err := tx.Model(r.table()).Ctx(ctx).Insert(data)
 	return err
 }
 
