@@ -12,6 +12,7 @@
     "dev:renderer": "vite",
     "dev:electron": "wait-on tcp:5173 file:dist-electron/src/main/main.js file:dist-electron/src/preload/preload.js && electron .",
     "build:core": "node ./scripts/build-core.mjs",
+    "verify:package": "node ./scripts/verify-package.mjs",
     "typecheck": "tsc -p tsconfig.node.json && tsc -p tsconfig.json --noEmit",
     "build": "tsc -p tsconfig.node.json && vite build && tsc -p tsconfig.json",
     "preview": "vite preview",

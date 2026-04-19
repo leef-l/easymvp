@@ -46,6 +46,25 @@ jobs:
           path: /tmp/easymvp-core
           if-no-files-found: error
 
+  core-release-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/core/go.mod
+          cache-dependency-path: apps/core/go.sum
+
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Validate apps/core release flow
+        run: |
+          chmod +x scripts/verify-apps-core-release.sh
+          ./scripts/verify-apps-core-release.sh
+
   desktop-build:
     runs-on: ubuntu-latest
     steps:
@@ -80,3 +99,36 @@ jobs:
           name: easymvp-desktop-web-dist
           path: apps/desktop/dist/**
           if-no-files-found: error
+
+  desktop-package-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/core/go.mod
+          cache-dependency-path: apps/core/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+
+      - name: Install apps/desktop dependencies
+        run: |
+          cd apps/desktop
+          pnpm install --frozen-lockfile
+
+      - name: Package apps/desktop directory build
+        run: |
+          cd apps/desktop
+          pnpm run package:dir
+
+      - name: Verify packaged apps/desktop contents
+        run: |
+          cd apps/desktop
+          pnpm run verify:package
