@@ -49,6 +49,8 @@ type GetReplayDetailRes struct {
 	ReplayKind         string               `json:"replay_kind"`
 	Title              string               `json:"title"`
 	Summary            string               `json:"summary,omitempty"`
+	DomainTaskID       string               `json:"domain_task_id,omitempty"`
+	CompiledTaskID     string               `json:"compiled_task_id,omitempty"`
 	SourceObjectKind   string               `json:"source_object_kind,omitempty"`
 	SourceObjectID     string               `json:"source_object_id,omitempty"`
 	EventID            string               `json:"event_id,omitempty"`
@@ -113,6 +115,8 @@ type ReplayArtifactSummary struct {
 }
 
 type ReplayEntryPointItem struct {
+	DomainTaskID   string `json:"domain_task_id,omitempty"`
+	CompiledTaskID string `json:"compiled_task_id,omitempty"`
 	ReplayID   string `json:"replay_id"`
 	ReplayType string `json:"replay_type"`
 	Summary    string `json:"summary,omitempty"`
@@ -122,6 +126,8 @@ type ReplayEntryPointItem struct {
 
 type ReplayTimelineItem struct {
 	ReplayID         string `json:"replay_id"`
+	DomainTaskID     string `json:"domain_task_id,omitempty"`
+	CompiledTaskID   string `json:"compiled_task_id,omitempty"`
 	SeqNo            int    `json:"seq_no"`
 	ReplayType       string `json:"replay_type"`
 	Title            string `json:"title"`

@@ -509,6 +509,10 @@ export function ExecutionPage() {
                       <p>
                         {item.created_at} · {item.file_path || item.replay_id}
                       </p>
+                      <p>
+                        {item.domain_task_id ? `domain ${item.domain_task_id}` : "domain n/a"} ·{" "}
+                        {item.compiled_task_id ? `compiled ${item.compiled_task_id}` : "compiled n/a"}
+                      </p>
                     </button>
                   ))}
                   {replaySummaryState.data.entry_points.length === 0 ? (
@@ -544,6 +548,10 @@ export function ExecutionPage() {
                     </p>
                     <p>
                       preview {item.preview_available ? "ready" : "unavailable"} · raw {item.raw_target || "n/a"}
+                    </p>
+                    <p>
+                      {item.domain_task_id ? `domain ${item.domain_task_id}` : "domain n/a"} ·{" "}
+                      {item.compiled_task_id ? `compiled ${item.compiled_task_id}` : "compiled n/a"}
                     </p>
                   </button>
                 ))}
@@ -599,6 +607,9 @@ export function ExecutionPage() {
                     </div>
                     <p>{replayDetailState.data.summary || replayDetailState.data.status}</p>
                     <p>
+                      domain {replayDetailState.data.domain_task_id || "n/a"} · compiled {replayDetailState.data.compiled_task_id || "n/a"}
+                    </p>
+                    <p>
                       source {replayDetailState.data.source_object_kind || "n/a"} · object {replayDetailState.data.source_object_id || "n/a"}
                     </p>
                     <p>
@@ -607,16 +618,17 @@ export function ExecutionPage() {
                     </p>
                     <p>raw target {replayDetailState.data.raw_preview.raw_target || "n/a"}</p>
                     <div className="action-row">
-                      {replayDetailState.data.source_object_id ? (
+                      {replayDetailState.data.domain_task_id || replayDetailState.data.source_object_id ? (
                         <button
                           className="secondary-button"
                           onClick={() =>
                             navigate(
                               buildRoute("/acceptance", {
                                 task:
-                                  replayDetailState.data!.source_object_kind === "domain_task"
+                                  replayDetailState.data!.domain_task_id ||
+                                  (replayDetailState.data!.source_object_kind === "domain_task"
                                     ? replayDetailState.data!.source_object_id
-                                    : selectedBinding?.task_id || undefined,
+                                    : selectedBinding?.task_id || undefined),
                               }),
                             )
                           }
@@ -624,6 +636,9 @@ export function ExecutionPage() {
                           Open Acceptance
                         </button>
                       ) : null}
+                      <button className="secondary-button" onClick={() => navigate(routes.plan)}>
+                        Open Plan
+                      </button>
                       <button className="secondary-button" onClick={() => navigate(routes.diagnostics)}>
                         Open Diagnostics
                       </button>

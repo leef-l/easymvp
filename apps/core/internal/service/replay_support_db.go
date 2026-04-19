@@ -97,6 +97,8 @@ func (s *sReplay) GetReplayTimeline(ctx context.Context, projectID string, runID
 	for _, item := range items {
 		timeline = append(timeline, replayv1.ReplayTimelineItem{
 			ReplayID:         item.ReplayID,
+			DomainTaskID:     item.DomainTaskID,
+			CompiledTaskID:   item.CompiledTaskID,
 			SeqNo:            item.SeqNo,
 			ReplayType:       item.ReplayKind,
 			Title:            item.Title,
@@ -131,6 +133,8 @@ func (s *sReplay) GetReplayDetail(ctx context.Context, projectID string, runID s
 		ReplayKind:       item.ReplayKind,
 		Title:            item.Title,
 		Summary:          item.Summary,
+		DomainTaskID:     item.DomainTaskID,
+		CompiledTaskID:   item.CompiledTaskID,
 		SourceObjectKind: item.SourceObjectKind,
 		SourceObjectID:   item.SourceObjectID,
 		EventID:          item.EventID,
@@ -390,6 +394,8 @@ func listReplayEntryPoints(ctx context.Context, projectID string, runID string, 
 	items := make([]replayv1.ReplayEntryPointItem, 0, len(rows))
 	for _, item := range rows {
 		items = append(items, replayv1.ReplayEntryPointItem{
+			DomainTaskID:   item.DomainTaskID,
+			CompiledTaskID: item.CompiledTaskID,
 			ReplayID:   item.ReplayID,
 			ReplayType: item.ReplayKind,
 			Summary:    item.Summary,
