@@ -7,7 +7,7 @@ import (
 	"github.com/leef-l/easymvp/apps/core/internal/model/entity"
 )
 
-func TestAcceptanceCompletionVerdictStopsAtManualCheckpoint(t *testing.T) {
+func TestAcceptanceCompletionVerdictStopsAtRuntimeEscalation(t *testing.T) {
 	t.Parallel()
 
 	data := &acceptanceAggregate{
@@ -19,21 +19,26 @@ func TestAcceptanceCompletionVerdictStopsAtManualCheckpoint(t *testing.T) {
 			CreatedAt:             "2026-04-20 10:00:00",
 			ManualReleaseRequired: 0,
 		},
-		Issues: []entity.AcceptanceIssues{
+		RunBindings: []entity.BrainRunBindings{
 			{
-				Id:       "issue_1",
-				Blocking: 1,
-				Summary:  "human review is still required",
+				Id:         "bind_1",
+				TaskId:     "task_1",
+				BrainRunId: "run_1",
+				RunStatus:  "run_failed",
+				UpdatedAt:  "2026-04-20 10:04:00",
 			},
 		},
 	}
 
 	got := buildCompletionVerdictView(data)
 	if got.Completed {
-		t.Fatalf("completion verdict should not complete when manual review is required: %#v", got)
+		t.Fatalf("completion verdict should not complete when runtime escalation exists: %#v", got)
 	}
 	if got.Decision != "manual_checkpoint" {
 		t.Fatalf("unexpected decision: got %s want %s", got.Decision, "manual_checkpoint")
+	}
+	if got.NextAction != "resolve_runtime_escalation" {
+		t.Fatalf("unexpected next action: got %s want %s", got.NextAction, "resolve_runtime_escalation")
 	}
 	if got.FinalStatus != "accepting" {
 		t.Fatalf("unexpected final status: got %s want %s", got.FinalStatus, "accepting")
