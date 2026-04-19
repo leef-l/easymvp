@@ -53,8 +53,8 @@ export function AppRouter() {
           <Route path="/workspace" element={<WorkspacePage />} />
           <Route path="/plan" element={<PlanPage />} />
           <Route path="/repair-draft" element={<RepairDraftPage />} />
-          <Route path="/execution" element={<ExecutionPage />} />
-          <Route path="/replay" element={<ExecutionPage />} />
+          <Route path="/execution" element={<ExecutionPage mode="execution" />} />
+          <Route path="/replay" element={<ExecutionPage mode="replay" />} />
           <Route path="/acceptance" element={<AcceptancePage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/diagnostics" element={<DiagnosticsPage />} />

@@ -12,9 +12,23 @@ const executionViewLimits = {
   logLimit: 10,
 } as const;
 
-export function ExecutionPage() {
+type ExecutionPageMode = "execution" | "replay";
+
+export function ExecutionPage(props: { mode?: ExecutionPageMode }) {
+  const mode = props.mode ?? "execution";
   const navigate = useNavigate();
   const { projectId, searchParams, routes, buildRoute } = useProjectState();
+  const routeBase = mode === "replay" ? "/replay" : "/execution";
+  const pageTitle = mode === "replay" ? "Replay" : "Execution";
+  const pageSection = mode === "replay" ? "Replay" : "Execution";
+  const pageDescription =
+    mode === "replay"
+      ? `Replay timeline, artifact detail, and log segments for project ${projectId}.`
+      : `Runtime health, recent bindings, replay summary, and log segments for project ${projectId}.`;
+  const recoveryMessage =
+    mode === "replay"
+      ? "Replay can stay partially usable even when runtime detail or raw artifact fetches fail."
+      : "Execution can stay partially usable even when runtime detail or replay fetches fail.";
   const [refreshTick, setRefreshTick] = useState(0);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [expandedRawView, setExpandedRawView] = useState<ExpandedRawView | null>(null);
@@ -129,14 +143,14 @@ export function ExecutionPage() {
   }, [replayTimelineState.data, logSegmentsState.data, replayFromUrl, segmentFromUrl, selectedReplayId, selectedSegmentId]);
 
   useEffect(() => {
-    const next = buildRoute("/execution", {
+    const next = buildRoute(routeBase, {
       binding: selectedBindingId || undefined,
       replay: selectedReplayId || undefined,
       segment: selectedSegmentId || undefined,
       task: taskFromUrl || undefined,
     });
     window.history.replaceState(null, "", next);
-  }, [buildRoute, selectedBindingId, selectedReplayId, selectedSegmentId, taskFromUrl]);
+  }, [buildRoute, routeBase, selectedBindingId, selectedReplayId, selectedSegmentId, taskFromUrl]);
 
   const replayDetailState = useQuery(
     () =>
@@ -241,21 +255,19 @@ export function ExecutionPage() {
     <QueryPanel
       loading={state.loading}
       error={state.error}
-      title="Execution"
+      title={pageTitle}
       onRetry={() => setRefreshTick((value) => value + 1)}
       secondaryActionLabel="Open Diagnostics"
       onSecondaryAction={() => navigate(routes.diagnostics)}
-      recoveryMessage="Execution can stay partially usable even when runtime detail or replay fetches fail."
+      recoveryMessage={recoveryMessage}
     >
       {state.data ? (
         <section className="dashboard-page">
           <div className="dashboard-intro">
             <div>
-              <p className="placeholder-section">Execution</p>
+              <p className="placeholder-section">{pageSection}</p>
               <h3 className="placeholder-title">{state.data.runtime_health.status}</h3>
-              <p className="placeholder-description">
-                Runtime health, recent bindings, replay summary, and log segments for project {projectId}.
-              </p>
+              <p className="placeholder-description">{pageDescription}</p>
             </div>
             <div className="summary-stack">
               <span className="status-pill">{state.data.runtime_health.base_url}</span>

@@ -54,11 +54,6 @@ type runtimeCreateRunResponse struct {
 	Status      string `json:"status"`
 }
 
-type runtimeExecutionStopResponse struct {
-	ExecutionID string `json:"execution_id"`
-	Status      string `json:"status"`
-}
-
 type runtimeResumeRunResponse struct {
 	RunID      string `json:"run_id"`
 	StoreRunID string `json:"store_run_id"`
@@ -148,14 +143,6 @@ func runtimeCreateRun(ctx context.Context, client *http.Client, baseURL string, 
 	if err != nil {
 		return nil, gerror.Wrap(err, "marshal runtime create request failed")
 	}
-	primaryPath := "/v1/executions"
-	primaryRes, primaryErr := runtimeCreateRunAtPath(ctx, client, baseURL, primaryPath, payload)
-	if primaryErr == nil {
-		return primaryRes, nil
-	}
-	if !isRuntimeEndpointFallbackError(primaryErr) {
-		return nil, primaryErr
-	}
 	return runtimeCreateRunAtPath(ctx, client, baseURL, "/v1/runs", payload)
 }
 
@@ -163,13 +150,6 @@ func runtimeGetRun(ctx context.Context, client *http.Client, baseURL, runID stri
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
 		return nil, gerror.New("run id is required")
-	}
-	primaryRes, primaryErr := runtimeGetRunAtPath(ctx, client, baseURL, "/v1/executions/"+runID, runID)
-	if primaryErr == nil {
-		return primaryRes, nil
-	}
-	if !isRuntimeEndpointFallbackError(primaryErr) {
-		return nil, primaryErr
 	}
 	return runtimeGetRunAtPath(ctx, client, baseURL, "/v1/runs/"+runID, runID)
 }
@@ -179,14 +159,7 @@ func runtimeCancelRun(ctx context.Context, client *http.Client, baseURL, runID s
 	if runID == "" {
 		return gerror.New("run id is required")
 	}
-	primaryErr := runtimeStopExecution(ctx, client, baseURL, runID)
-	if primaryErr == nil {
-		return nil
-	}
-	if !isRuntimeEndpointFallbackError(primaryErr) {
-		return primaryErr
-	}
-	return runtimeCancelRunLegacy(ctx, client, baseURL, runID)
+	return runtimeCancelRunAtPath(ctx, client, baseURL, runID)
 }
 
 func runtimeCreateRunAtPath(ctx context.Context, client *http.Client, baseURL, path string, payload []byte) (*runtimeCreateRunResponse, error) {
@@ -265,35 +238,7 @@ func runtimeGetRunAtPath(ctx context.Context, client *http.Client, baseURL, path
 	return &result, nil
 }
 
-func runtimeStopExecution(ctx context.Context, client *http.Client, baseURL, runID string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/executions/"+runID+"/stop", nil)
-	if err != nil {
-		return gerror.Wrap(err, "build runtime stop request failed")
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return gerror.Wrap(err, "runtime stop request failed")
-	}
-	defer resp.Body.Close()
-
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return gerror.Wrap(err, "read runtime stop response failed")
-	}
-	if resp.StatusCode >= 300 {
-		return runtimeEndpointError("runtime stop execution failed", "/v1/executions/{id}/stop", resp.StatusCode, raw)
-	}
-
-	var result runtimeExecutionStopResponse
-	if len(raw) > 0 {
-		if err = json.Unmarshal(raw, &result); err != nil {
-			return gerror.Wrap(err, "decode runtime stop response failed")
-		}
-	}
-	return nil
-}
-
-func runtimeCancelRunLegacy(ctx context.Context, client *http.Client, baseURL, runID string) error {
+func runtimeCancelRunAtPath(ctx context.Context, client *http.Client, baseURL, runID string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, baseURL+"/v1/runs/"+runID, nil)
 	if err != nil {
 		return gerror.Wrap(err, "build runtime cancel request failed")
@@ -313,14 +258,6 @@ func runtimeCancelRunLegacy(ctx context.Context, client *http.Client, baseURL, r
 
 func runtimeEndpointError(prefix, path string, statusCode int, body []byte) error {
 	return gerror.Newf("%s: path=%s status=%d body=%s", prefix, path, statusCode, strings.TrimSpace(string(body)))
-}
-
-func isRuntimeEndpointFallbackError(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "status=404") || strings.Contains(message, "status=405")
 }
 
 func runtimeResumeRun(ctx context.Context, runID string) (*runtimeResumeRunResponse, error) {

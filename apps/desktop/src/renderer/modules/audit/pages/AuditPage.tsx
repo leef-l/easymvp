@@ -42,7 +42,7 @@ export function AuditPage() {
       onRetry={() => window.location.reload()}
       secondaryActionLabel="Open Diagnostics"
       onSecondaryAction={() => window.location.assign(routes.diagnostics)}
-      recoveryMessage="Audit currently exposes a thin project log stream backed by persisted audit facts."
+      recoveryMessage="Audit exposes the persisted project log stream backed by current audit facts."
     >
       {state.data ? (
         <section className="dashboard-page">

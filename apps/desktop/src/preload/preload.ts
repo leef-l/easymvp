@@ -7,23 +7,12 @@ type DesktopRuntimeInfo = {
   launchMode: string;
   coreBaseUrl?: string;
   dataDirectory?: string;
-  startupDiagnostics?: unknown[];
-  startup_diagnostics?: unknown[];
-  recoveryIssues?: unknown[];
-  recovery_issues?: unknown[];
-  coreDiagnostics?: unknown[];
-  core_diagnostics?: unknown[];
   core?: {
     reachable: boolean;
     status: string;
     httpStatus: number;
     health?: Record<string, unknown>;
     error?: string;
-    startupDiagnostics?: unknown[];
-    startup_diagnostics?: unknown[];
-    recoveryIssues?: unknown[];
-    recovery_issues?: unknown[];
-    diagnostics?: unknown[];
   };
   startup?: {
     phase: "idle" | "probing" | "starting" | "ready" | "failed";

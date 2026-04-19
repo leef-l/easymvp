@@ -189,7 +189,7 @@ func buildProjectWorkspaceExplanationFallback(data *projectWorkspaceAggregate, a
 func buildFallbackWorkspaceExplanation(data *projectWorkspaceAggregate, actionInbox []projectsv1.ActionInboxItem) projectsv1.WorkspaceExplanation {
 	view := projectsv1.WorkspaceExplanation{
 		Headline: "Project status overview",
-		Summary:  "Workspace explanation is temporarily using local fallback summary.",
+		Summary:  "Workspace explanation is temporarily using a local summary.",
 	}
 	for _, item := range actionInbox {
 		view.TopBlockers = append(view.TopBlockers, item.Title)
@@ -230,7 +230,7 @@ func buildRuntimeLimitedWorkspaceExplanation(data *projectWorkspaceAggregate, mo
 		view.Summary = "The latest workspace explanation could not be generated because the runtime denied a required capability. Review the affected task and continue with manual follow-up."
 	case "unsupported":
 		view.Headline = "Workspace explanation limited by runtime capability"
-		view.Summary = "The latest workspace explanation could not be generated because the runtime reported an unsupported capability. Review the affected task and continue with fallback handling."
+		view.Summary = "The latest workspace explanation could not be generated because the runtime reported an unsupported capability. Review the affected task and continue with manual handling."
 	default:
 		return buildFallbackWorkspaceExplanation(data, nil)
 	}

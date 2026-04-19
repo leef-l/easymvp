@@ -195,13 +195,13 @@ export function RecoveryPage() {
           ) : (
             <article className="list-card recovery-issue-card">
               <div className="list-card-head">
-                <strong>No structured startup issue yet</strong>
+                <strong>No active startup issue</strong>
                 <span className="severity-badge severity-info">info</span>
               </div>
               <p>
-                This renderer build is ready to consume future startup
-                diagnostics. Once main/core exposes structured issue fields,
-                they will render here without changing the page contract.
+                The current startup snapshot did not report a structured issue.
+                Recovery stays available so you can still inspect health,
+                managed core state, and exported diagnostics from one page.
               </p>
               <p>
                 {runtimeState.data?.coreReachable

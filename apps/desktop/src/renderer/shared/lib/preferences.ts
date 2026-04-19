@@ -37,18 +37,35 @@ export type DesktopRuntimeInfo = {
   bridgeAvailable: boolean;
   source: "bridge-runtime" | "bridge-static" | "defaults";
   issue: string;
-  startupDiagnostics?: unknown[];
-  startup_diagnostics?: unknown[];
-  recoveryIssues?: unknown[];
-  recovery_issues?: unknown[];
-  coreDiagnostics?: unknown[];
-  core_diagnostics?: unknown[];
+  startup?: {
+    phase: "idle" | "probing" | "starting" | "ready" | "failed";
+    pending: boolean;
+    managed: boolean;
+    launchMode: string;
+    baseUrl: string;
+    startedAt: string;
+    updatedAt: string;
+    issue: {
+      code: string;
+      severity: "info" | "warning" | "error";
+      summary: string;
+      details: string[];
+      actions: string[];
+    } | null;
+    lastProbe: {
+      reachable: boolean;
+      status: string;
+      httpStatus: number;
+      health?: Record<string, unknown>;
+      error?: string;
+    } | null;
+  };
   core?: {
-    startupDiagnostics?: unknown[];
-    startup_diagnostics?: unknown[];
-    recoveryIssues?: unknown[];
-    recovery_issues?: unknown[];
-    diagnostics?: unknown[];
+    reachable: boolean;
+    status: string;
+    httpStatus: number;
+    health?: Record<string, unknown>;
+    error?: string;
   };
 };
 
@@ -129,6 +146,8 @@ function getDesktopRuntimeSeed(): DesktopRuntimeInfo {
     bridgeAvailable: Boolean(bridge),
     source: bridge ? "bridge-static" : "defaults",
     issue: bridge ? "" : "desktop bridge unavailable in renderer",
+    startup: undefined,
+    core: undefined,
   };
 }
 
@@ -218,31 +237,48 @@ export async function getDesktopRuntimeInfo(): Promise<DesktopRuntimeInfo> {
       bridgeAvailable: true,
       source: "bridge-runtime",
       issue: "",
-      startupDiagnostics: Array.isArray(runtimeInfo.startupDiagnostics)
-        ? runtimeInfo.startupDiagnostics
-        : Array.isArray(runtimeInfo.startup_diagnostics)
-          ? runtimeInfo.startup_diagnostics
-          : Array.isArray(runtimeInfo.core?.startupDiagnostics)
-            ? runtimeInfo.core.startupDiagnostics
-            : Array.isArray(runtimeInfo.core?.startup_diagnostics)
-              ? runtimeInfo.core.startup_diagnostics
-              : undefined,
-      recoveryIssues: Array.isArray(runtimeInfo.recoveryIssues)
-        ? runtimeInfo.recoveryIssues
-        : Array.isArray(runtimeInfo.recovery_issues)
-          ? runtimeInfo.recovery_issues
-          : Array.isArray(runtimeInfo.core?.recoveryIssues)
-            ? runtimeInfo.core.recoveryIssues
-            : Array.isArray(runtimeInfo.core?.recovery_issues)
-              ? runtimeInfo.core.recovery_issues
-              : undefined,
-      coreDiagnostics: Array.isArray(runtimeInfo.coreDiagnostics)
-        ? runtimeInfo.coreDiagnostics
-        : Array.isArray(runtimeInfo.core_diagnostics)
-          ? runtimeInfo.core_diagnostics
-          : Array.isArray(runtimeInfo.core?.diagnostics)
-            ? runtimeInfo.core.diagnostics
-            : undefined,
+      startup: runtimeInfo.startup
+        ? {
+            phase: runtimeInfo.startup.phase,
+            pending: Boolean(runtimeInfo.startup.pending),
+            managed: Boolean(runtimeInfo.startup.managed),
+            launchMode: runtimeInfo.startup.launchMode?.trim() || seed.launchMode,
+            baseUrl: normalizeBaseUrl(runtimeInfo.startup.baseUrl),
+            startedAt: runtimeInfo.startup.startedAt?.trim() || "",
+            updatedAt: runtimeInfo.startup.updatedAt?.trim() || "",
+            issue: runtimeInfo.startup.issue
+              ? {
+                  code: runtimeInfo.startup.issue.code?.trim() || "STARTUP_ISSUE",
+                  severity: runtimeInfo.startup.issue.severity,
+                  summary: runtimeInfo.startup.issue.summary?.trim() || "Startup issue",
+                  details: Array.isArray(runtimeInfo.startup.issue.details)
+                    ? runtimeInfo.startup.issue.details
+                    : [],
+                  actions: Array.isArray(runtimeInfo.startup.issue.actions)
+                    ? runtimeInfo.startup.issue.actions
+                    : [],
+                }
+              : null,
+            lastProbe: runtimeInfo.startup.lastProbe
+              ? {
+                  reachable: Boolean(runtimeInfo.startup.lastProbe.reachable),
+                  status: runtimeInfo.startup.lastProbe.status?.trim() || seed.coreStatus,
+                  httpStatus: Number(runtimeInfo.startup.lastProbe.httpStatus || 0),
+                  health: runtimeInfo.startup.lastProbe.health,
+                  error: runtimeInfo.startup.lastProbe.error?.trim() || "",
+                }
+              : null,
+          }
+        : undefined,
+      core: runtimeInfo.core
+        ? {
+            reachable: Boolean(runtimeInfo.core.reachable),
+            status: runtimeInfo.core.status?.trim() || seed.coreStatus,
+            httpStatus: Number(runtimeInfo.core.httpStatus || 0),
+            health: runtimeInfo.core.health,
+            error: runtimeInfo.core.error?.trim() || "",
+          }
+        : undefined,
     };
   } catch (error) {
     return {
@@ -570,29 +606,24 @@ function inferRuntimeMode(
 }
 
 function extractRuntimeDiagnostics(runtimeInfo: DesktopRuntimeInfo) {
-  const runtimeRecord = runtimeInfo as unknown as Record<string, unknown>;
-  const candidates = [
-    runtimeRecord.startupDiagnostics,
-    runtimeRecord.startup_diagnostics,
-    runtimeRecord.recoveryIssues,
-    runtimeRecord.recovery_issues,
-    runtimeRecord.coreDiagnostics,
-    runtimeRecord.core_diagnostics,
-  ];
-
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) {
-      return candidate;
-    }
-    if (
-      candidate &&
-      typeof candidate === "object" &&
-      Array.isArray((candidate as Record<string, unknown>).issues)
-    ) {
-      return (candidate as Record<string, unknown>).issues as unknown[];
-    }
+  if (!runtimeInfo.startup?.issue) {
+    return [];
   }
-  return [];
+  return [
+    {
+      code: runtimeInfo.startup.issue.code,
+      summary: runtimeInfo.startup.issue.summary,
+      detail: runtimeInfo.startup.issue.details.join(" "),
+      severity: runtimeInfo.startup.issue.severity,
+      source: "startup-diagnostic",
+      mode: runtimeInfo.startup.managed ? "managed" : "external",
+      evidence: runtimeInfo.startup.issue.details,
+      actions: runtimeInfo.startup.issue.actions.map((action) => ({
+        label: action,
+        description: action,
+      })),
+    },
+  ];
 }
 
 function normalizeExternalDiagnostic(

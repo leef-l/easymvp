@@ -271,7 +271,7 @@ export function WorkspacePage() {
                   primary={firstText(verificationResult?.decision, verificationResult?.status, "not ready")}
                   secondary={
                     verificationResult?.summary ||
-                    "Workspace is still falling back to production_status because no structured verification result is attached."
+                    "Workspace is currently using production_status because no structured verification result is attached."
                   }
                   pills={[
                     verificationResult?.completed !== undefined
@@ -291,7 +291,7 @@ export function WorkspacePage() {
                 <SummaryCard
                   title="Completion Verdict"
                   primary={firstText(completionVerdict?.decision, completionVerdict?.final_status, "not emitted")}
-                  secondary={firstText(completionVerdict?.summary, completionVerdict?.reason, "Workspace explanation is still the compatibility fallback.")}
+                  secondary={firstText(completionVerdict?.summary, completionVerdict?.reason, "Workspace explanation is currently using the latest available summary.")}
                   pills={[
                     completionVerdict?.completed !== undefined
                       ? `completed ${String(completionVerdict.completed)}`

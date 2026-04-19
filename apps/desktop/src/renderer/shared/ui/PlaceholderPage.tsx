@@ -22,7 +22,7 @@ export function PlaceholderPage(props: PlaceholderPageProps) {
         {bullets.map((item) => (
           <article key={item} className="placeholder-card">
             <h4>{item}</h4>
-            <p>Module contract defined in docs. UI implementation will attach live DTOs and event streams next.</p>
+            <p>Module contract is defined in docs and can be connected to live DTOs and event streams from this shell.</p>
           </article>
         ))}
       </div>

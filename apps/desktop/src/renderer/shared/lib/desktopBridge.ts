@@ -50,7 +50,7 @@ export async function selectDirectory(
     return {
       ok: false,
       unsupported: true,
-      message: `${label} selection is unavailable because the desktop bridge method is not wired yet.`,
+      message: `${label} selection is unavailable because the desktop bridge method is not available in this shell.`,
     };
   }
 
@@ -98,7 +98,7 @@ export async function openDesktopPath(
       ok: false,
       unsupported: true,
       path: normalized,
-      message: `${label} could not be opened because the desktop bridge openPath method is not wired yet.`,
+      message: `${label} could not be opened because the desktop bridge openPath method is not available in this shell.`,
     };
   }
 
@@ -142,7 +142,7 @@ export async function showDesktopItemInFolder(
       ok: false,
       unsupported: true,
       path: normalized,
-      message: `${label} could not be revealed because the desktop bridge showItemInFolder method is not wired yet.`,
+      message: `${label} could not be revealed because the desktop bridge showItemInFolder method is not available in this shell.`,
     };
   }
 

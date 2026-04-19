@@ -101,7 +101,7 @@ export function DiagnosticsPage() {
       onRetry={() => window.location.reload()}
       secondaryActionLabel="Open Settings"
       onSecondaryAction={() => window.location.assign(routes.settings)}
-      recoveryMessage="Diagnostics aggregates health endpoints first. Detailed audit and recovery history can be layered on later."
+      recoveryMessage="Diagnostics aggregates system health, runtime state, recovery signals, and exportable evidence from one entry point."
     >
       {systemState.data && runtimeState.data && diagnosticsState.data ? (
         <section className="dashboard-page">
@@ -308,7 +308,7 @@ export function DiagnosticsPage() {
                         </span>
                       </div>
                       <p>
-                        Renderer compatibility is in place. Future startup issue
+                        Renderer startup issue rendering is in place. Structured startup issue
                         arrays from main/core can render here without another
                         page refactor.
                       </p>

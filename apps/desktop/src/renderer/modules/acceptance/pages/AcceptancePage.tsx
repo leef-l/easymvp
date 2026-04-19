@@ -402,7 +402,7 @@ export function AcceptancePage() {
                   secondary={firstText(
                     completionVerdict?.summary,
                     completionVerdict?.reason,
-                    "Release gate remains the current fallback until completion verdict lands.",
+                    "Release gate is used when a structured completion verdict is not yet available.",
                   )}
                   pills={[
                     completionVerdict?.completed !== undefined ? `completed ${String(completionVerdict.completed)}` : undefined,
