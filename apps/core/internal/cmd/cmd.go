@@ -21,15 +21,23 @@ import (
 
 var (
 	Main = gcmd.Command{
-		Name:  "main",
-		Usage: "main",
-		Brief: "start http server",
+		Name:        "main",
+		Usage:       "main [--data-root=PATH] [--db-path=PATH] [--migration-path=PATH] [--brain-serve-base-url=URL] [--port=8000] [--safe-mode]",
+		Brief:       "start http server",
+		Description: "Start EasyMVP core service. Use --safe-mode to skip background workers and only expose recovery/diagnostic-safe APIs.",
 		Func: func(ctx context.Context, parser *gcmd.Parser) (err error) {
+			startup := service.ResolveStartupConfig(ctx, parser)
+			service.SetStartupConfig(startup)
+
 			if err = service.Bootstrap(ctx); err != nil {
 				return err
 			}
-			if err = service.Workers().Start(ctx); err != nil {
-				return err
+			if !startup.SafeMode {
+				if err = service.Workers().Start(ctx); err != nil {
+					return err
+				}
+			} else {
+				g.Log().Warning(ctx, "EasyMVP core started in safe-mode; background workers are disabled")
 			}
 			defer func() {
 				stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -38,6 +46,7 @@ var (
 			}()
 
 			s := g.Server()
+			s.SetAddr(startup.ServerAddress)
 			s.Group("/", func(group *ghttp.RouterGroup) {
 				group.Middleware(ghttp.MiddlewareHandlerResponse)
 				group.Bind(

@@ -27,13 +27,43 @@ func System() ISystem {
 }
 
 func (s *sSystem) Health(ctx context.Context) (res *v1.HealthRes, err error) {
-	_ = ctx
+	startup := CurrentStartupConfig(ctx)
+	workerStatus := Workers().Status()
+	runtimeStatus := "ok"
+	runtimeErr := Runtime().CheckHealth(ctx)
+	if runtimeErr != nil {
+		runtimeStatus = "degraded"
+	}
+
+	workerState := "stopped"
+	switch {
+	case startup.SafeMode:
+		workerState = "disabled-safe-mode"
+	case workerStatus.Started:
+		workerState = "running"
+	}
+
+	startupSnapshot := buildStartupSnapshot(ctx, startup, workerStatus, runtimeErr)
+	status := "ok"
+	if startupSnapshot != nil && startupSnapshot.Status != "" {
+		status = startupSnapshot.Status
+	}
 
 	return &v1.HealthRes{
-		Status:    "ok",
-		Service:   "easymvp-core",
-		Version:   "v3-bootstrap",
-		Timestamp: gtime.Now().Format("Y-m-d H:i:s"),
+		Status:            status,
+		Service:           "easymvp-core",
+		Version:           "v3-core",
+		Timestamp:         gtime.Now().Format("Y-m-d H:i:s"),
+		Mode:              StartupMode(ctx),
+		SafeMode:          startup.SafeMode,
+		WorkerStatus:      workerState,
+		RegisteredWorkers: workerStatus.Workers,
+		RuntimeStatus:     runtimeStatus,
+		ServerAddress:     startup.ServerAddress,
+		DataRoot:          startup.DataRoot,
+		DBPath:            startup.DBPath,
+		BrainServeBaseURL: startup.BrainServeBaseURL,
+		Startup:           startupSnapshot,
 	}, nil
 }
 

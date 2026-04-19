@@ -11,6 +11,12 @@ import (
 type IWorkerManager interface {
 	Start(ctx context.Context) error
 	Stop(ctx context.Context) error
+	Status() WorkerManagerStatus
+}
+
+type WorkerManagerStatus struct {
+	Started bool     `json:"started"`
+	Workers []string `json:"workers"`
 }
 
 type backgroundWorker interface {
@@ -103,6 +109,20 @@ func (m *sWorkerManager) Stop(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+func (m *sWorkerManager) Status() WorkerManagerStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	names := make([]string, 0, len(m.workers))
+	for _, worker := range m.workers {
+		names = append(names, worker.Name())
+	}
+	return WorkerManagerStatus{
+		Started: m.started,
+		Workers: names,
 	}
 }
 

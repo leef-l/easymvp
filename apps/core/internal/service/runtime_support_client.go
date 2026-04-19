@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
 
 	runtimev1 "github.com/leef-l/easymvp/apps/core/api/runtime/v1"
 	"github.com/leef-l/easymvp/apps/core/internal/dao"
@@ -109,7 +108,7 @@ func normalizeStartBrainRunCommand(req StartBrainRunCommand) (*normalizedStartBr
 }
 
 func runtimeBaseURL(ctx context.Context) (string, error) {
-	baseURL := strings.TrimRight(strings.TrimSpace(g.Cfg().MustGet(ctx, "easymvp.brainServeBaseURL", "http://127.0.0.1:7701").String()), "/")
+	baseURL := strings.TrimRight(strings.TrimSpace(CurrentStartupConfig(ctx).BrainServeBaseURL), "/")
 	if baseURL == "" {
 		return "", gerror.New("easymvp.brainServeBaseURL is empty")
 	}

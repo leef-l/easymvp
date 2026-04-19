@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	_ "modernc.org/sqlite"
@@ -28,9 +27,10 @@ type migrationFile struct {
 
 func Bootstrap(ctx context.Context) error {
 	var (
-		dataRoot      = g.Cfg().MustGet(ctx, "easymvp.dataRoot").String()
-		dbPath        = g.Cfg().MustGet(ctx, "easymvp.dbPath").String()
-		migrationPath = g.Cfg().MustGet(ctx, "easymvp.migrationPath").String()
+		startup       = CurrentStartupConfig(ctx)
+		dataRoot      = startup.DataRoot
+		dbPath        = startup.DBPath
+		migrationPath = startup.MigrationPath
 	)
 
 	if dataRoot == "" {
