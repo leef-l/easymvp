@@ -31,6 +31,8 @@ scripts\local-verify-apps-core-desktop.bat
 ```bash
 cd apps/core && go test ./...
 cd apps/desktop && pnpm run build
+cd apps/desktop && pnpm run package:dir
+cd apps/desktop && pnpm run verify:package
 ```
 
 ## CI 与打包
@@ -40,6 +42,7 @@ cd apps/desktop && pnpm run build
 - 桌面打包：`.github/workflows/desktop-package.yml`
 - Core 本地健康校验：`./scripts/verify-core-health.sh`
 - 桌面本地打包：`cd apps/desktop && pnpm run package`
+- 桌面打包产物 smoke：`cd apps/desktop && pnpm run verify:package`
 - 打包前会自动编译 `apps/core` 并把二进制带入安装包资源目录
 
 ## 文档入口

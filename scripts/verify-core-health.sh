@@ -33,7 +33,6 @@ echo "== Build apps/core smoke binary =="
 echo
 echo "== Run apps/core smoke process =="
 "$BIN_PATH" \
-  --safe-mode \
   --port "$HOST_PORT" \
   --data-root "$DATA_ROOT" \
   --db-path "$DB_PATH" \
@@ -44,8 +43,30 @@ PID="$!"
 echo
 echo "== Probe healthz =="
 for _ in $(seq 1 30); do
-  if curl --fail --silent "$HEALTH_URL" >/dev/null; then
-    echo "healthz ok: $HEALTH_URL"
+  RESPONSE="$(curl --fail --silent "$HEALTH_URL" || true)"
+  if [ -n "$RESPONSE" ]; then
+    python3 - "$RESPONSE" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+data = payload.get("data") or payload
+status = (data.get("status") or "").strip().lower()
+startup = data.get("startup") or {}
+startup_status = (startup.get("status") or "").strip().lower()
+startup_ready = bool(startup.get("ready"))
+runtime_status = (data.get("runtime_status") or "").strip().lower()
+
+if status not in {"ok", "attention"}:
+    raise SystemExit(f"unexpected top-level health status: {status!r}")
+if startup_status not in {"ok", "attention"}:
+    raise SystemExit(f"unexpected startup status: {startup_status!r}")
+if not startup_ready:
+    raise SystemExit(f"startup is not ready: ready={startup_ready!r}")
+if runtime_status not in {"ok", "degraded"}:
+    raise SystemExit(f"unexpected runtime status: {runtime_status!r}")
+PY
+    echo "healthz structured smoke ok: $HEALTH_URL"
     exit 0
   fi
   sleep 1

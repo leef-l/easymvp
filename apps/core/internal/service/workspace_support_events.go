@@ -46,6 +46,21 @@ func streamWorkspaceProjectEvents(ctx context.Context, req *workspacev1.ProjectE
 	}
 
 	normalized := normalizeProjectEventsStreamReq(httpReq, req)
+	if normalized.ProjectID == "" {
+		return gerror.New("project id is required for workspace event stream")
+	}
+
+	cursor := workspaceEventCursor{}
+	if normalized.LastEventID != "" {
+		resolvedCursor, found, err := getWorkspaceEventCursor(ctx, normalized.ProjectID, normalized.LastEventID)
+		if err != nil {
+			return gerror.Wrap(err, "resolve workspace event cursor failed")
+		}
+		if found {
+			cursor = resolvedCursor
+		}
+	}
+
 	httpReq.Response.RawWriter().Header().Set("Content-Type", "text/event-stream")
 	httpReq.Response.RawWriter().Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	httpReq.Response.RawWriter().Header().Set("Connection", "keep-alive")
@@ -53,29 +68,18 @@ func streamWorkspaceProjectEvents(ctx context.Context, req *workspacev1.ProjectE
 	httpReq.Response.RawWriter().WriteHeader(http.StatusOK)
 
 	if err := writeWorkspaceSSEControlFrame(httpReq, "retry: 3000\n\n"); err != nil {
-		return nil
+		return gerror.Wrap(err, "write workspace retry frame failed")
 	}
 	flusher.Flush()
-
-	cursor := workspaceEventCursor{}
-	if normalized.LastEventID != "" {
-		resolvedCursor, found, err := getWorkspaceEventCursor(ctx, normalized.ProjectID, normalized.LastEventID)
-		if err != nil {
-			g.Log().Warningf(ctx, "workspace event stream cursor lookup failed: %v", err)
-			return nil
+	if normalized.LastEventID != "" && cursor.EventID == "" {
+		if err := writeWorkspaceSSEEvent(httpReq, "", "workspace.snapshot_invalidated", map[string]any{
+			"project_id":      normalized.ProjectID,
+			"last_event_id":   normalized.LastEventID,
+			"recommended_act": "refresh_project_workspace",
+		}); err != nil {
+			return gerror.Wrap(err, "write workspace snapshot invalidated event failed")
 		}
-		if found {
-			cursor = resolvedCursor
-		} else {
-			if err = writeWorkspaceSSEEvent(httpReq, "", "workspace.snapshot_invalidated", map[string]any{
-				"project_id":      normalized.ProjectID,
-				"last_event_id":   normalized.LastEventID,
-				"recommended_act": "refresh_project_workspace",
-			}); err != nil {
-				return nil
-			}
-			flusher.Flush()
-		}
+		flusher.Flush()
 	}
 
 	emitEvents := func() error {
@@ -85,7 +89,7 @@ func streamWorkspaceProjectEvents(ctx context.Context, req *workspacev1.ProjectE
 		}
 		for _, item := range events {
 			if err = writeWorkspaceSSEEvent(httpReq, item.Id, item.EventType, mapWorkspaceProjectStreamEvent(item)); err != nil {
-				return nil
+				return gerror.Wrap(err, "write workspace project event failed")
 			}
 			cursor = workspaceEventCursor{
 				EventID:   item.Id,
@@ -99,7 +103,7 @@ func streamWorkspaceProjectEvents(ctx context.Context, req *workspacev1.ProjectE
 	}
 
 	if err := emitEvents(); err != nil {
-		g.Log().Warningf(ctx, "workspace event stream initial emit failed: %v", err)
+		writeWorkspaceStreamErrorEvent(httpReq, flusher, normalized.ProjectID, err)
 		return nil
 	}
 
@@ -116,15 +120,28 @@ func streamWorkspaceProjectEvents(ctx context.Context, req *workspacev1.ProjectE
 			return nil
 		case <-pollTicker.C:
 			if err := emitEvents(); err != nil {
-				g.Log().Warningf(ctx, "workspace event stream polling failed: %v", err)
+				writeWorkspaceStreamErrorEvent(httpReq, flusher, normalized.ProjectID, err)
 				return nil
 			}
 		case <-keepaliveTicker.C:
 			if err := writeWorkspaceSSEControlFrame(httpReq, ": keepalive\n\n"); err != nil {
-				return nil
+				return gerror.Wrap(err, "write workspace keepalive frame failed")
 			}
 			flusher.Flush()
 		}
+	}
+}
+
+func writeWorkspaceStreamErrorEvent(httpReq *ghttp.Request, flusher http.Flusher, projectID string, err error) {
+	if err == nil {
+		return
+	}
+	g.Log().Warningf(httpReq.Request.Context(), "workspace event stream failed: %v", err)
+	if writeErr := writeWorkspaceSSEEvent(httpReq, "", "workspace.stream_error", map[string]any{
+		"project_id": projectID,
+		"error":      err.Error(),
+	}); writeErr == nil {
+		flusher.Flush()
 	}
 }
 

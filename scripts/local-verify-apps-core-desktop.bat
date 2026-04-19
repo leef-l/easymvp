@@ -44,14 +44,14 @@ if exist pnpm-lock.yaml (
 )
 
 call :run pnpm run build || goto :fail
+call :run pnpm run package:dir || goto :fail
+call :run pnpm run verify:package || goto :fail
 
 call :log
 call :log == 4. Validation Passed ==
 call :log apps\core go test passed
 call :log apps\desktop build passed
-call :log
-call :log Optional smoke test:
-call :log   cd /d "%ROOT%\apps\desktop" ^&^& pnpm run dev
+call :log apps\desktop packaged smoke passed
 exit /b 0
 
 :fail

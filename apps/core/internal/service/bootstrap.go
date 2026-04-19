@@ -226,17 +226,8 @@ func applyMigration(db *sql.DB, migration migrationFile) error {
 	}
 
 	if _, err = tx.Exec(migration.sqlBody); err != nil {
-		_, _ = tx.Exec(
-			`INSERT OR REPLACE INTO schema_migrations(version,name,checksum,applied_at,duration_ms,status,error_message) VALUES(?,?,?,?,?,?,?)`,
-			migration.version,
-			migration.name,
-			migration.checksum,
-			gtime.Now().String(),
-			0,
-			"failed",
-			err.Error(),
-		)
 		_ = tx.Rollback()
+		recordMigrationFailure(db, migration, err)
 		return gerror.Wrapf(err, "execute migration %d failed", migration.version)
 	}
 
@@ -251,6 +242,7 @@ func applyMigration(db *sql.DB, migration migrationFile) error {
 		"",
 	); err != nil {
 		_ = tx.Rollback()
+		recordMigrationFailure(db, migration, err)
 		return gerror.Wrapf(err, "record migration %d failed", migration.version)
 	}
 
@@ -258,6 +250,22 @@ func applyMigration(db *sql.DB, migration migrationFile) error {
 		return gerror.Wrapf(err, "commit migration %d failed", migration.version)
 	}
 	return nil
+}
+
+func recordMigrationFailure(db *sql.DB, migration migrationFile, migrationErr error) {
+	if db == nil || migrationErr == nil {
+		return
+	}
+	_, _ = db.Exec(
+		`INSERT OR REPLACE INTO schema_migrations(version,name,checksum,applied_at,duration_ms,status,error_message) VALUES(?,?,?,?,?,?,?)`,
+		migration.version,
+		migration.name,
+		migration.checksum,
+		gtime.Now().String(),
+		0,
+		"failed",
+		migrationErr.Error(),
+	)
 }
 
 func _unusedContext(_ context.Context) {

@@ -14,6 +14,7 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const SMOKE_TEST_TIMEOUT_MS = 15000;
 
 function resolveCoreBaseUrl() {
   return (process.env.EASYMVP_CORE_BASE_URL ?? "http://127.0.0.1:8000").replace(
@@ -24,6 +25,10 @@ function resolveCoreBaseUrl() {
 
 function resolveLaunchMode() {
   return process.argv.includes("--safe-mode") ? "safe-mode" : "normal";
+}
+
+function isSmokeTestMode() {
+  return process.argv.includes("--smoke-test");
 }
 
 function buildRelaunchArgs(mode: "normal" | "safe-mode") {
@@ -163,6 +168,7 @@ function registerDesktopBridgeHandlers() {
 }
 
 function createWindow() {
+  const smokeTestMode = isSmokeTestMode();
   const window = new BrowserWindow({
     width: 1440,
     height: 960,
@@ -170,12 +176,31 @@ function createWindow() {
     minHeight: 760,
     backgroundColor: "#f3f4f6",
     title: "EasyMVP V3",
+    show: !smokeTestMode,
     webPreferences: {
       preload: path.join(__dirname, "../preload/preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
+
+  if (smokeTestMode) {
+    const timeout = setTimeout(() => {
+      console.error("desktop smoke test timed out before renderer finished loading");
+      app.exit(1);
+    }, SMOKE_TEST_TIMEOUT_MS);
+
+    window.webContents.once("did-fail-load", (_event, errorCode, errorDescription) => {
+      clearTimeout(timeout);
+      console.error(`desktop smoke test failed to load renderer: ${errorCode} ${errorDescription}`);
+      app.exit(1);
+    });
+
+    window.webContents.once("did-finish-load", () => {
+      clearTimeout(timeout);
+      setTimeout(() => app.exit(0), 800);
+    });
+  }
 
   const devUrl = process.env.EASYMVP_DESKTOP_DEV_URL ?? "http://127.0.0.1:5173";
 

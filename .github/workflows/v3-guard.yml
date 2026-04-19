@@ -131,4 +131,4 @@ jobs:
       - name: Verify packaged apps/desktop contents
         run: |
           cd apps/desktop
-          pnpm run verify:package
+          xvfb-run -a pnpm run verify:package
