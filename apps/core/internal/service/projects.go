@@ -129,7 +129,7 @@ func (s *sProjects) GetProjectWorkspaceView(ctx context.Context, projectID strin
 		FaultSummary:         data.FaultSummary,
 		RepairPlanDraft:      data.RepairPlanDraft,
 	}
-	_ = persistProjectSnapshot(ctx, projectID, res)
+	persistProjectSnapshotAsync(projectID, res)
 	return res, nil
 }
 

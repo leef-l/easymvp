@@ -13,6 +13,8 @@ import (
 	"github.com/leef-l/easymvp/apps/core/internal/dao"
 )
 
+const snapshotFreshnessWindow = 45 * time.Second
+
 type workspaceSnapshotRefreshWorker struct {
 	interval  time.Duration
 	batchSize int
@@ -107,6 +109,14 @@ ON CONFLICT(project_id) DO UPDATE SET snapshot_json = excluded.snapshot_json, ge
 	)
 }
 
+func persistProjectSnapshotAsync(projectID string, snapshot any) {
+	go func() {
+		asyncCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = persistProjectSnapshot(asyncCtx, projectID, snapshot)
+	}()
+}
+
 func persistWorkspaceSnapshot(ctx context.Context, key string, snapshot any) error {
 	return persistSnapshot(
 		ctx,
@@ -116,6 +126,14 @@ ON CONFLICT(key) DO UPDATE SET snapshot_json = excluded.snapshot_json, generated
 		key,
 		snapshot,
 	)
+}
+
+func persistWorkspaceSnapshotAsync(key string, snapshot any) {
+	go func() {
+		asyncCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = persistWorkspaceSnapshot(asyncCtx, key, snapshot)
+	}()
 }
 
 func persistSnapshot(ctx context.Context, query string, primaryKey string, snapshot any) error {
@@ -146,10 +164,14 @@ func loadProjectWorkspaceSnapshot(ctx context.Context, projectID string) (*proje
 	}
 	defer closeFn()
 
-	row := db.QueryRowContext(ctx, `SELECT snapshot_json FROM `+dao.ProjectSnapshots.Table()+` WHERE project_id = ? LIMIT 1`, projectID)
+	row := db.QueryRowContext(ctx, `SELECT snapshot_json, generated_at FROM `+dao.ProjectSnapshots.Table()+` WHERE project_id = ? LIMIT 1`, projectID)
 	var raw string
-	if err = row.Scan(&raw); err != nil {
+	var generatedAt string
+	if err = row.Scan(&raw, &generatedAt); err != nil {
 		return nil, err
+	}
+	if !isSnapshotFresh(generatedAt) {
+		return nil, sql.ErrNoRows
 	}
 	var res projectsv1.ProjectWorkspaceViewRes
 	if err = json.Unmarshal([]byte(raw), &res); err != nil {
@@ -165,14 +187,30 @@ func loadWorkspaceHomeSnapshot(ctx context.Context, key string) (*workspacev1.Ho
 	}
 	defer closeFn()
 
-	row := db.QueryRowContext(ctx, `SELECT snapshot_json FROM `+dao.WorkspaceSnapshots.Table()+` WHERE key = ? LIMIT 1`, key)
+	row := db.QueryRowContext(ctx, `SELECT snapshot_json, generated_at FROM `+dao.WorkspaceSnapshots.Table()+` WHERE key = ? LIMIT 1`, key)
 	var raw string
-	if err = row.Scan(&raw); err != nil {
+	var generatedAt string
+	if err = row.Scan(&raw, &generatedAt); err != nil {
 		return nil, err
+	}
+	if !isSnapshotFresh(generatedAt) {
+		return nil, sql.ErrNoRows
 	}
 	var res workspacev1.HomeViewRes
 	if err = json.Unmarshal([]byte(raw), &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
+}
+
+func isSnapshotFresh(generatedAt string) bool {
+	generatedAt = generatedAt
+	if generatedAt == "" {
+		return false
+	}
+	parsed, err := time.Parse(time.RFC3339, generatedAt)
+	if err != nil {
+		return false
+	}
+	return time.Since(parsed) <= snapshotFreshnessWindow
 }

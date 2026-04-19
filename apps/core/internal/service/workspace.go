@@ -51,7 +51,7 @@ func (s *sWorkspace) GetHomeView(ctx context.Context) (res *workspacev1.HomeView
 		RecentActivity:   data.RecentActivity,
 		ReleaseReadiness: data.ReleaseReadiness,
 	}
-	_ = persistWorkspaceSnapshot(ctx, "home_view", res)
+	persistWorkspaceSnapshotAsync("home_view", res)
 	return res, nil
 }
 

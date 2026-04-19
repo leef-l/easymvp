@@ -67,6 +67,7 @@
 46. 已继续补 `BE-022` 与 execution 深链闭环：`plan_support_repair.go` 现已按 `failed_task_context / failure_reason / original_contracts / runtime_summary / artifact_refs` 做 repair draft 幂等复用，相同失败上下文不会重复生成新草稿或重复调领域脑；桌面端 `ExecutionPage` 已接入相关 diagnostics 列表、runtime event payload pretty-json，以及从 replay/detail/diagnostics 跳 acceptance / diagnostics 的深链；`go test ./internal/service/... ./internal/controller/... ./api/...` 与 `cd apps/desktop && npm run build` 已通过
 47. 已继续补 `Acceptance -> Repair` 页面联动：`AcceptancePage` 现已接入 related diagnostics、repair context 卡片，并从 issue/diagnostic 卡片直接跳 `Execution / Diagnostics / Repair Draft`；`RepairDraftPage` 现已从 `failed_task_context_json` 解析 task 上下文，并提供回到 `Acceptance / Execution / Diagnostics / Plan` 的真实入口；`cd apps/desktop && npm run build` 已通过
 48. 已继续补 desktop diagnostics / recovery 原生动作：通过 Electron save dialog 可把当前 diagnostics 或 recovery 页面导出为 JSON 包；Recovery 页面同时已补 core working dir 的 reveal/open 动作，便于交接启动期故障事实
+49. 已补 `PF-001 / PF-003` 首版硬化：新增 SQLite 查询计划基线测试与 `scripts/verify-apps-core-query-plans.sh`，固定首页/Acceptance/Audit/Evidence/Replay 关键查询命中索引；同时 workspace/project snapshot 改为异步 best-effort 持久化，并给快照回退增加新鲜度窗口，避免读路径同步写库和长期陈旧快照被无条件回放
 
 ## 3. 当前进行中
 

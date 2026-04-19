@@ -151,9 +151,9 @@ P0-A 基座对齐
 
 | plan_id | name | priority | depends_on | parallelizable | doc_refs | definition_of_done | status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| PF-001 | 落关键查询索引校验与慢查询基线 | P1 | ST-003,AG-001 | yes | `EasyMVP-V3-数据库索引与查询优化设计.md`；`EasyMVP-V3-完整SQLite建表与索引SQL终稿.md#9. 索引终稿` | 首页、项目页、审计、回放、证据等关键查询走到既定索引；形成可回归的 explain / benchmark 基线 | pending |
+| PF-001 | 落关键查询索引校验与慢查询基线 | P1 | ST-003,AG-001 | yes | `EasyMVP-V3-数据库索引与查询优化设计.md`；`EasyMVP-V3-完整SQLite建表与索引SQL终稿.md#9. 索引终稿` | 首页、项目页、审计、回放、证据等关键查询走到既定索引；形成可回归的 explain / benchmark 基线 | in_progress |
 | PF-002 | 落幂等重试与事件去重 | P1 | ST-005,RN-002 | yes | `EasyMVP-V3-事务边界与一致性设计.md#6. 幂等性要求`；`EasyMVP-V3-brain-serve接口接入与Run生命周期映射.md#8. 错误处理原则` | 重试不会重复建项目、重复建 run、重复写事件；乱序或重复事件有去重规则；恢复后状态稳定 | pending |
-| PF-003 | 落工作台快照更新策略与读写隔离约束 | P1 | AG-001,AG-002 | yes | `EasyMVP-V3工作台视图模型与聚合接口设计.md`；`EasyMVP-V3-数据库Schema总设计.md#2.8 view_cache`；`EasyMVP-V3-事务边界与一致性设计.md#7. 一致性优先级` | 聚合快照刷新有策略；页面读接口不过度阻塞主事务；用户看到的数据在可接受延迟范围内一致 | pending |
+| PF-003 | 落工作台快照更新策略与读写隔离约束 | P1 | AG-001,AG-002 | yes | `EasyMVP-V3工作台视图模型与聚合接口设计.md`；`EasyMVP-V3-数据库Schema总设计.md#2.8 view_cache`；`EasyMVP-V3-事务边界与一致性设计.md#7. 一致性优先级` | 聚合快照刷新有策略；页面读接口不过度阻塞主事务；用户看到的数据在可接受延迟范围内一致 | in_progress |
 
 ### 5.8 P2-A 稳定性增强
 
