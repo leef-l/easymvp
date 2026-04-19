@@ -5,6 +5,19 @@ rem Windows local validation entry for the current apps/core + apps/desktop code
 rem Run this on your local high-spec machine after git pull.
 
 set "ROOT=%~dp0.."
+set "LOGFILE=%~dp0local-verify-apps-core-desktop.log"
+
+call :main > "%LOGFILE%" 2>&1
+set "EXIT_CODE=%errorlevel%"
+
+type "%LOGFILE%"
+echo.
+echo LogFile=%LOGFILE%
+echo ExitCode=%EXIT_CODE%
+pause
+exit /b %EXIT_CODE%
+
+:main
 
 echo == 1. Update Repository ==
 cd /d "%ROOT%" || goto :fail
@@ -40,14 +53,9 @@ echo apps\desktop build passed
 echo.
 echo Optional smoke test:
 echo   cd /d "%ROOT%\apps\desktop" ^&^& npm run dev
-echo.
-echo ExitCode=0
-pause
 exit /b 0
 
 :fail
 echo.
 echo == Validation Failed ==
-echo ExitCode=1
-pause
 exit /b 1
