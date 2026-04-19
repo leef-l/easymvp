@@ -14,12 +14,14 @@ const jsonSections = [
 ] as const;
 
 export function RepairDraftPage() {
-  const { projectId, routes } = useProjectState();
+  const { projectId, routes, buildRoute } = useProjectState();
   const state = useQuery(
     () => apiGet<RepairDraftView>(`/api/v3/projects/${encodeURIComponent(projectId)}/repair-draft`),
     [projectId],
   );
   const repairDraft = state.data?.repair_draft;
+  const failedTaskContext = safeParseJSONObject(repairDraft?.failed_task_context_json);
+  const taskID = readStringField(failedTaskContext, "acceptance_task_id", "task_id");
 
   return (
     <QueryPanel loading={state.loading} error={state.error} title="Repair draft">
@@ -34,10 +36,35 @@ export function RepairDraftPage() {
             <div className="summary-stack">
               <span className="status-pill">{repairDraft.status}</span>
               <span className="status-pill">{repairDraft.updated_at || "no timestamp"}</span>
+              {taskID ? <span className="status-pill">task {taskID}</span> : null}
             </div>
           </div>
 
           <div className="content-grid repair-grid">
+            <section className="data-panel">
+              <div className="panel-header">
+                <h3>Linked Actions</h3>
+              </div>
+              <div className="action-row">
+                <Link className="secondary-button" to={routes.plan}>
+                  Open Plan
+                </Link>
+                <Link className="secondary-button" to={routes.diagnostics}>
+                  Open Diagnostics
+                </Link>
+                {taskID ? (
+                  <>
+                    <Link className="secondary-button" to={buildRoute("/acceptance", { task: taskID })}>
+                      Open Acceptance
+                    </Link>
+                    <Link className="secondary-button" to={buildRoute("/execution", { task: taskID })}>
+                      Open Execution
+                    </Link>
+                  </>
+                ) : null}
+              </div>
+            </section>
+
             <section className="data-panel">
               <div className="panel-header">
                 <h3>Replaced Constraints</h3>
@@ -100,4 +127,32 @@ function prettyJson(raw?: string) {
   } catch {
     return raw;
   }
+}
+
+function safeParseJSONObject(raw?: string): Record<string, unknown> | null {
+  if (!raw || raw.trim() === "") {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function readStringField(source: Record<string, unknown> | null, ...keys: string[]) {
+  if (!source) {
+    return "";
+  }
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim() !== "") {
+      return value.trim();
+    }
+  }
+  return "";
 }

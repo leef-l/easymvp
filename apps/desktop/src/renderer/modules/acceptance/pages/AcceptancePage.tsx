@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { apiGet, apiPost } from "@/shared/lib/api";
 import { useProjectState } from "@/shared/lib/project";
 import { useQuery } from "@/shared/lib/query";
-import type { AcceptanceView, CommandResponse, PlanView } from "@/shared/lib/types";
+import type { AcceptanceView, CommandResponse, PlanView, ProjectDiagnosticsView } from "@/shared/lib/types";
 import { QueryPanel } from "@/shared/ui/QueryPanel";
 
 export function AcceptancePage() {
@@ -24,11 +24,28 @@ export function AcceptancePage() {
     () => apiGet<PlanView>(`/api/v3/projects/${encodeURIComponent(projectId)}/plan-view`),
     [projectId, refreshTick],
   );
+  const diagnosticsState = useQuery(
+    () => apiGet<ProjectDiagnosticsView>(`/api/v3/projects/${encodeURIComponent(projectId)}/diagnostic-records?limit=20`),
+    [projectId, refreshTick],
+  );
 
   const availableTaskOptions = useMemo(() => {
     return (planState.data?.task_projection ?? []).filter((item) => item.mapped_domain_task_id);
   }, [planState.data]);
   const currentAcceptanceTaskId = state.data?.acceptance_run.task_id || "";
+  const relatedDiagnostics = useMemo(() => {
+    const targetTaskID = currentAcceptanceTaskId || selectedTaskId || selectedTaskFromUrl;
+    const targetRunID = state.data?.acceptance_run.id || "";
+    return (diagnosticsState.data?.items ?? []).filter((item) => {
+      if (targetTaskID && item.task_id === targetTaskID) {
+        return true;
+      }
+      if (targetRunID && item.run_id === targetRunID) {
+        return true;
+      }
+      return false;
+    });
+  }, [currentAcceptanceTaskId, diagnosticsState.data?.items, selectedTaskFromUrl, selectedTaskId, state.data?.acceptance_run.id]);
 
   useEffect(() => {
     if (selectedTaskFromUrl) {
@@ -199,6 +216,11 @@ export function AcceptancePage() {
                     Open Task Execution
                   </button>
                 ) : null}
+                {planState.data?.repair_draft.id ? (
+                  <button className="secondary-button" onClick={() => navigate(routes.repairDraft)}>
+                    Open Repair Draft
+                  </button>
+                ) : null}
               </div>
             </div>
             {actionError ? <p className="error-copy">{actionError}</p> : null}
@@ -250,6 +272,24 @@ export function AcceptancePage() {
                       <span className={`severity-badge severity-${item.severity}`}>{item.severity}</span>
                     </div>
                     <p>{item.blocking ? "blocking" : "non-blocking"}</p>
+                    <div className="action-row">
+                      {currentAcceptanceTaskId ? (
+                        <button
+                          className="secondary-button"
+                          onClick={() => navigate(buildRoute("/execution", { task: currentAcceptanceTaskId }))}
+                        >
+                          Inspect Execution
+                        </button>
+                      ) : null}
+                      <button className="secondary-button" onClick={() => navigate(routes.diagnostics)}>
+                        Open Diagnostics
+                      </button>
+                      {planState.data?.repair_draft.id ? (
+                        <button className="secondary-button" onClick={() => navigate(routes.repairDraft)}>
+                          Open Repair Draft
+                        </button>
+                      ) : null}
+                    </div>
                   </article>
                 ))}
                 {state.data.issues.length === 0 ? (
@@ -281,9 +321,110 @@ export function AcceptancePage() {
                 ) : null}
               </div>
             </section>
+
+            <section className="data-panel">
+              <div className="panel-header">
+                <h3>Repair Context</h3>
+                <span className="status-pill">{planState.data?.repair_draft.id ? "ready" : "idle"}</span>
+              </div>
+              <div className="stack-list">
+                <article className="list-card">
+                  <div className="list-card-head">
+                    <strong>{planState.data?.repair_draft.id || "No repair draft yet"}</strong>
+                    <span className="status-pill">{planState.data?.repair_draft.status || "idle"}</span>
+                  </div>
+                  <p>{planState.data?.repair_draft.reasoning_summary || "The latest failed acceptance run has not produced a repair draft yet."}</p>
+                  <div className="action-row">
+                    {planState.data?.repair_draft.id ? (
+                      <button className="secondary-button" onClick={() => navigate(routes.repairDraft)}>
+                        Open Repair Draft
+                      </button>
+                    ) : (
+                      <button className="secondary-button" onClick={() => navigate(routes.plan)}>
+                        Open Plan
+                      </button>
+                    )}
+                    {currentAcceptanceTaskId ? (
+                      <button
+                        className="secondary-button"
+                        onClick={() => navigate(buildRoute("/execution", { task: currentAcceptanceTaskId }))}
+                      >
+                        Open Execution
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section className="data-panel">
+              <div className="panel-header">
+                <h3>Related Diagnostics</h3>
+                <span className="status-pill">{relatedDiagnostics.length}</span>
+              </div>
+              <div className="stack-list">
+                {relatedDiagnostics.map((item) => (
+                  <article key={item.id} className="list-card">
+                    <div className="list-card-head">
+                      <strong>{item.summary}</strong>
+                      <span className={`severity-badge severity-${item.severity}`}>{item.severity}</span>
+                    </div>
+                    <p>
+                      {item.scope} · {item.error_code} · {item.created_at}
+                    </p>
+                    <p>
+                      {item.task_id ? `task ${item.task_id}` : "task n/a"} · {item.run_id ? `run ${item.run_id}` : "run n/a"} ·{" "}
+                      {item.binding_id ? `binding ${item.binding_id}` : "binding n/a"}
+                    </p>
+                    <div className="action-row">
+                      <button className="secondary-button" onClick={() => navigate(routes.diagnostics)}>
+                        Open Diagnostics
+                      </button>
+                      {item.task_id ? (
+                        <button
+                          className="secondary-button"
+                          onClick={() =>
+                            navigate(
+                              buildRoute("/execution", {
+                                task: item.task_id,
+                                binding: item.binding_id,
+                              }),
+                            )
+                          }
+                        >
+                          Open Execution
+                        </button>
+                      ) : null}
+                      {planState.data?.repair_draft.id ? (
+                        <button className="secondary-button" onClick={() => navigate(routes.repairDraft)}>
+                          Open Repair Draft
+                        </button>
+                      ) : null}
+                    </div>
+                    {item.detail_json ? <pre className="json-block">{prettyJson(item.detail_json)}</pre> : null}
+                  </article>
+                ))}
+                {relatedDiagnostics.length === 0 ? (
+                  <article className="list-card">
+                    <p>No diagnostics are linked to the current acceptance task or run yet.</p>
+                  </article>
+                ) : null}
+              </div>
+            </section>
           </div>
         </section>
       ) : null}
     </QueryPanel>
   );
+}
+
+function prettyJson(raw?: string) {
+  if (!raw || raw.trim() === "") {
+    return "{}";
+  }
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
 }
