@@ -1,25 +1,29 @@
 import { apiGet } from "@/shared/lib/api";
 import { useProjectState } from "@/shared/lib/project";
 import { useQuery } from "@/shared/lib/query";
-import type { RuntimeHealthView, SystemHealthView } from "@/shared/lib/types";
+import type { ProjectDiagnosticsView, RuntimeHealthView, SystemHealthView } from "@/shared/lib/types";
 import { QueryPanel } from "@/shared/ui/QueryPanel";
 
 export function DiagnosticsPage() {
-  const { routes } = useProjectState();
+  const { projectId, routes, buildRoute } = useProjectState();
   const systemState = useQuery(() => apiGet<SystemHealthView>("/api/v3/system/healthz"), []);
   const runtimeState = useQuery(() => apiGet<RuntimeHealthView>("/api/v3/runtime/healthz"), []);
+  const diagnosticsState = useQuery(
+    () => apiGet<ProjectDiagnosticsView>(`/api/v3/projects/${encodeURIComponent(projectId)}/diagnostic-records?limit=12`),
+    [projectId],
+  );
 
   return (
     <QueryPanel
-      loading={systemState.loading || runtimeState.loading}
-      error={systemState.error || runtimeState.error}
+      loading={systemState.loading || runtimeState.loading || diagnosticsState.loading}
+      error={systemState.error || runtimeState.error || diagnosticsState.error}
       title="Diagnostics"
       onRetry={() => window.location.reload()}
       secondaryActionLabel="Open Settings"
       onSecondaryAction={() => window.location.assign(routes.settings)}
       recoveryMessage="Diagnostics aggregates health endpoints first. Detailed audit and recovery history can be layered on later."
     >
-      {systemState.data && runtimeState.data ? (
+      {systemState.data && runtimeState.data && diagnosticsState.data ? (
         <section className="dashboard-page">
           <div className="dashboard-intro">
             <div>
@@ -32,6 +36,7 @@ export function DiagnosticsPage() {
             <div className="summary-stack">
               <span className="status-pill">system {systemState.data.status}</span>
               <span className="status-pill">runtime {runtimeState.data.status}</span>
+              <span className="status-pill">{diagnosticsState.data.items.length} diagnostics</span>
             </div>
           </div>
 
@@ -109,9 +114,71 @@ export function DiagnosticsPage() {
                 </a>
               </div>
             </section>
+
+            <section className="data-panel">
+              <div className="panel-header">
+                <h3>Recent Diagnostics</h3>
+                <span className="status-pill">{diagnosticsState.data.refresh_hint}</span>
+              </div>
+              <div className="stack-list">
+                {diagnosticsState.data.items.map((item) => (
+                  <article key={item.id} className="list-card">
+                    <div className="list-card-head">
+                      <strong>{item.summary}</strong>
+                      <span className={`severity-badge severity-${item.severity}`}>{item.severity}</span>
+                    </div>
+                    <p>
+                      {item.scope} · {item.error_code} · {item.created_at}
+                    </p>
+                    {(item.project_id || item.task_id || item.run_id || item.binding_id) ? (
+                      <p>
+                        {item.project_id ? `project ${item.project_id}` : ""}
+                        {item.task_id ? ` · task ${item.task_id}` : ""}
+                        {item.run_id ? ` · run ${item.run_id}` : ""}
+                        {item.binding_id ? ` · binding ${item.binding_id}` : ""}
+                      </p>
+                    ) : null}
+                    <div className="action-row">
+                      <a className="secondary-button" href={routes.workspace}>
+                        Open Workspace
+                      </a>
+                      {item.task_id ? (
+                        <a className="secondary-button" href={buildRoute("/execution", { task: item.task_id })}>
+                          Open Execution
+                        </a>
+                      ) : (
+                        <a className="secondary-button" href={routes.execution}>
+                          Open Execution
+                        </a>
+                      )}
+                      <a className="secondary-button" href={routes.audit}>
+                        Open Audit
+                      </a>
+                    </div>
+                    {item.detail_json ? <pre className="json-block">{prettyJson(item.detail_json)}</pre> : null}
+                  </article>
+                ))}
+                {diagnosticsState.data.items.length === 0 ? (
+                  <article className="list-card">
+                    <p>No diagnostic records have been captured for this project yet.</p>
+                  </article>
+                ) : null}
+              </div>
+            </section>
           </div>
         </section>
       ) : null}
     </QueryPanel>
   );
+}
+
+function prettyJson(raw?: string) {
+  if (!raw || raw.trim() === "") {
+    return "{}";
+  }
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
 }

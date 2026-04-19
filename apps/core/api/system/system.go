@@ -12,4 +12,5 @@ import (
 
 type ISystemV1 interface {
 	Health(ctx context.Context, req *v1.HealthReq) (res *v1.HealthRes, err error)
+	ListProjectDiagnostics(ctx context.Context, req *v1.ListProjectDiagnosticsReq) (res *v1.ListProjectDiagnosticsRes, err error)
 }

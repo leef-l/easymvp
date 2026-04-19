@@ -274,6 +274,23 @@ export type RuntimeHealthView = {
   base_url: string;
 };
 
+export type ProjectDiagnosticsView = {
+  items: Array<{
+    id: string;
+    scope: string;
+    severity: string;
+    error_code: string;
+    summary: string;
+    detail_json?: string;
+    project_id?: string;
+    task_id?: string;
+    run_id?: string;
+    binding_id?: string;
+    created_at: string;
+  }>;
+  refresh_hint: string;
+};
+
 export type ExecutionView = {
   runtime_health: RuntimeHealthView;
   runtime_error?: string;
