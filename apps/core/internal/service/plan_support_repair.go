@@ -30,6 +30,14 @@ func createRepairDraftForProject(ctx context.Context, req CreateRepairDraftComma
 		return "", err
 	}
 
+	existingDraftID, err := findExistingRepairDraftByInputs(ctx, db, normalized)
+	if err != nil {
+		return "", err
+	}
+	if existingDraftID != "" {
+		return existingDraftID, nil
+	}
+
 	_, result, err := EasyMVPBrain().CallRepairDesign(ctx, braincontracts.RepairDesignInput{
 		FailedTaskContextJSON: json.RawMessage(normalized.FailedTaskContextJSON),
 		FailureReasonJSON:     json.RawMessage(normalized.FailureReasonJSON),
@@ -54,7 +62,7 @@ func createRepairDraftForProject(ctx context.Context, req CreateRepairDraftComma
 		FailureReasonJSON:      normalized.FailureReasonJSON,
 		OriginalContractsJSON:  normalized.OriginalContractsJSON,
 		RuntimeSummaryJSON:     normalized.RuntimeSummaryJSON,
-		ArtifactRefsJSON:       mustMarshalJSONString(normalized.ArtifactRefs, "[]"),
+		ArtifactRefsJSON:       buildRepairArtifactRefsJSON(normalized.ArtifactRefs),
 		RepairPlanJSON:         strings.TrimSpace(string(result.RepairPlanJSON)),
 		RepairReasoningSummary: strings.TrimSpace(result.RepairReasoningSummary),
 		ReplacedConstraintsJSON: mustMarshalJSONString(
@@ -112,6 +120,7 @@ func normalizeCreateRepairDraftCommand(req CreateRepairDraftCommand) (*normalize
 		ArtifactRefs:          req.ArtifactRefs,
 		CreatedBy:             strings.TrimSpace(req.CreatedBy),
 	}
+	var err error
 
 	if normalized.ProjectID == "" {
 		return nil, gerror.New("project id is required")
@@ -119,16 +128,90 @@ func normalizeCreateRepairDraftCommand(req CreateRepairDraftCommand) (*normalize
 	if err := requireJSONObject("failed task context", normalized.FailedTaskContextJSON); err != nil {
 		return nil, err
 	}
+	normalized.FailedTaskContextJSON, err = canonicalizeJSONObjectString(normalized.FailedTaskContextJSON)
+	if err != nil {
+		return nil, err
+	}
 	if err := requireJSONObject("failure reason", normalized.FailureReasonJSON); err != nil {
+		return nil, err
+	}
+	normalized.FailureReasonJSON, err = canonicalizeJSONObjectString(normalized.FailureReasonJSON)
+	if err != nil {
 		return nil, err
 	}
 	if err := requireJSONObject("original contracts", normalized.OriginalContractsJSON); err != nil {
 		return nil, err
 	}
+	normalized.OriginalContractsJSON, err = canonicalizeJSONObjectString(normalized.OriginalContractsJSON)
+	if err != nil {
+		return nil, err
+	}
 	if err := requireJSONObject("runtime summary", normalized.RuntimeSummaryJSON); err != nil {
 		return nil, err
 	}
+	normalized.RuntimeSummaryJSON, err = canonicalizeJSONObjectString(normalized.RuntimeSummaryJSON)
+	if err != nil {
+		return nil, err
+	}
 	return normalized, nil
+}
+
+func canonicalizeJSONObjectString(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", gerror.New("json is required")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return "", gerror.Wrap(err, "json is invalid")
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", gerror.Wrap(err, "json canonicalization failed")
+	}
+	return string(encoded), nil
+}
+
+func buildRepairArtifactRefsJSON(items []braincontracts.ArtifactRef) string {
+	return mustMarshalJSONString(items, "[]")
+}
+
+func findExistingRepairDraftByInputs(ctx context.Context, db *sql.DB, normalized *normalizedCreateRepairDraftCommand) (string, error) {
+	if normalized == nil {
+		return "", nil
+	}
+
+	row := db.QueryRowContext(
+		ctx,
+		`SELECT id
+FROM `+repairPlanDraftsTable+`
+WHERE project_id = ?
+  AND failed_task_context_json = ?
+  AND failure_reason_json = ?
+  AND original_contracts_json = ?
+  AND runtime_summary_json = ?
+  AND COALESCE(artifact_refs_json, '') = ?
+ORDER BY updated_at DESC, created_at DESC
+LIMIT 1`,
+		normalized.ProjectID,
+		normalized.FailedTaskContextJSON,
+		normalized.FailureReasonJSON,
+		normalized.OriginalContractsJSON,
+		normalized.RuntimeSummaryJSON,
+		buildRepairArtifactRefsJSON(normalized.ArtifactRefs),
+	)
+
+	var draftID string
+	if err := row.Scan(&draftID); err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		if isSchemaMissingError(err) {
+			return "", nil
+		}
+		return "", gerror.Wrap(err, "query matching repair draft failed")
+	}
+	return strings.TrimSpace(draftID), nil
 }
 
 func requireJSONObject(label string, raw string) error {

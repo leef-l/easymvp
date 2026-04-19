@@ -143,7 +143,10 @@ export function DiagnosticsPage() {
                         Open Workspace
                       </a>
                       {item.task_id ? (
-                        <a className="secondary-button" href={buildRoute("/execution", { task: item.task_id })}>
+                        <a className="secondary-button" href={buildRoute("/execution", {
+                          task: item.task_id,
+                          binding: item.binding_id,
+                        })}>
                           Open Execution
                         </a>
                       ) : (

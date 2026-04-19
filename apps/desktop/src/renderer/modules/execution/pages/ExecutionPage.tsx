@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { apiDelete, apiGet, apiPost } from "@/shared/lib/api";
 import { useProjectState } from "@/shared/lib/project";
 import { useQuery } from "@/shared/lib/query";
-import type { CommandResponse, ExecutionView, LogSegmentRawView, ReplayDetailView, ReplayRawView, StartRunResponse, SyncRunResponse } from "@/shared/lib/types";
+import type { CommandResponse, ExecutionView, LogSegmentRawView, ProjectDiagnosticsView, ReplayDetailView, ReplayRawView, StartRunResponse, SyncRunResponse } from "@/shared/lib/types";
 import { QueryPanel } from "@/shared/ui/QueryPanel";
 
 const executionViewLimits = {
@@ -165,6 +165,10 @@ export function ExecutionPage() {
         : Promise.resolve(null),
     [projectId, activeRunID, selectedSegmentId, refreshTick],
   );
+  const diagnosticsState = useQuery(
+    () => apiGet<ProjectDiagnosticsView>(`/api/v3/projects/${encodeURIComponent(projectId)}/diagnostic-records?limit=20`),
+    [projectId, refreshTick],
+  );
 
   const replayPreview = useMemo(() => {
     return formatRawPreview(replayRawState.data?.content, replayRawState.data?.truncated);
@@ -194,6 +198,23 @@ export function ExecutionPage() {
     () => buildOptions((bindingDetailState.data?.recent_events ?? []).map((item) => item.event_level || "info")),
     [bindingDetailState.data?.recent_events],
   );
+  const relatedDiagnostics = useMemo(() => {
+    return (diagnosticsState.data?.items ?? []).filter((item) => {
+      if (selectedBindingId && item.binding_id === selectedBindingId) {
+        return true;
+      }
+      if (activeRunID && item.run_id === activeRunID) {
+        return true;
+      }
+      if (taskFromUrl && item.task_id === taskFromUrl) {
+        return true;
+      }
+      if (selectedBinding?.task_id && item.task_id === selectedBinding.task_id) {
+        return true;
+      }
+      return false;
+    });
+  }, [activeRunID, diagnosticsState.data?.items, selectedBinding?.task_id, selectedBindingId, taskFromUrl]);
 
   async function runBindingMutation<T extends CommandResponse | StartRunResponse | SyncRunResponse>(
     actionKey: string,
@@ -442,6 +463,7 @@ export function ExecutionPage() {
                     <p>
                       {item.event_level || "info"} · {item.created_at}
                     </p>
+                    {item.payload ? <pre className="json-block">{prettyPayload(item.payload)}</pre> : null}
                   </article>
                 ))}
                 {filteredEvents.length === 0 ? (
@@ -585,6 +607,23 @@ export function ExecutionPage() {
                     </p>
                     <p>raw target {replayDetailState.data.raw_preview.raw_target || "n/a"}</p>
                     <div className="action-row">
+                      {replayDetailState.data.source_object_id ? (
+                        <button
+                          className="secondary-button"
+                          onClick={() =>
+                            navigate(
+                              buildRoute("/acceptance", {
+                                task:
+                                  replayDetailState.data!.source_object_kind === "domain_task"
+                                    ? replayDetailState.data!.source_object_id
+                                    : selectedBinding?.task_id || undefined,
+                              }),
+                            )
+                          }
+                        >
+                          Open Acceptance
+                        </button>
+                      ) : null}
                       <button className="secondary-button" onClick={() => navigate(routes.diagnostics)}>
                         Open Diagnostics
                       </button>
@@ -674,6 +713,63 @@ export function ExecutionPage() {
                 />
               </div>
             </section>
+
+            <section className="data-panel">
+              <div className="panel-header">
+                <h3>Related Diagnostics</h3>
+                <span className="status-pill">{relatedDiagnostics.length}</span>
+              </div>
+              <div className="stack-list">
+                {relatedDiagnostics.map((item) => (
+                  <article key={item.id} className="list-card">
+                    <div className="list-card-head">
+                      <strong>{item.summary}</strong>
+                      <span className={`severity-badge severity-${item.severity}`}>{item.severity}</span>
+                    </div>
+                    <p>
+                      {item.scope} · {item.error_code} · {item.created_at}
+                    </p>
+                    <p>
+                      {item.task_id ? `task ${item.task_id}` : "task n/a"} · {item.run_id ? `run ${item.run_id}` : "run n/a"} ·{" "}
+                      {item.binding_id ? `binding ${item.binding_id}` : "binding n/a"}
+                    </p>
+                    <div className="action-row">
+                      <button
+                        className="secondary-button"
+                        onClick={() =>
+                          navigate(
+                            buildRoute("/diagnostics", {
+                              project: projectId,
+                            }),
+                          )
+                        }
+                      >
+                        Open Diagnostics
+                      </button>
+                      {item.task_id ? (
+                        <button
+                          className="secondary-button"
+                          onClick={() =>
+                            navigate(
+                              buildRoute("/acceptance", {
+                                task: item.task_id,
+                              }),
+                            )
+                          }
+                        >
+                          Open Acceptance
+                        </button>
+                      ) : null}
+                    </div>
+                  </article>
+                ))}
+                {relatedDiagnostics.length === 0 ? (
+                  <article className="list-card">
+                    <p>No diagnostics are linked to the selected task, binding, or run yet.</p>
+                  </article>
+                ) : null}
+              </div>
+            </section>
           </div>
 
           {expandedRawView ? (
@@ -703,6 +799,17 @@ export function ExecutionPage() {
       ) : null}
     </QueryPanel>
   );
+}
+
+function prettyPayload(raw?: string) {
+  if (!raw || raw.trim() === "") {
+    return "{}";
+  }
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
 }
 
 function MetricCard(props: { label: string; value: string }) {
