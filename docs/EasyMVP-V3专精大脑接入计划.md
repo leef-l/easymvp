@@ -4,6 +4,13 @@
 > 参考对象：`/www/wwwroot/project/brain-v3`  
 > 目标：把 `brain-v3` 作为 EasyMVP V3 的首个执行底座接入，并设计配套的 `easymvp` 专精大脑，支撑 EasyMVP 从“任务执行器编排”升级为“方案编译 + 多脑协作执行”。
 
+> 最新口径说明：
+> 这份文档保留为 V3 接入设计背景稿。当前 EasyMVP 最新顶层边界、合同与阶段协作，统一以 [钱学森总纲设计/README.md](/www/wwwroot/project/easymvp/docs/钱学森总纲设计/README.md) 为准。
+> 其中与本专题最直接对应的最新文档是：
+> [easymvp-brain-职责与边界定义.md](/www/wwwroot/project/easymvp/docs/钱学森总纲设计/easymvp-brain-职责与边界定义.md)、
+> [easymvp-brain-输入输出契约.md](/www/wwwroot/project/easymvp/docs/钱学森总纲设计/easymvp-brain-输入输出契约.md)、
+> [EasyMVP-四基础专精大脑阶段调用矩阵.md](/www/wwwroot/project/easymvp/docs/钱学森总纲设计/EasyMVP-四基础专精大脑阶段调用矩阵.md)。
+
 ## 1. 结论
 
 结论先行：
@@ -18,6 +25,12 @@
 一句话：
 
 > `brain-v3` 是执行内核，`easymvp-brain` 是 EasyMVP 的领域大脑，二者不是替代关系，而是上下层关系。
+
+按当前钱学森总纲，需要把这里的旧表达再收紧：
+
+1. 不再建议围绕 `execution_mode` 建模
+2. 应改为围绕“脑路由、验证通道、能力可用性、人工检查点”建模
+3. 基础专精大脑统一以 `code / browser / verifier / fault` 加中央协调脑为主口径，`easymvp-brain` 负责领域判断
 
 ## 2. 对 `brain-v3` 的分析结论
 
@@ -174,7 +187,7 @@ EasyMVP Workflow Orchestrator
 
 - scope 是否过大
 - affected_resources 是否过宽
-- execution_mode 是否可用
+- 脑能力与验证通道是否可用
 - verification/delivery 要求是否缺失
 - 风险等级是否过高
 - 是否需要 split / drop / override
@@ -189,7 +202,7 @@ EasyMVP Workflow Orchestrator
 - 把草案任务转换为正式可执行任务
 - 为每个任务生成 `delivery_contract`
 - 为每个任务生成 `verification_contract`
-- 落实 execution mode override
+- 落实脑路由、推荐验证通道与人工检查点
 - 在方案阶段完成拆分，不把大任务留到 execute 再炸
 
 ### 6.3 返工重构
@@ -213,6 +226,12 @@ EasyMVP Workflow Orchestrator
 - 提前声明这个项目最终需要哪些证据
 - 在 design 阶段就把 `.github/workflows/ci.yml`、`.easymvp/ci/latest.json`、浏览器采证等要求下放到任务合同
 
+补充说明：
+
+- 当前可以把 `github_actions` 作为远端替代验证通道写入合同
+- 但语义上必须明确它是当前资源受限下的替代方案
+- 长期最终通道仍应保留 `high_spec_remote`
+
 ### 6.5 任务完成语义裁决
 
 输入：executor 结果 + delivery 结果 + verification 结果  
@@ -221,7 +240,13 @@ EasyMVP Workflow Orchestrator
 作用：
 
 - 避免“模型说成功”就直接 completed
-- 统一判断 `executor_succeeded / delivery_verified / completed`
+- 统一判断 `executor_succeeded / delivery_verified / acceptance_passed / completed`
+
+并且要明确：
+
+- `easymvp-brain` 负责输出结构化裁决
+- 最终推进到 `completed` 仍应由 EasyMVP 状态机按裁决对象执行
+- 不能把“脑返回 success”偷换成系统完成
 
 ## 7. EasyMVP 不该怎么接 `brain-v3`
 
@@ -231,7 +256,7 @@ EasyMVP Workflow Orchestrator
 
 错误方式：
 
-- 在 `execution_mode` 里新增一个 `brain`
+- 在旧 `execution_mode` 里新增一个 `brain`
 - 然后像 `aider` 一样 `shell_exec brain run --prompt ...`
 
 问题：
@@ -240,6 +265,12 @@ EasyMVP Workflow Orchestrator
 - 丢失 replay / logs / resume / cancel
 - 丢失多脑协作能力
 - 退化成一个普通命令行执行器
+
+当前更推荐的口径是：
+
+- 用 `brain_kind` 表达脑路由
+- 用 `preferred_verification_channel / fallback_channels` 表达验证通道
+- 用 `manual_review_required` 表达人工检查点
 
 ### 7.2 不推荐让通用 `code brain` 直接承接 EasyMVP 的 plan review / compile
 

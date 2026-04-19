@@ -174,6 +174,16 @@ type BrainSourceRef struct {
 }
 ```
 
+当前总纲口径补充：
+
+- 这份 `result_json` 可以继续保留为旧 adjudication 合同形态
+- 但 `final_status = production_passed / released_by_human` 不应再被解释为最终业务完成语义
+- 更准确的方向应逐步收口到：
+  - `decision`
+  - `completed`
+  - `reason_summary`
+  - `manual_release_required`
+
 ### SQLite 映射
 
 1. `workflow_plan_review_results.id` ← `review_result_id`
@@ -456,6 +466,12 @@ type BrainSourceRef struct {
 3. `acceptance_runs.production_passed`
 4. `acceptance_runs.manual_release_required`
 5. `acceptance_runs.decision_reason`
+
+补充说明：
+
+- 这些映射反映的是旧表结构与历史兼容现实
+- 按当前钱学森总纲，后续不应只围绕 `acceptance_runs.*` 承载最终裁决语义
+- 更合理的方向是并行补出 `VerificationResult / CompletionVerdict` 对应的结构化落点
 
 ## 8. `workspace_explanation` 合同终稿
 

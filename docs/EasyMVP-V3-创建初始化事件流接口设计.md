@@ -266,7 +266,7 @@ V3 必须把“创建项目”拆成：
 
 1. 创建初始 `PlanDraft`
 2. 或创建 `PlanBootstrapIntent`
-3. 准备将项目推进到 `Design / Review` 主链路
+3. 准备将项目推进到早期 `reviewing` 主链路
 
 ## 9. 创建结果接口
 
@@ -287,7 +287,7 @@ V3 必须把“创建项目”拆成：
   "project_id": "proj_01",
   "workspace_url": "/projects/proj_01/workspace",
   "plan_url": "/projects/proj_01/plan",
-  "current_stage": "design",
+  "current_stage": "reviewing",
   "initial_action_hint": "查看初始计划草案"
 }
 ```
@@ -356,8 +356,9 @@ V3 必须把“创建项目”拆成：
 建议展示原则：
 
 1. `Running Projects` 中显示新项目卡片
-2. `current_stage` 显示为 `Design`
+2. `current_stage` 显示为早期 `reviewing`
 3. `active_task_or_run` 显示为 `Preparing project`
+4. 首页不应把这个状态误呈现为“已进入正常执行”
 4. `Recent Activity` 中可见最新初始化事件
 
 ## 13. 失败与恢复策略

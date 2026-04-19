@@ -201,6 +201,12 @@ projects
 1. `acceptance_runs` 自身不承载底层执行脑原始信息
 2. 如需追踪执行来源，应通过关联的 `domain_tasks` / `brain_run_bindings` 读取归一化标识
 
+补充说明：
+
+- `acceptance_runs` 可以继续保留为当前现实表结构
+- 但按当前钱学森总纲，不应再把 `functional_status / production_status` 直接解释为最终完成语义
+- 更合理的后续方向是并行补出 `verification_results` / `completion_verdicts` 一类结构化落点
+
 ### 5.5 `evidence_items`
 
 核心列建议：

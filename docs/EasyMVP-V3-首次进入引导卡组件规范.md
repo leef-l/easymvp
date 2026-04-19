@@ -29,9 +29,9 @@
 ```text
 ┌──────────────────────────────────────────────────────────────┐
 │ Your project is ready                                        │
-│ EasyMVP is preparing the first plan                          │
+│ EasyMVP is preparing the first review cycle                  │
 │ ✓ Project created  ✓ Workspace bound  ✓ Category matched     │
-│ Now preparing: first plan draft                              │
+│ Now preparing: first review/compile cycle                    │
 │ [Open Plan] [View Init Events]                               │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -43,6 +43,8 @@
 1. 标题短
 2. 副标题解释当前阶段
 3. 已完成项用勾选短标签
+
+按当前钱学森总纲，这张卡服务的是早期 `reviewing` 引导态，不应继续把用户心智拉回旧 `Design` 阶段。
 
 ## 5. 动作规则
 

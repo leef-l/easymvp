@@ -25,3 +25,18 @@ type ReleaseReadinessItem = {
 }
 ```
 
+## 3. 口径补充
+
+按当前钱学森总纲，这个 props 结构可以继续保留为旧首页壳层首版字段。
+
+但更准确的后续方向应逐步补齐：
+
+1. `decision`
+2. `completed`
+3. `manual_release_required`
+4. `blocking_reason`
+
+核心边界：
+
+- `production_status` 不应再被实现者误读为“最终完成状态”
+- `Release Readiness` 卡只能表达接近收口程度，不能替代 `CompletionVerdict`

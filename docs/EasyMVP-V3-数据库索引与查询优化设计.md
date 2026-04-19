@@ -98,6 +98,12 @@
 2. `idx_acceptance_runs_project_status(project_id, status, created_at desc)`
 3. `idx_acceptance_runs_project_production(project_id, production_status, created_at desc)`
 
+补充说明：
+
+- 这些索引建议继续保留，因为它们服务当前现实表结构
+- 但按当前钱学森总纲，不应让 `production_status` 查询路径继续被误读为“最终完成状态查询”
+- 后续若补出 `verification_results / completion_verdicts`，索引设计也应同步向那组结构化对象扩展
+
 ### 3.10 `acceptance_issues`
 
 建议：
@@ -146,6 +152,12 @@
 2. `production_status`
 3. `updated_at`
 
+补充说明：
+
+- 这里的 `production_status` 仍可作为当前现实查询字段存在
+- 但按当前钱学森总纲，首页壳层不应把它误读成最终完成状态
+- 后续如果补出 `completion_verdicts` 一类结构化对象，首页查询重点也应逐步转向 `decision / completed / manual checkpoint / escalation`
+
 ### 4.2 Project Workspace
 
 依赖：
@@ -161,6 +173,11 @@
 2. `phase`
 3. `status`
 4. `created_at`
+
+补充说明：
+
+- 单项目工作台当前可以继续读取 `acceptance_runs`
+- 但按当前总纲，它的真正主解释链应逐步补到 `VerificationResult / CompletionVerdict / RuntimeEscalation`
 
 ### 4.3 Plan 页面
 
@@ -193,6 +210,11 @@
 4. `surface`
 5. `journey`
 
+补充说明：
+
+- 这是旧 acceptance 首版查询现实
+- 后续如果补出 `verification_results` 或与合同要求直接对齐的结构化对象，索引设计也应同步扩展
+
 ## 5. 不建议的索引方式
 
 不建议：
@@ -207,4 +229,3 @@
 1. 首批 migration 的索引 SQL
 2. 热点查询 explain 基线
 3. 快照缓存与事实查询分工
-

@@ -220,7 +220,7 @@
 - 必须走 `service / repo interface / repo implementation` 的标准分层
 - 项目级角色定义统一收口到 `workflow.role_definitions`
 - 所有测试与编译统一交给 GitHub Actions，本机禁止直接执行 `go test`、`go build`、`pnpm build`、`pnpm exec vite build`、`pnpm exec vue-tsc`、`npm/pnpm test`
-- 详细约束见 [EasyMVP工程铁律](./EasyMVP工程铁律.md)
+- 详细约束见 [EasyMVP工程铁律](./钱学森总纲设计/EasyMVP工程铁律.md)
 
 涉及模块：
 

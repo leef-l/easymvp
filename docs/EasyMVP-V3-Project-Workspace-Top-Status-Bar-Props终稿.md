@@ -30,3 +30,16 @@ type ProjectSnapshot = {
 }
 ```
 
+## 3. 口径补充
+
+按当前钱学森总纲，`ProjectSnapshot` 后续建议逐步补齐或等价承载以下字段：
+
+1. `manual_checkpoint_required`
+2. `has_runtime_escalation`
+3. `decision`
+4. `completed`
+
+原因：
+
+- 顶部状态条不能只展示 readiness 摘要
+- 它至少要有能力提示人工检查点、升级对象和最终完成裁决

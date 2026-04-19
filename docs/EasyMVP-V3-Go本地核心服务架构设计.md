@@ -112,6 +112,12 @@ internal/model
 4. coverage 计算
 5. release gate 判定
 
+补充说明：
+
+- 这里保留 `AcceptanceRun` 代表当前实现与历史设计现实
+- 按当前钱学森总纲，`acceptance` 子系统后续不应只围绕 `AcceptanceRun` 组织最终语义
+- 更准确的方向是逐步补齐 `VerificationResult / CompletionVerdict`，并让它们承担验证结果与完成裁决
+
 ### 3.6 `runtime`
 
 负责：

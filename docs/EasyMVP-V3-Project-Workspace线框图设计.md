@@ -10,6 +10,8 @@
 
 常规态 `Project Workspace` 应是一个稳定三栏驾驶舱，而不是 tab 详情页。
 
+按当前钱学森总纲，这个三栏驾驶舱必须优先服务闭环对象可见性，而不是只展示活动和 readiness 摘要。
+
 ## 2. 线框结构
 
 ```text
@@ -19,7 +21,7 @@
 │ Stage Rail             │ Live Activity          │ Action Inbox     │
 │ stages + blockers      │ high value events      │ next actions     │
 ├────────────────────────┴────────────────────────┴──────────────────┤
-│ Acceptance Coverage / Release Readiness                           │
+│ Verification Coverage / Completion Readiness                      │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -29,7 +31,7 @@
 2. Live Activity
 3. Action Inbox
 4. Stage Rail
-5. Acceptance Coverage
+5. Verification / Completion Coverage
 
 ## 4. 比例建议
 
@@ -53,9 +55,9 @@
 1. 切成很多 tab
 2. 让 `Action Inbox` 折叠太深
 3. 首屏看不到最新事件
+4. 首屏只有 readiness，没有结构化阻塞原因
 
 ## 7. 后续细分专题
 
 1. 常规态工作台视觉稿
 2. 响应式断点规则
-

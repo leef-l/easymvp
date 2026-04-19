@@ -4,6 +4,11 @@
 > 上游文档：[EasyMVP-V3文档总纲](./EasyMVP-V3文档总纲.md)  
 > 目标：给出 EasyMVP V3 的顶层系统边界、核心对象、主链路和分层职责。
 
+> 最新口径说明：
+> 这份文档保留为旧 V3 顶层架构草图。当前 EasyMVP 最新三层定位、闭环原则和多脑协作边界，统一以
+> [钱学森工程控制论总方案-brain-v3-easymvp-easymvp-brain.md](/www/wwwroot/project/easymvp/docs/钱学森总纲设计/钱学森工程控制论总方案-brain-v3-easymvp-easymvp-brain.md)
+> 和 [钱学森总纲设计/README.md](/www/wwwroot/project/easymvp/docs/钱学森总纲设计/README.md) 为准。
+
 ## 1. 设计结论
 
 EasyMVP V3 的顶层结构分为三层：
@@ -17,6 +22,12 @@ EasyMVP V3 的顶层结构分为三层：
 - EasyMVP 主仓继续负责工作流状态机和业务对象
 - `easymvp-brain` 负责 EasyMVP 领域认知
 - `brain-v3` 负责运行时、工具、Run 生命周期和多脑协作
+
+按当前钱学森总纲口径，这里的三层定位仍然成立，但读法必须更新：
+
+1. 这份文档保留三层分工和主链路草图价值
+2. 当前 EasyMVP 实现层真正要先做实的，不再是旧对象大拼盘，而是闭环主对象链
+3. `completed` 的业务语义不再由“执行成功”或“production passed”直接决定，而必须由结构化裁决对象驱动
 
 ## 2. V3 要解决的根因
 
@@ -46,6 +57,24 @@ V3 第一批必须稳定下来的对象：
 9. `ProductionAcceptanceProfile`
 10. `AcceptanceRun`
 
+上面这组对象现在更适合被理解为“旧 V3 的上游背景对象”。
+
+按当前钱学森总纲，EasyMVP 近期真正要优先固定并进入实现/展示/裁决主链的对象是：
+
+1. `CompiledTask`
+2. `VerificationResult`
+3. `CompletionVerdict`
+4. `FaultSummary`
+5. `RepairPlanDraft`
+6. `RuntimeEscalation`
+
+收口原则：
+
+- `PlanDraft / PlanReviewResult / CompiledPlan` 解决方案形成与编译
+- `CompiledTask` 解决正式执行起点
+- `VerificationResult / CompletionVerdict` 解决验证与完成判定
+- `FaultSummary / RepairPlanDraft / RuntimeEscalation` 解决失败、升级与返工闭环
+
 ## 4. 顶层链路
 
 V3 的主链路：
@@ -68,10 +97,25 @@ Production Acceptance
 Complete
 ```
 
+按当前总纲，这条旧链路需要补成“对象级闭环链路”来理解：
+
+```text
+PlanDraft
+  -> PlanReviewResult
+  -> CompiledPlan
+  -> CompiledTask
+  -> RunResult / DeliveryResult
+  -> VerificationResult
+  -> CompletionVerdict
+  -> RuntimeEscalation / FaultSummary / RepairPlanDraft
+  -> completed 或 reworking
+```
+
 与 V2 最大的区别是：
 
 - 方案不能直接进入 execute
 - 验收目标不是普通通过，而是生产级通过
+- 运行成功、验证通过、业务完成被明确拆开，不再混成一个状态
 
 ## 5. 三层分工
 
@@ -114,6 +158,13 @@ V3 的设计原则：
 4. 执行期只做执行，不临时发明业务规则
 5. 验收按分类、按 surface、按 journey、按证据判定
 6. 最终目标是 `production_ready`
+
+按当前 EasyMVP 总纲，建议把这里再补成 4 条硬约束：
+
+7. 页面必须展示结构化原因，不能只展示成功/失败
+8. `github_actions` 当前只是替代验证通道，不是长期终局
+9. `completed` 必须由 `CompletionVerdict.completed = true` 驱动
+10. 有 `manual_review_required / verification_conflict / fault_loop_detected / channel_unavailable` 时，不能静默推进
 
 ## 7. 相关子文档
 

@@ -98,6 +98,12 @@
 1. `Insert(ctx context.Context, data *do.AcceptanceRun) error`
 2. `GetLatestByProjectID(ctx context.Context, projectID string) (*entity.AcceptanceRun, error)`
 
+补充说明：
+
+- 这里保留 `AcceptanceRunRepository` 代表历史实现资产和当期读写现实
+- 但按当前钱学森总纲，后续不应把 `AcceptanceRun` 继续当成最终完成语义中心
+- 更准确的方向是让 `AcceptanceRun` 与 `VerificationResult / CompletionVerdict` 并存，并逐步让后两者承担验证与完成裁决语义
+
 ### 3.11 `AcceptanceIssueRepository`
 
 1. `BatchInsert(ctx context.Context, list []*do.AcceptanceIssue) error`
@@ -107,6 +113,11 @@
 
 1. `ListByProjectID(ctx context.Context, projectID string) ([]*entity.EvidenceItem, error)`
 2. `ListByRunID(ctx context.Context, runID string) ([]*entity.EvidenceItem, error)`
+
+补充说明：
+
+- `Evidence` 的读取不应只服务 `AcceptanceRun`
+- 还应逐步支持 `VerificationResult`、`RuntimeEscalation`、`FaultSummary` 等闭环对象的页面消费
 
 ### 3.13 `ReplayRepository`
 
@@ -145,4 +156,3 @@
 2. repository 不返回 UI DTO
 3. query service 可以聚合多个 repository 读取
 4. command service 应持有事务边界
-

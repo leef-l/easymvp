@@ -19,7 +19,11 @@ Release Gate 不应只是页面底部的一个按钮。
 
 一句话：
 
-> Release Gate 是最终交付决策层，不是普通按钮层。
+> Release Gate 是完成裁决与人工放行辅助层，不是普通按钮层。
+
+按当前钱学森总纲，需要补一条关键约束：
+
+- Release Gate 不能单独定义“是否 completed”，它只能展示 `CompletionVerdict` 与人工放行相关语义
 
 ## 2. 打开入口
 
@@ -37,6 +41,10 @@ Release Gate 不应只是页面底部的一个按钮。
 2. 是谁阻塞了交付
 3. 若需要人工放行，动作是什么
 4. 放行后状态会如何变化
+
+并且要明确：
+
+5. 当前卡住的是验证问题、人工检查点，还是最终完成裁决
 
 ## 4. 抽屉布局
 
@@ -67,9 +75,11 @@ Release Gate 不应只是页面底部的一个按钮。
 
 1. `can_release`
 2. `requires_manual_release`
-3. `production_passed`
-4. `released_by_human`
-5. `current_blocking_reason`
+3. `decision`
+4. `completed`
+5. `released_by_human`
+6. `current_blocking_reason`
+7. `channel_note`
 
 ## 6. 阻塞原因区
 
@@ -123,7 +133,7 @@ Release Gate 不应只是页面底部的一个按钮。
 
 仅在以下条件同时满足时高亮可点：
 
-1. `production_passed = true`
+1. `decision = manual_checkpoint` 或等价可放行状态
 2. `manual_release_required = true`
 3. `released_by_human = false`
 4. 所需确认条件已满足
@@ -141,14 +151,14 @@ Release Gate 不应只是页面底部的一个按钮。
 
 抽屉主信息应强调：
 
-1. 当前仍未达到 `production_passed`
+1. 当前仍未达到 `completed`
 2. 缺少哪些证据或 gate
 
 ### 9.2 生产通过但需人工放行
 
 抽屉主信息应强调：
 
-1. 已达到 `production_passed`
+1. 验证侧要求已满足
 2. 但仍需人工确认后才算真正完成
 
 ### 9.3 已完成人工放行
@@ -167,6 +177,7 @@ Release Gate 不应只是页面底部的一个按钮。
 2. 把人工放行做成无上下文的危险动作
 3. 缺少阻塞原因明细
 4. 放行后不保留可见记录入口
+5. 用 Release Gate 直接替代 `CompletionVerdict`
 
 ## 11. 对后续文档的约束
 

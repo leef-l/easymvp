@@ -38,6 +38,9 @@
 4. `manual_release_required`
 5. `run_sync_failed`
 6. `creation_recovery_required`
+7. `verification_conflict`
+8. `fault_loop_detected`
+9. `policy_denied`
 
 ## 5. 排序
 
@@ -45,7 +48,8 @@
 
 1. `blocking=true` 最优先
 2. `manual_release_required` 第二
-3. `risk_confirmation` 第三
+3. `verification_conflict / fault_loop_detected` 第三
+4. `risk_confirmation` 第四
 4. 其他按更新时间
 
 ## 6. 首次进入特殊规则
@@ -57,6 +61,8 @@
 1. `Open Plan`
 2. `Confirm project goal`
 3. `Check workspace path`
+
+不要在首次进入时伪造“已进入执行/验收”类动作卡。
 
 ## 7. 线框
 
@@ -76,9 +82,9 @@
 1. 右侧只是普通消息列表
 2. 没有主动作
 3. blocker 和建议动作混在一起没有层级
+4. 把 `verification_conflict` 或 `fault_loop_detected` 隐藏成普通失败
 
 ## 9. 后续细分专题
 
 1. Action Inbox 卡片视觉稿
 2. Action Inbox 数据字段约束
-

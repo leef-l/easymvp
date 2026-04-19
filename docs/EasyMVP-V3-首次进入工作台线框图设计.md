@@ -10,19 +10,21 @@
 
 首次进入工作台时，应当在常规三栏布局上做一次“启动期重排”。
 
+按当前钱学森总纲，这个启动期重排对应的是早期 `reviewing` 引导态，而不是旧 `Design` 阶段的单独页面心智。
+
 ## 2. 线框结构
 
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
-│ Top Status Bar: Project created / preparing first plan          │
+│ Top Status Bar: Project created / preparing first review cycle  │
 ├──────────────────────────────────────────────────────────────────┤
 │ Startup Guide Card                                              │
 ├───────────────────────┬───────────────────────┬──────────────────┤
 │ Stage Rail            │ Init Activity         │ Next Actions     │
-│ Design active         │ creation events       │ Open Plan         │
+│ reviewing active      │ creation events       │ Open Plan         │
 │ others muted          │ plan bootstrap        │ Check path        │
 ├───────────────────────┴───────────────────────┴──────────────────┤
-│ Acceptance Preparation Summary                                  │
+│ Verification Preparation Summary                                │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -43,7 +45,7 @@
 
 ### 3.3 Stage Rail
 
-只高亮 `Design`。
+只高亮 `reviewing`。
 
 ### 3.4 Init Activity
 
@@ -56,7 +58,7 @@
 1. `Open Plan`
 2. `View Init Events`
 
-### 3.6 Acceptance Preparation Summary
+### 3.6 Verification Preparation Summary
 
 不展示完整矩阵，只展示准备态说明。
 

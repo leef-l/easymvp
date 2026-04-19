@@ -27,6 +27,10 @@
 2. 不直接透出 `brain-v3` 原始 `tools/list` / `tools/call`、原始 `content[]` 或原始工具 payload
 3. `unsupported / denied` 必须在聚合层先变成显式首页状态或待处理项语义
 
+按当前钱学森总纲，需要再补一条定位：
+
+4. `WorkspaceHomeView` 只承担多项目壳层总览，不替代单项目 `WorkspacePage / AcceptancePage / DiagnosticsPage`
+
 ## 2. 根对象定义
 
 建议首页根对象固定为：
@@ -70,9 +74,11 @@
 9. `blocker_count`
 10. `waiting_action`
 11. `production_readiness`
-12. `functional_passed`
-13. `production_passed`
-14. `deep_link`
+12. `decision`
+13. `completed`
+14. `has_runtime_escalation`
+15. `manual_checkpoint_required`
+16. `deep_link`
 
 ### 4.2 字段说明
 
@@ -113,6 +119,8 @@
 3. `acceptance_blocker`
 4. `manual_release_required`
 5. `run_sync_failed`
+6. `verification_conflict`
+7. `fault_loop_detected`
 
 ## 6. stage_overview
 
@@ -132,12 +140,11 @@
 
 建议固定枚举：
 
-1. `Design`
-2. `Review`
-3. `Compile`
-4. `Execute`
-5. `Acceptance`
-6. `Complete`
+1. `reviewing`
+2. `executing`
+3. `accepting`
+4. `reworking`
+5. `completed`
 
 ## 7. recent_activity
 
@@ -189,12 +196,13 @@
 
 1. `project_id`
 2. `project_name`
-3. `functional_passed`
-4. `production_passed`
+3. `decision`
+4. `completed`
 5. `manual_release_required`
 6. `released_by_human`
 7. `blocking_reason`
 8. `acceptance_link`
+9. `preferred_channel_note`
 
 ## 9. quick_actions
 
@@ -249,6 +257,8 @@
 2. run 失败
 3. manual release 触发
 4. production readiness 进入 `near_ready`
+5. `RuntimeEscalation` 新增
+6. `CompletionVerdict.decision` 变化
 
 ## 12. 排序规则
 
@@ -304,7 +314,12 @@
 
 1. `ProjectSnapshot`
 2. `BrainRunBinding`
-3. `AcceptanceRun`
+3. 旧聚合里的 `AcceptanceRun` 摘要
+
+补充说明：
+
+- 当前钱学森总纲下，`running_projects` 的更准确方向应逐步补齐 `CompletionVerdict / RuntimeEscalation` 摘要
+- 不应继续只靠 `AcceptanceRun` 判断首页项目是否接近完成
 
 ### 14.2 need_attention 来源
 
@@ -323,8 +338,13 @@
 
 来自：
 
-1. `AcceptanceRun`
+1. 旧聚合里的 `AcceptanceRun`
 2. `AcceptanceCoverage`
+
+补充说明：
+
+- 这组来源可以继续保留为首页壳层首版现实
+- 但按当前总纲，`release_readiness` 更准确的中心应逐步补到 `decision / completed / blocking_reason`
 
 ## 15. 不该怎么做
 

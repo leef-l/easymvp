@@ -10,6 +10,8 @@
 
 `Workspace Home` 必须采用“多项目总览 + 待处理聚焦 + 交付进度前置”的首屏结构。
 
+按当前钱学森总纲，这里说的“交付进度前置”只能是壳层总览，不替代单项目 `Workspace / Acceptance / Diagnostics` 的结构化原因展示。
+
 首页不能做成：
 
 1. 统计页
@@ -27,14 +29,14 @@
 │ Header: Logo / Workspace / Search / New Project / Settings         │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Global Summary Strip                                                │
-│ Running | Blocked | Need Action | Ready For Acceptance              │
+│ Running | Blocked | Need Action | Near Completion                   │
 ├───────────────────────────────────────┬──────────────────────────────┤
 │ Running Projects                      │ Need Attention              │
 │ project cards                         │ action cards                │
 │                                       │                              │
 ├───────────────────────────────────────┴──────────────────────────────┤
 │ Stage Overview                                                     │
-│ Design | Review | Compile | Execute | Acceptance | Complete        │
+│ reviewing | executing | accepting | reworking | completed          │
 ├───────────────────────────────────────┬──────────────────────────────┤
 │ Recent Activity                       │ Release Readiness           │
 │ cross-project live feed               │ near-ready projects         │
@@ -95,7 +97,7 @@
 1. `Running Projects`
 2. `Blocked Projects`
 3. `Need Action`
-4. `Ready For Acceptance`
+4. `Near Completion`
 
 每张卡只放：
 
@@ -123,7 +125,7 @@
 │ Stage Badge             Progress %   │
 │ Active: current task/run             │
 │ Blockers: n   Need Action: yes/no    │
-│ Acceptance: partial / near-ready     │
+│ Completion: blocked / near-ready     │
 │ [Open Project] [Acceptance]          │
 └──────────────────────────────────────┘
 ```
@@ -136,7 +138,7 @@
 2. 当前阶段
 3. 当前活跃项
 4. 阻塞状态
-5. Acceptance 进度
+5. Completion / Readiness 状态
 
 ### 6.4 状态表现
 
@@ -144,7 +146,7 @@
 
 1. `blocked` 项目卡高亮告警
 2. `running` 项目卡显示活动状态
-3. `near-ready` 项目卡突出可交付感
+3. `near-ready` 项目卡突出接近收口感
 
 ## 7. Need Attention 区线框
 
@@ -167,7 +169,8 @@
 
 1. `blocking` 卡片置顶
 2. `manual_release_required` 次置顶
-3. 普通 warning 最后
+3. `verification_conflict / fault_loop_detected` 紧随其后
+4. 普通 warning 最后
 
 ## 8. Stage Overview 线框
 
@@ -180,7 +183,7 @@
 建议用横向阶段条，每段带数量：
 
 ```text
-Design(2) Review(3) Compile(1) Execute(4) Acceptance(2) Complete(5)
+reviewing(2) executing(3) accepting(1) reworking(2) completed(5)
 ```
 
 ### 8.3 交互
@@ -210,6 +213,7 @@ time · project · event summary · [Open]
 2. task failed
 3. acceptance blocker
 4. manual action required
+5. runtime escalation raised
 
 ## 10. Release Readiness 线框
 
@@ -222,8 +226,8 @@ time · project · event summary · [Open]
 ```text
 ┌──────────────────────────────┐
 │ Project Name                 │
-│ functional: yes/no           │
-│ production: yes/no           │
+│ decision: blocked/rework/... │
+│ completed: yes/no            │
 │ manual release: yes/no       │
 │ [Open Acceptance]            │
 └──────────────────────────────┘
@@ -231,7 +235,7 @@ time · project · event summary · [Open]
 
 ### 10.3 目的
 
-首页直接建立“离交付多远”的感觉，而不是只显示项目是否在跑。
+首页直接建立“离完成多远”的感觉，而不是只显示项目是否在跑。
 
 ## 11. 空态设计
 

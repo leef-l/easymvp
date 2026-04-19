@@ -143,6 +143,14 @@ export type ActionInboxItem = {
 }
 ```
 
+### 4.1 当前总纲口径补充
+
+上面这组首页/单项目 DTO 可以继续保留为旧 V3 首版聚合形态，但按当前钱学森总纲应补一条解释边界：
+
+1. `production_status` 仍可保留为当前现实字段
+2. 但不应再被实现者误读为最终完成状态
+3. 首页与单项目工作台的更准确方向，应逐步补齐 `decision / completed / manual_checkpoint_required / has_runtime_escalation`
+
 ## 5. Plan DTO 终稿
 
 ```ts
@@ -394,6 +402,30 @@ export type ReleaseGateView = {
   summary: string
 }
 ```
+
+### 7.1 当前总纲口径补充
+
+上面这组 DTO 可以继续保留为旧 V3 的首版接口形态，但当前钱学森总纲下不应再把它理解为最终权威对象集合。
+
+建议这样理解：
+
+1. `AcceptanceRunView` 仍可保留为历史兼容/查询聚合中的一部分
+2. `AcceptanceView` 的真正主锚点应逐步补到 `VerificationResult + CompletionVerdict`
+3. `release_gate` 不能单独定义“是否 completed”
+
+如果后续继续扩 DTO，建议优先补齐：
+
+1. `verification_contract`
+2. `verification_result`
+3. `completion_verdict`
+4. `runtime_escalations`
+5. `missing_evidence`
+6. `failed_checks`
+
+核心边界：
+
+- `production_status` 不应再被实现者误读为“最终完成状态”
+- 最终是否完成，仍以 `CompletionVerdict.completed` 为准
 
 ## 8. GoFrame Request Struct 建议
 

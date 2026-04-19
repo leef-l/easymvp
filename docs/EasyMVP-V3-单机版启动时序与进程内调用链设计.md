@@ -163,6 +163,15 @@ Acceptance requested
   → refresh Acceptance view
 ```
 
+补充说明：
+
+- 这条调用链可以继续表示当前首版实现现实
+- 但按当前钱学森总纲，后续验收链路更准确的收口应是：
+  - `AcceptanceRun` 作为历史/兼容运行对象
+  - `VerificationResult` 作为验证结果对象
+  - `CompletionVerdict` 作为最终完成裁决对象
+- 因此 “验收调用链” 不应再被误读为“AcceptanceRun 一步定义最终完成”
+
 ## 9. 后台 worker 原则
 
 建议首批 worker：

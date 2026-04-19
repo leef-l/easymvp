@@ -26,3 +26,18 @@ type ActionInboxItem = {
 }
 ```
 
+## 3. 口径补充
+
+按当前钱学森总纲，建议后续补充或等价承载以下信息：
+
+1. `blocking`
+2. `reason_code`
+3. `source_object_kind`
+4. `source_object_id`
+
+这样才能避免以下问题被压平：
+
+1. `verification_conflict`
+2. `fault_loop_detected`
+3. `policy_denied`
+4. `manual_review_required`

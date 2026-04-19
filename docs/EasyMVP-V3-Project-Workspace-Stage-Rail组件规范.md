@@ -11,16 +11,17 @@
 
 它是主链路状态带，用来表示项目推进位置与阻塞位置。
 
+按当前钱学森总纲，这个组件显示的是闭环状态机主链，不再单独把 `Compile` 作为外显阶段。
+
 ## 2. 阶段
 
 固定为：
 
-1. `Design`
-2. `Review`
-3. `Compile`
-4. `Execute`
-5. `Acceptance`
-6. `Complete`
+1. `reviewing`
+2. `executing`
+3. `accepting`
+4. `reworking`
+5. `completed`
 
 ## 3. 每个阶段节点字段
 
@@ -45,16 +46,17 @@
 
 点击阶段时：
 
-1. `Design / Review / Compile` 打开 `Plan`
-2. `Execute` 打开 run/task 详情
-3. `Acceptance` 打开 `Acceptance`
-4. `Complete` 打开总结抽屉
+1. `reviewing` 打开 `Plan`
+2. `executing` 打开 run/task 详情
+3. `accepting` 打开 `Acceptance`
+4. `reworking` 打开返工/诊断相关视图
+5. `completed` 打开总结抽屉
 
 ## 6. 首次进入特殊规则
 
 首次进入时：
 
-1. 只高亮 `Design`
+1. 只高亮 `reviewing`
 2. 其余阶段弱化为“即将进入”
 
 ## 7. 不该怎么做
@@ -69,4 +71,3 @@
 
 1. Stage Rail 视觉稿
 2. 阶段状态到页面跳转映射表
-

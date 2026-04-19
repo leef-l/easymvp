@@ -312,7 +312,13 @@ Evidence 必须直接服务 `Acceptance` 页，而不是只服务存档。
 ### 15.1 默认不应清理
 
 1. 已 `validated` 的 blocking evidence
-2. 当前最新版 AcceptanceRun 正在引用的 evidence
+2. 当前最新版验收/验证链路仍在引用的 evidence
+
+补充说明：
+
+- 这里的旧表述里可以包含 `AcceptanceRun`
+- 但按当前钱学森总纲，Evidence 的保留判断不应只围绕 `AcceptanceRun`
+- 还应逐步兼容 `VerificationResult / CompletionVerdict / RuntimeEscalation` 的引用语义
 
 ### 15.2 可清理
 

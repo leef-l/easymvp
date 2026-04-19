@@ -57,6 +57,9 @@
 3. `acceptance_blocker`
 4. `manual_release_required`
 5. `path_or_workspace_problem`
+6. `verification_conflict`
+7. `fault_loop_detected`
+8. `policy_denied`
 
 ## 6. 排序
 
@@ -64,7 +67,8 @@
 
 1. `blocking = true`
 2. `manual_release_required`
-3. `severity = high`
+3. `verification_conflict / fault_loop_detected`
+4. `severity = high`
 4. 最近更新时间
 
 ## 7. 动作
@@ -85,9 +89,9 @@
 1. 一卡放很多字段
 2. 要点开后才知道是什么问题
 3. 一个卡片塞 4 个按钮
+4. 把升级类问题隐藏成普通失败
 
 ## 10. 后续细分专题
 
 1. Need Attention 卡视觉稿
 2. 跨项目动作映射表
-

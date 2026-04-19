@@ -39,7 +39,7 @@
 建议以下条件同时满足时进入首次引导态：
 
 1. 项目创建时间处于最近窗口内
-2. `current_stage` 位于 `Design` 或 `Review` 前期
+2. `current_stage` 位于早期 `reviewing`
 3. 尚未产生稳定的执行阶段活动
 4. 用户尚未手动关闭首次引导
 
@@ -80,7 +80,7 @@
 建议顶部主文案使用：
 
 1. `Project created`
-2. `EasyMVP is preparing the first plan`
+2. `EasyMVP is preparing the first review cycle`
 
 ### 6.3 建议字段
 
@@ -123,7 +123,7 @@
 1. `项目已创建`
 2. `工作区已绑定`
 3. `分类策略已命中`
-4. `初始计划正在准备`
+4. `首次 review/compile 正在准备`
 
 ### 7.4 主按钮
 
@@ -142,17 +142,17 @@
 
 建议：
 
-1. 仅高亮 `Design`
-2. `Review / Compile / Execute / Acceptance / Complete` 使用弱化态
+1. 仅高亮 `reviewing`
+2. `executing / accepting / reworking / completed` 使用弱化态
 3. 阶段说明改为“即将进入”
 
 ### 8.1 阶段卡提示
 
 例如：
 
-1. `Design`：正在生成初始计划
-2. `Review`：将在计划准备后自动进入
-3. `Compile`：等待 review 结论
+1. `reviewing`：正在准备首轮计划审核与编译
+2. `executing`：将在首轮计划收口后进入
+3. `accepting`：待执行与验证产出形成后进入
 
 ## 9. 初始化事件流设计
 
@@ -208,16 +208,16 @@
 2. 单一动作按钮
 3. 是否阻塞主流程
 
-## 11. Acceptance 区域降级
+## 11. Verification 区域降级
 
-首次进入时，验收区不应制造“为什么这里全是空”的感觉。
+首次进入时，验证/验收区不应制造“为什么这里全是空”的感觉。
 
 建议改成准备态摘要卡，而不是完整覆盖矩阵。
 
 建议展示：
 
-1. `Acceptance profile will be prepared from project category`
-2. `Surface and journey coverage will appear after planning`
+1. `Verification requirements will be prepared from project category`
+2. `Coverage details will appear after the first review/compile cycle`
 
 这可以避免页面底部出现大片空白。
 
@@ -249,7 +249,7 @@
 
 1. 用户主动关闭引导
 2. 用户进入过 `Plan` 并返回
-3. 项目已进入 `Review` 稳定阶段
+3. 项目已进入稳定 `reviewing` 阶段
 4. 项目已出现正式执行活动
 
 退出后恢复常规 `Project Workspace` 视图。
@@ -263,6 +263,10 @@
 3. `startup_summary`
 4. `recommended_next_actions`
 5. `plan_ready`
+
+如后续对象口径继续收口，建议补充：
+
+6. `first_verification_prep_summary`
 
 这样前端无需自己猜测是否要展示引导态。
 
@@ -298,7 +302,7 @@
 建议优先用：
 
 1. `Your project is ready`
-2. `EasyMVP is preparing the first plan`
+2. `EasyMVP is preparing the first review cycle`
 3. `Open Plan to review how the system will structure the work`
 
 避免使用：

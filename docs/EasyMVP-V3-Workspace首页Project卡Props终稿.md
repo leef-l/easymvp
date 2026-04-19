@@ -29,3 +29,18 @@ type ProjectCard = {
 }
 ```
 
+## 3. 口径补充
+
+按当前钱学森总纲，这个 props 结构可以继续保留为首页壳层首版现实字段。
+
+但后续建议逐步补齐或等价承载：
+
+1. `decision`
+2. `completed`
+3. `manual_checkpoint_required`
+4. `has_runtime_escalation`
+
+原因：
+
+- `production_status` 不应再被首页卡误读为最终完成状态
+- 首页卡至少要有能力提示当前是否存在人工检查点和升级对象

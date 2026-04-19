@@ -13,11 +13,17 @@
 
 ## 1. 设计结论
 
-`Workspace` 顶层必须是多项目实时总览首页。
+这份文档现在应被理解为“多项目壳层首页备选稿”，不是当前主工作台定义。
 
-它不是单项目驾驶舱，而是：
+当前钱学森总纲下，真正的主入口优先级是：
 
-> 所有进行中项目的实时总览首页。
+1. 单项目闭环驾驶舱
+2. 单项目的 `Workspace / Plan / Acceptance / Diagnostics`
+3. 多项目首页只承担壳层总览和项目切换，不承担当前主链可视化语义
+
+因此这里的首页定位应改写为：
+
+> 所有进行中项目的壳层总览首页。
 
 ## 2. 首页核心问题
 
@@ -27,6 +33,12 @@
 2. 哪些项目卡住了
 3. 哪些项目等我处理
 4. 哪些项目快能交付了
+
+但不能试图替代单项目工作台去回答：
+
+1. 当前任务为什么卡住
+2. 当前项目为什么还不能 `completed`
+3. 当前验证缺口和升级对象是什么
 
 ## 3. 页面布局
 
@@ -64,6 +76,8 @@
 6. `blocker_count`
 7. `waiting_action`
 8. `production_readiness`
+9. `has_runtime_escalation`
+10. `manual_checkpoint_required`
 
 ### 5.3 操作
 
@@ -85,6 +99,8 @@
 2. `run_failed`
 3. `acceptance_blocker`
 4. `manual_release_required`
+5. `verification_conflict`
+6. `fault_loop_detected`
 
 ### 6.3 展示字段
 
@@ -104,12 +120,11 @@
 
 建议按阶段展示计数：
 
-1. `Design`
-2. `Review`
-3. `Compile`
-4. `Execute`
-5. `Acceptance`
-6. `Complete`
+1. `reviewing`
+2. `executing`
+3. `accepting`
+4. `reworking`
+5. `completed`
 
 ## 8. Recent Activity 区
 
@@ -136,10 +151,11 @@
 ### 9.2 展示字段
 
 1. `project_name`
-2. `functional_passed`
-3. `production_passed`
+2. `decision`
+3. `completed`
 4. `manual_release_required`
 5. `released_by_human`
+6. `blocking_reason`
 
 ## 10. 首页交互规则
 
@@ -150,6 +166,11 @@
 3. 点击阶段分布项筛选项目列表
 4. 点击 `New Project` 打开创建项目流程
 
+补充约束：
+
+1. 首页上的任何“通过/失败/可交付”提示，都必须能深链到单项目页面看结构化原因
+2. 首页不应成为唯一的阻塞解释页面
+
 ## 11. 不该怎么做
 
 不应该：
@@ -157,6 +178,8 @@
 1. 首页只显示统计数字
 2. 首页没有进行中项目卡片
 3. 首页必须切页后才知道哪些项目阻塞
+4. 把首页当成单项目 `Workspace` 的替代品
+5. 用 `production_passed` 直接替代当前完成状态
 
 ## 12. 后续细分专题
 

@@ -17,6 +17,10 @@
 3. 在高风险场景补充人工审核要求
 4. 输出可解释来源
 
+按当前钱学森总纲，需要补一条关键收口：
+
+5. `RoleResolver` 服务于 `CompiledTask` 的脑路由与闭环控制，不再把 `Compile` 视为独立运行阶段
+
 ## 2. 输入输出
 
 ### 2.1 输入
@@ -31,6 +35,15 @@
 6. `capability_need`
 7. `project_role_override`
 8. `manual_review_required`
+
+这里的 `phase` 现在应按当前闭环主链理解为：
+
+1. `reviewing`
+2. `executing`
+3. `accepting`
+4. `reworking`
+
+其中 `plan_compile` 是 `reviewing` 阶段内的合同动作，不建议继续当成独立 phase 对外扩散。
 
 ### 2.2 输出
 
@@ -90,17 +103,19 @@
 
 例如：
 
-1. `Review` 阶段优先 `easymvp-brain`
-2. `Execute` 阶段优先 `code-brain`
-3. `Acceptance` 阶段优先 `browser-brain` 或 `verifier-brain`
+1. `reviewing` 阶段优先 `easymvp-brain`
+2. `executing` 阶段优先 `code-brain`
+3. `accepting` 阶段优先 `browser-brain` 或 `verifier-brain`
+4. `reworking` 阶段默认回到 `easymvp-brain`
 
 ### 4.5 全局回退规则
 
 当以上都未命中时：
 
-1. `Design / Review / Compile` 回退到 `easymvp-brain`
-2. `Execute` 回退到 `code-brain`
-3. `Acceptance` 回退到 `verifier-brain`
+1. `reviewing` 回退到 `easymvp-brain`
+2. `executing` 回退到 `code-brain`
+3. `accepting` 回退到 `verifier-brain`
+4. `reworking` 回退到 `easymvp-brain`
 
 ## 5. 风险升级规则
 
@@ -153,6 +168,14 @@
 5. `acceptance_verifier -> verifier-brain`
 6. `release_gate_reviewer -> easymvp-brain`
 
+如果和当前总纲统一枚举发生冲突，脑种命名统一以后者为准：
+
+1. `easymvp`
+2. `code`
+3. `browser`
+4. `verifier`
+5. `fault`
+
 ## 9. 与 CompiledTask 的关系
 
 `RoleResolver` 的输出应写入 `CompiledTask`：
@@ -167,6 +190,12 @@
 1. 为什么是这个角色
 2. 为什么是这个 brain
 3. 是否存在项目级覆盖
+
+同时还能支撑：
+
+4. 是否需要人工检查点
+5. 为什么会走某个验证通道
+6. 返工后是否发生脑路由重算
 
 ## 10. 异常与回退
 

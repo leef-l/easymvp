@@ -19,6 +19,12 @@ V3 页面设计不能直接面向底层业务对象逐个取数。
 2. 视图聚合层负责把业务对象组合成页面对象
 3. 前端只消费聚合后的页面模型
 
+按当前钱学森总纲口径，需要再补 3 个顶层约束：
+
+1. 页面不只展示“结果”，还必须展示导致结果的结构化原因
+2. 页面必须显式展示 `RuntimeEscalation / CompletionVerdict / VerificationResult` 这些闭环对象，不能退化成日志页
+3. `github_actions` 在页面上必须被标注为当前替代验证通道，而不是长期最终验证环境
+
 这层的作用不是替代业务模型，而是：
 
 1. 降低前端对内部状态机的耦合
@@ -47,6 +53,10 @@ V3 页面设计不能直接面向底层业务对象逐个取数。
 
 所以 V3 必须定义正式的聚合视图对象。
 
+而在当前 EasyMVP 总纲下，还要多挡住一种退化：
+
+5. 页面只显示“成功/失败”，却看不到 contract gap、人工检查点、故障升级对象和返工来源
+
 ## 3. 视图模型层的定位
 
 V3 的对象分三层看：
@@ -68,7 +78,7 @@ V3 的对象分三层看：
 
 ### 3.2 运行时对象层
 
-由 `brain-v3` 提供：
+由运行中的脑执行链路提供：
 
 1. `run_id`
 2. `status`
@@ -76,6 +86,10 @@ V3 的对象分三层看：
 4. `replay`
 5. `cancel`
 6. `resume`
+7. `RuntimeEscalation`
+8. `FaultSummary`
+9. `VerificationResult`
+10. `CompletionVerdict`
 
 ### 3.3 视图对象层
 
@@ -121,6 +135,8 @@ V3 的对象分三层看：
 3. `LiveEvent`
 4. `ActionInbox`
 5. `AcceptanceCoverage`
+6. `RuntimeEscalation`
+7. `VerificationResult`
 
 以下内容相对稳定：
 
@@ -128,6 +144,7 @@ V3 的对象分三层看：
 2. `PlanReviewResult`
 3. `CompiledPlan`
 4. `ProductionAcceptanceProfile`
+5. `verification_contract_json`
 
 因此接口层应区分：
 
@@ -164,6 +181,9 @@ V3 的对象分三层看：
 6. `action_inbox`
 7. `acceptance_coverage`
 8. `quick_actions`
+9. `completion_verdict_summary`
+10. `runtime_escalation_summary`
+11. `verification_summary`
 
 ### 5.2 project
 
@@ -191,6 +211,9 @@ V3 的对象分三层看：
 5. `waiting_action_count`
 6. `production_readiness`
 7. `final_status_hint`
+8. `manual_checkpoint_required`
+9. `verification_conflict`
+10. `fault_loop_detected`
 
 ### 5.4 stage_progress
 
@@ -262,6 +285,7 @@ V3 的对象分三层看：
 9. `action_target`
 10. `source_object_kind`
 11. `source_object_id`
+12. `reason_code`
 
 ### 5.8 acceptance_coverage
 
@@ -276,6 +300,7 @@ V3 的对象分三层看：
 5. `blocking_gap`
 6. `last_verified_at`
 7. `detail_target`
+8. `channel`
 
 ### 5.9 quick_actions
 
@@ -372,6 +397,8 @@ V3 的对象分三层看：
 6. `delivery_summary`
 7. `verification_summary`
 8. `affected_resources`
+9. `manual_review_required`
+10. `preferred_verification_channel`
 
 ### 6.7 role_resolution_summary
 
@@ -403,6 +430,9 @@ V3 的对象分三层看：
 5. `evidence_cards`
 6. `final_judgement`
 7. `release_gate`
+8. `verification_contract`
+9. `verification_result`
+10. `runtime_escalations`
 
 ### 7.2 acceptance_profile
 
@@ -428,6 +458,7 @@ V3 的对象分三层看：
 4. `ended_at`
 5. `blocking_issue_count`
 6. `warning_count`
+7. `channel`
 
 ### 7.4 coverage
 
@@ -440,6 +471,8 @@ V3 的对象分三层看：
 3. `status`
 4. `evidence_count`
 5. `blocking_gap`
+6. `missing_evidence`
+7. `failed_checks`
 
 ### 7.5 evidence_cards
 
@@ -466,6 +499,8 @@ V3 的对象分三层看：
 3. `manual_release_required`
 4. `released_by_human`
 5. `current_blocking_reason`
+6. `decision`
+7. `completed`
 
 ### 7.7 release_gate
 
@@ -477,6 +512,7 @@ V3 的对象分三层看：
 2. `requires_manual_release`
 3. `release_button_text`
 4. `release_action_target`
+5. `channel_note`
 
 ## 8. 视图对象与来源对象映射
 
@@ -489,6 +525,9 @@ V3 的对象分三层看：
 3. `DeliveryContract` 执行结果
 4. `VerificationContract` 执行结果
 5. `AcceptanceRun`
+6. `CompletionVerdict`
+7. `RuntimeEscalation`
+8. `FaultSummary`
 
 ### 8.2 PlanView 来源
 
@@ -508,12 +547,25 @@ V3 的对象分三层看：
 2. `AcceptanceRun`
 3. `Evidence`
 4. `browser-brain / verifier-brain / easymvp-brain` 结果
+5. `VerificationResult`
+6. `CompletionVerdict`
 
-## 9. 接口边界建议
+## 9. 与当前总纲的收口说明
+
+本文件现在应当被理解为“页面聚合与展示细稿”，不是最新总纲本身。
+
+当前真正的权威口径是：
+
+1. 页面该读什么对象，以 [EasyMVP-页面读取与展示清单](./钱学森总纲设计/EasyMVP-页面读取与展示清单.md) 为准
+2. 对象最少要有哪些字段，以 [EasyMVP-对象级字段清单](./钱学森总纲设计/EasyMVP-对象级字段清单.md) 为准
+3. 哪些状态可以推进到 `completed`，以 [EasyMVP-闭环状态机补充说明](./钱学森总纲设计/EasyMVP-闭环状态机补充说明.md) 为准
+4. 验证通道与验证合同怎么表达，以 [EasyMVP-Verification-Contract统一设计](./钱学森总纲设计/EasyMVP-Verification-Contract统一设计.md) 为准
+
+## 10. 接口边界建议
 
 V3 第一版建议只开放 3 类页面接口和 1 类事件流接口。
 
-### 9.1 页面快照接口
+### 10.1 页面快照接口
 
 建议：
 
@@ -521,7 +573,7 @@ V3 第一版建议只开放 3 类页面接口和 1 类事件流接口。
 2. `GET /api/v3/projects/{id}/plan-view`
 3. `GET /api/v3/projects/{id}/acceptance-view`
 
-### 9.2 事件流接口
+### 10.2 事件流接口
 
 建议：
 
@@ -529,7 +581,7 @@ V3 第一版建议只开放 3 类页面接口和 1 类事件流接口。
 
 第一版可以先用短轮询或 SSE。
 
-### 9.3 操作接口
+### 10.3 操作接口
 
 建议操作接口不要直接暴露底层对象修改语义。
 
@@ -540,9 +592,9 @@ V3 第一版建议只开放 3 类页面接口和 1 类事件流接口。
 3. `POST /api/v3/projects/{id}/actions/manual-release`
 4. `POST /api/v3/projects/{id}/actions/resolve-blocker`
 
-## 10. 刷新策略建议
+## 11. 刷新策略建议
 
-### 10.1 Workspace
+### 11.1 Workspace
 
 建议：
 
@@ -550,23 +602,23 @@ V3 第一版建议只开放 3 类页面接口和 1 类事件流接口。
 2. 事件流增量刷新
 3. 待处理项立即刷新
 
-### 10.2 Plan
+### 11.2 Plan
 
 建议：
 
 1. 以快照拉取为主
 2. 编译结果变更后局部刷新
 
-### 10.3 Acceptance
+### 11.3 Acceptance
 
 建议：
 
 1. 验收运行中增量刷新
 2. 最终裁决变化立即刷新
 
-## 11. 页面跳转规则
+## 12. 页面跳转规则
 
-### 11.1 Workspace -> Plan
+### 12.1 Workspace -> Plan
 
 在以下情况下可跳：
 
@@ -574,7 +626,7 @@ V3 第一版建议只开放 3 类页面接口和 1 类事件流接口。
 2. 点击阻塞项中的方案问题
 3. 点击事件流中的编译变更事件
 
-### 11.2 Workspace -> Acceptance
+### 12.2 Workspace -> Acceptance
 
 在以下情况下可跳：
 
@@ -582,14 +634,14 @@ V3 第一版建议只开放 3 类页面接口和 1 类事件流接口。
 2. 点击覆盖矩阵
 3. 点击缺失证据卡片
 
-### 11.3 Plan -> Workspace
+### 12.3 Plan -> Workspace
 
 在以下情况下可跳：
 
 1. 点击任务投影项
 2. 点击某任务当前运行状态
 
-## 12. 不该怎么做
+## 13. 不该怎么做
 
 不应该：
 
@@ -599,7 +651,7 @@ V3 第一版建议只开放 3 类页面接口和 1 类事件流接口。
 4. 把验收页做成 issue 列表页
 5. 把工作台做成对象详情页集合
 
-## 13. 与后续页面设计的关系
+## 14. 与后续页面设计的关系
 
 本专题完成后，页面设计应按以下顺序继续推进：
 

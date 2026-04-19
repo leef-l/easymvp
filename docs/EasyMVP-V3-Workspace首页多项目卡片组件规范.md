@@ -21,6 +21,8 @@
 
 > 多项目实时驾驶舱中的“单项目状态卡”。
 
+按当前钱学森总纲，这张卡只承担壳层概览，不承担最终裁决解释职责。
+
 ## 2. 组件目标
 
 项目卡必须做到：
@@ -48,7 +50,7 @@
 │ Stage Badge                 62%          │
 │ Active: compiling task plan             │
 │ Blockers: 1   Need Action: Yes          │
-│ Readiness: partial / near-ready         │
+│ Completion: blocked / near-ready        │
 │ [Open Project] [Acceptance]             │
 └──────────────────────────────────────────┘
 ```
@@ -65,6 +67,17 @@
 6. `production_readiness`
 7. `project_category`
 8. `overall_progress`
+
+如果聚合层已提供更新后的裁决字段，建议优先过渡为：
+
+1. `project_name`
+2. `current_stage`
+3. `active_task_or_run`
+4. `blocker_count`
+5. `waiting_action`
+6. `decision`
+7. `completed`
+8. `project_category`
 
 原因：
 
@@ -97,12 +110,11 @@
 
 建议使用短 badge：
 
-1. `Design`
-2. `Review`
-3. `Compile`
-4. `Execute`
-5. `Acceptance`
-6. `Complete`
+1. `reviewing`
+2. `executing`
+3. `accepting`
+4. `reworking`
+5. `completed`
 
 ### 7.2 进度表现
 
@@ -156,9 +168,14 @@
 1. `Readiness: not started`
 2. `Readiness: partial`
 3. `Readiness: near-ready`
-4. `Readiness: production passed`
+4. `Readiness: completed`
 
 不要直接暴露一堆内部布尔字段。
+
+如果页面已经接入最新字段，推荐优先展示：
+
+1. `Decision: blocked / rework / manual checkpoint / complete`
+2. `Completed: yes / not yet`
 
 ## 11. 动作区
 
@@ -227,6 +244,8 @@
 
 优先打开项目中的 `Action Inbox` 或 blocker 详情。
 
+若当前卡点来自 `verification_conflict / fault_loop_detected / manual_checkpoint`，应优先深链到能解释结构化原因的页面，而不是只打开普通活动流。
+
 ## 15. 空态与长文本规则
 
 ### 15.1 无当前活动
@@ -267,6 +286,7 @@
 3. blocker 信息要点进去才看到
 4. 动作区按钮太多
 5. 暴露过多内部术语
+6. 用 `production passed` 直接替代完成状态
 
 ## 18. 后续细分专题
 

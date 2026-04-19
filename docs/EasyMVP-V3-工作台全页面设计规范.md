@@ -80,6 +80,12 @@ V3 工作台不是“管理系统”，而是“单用户项目工作台”。
 
 这些应由系统推导，用户只在必要时修正或确认。
 
+按当前钱学森总纲，这里的验证语义建议进一步收口为：
+
+1. 系统推导 `brain_kind`
+2. 系统推导 `preferred_verification_channel`
+3. 系统推导 `manual_review_required`
+
 ### 3.5 术语必须面向用户理解
 
 页面文案优先使用用户能直接理解的表达，而不是系统内部术语原样暴露。
@@ -89,6 +95,10 @@ V3 工作台不是“管理系统”，而是“单用户项目工作台”。
 1. `Waiting for review` 优于 `review_pending`
 2. `Needs your decision` 优于 `manual_action_required`
 3. `Ready for release` 优于 `production_passed=true`
+
+但要补一条边界：
+
+- 面向用户的自然语言不等于可以偷换业务语义，`run success / acceptance passed / completed` 仍必须区分
 
 内部字段可以在详情或开发文档里保留，但不能主导界面语言。
 
@@ -101,6 +111,11 @@ V3 顶层导航建议固定为 5 页：
 3. `Execution`
 4. `Acceptance`
 5. `Settings`
+
+补充说明：
+
+- `Workspace` 内部可以继续分为 `Workspace Home` 与 `Project Workspace`
+- 当前主入口优先级仍是单项目闭环驾驶舱，不是多项目首页
 
 ### 4.1 导航原则
 
@@ -135,9 +150,14 @@ V3 顶层导航建议固定为 5 页：
 
 其中：
 
-1. `Workspace Home` 是多项目实时总览
+1. `Workspace Home` 是多项目壳层总览
 2. `Project Workspace` 是单项目实时驾驶舱
 3. `Create Project` 是 `Workspace Home` 的主入口动作
+
+并且要明确：
+
+- 真正承载闭环对象解释的是 `Project Workspace`
+- `Workspace Home` 只做入口与分流，不承担最终裁决解释职责
 
 ### 5.2 Plan
 
@@ -161,7 +181,12 @@ V3 顶层导航建议固定为 5 页：
 
 1. 当前覆盖了哪些 surface/journey
 2. 还缺哪些证据
-3. 现在能不能正式交付
+3. 现在能不能真正 `completed`
+
+补充说明：
+
+- `Acceptance` 页应同时展示 `VerificationResult` 与 `CompletionVerdict`
+- 不能继续只用 `production_passed` 作为页面主锚点
 
 ### 5.5 Settings
 
@@ -258,6 +283,10 @@ V3 顶层导航建议固定为 5 页：
 2. `Review blockers`
 3. `Open acceptance`
 4. `Release`
+
+但要避免：
+
+- 在未满足完成条件时，用 `Release` 把用户误导成“已经完成”
 
 ### 9.2 深层信息用抽屉，不轻易跳新页面
 

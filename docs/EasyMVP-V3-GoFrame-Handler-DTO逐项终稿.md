@@ -500,6 +500,12 @@ type AcceptanceViewRes struct {
 }
 ```
 
+补充说明：
+
+- 这里保留 `AcceptanceRun` 字段代表旧 V3 首版接口现实
+- 按当前钱学森总纲，后续 `acceptance-view` 更准确的中心对象应逐步补齐为 `verification_result / completion_verdict / runtime_escalations`
+- `ReleaseGate` 不能单独定义“是否 completed”
+
 ### 7.2 `POST /api/v3/projects/{id}/acceptance-runs`
 
 ```go
@@ -517,6 +523,12 @@ type StartAcceptanceRes struct {
     NextAction string `json:"next_action"`
 }
 ```
+
+补充说明：
+
+- `acceptance-runs` 这个命令入口可以继续保留
+- 但实现解释上不应把“启动 acceptance run”直接等同于最终完成裁决
+- 最终是否进入 `completed`，仍应由 `CompletionVerdict` 驱动
 
 ## 8. Manual Decisions
 

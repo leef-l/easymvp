@@ -4,6 +4,12 @@
 > 上游文档：[EasyMVP-V3总体架构设计](./EasyMVP-V3总体架构设计.md)  
 > 目标：把 EasyMVP 的 accept 升级成按项目分类驱动的生产级验收编排系统。
 
+> 最新口径说明：
+> 这份文档保留分类验收设计细稿。当前 EasyMVP 最新的验证合同、验证通道、完成裁决与人工检查点口径，统一以
+> [EasyMVP-Verification-Contract统一设计.md](/www/wwwroot/project/easymvp/docs/钱学森总纲设计/EasyMVP-Verification-Contract统一设计.md)、
+> [EasyMVP-页面读取与展示清单.md](/www/wwwroot/project/easymvp/docs/钱学森总纲设计/EasyMVP-页面读取与展示清单.md)、
+> [EasyMVP-闭环状态机补充说明.md](/www/wwwroot/project/easymvp/docs/钱学森总纲设计/EasyMVP-闭环状态机补充说明.md) 为准。
+
 ## 1. 设计结论
 
 V3 的最终目标不是“功能通过”，而是：
@@ -16,7 +22,15 @@ V3 的最终目标不是“功能通过”，而是：
 - `production_passed`
 - 必要时 `manual_release_required`
 
-只有 `production_passed` 才能算真正完成。
+这组状态仍然重要，但按当前钱学森总纲，它们已经不能单独定义“真正完成”。
+
+更准确的收口是：
+
+1. 分类验收体系负责定义项目类别所需的 surface / journey / evidence / gate
+2. 任务级是否验到位，由 `Verification Contract + VerificationResult` 决定
+3. 系统是否真正进入 `completed`，由 `CompletionVerdict` 统一裁决
+
+因此本文件现在应被理解为“分类验收框架文档”，不是最终完成语义的唯一来源。
 
 ## 2. 为什么 V2 不够
 
@@ -73,6 +87,12 @@ V2 的 accept 更接近：
 - issue 分级
 - 最终裁决
 
+按当前总纲，这里建议进一步拆开理解：
+
+- `ProductionAcceptanceProfile` 定义分类验收框架
+- `VerificationResult` 记录某次验证执行结果
+- `CompletionVerdict` 负责最终完成裁决
+
 ### 4.2 分类验收 Profile
 
 每个分类决定：
@@ -91,6 +111,10 @@ V2 的 accept 更接近：
 - `code/engine brain`
 - `easymvp-brain`
 
+同时要补一条当前口径：
+
+- 若采用 `github_actions` 生成 CI 证据，页面和文档都必须明确其为当前替代验证通道
+
 ## 5. 生产级的额外要求
 
 生产级验收除了功能通过，还必须覆盖：
@@ -104,6 +128,12 @@ V2 的 accept 更接近：
 - 可运营
 - 可上线
 - 可恢复
+
+并且在当前闭环规则下，还必须满足：
+
+1. 关键验证项无未收口 `verification_conflict`
+2. 必要证据无缺口
+3. 人工检查点未完成时不能自动推进到 `completed`
 
 ## 6. 不同分类的核心差异
 

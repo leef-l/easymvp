@@ -100,8 +100,8 @@ P0-A 基座对齐
 | plan_id | name | priority | depends_on | parallelizable | doc_refs | definition_of_done | status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | RT-001 | 固化 GoFrame v2 本地核心服务骨架与模块装配顺序 | P0 | - | no | `EasyMVP-V3-Go本地核心服务架构设计.md#2. 模块总览`；`EasyMVP-V3-Go本地核心服务架构设计.md#5. 服务装配顺序`；`EasyMVP-V3-代码目录结构与模块归属建议.md` | `apps/core` 的模块边界、装配入口、包归属与文档一致；首版 `app/api/orchestrator/runtime/storage/worker/diagnostics` 目录可用；装配顺序可启动且可健康检查 | completed |
-| RT-002 | 固化 Electron Main / Renderer / Go Core 三进程边界 | P0 | RT-001 | no | `EasyMVP-V3-Electron进程模型与IPC边界设计.md#2. 进程分工`；`EasyMVP-V3-Electron进程模型与IPC边界设计.md#3. IPC 的正式定位`；`EasyMVP-V3-本地API与IPC适配设计.md#3. 逻辑边界与物理边界` | 桌面壳、渲染层、Go 核心之间的边界被落实为代码目录与调用约束；主业务 API 不经 IPC 直传；本地 API 与桌面桥接职责不混淆 | pending |
-| RT-003 | 固化本地配置加载、启动参数与 safe-mode 入口 | P0 | RT-001 | yes | `EasyMVP-V3-本地配置与启动参数设计.md#3. 推荐配置项`；`EasyMVP-V3-本地配置与启动参数设计.md#5. 启动参数建议`；`EasyMVP-V3-本地配置与启动参数设计.md#6. safe-mode` | 启动时能稳定加载默认配置、工作目录、端口、诊断开关；safe-mode 能独立进入；配置缺失或错误时有标准化诊断输出 | pending |
+| RT-002 | 固化 Electron Main / Renderer / Go Core 三进程边界 | P0 | RT-001 | no | `EasyMVP-V3-Electron进程模型与IPC边界设计.md#2. 进程分工`；`EasyMVP-V3-Electron进程模型与IPC边界设计.md#3. IPC 的正式定位`；`EasyMVP-V3-本地API与IPC适配设计.md#3. 逻辑边界与物理边界` | 桌面壳、渲染层、Go 核心之间的边界被落实为代码目录与调用约束；主业务 API 不经 IPC 直传；本地 API 与桌面桥接职责不混淆 | completed |
+| RT-003 | 固化本地配置加载、启动参数与 safe-mode 入口 | P0 | RT-001 | yes | `EasyMVP-V3-本地配置与启动参数设计.md#3. 推荐配置项`；`EasyMVP-V3-本地配置与启动参数设计.md#5. 启动参数建议`；`EasyMVP-V3-本地配置与启动参数设计.md#6. safe-mode` | 启动时能稳定加载默认配置、工作目录、端口、诊断开关；safe-mode 能独立进入；配置缺失或错误时有标准化诊断输出 | in_progress |
 
 ### 5.2 P0-B 存储落库
 
@@ -119,7 +119,7 @@ P0-A 基座对齐
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | RN-001 | 落 Runtime Adapter 与 `brain-v3` Run 生命周期映射骨架 | P0 | RT-001 | yes | `EasyMVP-V3-brain-serve接口接入与Run生命周期映射.md#4. Run 生命周期映射`；`EasyMVP-V3-brain-serve接口接入与Run生命周期映射.md#5. 建议接口流程`；`EasyMVP-V3-Go本地核心服务架构设计.md#3.6 runtime` | Go 核心服务可创建、查询、取消、恢复 `brain` run；本地状态映射与远端状态映射有统一结构；失败可回写诊断 | done |
 | RN-002 | 落 brain run 绑定、事件、checkpoint 存储链路 | P0 | ST-003,RN-001 | no | `EasyMVP-V3-brain-serve接口接入与Run生命周期映射.md#6. 建议本地表`；`EasyMVP-V3-数据库Schema总设计.md#2.4 runtime`；`EasyMVP-V3-完整SQLite建表与索引SQL终稿.md#6.4 brain_run_bindings`；`EasyMVP-V3-完整SQLite建表与索引SQL终稿.md#6.5 run_checkpoints`；`EasyMVP-V3-完整SQLite建表与索引SQL终稿.md#6.6 run_event_index` | run 与 task / project 绑定关系落库；增量事件与 checkpoint 可写入、去重、查询；页面可稳定读取当前运行态；必要时可把 `tools/call` 结果归一化为稳定 runtime 摘要而不透传原始 payload | pending |
-| RN-003 | 落后台 Worker 管理器、调度与失败回传 | P0 | RT-001,RN-001 | yes | `EasyMVP-V3-后台Worker与任务调度设计.md#2. 首批 worker`；`EasyMVP-V3-后台Worker与任务调度设计.md#3. Go 调度模型`；`EasyMVP-V3-后台Worker与任务调度设计.md#6. 失败处理` | 首批 worker 进程内可调度；有并发上限、重试、失败记录、停机回收；失败会产出审计与诊断记录；`unsupported / denied` 会以显式运行时状态回传，不伪装成成功 | pending |
+| RN-003 | 落后台 Worker 管理器、调度与失败回传 | P0 | RT-001,RN-001 | yes | `EasyMVP-V3-后台Worker与任务调度设计.md#2. 首批 worker`；`EasyMVP-V3-后台Worker与任务调度设计.md#3. Go 调度模型`；`EasyMVP-V3-后台Worker与任务调度设计.md#6. 失败处理` | 首批 worker 进程内可调度；有并发上限、重试、失败记录、停机回收；失败会产出审计与诊断记录；`unsupported / denied` 会以显式运行时状态回传，不伪装成成功 | completed |
 | RN-004 | 落 replay / log / artifact 文件索引绑定与缺失诊断 | P0 | ST-004,RN-002 | yes | `EasyMVP-V3-replay与log artifact存储规范.md`；`EasyMVP-V3-本地目录与项目工作区规范.md#7. Run 目录规范`；`EasyMVP-V3-Evidence文件命名与引用规范.md#10. 文件生成与索引写入顺序` | run 相关日志、checkpoint、artifact、replay 的索引与物理文件一致；文件缺失可诊断；不重复造原始 replay 存储 | pending |
 
 ### 5.4 P0-D 集成接通
@@ -127,16 +127,16 @@ P0-A 基座对齐
 | plan_id | name | priority | depends_on | parallelizable | doc_refs | definition_of_done | status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | IN-001 | 落本地 Go API 路由分组与健康检查链路 | P0 | RT-001,ST-001 | yes | `EasyMVP-V3-API路由分组与命令查询边界设计.md#3. 路由分组建议`；`EasyMVP-V3-GoFrame-Handler-DTO逐项终稿.md`；`EasyMVP-V3-核心API-DTO与TypeScript类型终稿.md` | `/api/v3/system/healthz` 与首批 query/command 路由可用；路由分组、DTO、错误格式与文档一致 | completed |
-| IN-002 | 落 Electron 到 Go Core 的本地 API client 与启动握手 | P0 | RT-002,IN-001 | no | `EasyMVP-V3-Electron进程模型与IPC边界设计.md#2. 进程分工`；`EasyMVP-V3-本地API与IPC适配设计.md#4. 示例映射`；`EasyMVP-V3-单机版启动时序与进程内调用链设计.md` | Electron 能托管或探活 Go 本地服务；renderer 通过统一 client 调用本地 API；启动失败时能进入恢复模式 | pending |
-| IN-003 | 落桌面原生桥接最小面：文件选择、目录探测、shell 能力 | P0 | RT-002 | yes | `EasyMVP-V3-Electron进程模型与IPC边界设计.md#7. 首版建议的 preload 暴露面`；`EasyMVP-V3-本地API与IPC适配设计.md#7. 首版 client 建议` | preload 只暴露必要原生能力；不承载主业务；桥接 API 有类型定义与错误包装 | pending |
-| IN-004 | 接通运行时事件流到工作台聚合入口 | P0 | RN-002,IN-001 | yes | `EasyMVP-V3-实时事件流推送机制设计.md`；`EasyMVP-V3工作台视图模型与聚合接口设计.md`；`EasyMVP-V3-Workspace首页聚合接口Schema设计.md` | runtime 事件可被聚合层消费；工作台和项目页能看到基础实时状态；中断重连后可恢复订阅 | pending |
+| IN-002 | 落 Electron 到 Go Core 的本地 API client 与启动握手 | P0 | RT-002,IN-001 | no | `EasyMVP-V3-Electron进程模型与IPC边界设计.md#2. 进程分工`；`EasyMVP-V3-本地API与IPC适配设计.md#4. 示例映射`；`EasyMVP-V3-单机版启动时序与进程内调用链设计.md` | Electron 能托管或探活 Go 本地服务；renderer 通过统一 client 调用本地 API；启动失败时能进入恢复模式 | in_progress |
+| IN-003 | 落桌面原生桥接最小面：文件选择、目录探测、shell 能力 | P0 | RT-002 | yes | `EasyMVP-V3-Electron进程模型与IPC边界设计.md#7. 首版建议的 preload 暴露面`；`EasyMVP-V3-本地API与IPC适配设计.md#7. 首版 client 建议` | preload 只暴露必要原生能力；不承载主业务；桥接 API 有类型定义与错误包装 | completed |
+| IN-004 | 接通运行时事件流到工作台聚合入口 | P0 | RN-002,IN-001 | yes | `EasyMVP-V3-实时事件流推送机制设计.md`；`EasyMVP-V3工作台视图模型与聚合接口设计.md`；`EasyMVP-V3-Workspace首页聚合接口Schema设计.md` | runtime 事件可被聚合层消费；工作台和项目页能看到基础实时状态；中断重连后可恢复订阅 | completed |
 
 ### 5.5 P1-A 事件与聚合
 
 | plan_id | name | priority | depends_on | parallelizable | doc_refs | definition_of_done | status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| AG-001 | 落 Workspace 首页聚合查询与缓存快照 | P1 | ST-003,IN-001 | yes | `EasyMVP-V3工作台视图模型与聚合接口设计.md`；`EasyMVP-V3-Workspace首页聚合接口Schema设计.md`；`EasyMVP-V3-数据库Schema总设计.md#2.8 view_cache` | Workspace 首页所需聚合接口可返回项目进度、待处理、验收状态、最近活动；快照策略可读且可刷新 | pending |
-| AG-002 | 落 Project Workspace 实时状态聚合 | P1 | RN-002,IN-004 | yes | `EasyMVP-V3实时工作台页面设计.md`；`EasyMVP-V3-Workspace详细页面设计.md`；`EasyMVP-V3-Project-Workspace线框图设计.md` | 单项目工作台能读到阶段条、活动流、Action Inbox、验收摘要；聚合对象不直接暴露底表结构 | pending |
+| AG-001 | 落 Workspace 首页聚合查询与缓存快照 | P1 | ST-003,IN-001 | yes | `EasyMVP-V3工作台视图模型与聚合接口设计.md`；`EasyMVP-V3-Workspace首页聚合接口Schema设计.md`；`EasyMVP-V3-数据库Schema总设计.md#2.8 view_cache` | Workspace 首页所需聚合接口可返回项目进度、待处理、验收状态、最近活动；快照策略可读且可刷新 | completed |
+| AG-002 | 落 Project Workspace 实时状态聚合 | P1 | RN-002,IN-004 | yes | `EasyMVP-V3实时工作台页面设计.md`；`EasyMVP-V3-Workspace详细页面设计.md`；`EasyMVP-V3-Project-Workspace线框图设计.md` | 单项目工作台能读到阶段条、活动流、Action Inbox、验收摘要；聚合对象不直接暴露底表结构 | completed |
 | AG-003 | 落审计 / 回放 / Evidence 查询聚合面 | P1 | ST-003,RN-004 | yes | `EasyMVP-V3-审计查询接口设计.md`；`EasyMVP-V3-Replay查询接口设计.md`；`EasyMVP-V3-Evidence卡片查询接口设计.md` | 审计、回放、证据页都有页面语义 API；查询不要求前端拼底表；分页、过滤、详情读取可用 | pending |
 
 ### 5.6 P1-B 恢复与诊断
@@ -144,7 +144,7 @@ P0-A 基座对齐
 | plan_id | name | priority | depends_on | parallelizable | doc_refs | definition_of_done | status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | DG-001 | 落错误码、错误域与标准诊断记录模型 | P1 | RT-003,ST-001 | yes | `EasyMVP-V3-错误码与诊断分级设计.md#3. 错误域`；`EasyMVP-V3-错误码与诊断分级设计.md#4. 错误码建议`；`EasyMVP-V3-完整SQLite建表与索引SQL终稿.md#3.3 diagnostic_records` | 错误码、错误域、诊断上下文、恢复建议具备统一结构； API 与 worker 错误都能归一化写入诊断记录 | pending |
-| DG-002 | 落启动失败、migration 失败、目录异常的恢复模式链路 | P1 | ST-002,ST-004,DG-001 | no | `EasyMVP-V3-恢复模式与诊断模式页面设计.md`；`EasyMVP-V3-本地配置与启动参数设计.md#6. safe-mode` | 启动失败可进入恢复模式；能展示 migration 失败、目录不可写、核心服务不可用等问题；支持重试和诊断导出 | pending |
+| DG-002 | 落启动失败、migration 失败、目录异常的恢复模式链路 | P1 | ST-002,ST-004,DG-001 | no | `EasyMVP-V3-恢复模式与诊断模式页面设计.md`；`EasyMVP-V3-本地配置与启动参数设计.md#6. safe-mode` | 启动失败可进入恢复模式；能展示 migration 失败、目录不可写、核心服务不可用等问题；支持重试和诊断导出 | in_progress |
 | DG-003 | 落孤儿文件、缺失索引、artifact 缺失检测任务 | P1 | RN-004,DG-001 | yes | `EasyMVP-V3-本地目录与项目工作区规范.md#14. 恢复与校验`；`EasyMVP-V3-Evidence文件命名与引用规范.md`；`EasyMVP-V3-replay与log artifact存储规范.md` | 可以扫描并识别 orphan files、missing artifact、stale index；结果进入诊断与审计；不自动破坏业务数据 | pending |
 
 ### 5.7 P1-C 性能与一致性补齐
@@ -160,7 +160,7 @@ P0-A 基座对齐
 | plan_id | name | priority | depends_on | parallelizable | doc_refs | definition_of_done | status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | SX-001 | 落备份、恢复与升级前快照工具链 | P2 | ST-002,ST-004,DG-002 | yes | `EasyMVP-V3-SQLite初始化与Migration设计.md#8. 升级策略`；`EasyMVP-V3-本地目录与项目工作区规范.md#13. 备份与导出边界` | 升级前快照、最小备份单元、恢复校验流程可执行；恢复后数据库与目录一致性有校验步骤 | pending |
-| SX-002 | 落运行时诊断导出与问题打包 | P2 | DG-001,RN-003 | yes | `EasyMVP-V3-错误码与诊断分级设计.md#6. 审计与诊断要求`；`EasyMVP-V3-恢复模式与诊断模式页面设计.md` | 一键导出诊断包可包含配置摘要、错误码、日志索引、migration 状态、目录检查结果；敏感信息按规则脱敏 | pending |
+| SX-002 | 落运行时诊断导出与问题打包 | P2 | DG-001,RN-003 | yes | `EasyMVP-V3-错误码与诊断分级设计.md#6. 审计与诊断要求`；`EasyMVP-V3-恢复模式与诊断模式页面设计.md` | 一键导出诊断包可包含配置摘要、错误码、日志索引、migration 状态、目录检查结果；敏感信息按规则脱敏 | in_progress |
 | SX-003 | 落集成自检清单与开机验收脚本 | P2 | IN-004,DG-002,PF-001 | yes | `EasyMVP-V3-技术栈与选型基线.md`；`EasyMVP-V3-Electron-Go单仓脚手架与开发命令设计.md`；`EasyMVP-V3-Go本地核心服务架构设计.md#8. 可直接开工的第一批 package` | 提供本地环境自检、数据库状态检查、Go API 健康检查、brain-v3 连通性检查、工作目录检查的一次性验收脚本 | pending |
 
 ## 6. 推荐多 Agent 分工
@@ -189,6 +189,7 @@ P0-A 基座对齐
 
 | agent | 主负责计划 |
 | --- | --- |
+| `agent-runtime-core` | `RT-001` `RN-001` `RN-002` `RN-003` `RN-004` `PF-002` |
 | `agent-runtime-core` | `RT-001` `RN-001` `RN-002` `RN-003` `RN-004` `PF-002` |
 | `agent-storage-sqlite` | `ST-001` `ST-002` `ST-003` `ST-004` `ST-005` `PF-001` `SX-001` |
 | `agent-integration-desktop` | `RT-002` `IN-001` `IN-002` `IN-003` `IN-004` `AG-001` `AG-002` |

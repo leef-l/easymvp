@@ -26,3 +26,14 @@ type StageProgressItem = {
 }
 ```
 
+## 3. 口径补充
+
+按当前钱学森总纲，`stage` 建议优先收口到：
+
+1. `reviewing`
+2. `executing`
+3. `accepting`
+4. `reworking`
+5. `completed`
+
+不再建议继续在单项目 `Stage Rail` 中把 `Compile` 暴露成独立主阶段。

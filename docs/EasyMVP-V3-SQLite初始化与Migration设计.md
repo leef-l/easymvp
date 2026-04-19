@@ -297,6 +297,12 @@ migration 完成后，启动流程还应做最小自检。
 12. `workflow_evidence_index`
 13. `app_settings`
 
+补充说明：
+
+- 这里的 `workflow_acceptance_runs` 继续保留为首版现实表结构
+- 按当前钱学森总纲，不应再把它解释为最终验证与完成语义的唯一中心表
+- 后续更准确的方向是保留该表，同时逐步补齐 `verification_results / completion_verdicts` 一类结构化对象表
+
 ## 13. 推荐 migration 分批策略
 
 建议不要把所有表放进一个巨型 migration。
@@ -314,6 +320,11 @@ migration 完成后，启动流程还应做最小自检。
 1. Run 绑定与事件表
 2. 验收运行表
 3. 待处理问题表
+
+补充说明：
+
+- 这里的“验收运行表”更准确应理解为旧 acceptance 主线的现实落点
+- 不是当前总纲下最终裁决语义的全部承载体
 
 ### P2
 

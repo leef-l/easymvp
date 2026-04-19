@@ -344,6 +344,12 @@ CREATE TABLE IF NOT EXISTS acceptance_journey_coverage (
 );
 ```
 
+补充说明：
+
+- 这段 migration 反映的是旧 acceptance 主线的首版落库现实
+- 按当前钱学森总纲，`acceptance_runs` 可以继续保留，但不应继续单独承担最终验证与完成语义
+- 后续更准确的方向应是保留本表，同时补齐 `VerificationResult / CompletionVerdict` 对应的结构化落点
+
 ## 8. `0007_init_evidence_replay_audit_tables.sql`
 
 ```sql

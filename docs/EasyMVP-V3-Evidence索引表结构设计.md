@@ -25,6 +25,14 @@ V3 的 Evidence 不能只散落在 `AcceptanceRun` 的 JSON 字段里。
 
 > Evidence 的文件在磁盘，Evidence 的真相在索引表。
 
+按当前钱学森总纲，这里的 `AcceptanceRun` 更适合被理解为旧验收主线中的历史关联对象，而不是唯一中心对象。
+
+当前更准确的理解应是：
+
+1. Evidence 可以关联 `AcceptanceRun`
+2. 但它还必须能服务 `VerificationResult`
+3. 并且要能支撑 `CompletionVerdict / RuntimeEscalation / FaultSummary` 的解释链路
+
 ## 2. 要解决的问题
 
 本专题主要解决：
@@ -34,6 +42,10 @@ V3 的 Evidence 不能只散落在 `AcceptanceRun` 的 JSON 字段里。
 3. 页面无法高效筛选不同类型 Evidence
 4. replay 与 Acceptance 之间缺少可靠关联
 5. 清理附件后页面缺少可降级状态
+
+还应补一条：
+
+6. Evidence 无法稳定对齐“合同要求了什么、实际补到了什么、还缺什么”
 
 ## 3. 表设计原则
 
@@ -93,6 +105,12 @@ V3 的 Evidence 不能只散落在 `AcceptanceRun` 的 JSON 字段里。
 26. `validated_at`
 27. `created_at`
 28. `updated_at`
+
+如果后续继续增强，建议优先补充或等价承载：
+
+29. `verification_run_id`
+30. `verification_check_id`
+31. `contract_requirement_key`
 
 ### 5.3 列说明
 
@@ -223,6 +241,12 @@ V3 的 Evidence 不能只散落在 `AcceptanceRun` 的 JSON 字段里。
 3. 某个 `evidence_type` 的最近证据
 4. 某个 `blocking_gap` 对应缺了哪些 evidence type
 
+按当前总纲，还应补充以下查询视角：
+
+1. 某个 `verification_run_id` 对应的全部证据
+2. 某个 `contract_requirement_key` 当前是否已被覆盖
+3. 某个 `RuntimeEscalation` 关联了哪些证据
+
 ## 11. 与 Coverage 的关系
 
 Coverage 不应直接从文件目录推断，而应基于 `workflow_evidence_index` 聚合。
@@ -281,6 +305,7 @@ Coverage 不应直接从文件目录推断，而应基于 `workflow_evidence_ind
 3. 把 `sha256`、`file_size` 这类校验信息丢掉
 4. 只记录 `artifact_uri` 不记录 `surface / journey / run_id`
 5. 清理文件时直接删主索引记录
+6. 把 Evidence 设计成只能围着 `AcceptanceRun` 转
 
 ## 17. 对后续文档的约束
 

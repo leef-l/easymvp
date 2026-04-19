@@ -14,20 +14,20 @@ Acceptance 页不是普通详情页，也不是大表格页。
 
 它的正确形态应该是：
 
-> 一个以“最终裁决 + 覆盖差距 + 证据实体 + 最后放行”为主线的交付页面。
+> 一个以“验证合同 + 结果差距 + 证据实体 + 完成裁决 + 必要放行”为主线的交付页面。
 
 因此线框图必须把四件事同时放在一个页面里：
 
-1. 最终裁决
-2. Coverage 差距
+1. 合同要求
+2. Coverage / Contract Gap
 3. Evidence 实体
-4. Release Gate
+4. 完成裁决与放行
 
 ## 2. 页面总结构
 
 建议采用四段式主布局：
 
-1. 顶部最终裁决条
+1. 顶部验证与裁决条
 2. 中部左侧 Coverage 区
 3. 中部右侧 Evidence 区
 4. 底部 Release Gate 区
@@ -36,7 +36,7 @@ Acceptance 页不是普通详情页，也不是大表格页。
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│ Final Judgement Bar                                                 │
+│ Verification + Completion Bar                                       │
 ├───────────────────────────────┬──────────────────────────────────────┤
 │ Coverage Matrix / Gap List    │ Evidence Cards                      │
 │                               │                                      │
@@ -52,16 +52,17 @@ Acceptance 页不是普通详情页，也不是大表格页。
 
 让用户在一眼内知道：
 
-1. 功能是否通过
-2. 生产是否通过
-3. 是否还需人工放行
+1. 合同要求了什么
+2. 当前验证结论是什么
+3. 为什么还不能 `completed`
+4. 是否还需人工放行
 
 ### 3.2 线框内容
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│ functional_passed | production_passed | manual_release_required     │
-│ released_by_human | blocking_issue_count | overall_status_hint      │
+│ verdict | decision | completed | preferred_channel                  │
+│ missing_evidence | failed_checks | manual_release_required          │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -69,9 +70,10 @@ Acceptance 页不是普通详情页，也不是大表格页。
 
 建议：
 
-1. `production_passed` 是最强视觉锚点
+1. `decision / completed` 是最强视觉锚点
 2. `manual_release_required` 单独高亮
-3. `blocking_issue_count` 不能埋进小字
+3. `missing_evidence / failed_checks` 不能埋进小字
+4. 若通道是 `github_actions`，必须显示“替代通道”提示
 
 ## 4. Coverage 区线框
 
@@ -111,7 +113,7 @@ Acceptance 页不是普通详情页，也不是大表格页。
 
 1. 当前 blocking gap
 2. 缺少哪些 evidence type
-3. 哪些 gap 会阻塞 `production_passed`
+3. 哪些 gap 会阻塞 `completed`
 
 ## 5. Evidence 区线框
 
@@ -160,13 +162,14 @@ Acceptance 页不是普通详情页，也不是大表格页。
 
 ### 6.1 目标
 
-把“最后一步能不能交付”单独拉出来，而不是散在上面各区。
+把“最后一步能不能交付、为什么还不能完成”单独拉出来，而不是散在上面各区。
 
 ### 6.2 推荐结构
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
 │ can_release | requires_manual_release | current_blocking_reason     │
+│ channel_note | manual_checkpoint | escalation_hint                 │
 │ [View Reason] [Manual Release] [View History]                       │
 └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -180,6 +183,13 @@ Acceptance 页不是普通详情页，也不是大表格页。
 1. 为什么不能 release
 2. 还差哪些 gap
 
+#### 验证通过但仍未 completed
+
+底部主文案应强调：
+
+1. 当前是验证通过但未完成，还是人工检查点未完成
+2. 决策卡住在 `manual_checkpoint / blocked / rework` 哪一类
+
 #### 生产通过但需人工放行
 
 底部主按钮应为：
@@ -191,6 +201,10 @@ Acceptance 页不是普通详情页，也不是大表格页。
 底部主文案应为：
 
 1. `Ready for delivery`
+
+但前提必须是：
+
+1. `CompletionVerdict.completed = true`
 
 ## 7. 抽屉与弹层关系
 
@@ -248,6 +262,7 @@ Acceptance 页本身不应塞太多展开细节。
 2. 把 Evidence 卡埋在二级 tab 里
 3. 把 Release Gate 藏到页面最深处
 4. 让 Preview/Replay 弹层和主页面互相抢焦点
+5. 只显示“验收通过/失败”，不展示 contract gap
 
 ## 10. 对后续文档的约束
 

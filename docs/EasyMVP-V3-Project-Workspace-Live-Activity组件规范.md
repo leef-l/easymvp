@@ -54,6 +54,9 @@
 8. `acceptance_blocker_found`
 9. `manual_action_required`
 10. `creation.workspace_ready`
+11. `verification_conflict_found`
+12. `runtime_escalation_raised`
+13. `fault_loop_detected`
 
 ## 5. 排序与过滤
 
@@ -68,7 +71,7 @@
 建议：
 
 1. 普通事件单行摘要
-2. 失败、blocker、manual action 默认展开一层说明
+2. 失败、blocker、manual action、escalation 默认展开一层说明
 
 ## 7. 交互
 
@@ -85,6 +88,7 @@
 1. 原样铺日志
 2. 没有时间和来源
 3. 失败事件与普通事件没有层级差异
+4. 把 `verification_conflict` 或 `runtime escalation` 混成普通失败事件
 
 ## 9. 后续细分专题
 

@@ -206,6 +206,15 @@ Go Local Core Service
 5. `manual_release_required`
 6. `production_passed` 判定
 
+按当前钱学森总纲，建议把这里理解为“旧验收系统职责表达”。
+
+更准确的收口方向是：
+
+1. `acceptance_system` 继续保留 `AcceptanceRun` 相关现实读写
+2. 但验证结果应逐步落到 `VerificationResult`
+3. 最终是否 `completed` 应逐步落到 `CompletionVerdict`
+4. `production_passed` 不再单独承担最终完成语义
+
 ### 4.9 `runtime_and_storage`
 
 放在 Go 内核里。

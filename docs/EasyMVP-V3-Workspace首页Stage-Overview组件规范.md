@@ -14,6 +14,8 @@
 1. 项目大都卡在哪个阶段
 2. 哪个阶段阻塞最多
 
+按当前钱学森总纲，这个组件只承担多项目壳层分布统计，不定义单项目主链语义。
+
 ## 2. 组件结构
 
 建议每个阶段桶展示：
@@ -27,12 +29,15 @@
 
 固定为：
 
-1. `Design`
-2. `Review`
-3. `Compile`
-4. `Execute`
-5. `Acceptance`
-6. `Complete`
+1. `reviewing`
+2. `executing`
+3. `accepting`
+4. `reworking`
+5. `completed`
+
+补充说明：
+
+- `plan_compile` 现在视为 `reviewing` 阶段内动作，不再单列成首页阶段桶
 
 ## 4. 交互
 
@@ -62,4 +67,3 @@
 
 1. 阶段分布带视觉稿
 2. 筛选联动规则
-

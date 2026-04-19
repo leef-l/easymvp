@@ -97,6 +97,13 @@ V3 的一致性设计应遵守：
 3. 写 `acceptance_judgements`
 4. 更新项目 `production_status`
 
+补充说明：
+
+- 这段事务设计反映的是旧 acceptance 主线下的首版现实
+- 按当前钱学森总纲，它可以继续保留为现有实现路径
+- 但不应再被解释为“写完 `acceptance_runs / production_status` 就完成了最终裁决”
+- 更准确的后续方向，应逐步让事务边界同时覆盖或映射 `VerificationResult / CompletionVerdict`
+
 事务外：
 
 1. evidence 详情补索引
@@ -153,4 +160,3 @@ V3 的一致性设计应遵守：
 1. 事务 helper 接口设计
 2. 命令幂等键设计
 3. 补偿任务表设计
-

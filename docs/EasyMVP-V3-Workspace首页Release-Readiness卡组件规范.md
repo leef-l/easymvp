@@ -13,9 +13,9 @@
 
 每张卡需要回答：
 
-1. 功能是否通过
-2. 生产级是否通过
-3. 是否还需要人工放行
+1. 当前完成决策到哪一步了
+2. 是否还需要人工放行
+3. 为什么还不能完成
 4. 点哪里继续处理
 
 ## 3. 字段
@@ -23,18 +23,19 @@
 建议固定：
 
 1. `project_name`
-2. `functional_passed`
-3. `production_passed`
+2. `decision`
+3. `completed`
 4. `manual_release_required`
 5. `released_by_human`
-6. `acceptance_link`
+6. `blocking_reason`
+7. `acceptance_link`
 
 ## 4. 文案原则
 
 建议使用：
 
-1. `Functional: passed / not yet`
-2. `Production: passed / blocked`
+1. `Decision: complete / blocked / rework / manual checkpoint`
+2. `Completed: yes / not yet`
 3. `Manual release: required / not required`
 
 不要把一堆内部布尔值直接丢给用户。
@@ -49,7 +50,7 @@
 
 默认优先显示：
 
-1. `production_passed = false` 但接近完成
+1. `completed = false` 但接近完成
 2. `manual_release_required = true`
 3. 已完成项目最后
 
@@ -59,10 +60,9 @@
 
 1. 卡片信息过多
 2. 没有明确动作
-3. 看不出生产级与功能级的区别
+3. 用 `production_passed` 直接替代完成状态
 
 ## 8. 后续细分专题
 
 1. Release Readiness 卡视觉稿
 2. readiness 文案映射表
-

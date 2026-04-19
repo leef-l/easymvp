@@ -350,6 +350,12 @@ CREATE TABLE IF NOT EXISTS run_event_index (
 1. `acceptance_runs` 不直接存底层执行脑原始信息
 2. 相关来源归属应通过上游任务与运行绑定的归一化字段追溯
 
+补充说明：
+
+- 这里的 SQL 可以继续保留为当前 SQLite 首版现实结构
+- 但按当前钱学森总纲，`production_status` 不应再被实现者误读为“最终完成状态”
+- 更准确的方向是保留本表，同时逐步引入 `verification_results / completion_verdicts` 一类结构化对象
+
 ```sql
 CREATE TABLE IF NOT EXISTS acceptance_runs (
   id TEXT PRIMARY KEY,

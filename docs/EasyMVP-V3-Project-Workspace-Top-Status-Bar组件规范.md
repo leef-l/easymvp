@@ -16,6 +16,8 @@
 3. 当前整体状态如何
 4. 离交付还有多远
 
+按当前总纲，这里的“离交付还有多远”不能只用 readiness 文案表达，还必须能看出是否存在人工检查点和升级对象。
+
 ## 2. 字段
 
 建议固定：
@@ -27,6 +29,8 @@
 5. `current_run_status`
 6. `production_readiness`
 7. `final_status_hint`
+8. `manual_checkpoint_required`
+9. `has_runtime_escalation`
 
 ## 3. 状态
 
@@ -37,12 +41,17 @@
 3. `blocked`
 4. `ready_to_release`
 
+补充说明：
+
+- 这里的状态条只做顶部概览
+- 最终是否 `completed` 仍以 `CompletionVerdict` 为准，不由状态条自行定义
+
 ## 4. 首次进入特殊规则
 
 首次进入时：
 
 1. 主文案突出 `Project created`
-2. 副文案突出 `preparing first plan`
+2. 副文案突出 `preparing first review cycle`
 3. 整体进度弱化
 
 ## 5. 交互
@@ -71,4 +80,3 @@
 
 1. Top Status Bar 视觉稿
 2. 状态色映射表
-

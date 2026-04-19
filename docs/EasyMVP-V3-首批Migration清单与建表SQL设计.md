@@ -261,6 +261,12 @@ CREATE TABLE brain_run_bindings (
 1. `acceptance_runs` 本身不保存底层执行脑原始信息
 2. 相关运行目标归属应通过 `task_id -> domain_tasks / brain_run_bindings` 追溯
 
+补充说明：
+
+- 这里保留 `acceptance_runs` 代表首版 migration 现实
+- 按当前钱学森总纲，不应再把 `functional_status / production_status` 直接解释为最终完成语义
+- 更合理的后续方向是并行补出 `verification_results / completion_verdicts` 一类结构化落点
+
 ```sql
 CREATE TABLE acceptance_runs (
   id TEXT PRIMARY KEY,
