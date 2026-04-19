@@ -33,6 +33,13 @@ cd apps/core && go test ./...
 cd apps/desktop && pnpm run build
 ```
 
+## CI 与打包
+
+- 主验证：`.github/workflows/v3-guard.yml`
+- 桌面打包：`.github/workflows/desktop-package.yml`
+- 桌面本地打包：`cd apps/desktop && pnpm run package`
+- 打包前会自动编译 `apps/core` 并把二进制带入安装包资源目录
+
 ## 文档入口
 
 - [docs/README.md](docs/README.md)

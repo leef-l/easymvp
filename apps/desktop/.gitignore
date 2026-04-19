@@ -2,3 +2,5 @@ node_modules/
 dist/
 dist-electron/
 *.tsbuildinfo
+resources/bin/
+release/

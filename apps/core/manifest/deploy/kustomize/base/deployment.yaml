@@ -1,21 +1,59 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: template-single
+  name: easymvp-core
   labels:
-    app: template-single
+    app: easymvp-core
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: template-single
+      app: easymvp-core
   template:
     metadata:
       labels:
-        app: template-single
+        app: easymvp-core
     spec:
       containers:
-        - name : main
-          image: template-single
-          imagePullPolicy: Always
-
+        - name: easymvp-core
+          image: easymvp-core:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - secretRef:
+                name: easymvp-core-secrets
+                optional: true
+          volumeMounts:
+            - name: config
+              mountPath: /app/manifest/config
+              readOnly: true
+            - name: data
+              mountPath: /app/var
+          readinessProbe:
+            httpGet:
+              path: /api/v3/system/healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/v3/system/healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: config
+          configMap:
+            name: easymvp-core-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: easymvp-core-data

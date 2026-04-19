@@ -1,0 +1,82 @@
+name: V3 Guard
+
+on:
+  push:
+    branches: [main, v3]
+    paths:
+      - ".github/workflows/v3-guard.yml"
+      - "apps/core/**"
+      - "apps/desktop/**"
+      - "scripts/local-verify-apps-core-desktop.bat"
+      - "README.md"
+  pull_request:
+    paths:
+      - ".github/workflows/v3-guard.yml"
+      - "apps/core/**"
+      - "apps/desktop/**"
+      - "scripts/local-verify-apps-core-desktop.bat"
+      - "README.md"
+  workflow_dispatch:
+
+jobs:
+  core-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/core/go.mod
+          cache-dependency-path: apps/core/go.sum
+
+      - name: Test apps/core
+        run: |
+          cd apps/core
+          go test ./...
+
+      - name: Build apps/core linux binary
+        run: |
+          cd apps/core
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/easymvp-core ./main.go
+
+      - name: Upload apps/core linux binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: easymvp-core-linux-amd64
+          path: /tmp/easymvp-core
+          if-no-files-found: error
+
+  desktop-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+
+      - name: Install apps/desktop dependencies
+        run: |
+          cd apps/desktop
+          pnpm install --frozen-lockfile
+
+      - name: Typecheck apps/desktop
+        run: |
+          cd apps/desktop
+          pnpm run typecheck
+
+      - name: Build apps/desktop
+        run: |
+          cd apps/desktop
+          pnpm run build
+
+      - name: Upload apps/desktop build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: easymvp-desktop-web-dist
+          path: apps/desktop/dist/**
+          if-no-files-found: error

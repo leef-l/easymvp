@@ -9,18 +9,11 @@
 Thumbs.db
 
 # Go
-admin-go/system
-admin-go/ai
-admin-go/mvp
 *.exe
 *.test
 
 # Node
 node_modules/
-vue-vben-admin/apps/web-antd/dist-verify/
-vue-vben-admin/apps/web-antd/dist-workflow-verify/
-vue-vben-admin/apps/web-antd/dist-entry-verify-*/
-vue-vben-admin/apps/web-antd/.easymvp/
 
 # CI artifacts
 .easymvp/ci/
@@ -28,17 +21,7 @@ vue-vben-admin/apps/web-antd/.easymvp/
 # Env
 .env.local
 *.local
-admin-go/.env
-docker/prod/.env
-docker/dev/.env
-admin-go/.runtime-config/
 
 # Claude Code
 .claude/
 .aider*
-
-# Local test workspace
-admin-go/easymvp-test/
-
-# Logs
-admin-go/logs/

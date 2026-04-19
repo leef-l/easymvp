@@ -1,16 +1,19 @@
-FROM loads/alpine:3.8
+FROM golang:1.24-alpine AS builder
 
-###############################################################################
-#                                INSTALLATION
-###############################################################################
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/easymvp-core ./main.go
 
-ENV WORKDIR                 /app
-ADD resource                $WORKDIR/
-ADD ./temp/linux_amd64/main $WORKDIR/main
-RUN chmod +x $WORKDIR/main
+FROM alpine:3.20
 
-###############################################################################
-#                                   START
-###############################################################################
-WORKDIR $WORKDIR
-CMD ./main
+WORKDIR /app
+RUN addgroup -S easymvp && adduser -S easymvp -G easymvp
+COPY --from=builder /out/easymvp-core /app/easymvp-core
+COPY manifest /app/manifest
+RUN mkdir -p /app/var/data && chown -R easymvp:easymvp /app
+
+USER easymvp
+EXPOSE 8000
+ENTRYPOINT ["/app/easymvp-core"]
