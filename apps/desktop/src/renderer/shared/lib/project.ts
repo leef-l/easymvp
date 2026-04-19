@@ -32,6 +32,7 @@ export function useProjectState() {
       acceptance: buildRoute("/acceptance"),
       audit: buildRoute("/audit"),
       diagnostics: buildRoute("/diagnostics"),
+      recovery: buildRoute("/recovery"),
       settings: buildRoute("/settings"),
       repairDraft: buildRoute("/repair-draft"),
     }),
