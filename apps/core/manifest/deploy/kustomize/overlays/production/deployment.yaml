@@ -8,7 +8,7 @@ spec:
     spec:
       containers:
         - name: easymvp-core
-          image: ghcr.io/leef-l/easymvp-core:latest
+          image: easymvp-core:release
           imagePullPolicy: IfNotPresent
           env:
             - name: TZ

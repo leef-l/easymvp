@@ -22,10 +22,6 @@ build-windows:
 	mkdir -p $(BIN_DIR)
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o $(BIN_DIR)/$(APP_NAME)-windows-amd64.exe ./main.go
 
-.PHONY: docker-build
-docker-build:
-	docker build -f manifest/docker/Dockerfile -t $(APP_NAME):local .
-
 .PHONY: clean
 clean:
 	rm -rf $(BIN_DIR)
