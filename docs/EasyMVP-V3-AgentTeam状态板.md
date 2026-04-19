@@ -59,6 +59,7 @@
 40. 已补薄审计链与 replay 入口：新增 `GET /api/v3/projects/{project_id}/audit-logs`、desktop `AuditPage`、`/replay` 路由别名与导航入口；同时修正 workspace 首页 release readiness 缺项计算，避免人工放行后仍被误算为缺项；`go test ./internal/service/... ./internal/controller/... ./api/...` 与 `npm run build` 均已通过
 41. 已补 formal replay/log 写侧首版：新增 `replay_support_write.go`，`Runtime().SyncBrainRunBinding(...)` 现在会按 `brain_run_bindings + project_workspaces.runs_root/replay_root` 扫描 run artifact，并幂等刷新 `workflow_replay_index / workflow_run_log_segments`；索引失败会写 `diagnostic_records` 但不阻断主同步链路，`go test ./internal/service/... ./internal/controller/... ./api/...` 已通过
 42. 已补桌面端 replay/audit/diagnostics 收口：`ExecutionPage` 已切到后端真实 replay contract，补齐 `artifact_status_summary / entry_points / seq_no / raw_target / source_object_id / event_id / span_id / started_at / ended_at` 展示；`DiagnosticsPage` 已增加 Replay/Audit 跳转；`AuditPage` 已补 pretty-json 与回跳入口；`npm run build` 已通过
+43. 已继续收口 `BE-022` 三个关键缺口：runtime 适配层现已显式保留 `unsupported / denied -> run_unsupported / run_denied`，并投影到 run event / workspace live activity / action inbox / workspace explanation fallback；同时自动 adjudication 已改为按命中的 `acceptance_run_id` 精准裁决，避免跨任务 acceptance run 串单；`workspace_explanation` 在上游 runtime `unsupported / denied` 时也会输出显式 capability / policy 文案而不是静默通用 fallback；`go test ./internal/service/... ./internal/controller/... ./api/...` 已通过
 
 ## 3. 当前进行中
 
@@ -71,8 +72,8 @@
 ## 4. 当前待做
 
 1. 完成 `BE-020 / P-BR-002` 的业务服务接线与最终收口
-2. 完成 `BE-021 / P-BR-003` 中更厚的 replay/log 语义投影、更多页面联动与收口
-3. 继续把 `workspace_explanation` 与快照/事件的前端消费链路联调完
+2. 继续完成 `BE-021 / P-BR-003` 中更厚的 replay/log 语义投影、更多页面联动与收口
+3. 继续把 `workspace_explanation` 的前端消费链路与页面联调完，并补回放/诊断入口的细化展示
 4. 补齐前端创建流初始化态、审计详情筛选/过滤与更多组件细化
 5. 继续完成前后端联调与页面级验证
 

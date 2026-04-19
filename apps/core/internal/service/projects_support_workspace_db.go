@@ -106,7 +106,7 @@ func buildProjectWorkspaceExplanation(
 
 	_, result, err := EasyMVPBrain().CallWorkspaceExplanation(ctx, input)
 	if err != nil || result == nil {
-		return buildFallbackWorkspaceExplanation(data, actionInbox)
+		return buildProjectWorkspaceExplanationFallback(data, actionInbox, err)
 	}
 
 	view := projectsv1.WorkspaceExplanation{
@@ -124,9 +124,20 @@ func buildProjectWorkspaceExplanation(
 		})
 	}
 	if strings.TrimSpace(view.Headline) == "" || strings.TrimSpace(view.Summary) == "" {
-		return buildFallbackWorkspaceExplanation(data, actionInbox)
+		return buildProjectWorkspaceExplanationFallback(data, actionInbox, nil)
 	}
 	return view
+}
+
+func buildProjectWorkspaceExplanationFallback(data *projectWorkspaceAggregate, actionInbox []projectsv1.ActionInboxItem, err error) projectsv1.WorkspaceExplanation {
+	switch deriveWorkspaceExplanationFallbackMode(data, err) {
+	case "denied":
+		return buildRuntimeLimitedWorkspaceExplanation(data, "denied")
+	case "unsupported":
+		return buildRuntimeLimitedWorkspaceExplanation(data, "unsupported")
+	default:
+		return buildFallbackWorkspaceExplanation(data, actionInbox)
+	}
 }
 
 func buildFallbackWorkspaceExplanation(data *projectWorkspaceAggregate, actionInbox []projectsv1.ActionInboxItem) projectsv1.WorkspaceExplanation {
@@ -156,6 +167,58 @@ func buildFallbackWorkspaceExplanation(data *projectWorkspaceAggregate, actionIn
 				ActionKey: "open_project_plan",
 				Label:     "Open project plan",
 				Reason:    "Review the current project stage and next planned action.",
+				DeepLink:  data.Project.Id,
+			},
+		}
+	}
+	return view
+}
+
+func buildRuntimeLimitedWorkspaceExplanation(data *projectWorkspaceAggregate, mode string) projectsv1.WorkspaceExplanation {
+	view := projectsv1.WorkspaceExplanation{
+		ExplainLinks: []string{"runtime", "task_review"},
+	}
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "denied":
+		view.Headline = "Workspace explanation blocked by runtime policy"
+		view.Summary = "The latest workspace explanation could not be generated because the runtime denied a required capability. Review the affected task and continue with manual follow-up."
+	case "unsupported":
+		view.Headline = "Workspace explanation limited by runtime capability"
+		view.Summary = "The latest workspace explanation could not be generated because the runtime reported an unsupported capability. Review the affected task and continue with fallback handling."
+	default:
+		return buildFallbackWorkspaceExplanation(data, nil)
+	}
+
+	targetStatus := "run_" + strings.ToLower(strings.TrimSpace(mode))
+	for _, binding := range data.RunBindings {
+		if normalizeBindingStatus(binding.RunStatus) != targetStatus {
+			continue
+		}
+		view.TopBlockers = append(view.TopBlockers, deriveBindingInboxTitle(binding, data.Tasks))
+		view.RecommendedActions = append(view.RecommendedActions, projectsv1.WorkspaceRecommendedAction{
+			ActionKey: "open_task_review",
+			Label:     deriveBindingTitle(binding, data.Tasks),
+			Reason:    deriveBindingInboxTitle(binding, data.Tasks),
+			DeepLink:  firstNonEmpty(strings.TrimSpace(binding.TaskId), binding.Id),
+		})
+		if len(view.TopBlockers) >= 3 || len(view.RecommendedActions) >= 3 {
+			break
+		}
+	}
+	if len(view.TopBlockers) == 0 {
+		switch targetStatus {
+		case "run_denied":
+			view.TopBlockers = []string{"Runtime policy denied the latest workspace explanation request."}
+		case "run_unsupported":
+			view.TopBlockers = []string{"Runtime reported an unsupported capability for the latest workspace explanation request."}
+		}
+	}
+	if len(view.RecommendedActions) == 0 {
+		view.RecommendedActions = []projectsv1.WorkspaceRecommendedAction{
+			{
+				ActionKey: "open_project_plan",
+				Label:     "Open project plan",
+				Reason:    "Use the project plan and action inbox while workspace explanation is unavailable.",
 				DeepLink:  data.Project.Id,
 			},
 		}
@@ -653,12 +716,12 @@ func buildProjectLiveActivity(data *projectWorkspaceAggregate) []projectsv1.Live
 		}
 		items = append(items, projectsv1.LiveActivityItem{
 			EventID:        binding.Id,
-			EventType:      "brain_run_" + normalizeBindingStatus(binding.RunStatus),
+			EventType:      bindingActivityEventType(binding.RunStatus),
 			Title:          deriveBindingTitle(binding, data.Tasks),
 			SourceBrain:    firstNonEmpty(binding.BrainKind, "brain"),
 			SourceTaskID:   binding.TaskId,
 			OccurredAt:     firstNonEmpty(binding.LastSyncAt, binding.UpdatedAt, binding.StartedAt, binding.CreatedAt),
-			RequiresAction: strings.EqualFold(binding.RunStatus, "failed"),
+			RequiresAction: bindingNeedsAttention(binding.RunStatus),
 		})
 	}
 	if len(items) > 0 {
@@ -715,6 +778,25 @@ func buildProjectActionInbox(data *projectWorkspaceAggregate) []projectsv1.Actio
 			RecommendedAction: deriveIssueRecommendedAction(issue),
 			TargetID:          firstNonEmpty(issue.AcceptanceRunId, data.Project.Id),
 		})
+	}
+
+	if len(items) < projectWorkspaceInboxLimit {
+		for _, binding := range data.RunBindings {
+			if len(items) >= projectWorkspaceInboxLimit {
+				break
+			}
+			if !bindingNeedsAttention(binding.RunStatus) {
+				continue
+			}
+			items = append(items, projectsv1.ActionInboxItem{
+				ItemID:            "run_attention_" + binding.Id,
+				Title:             deriveBindingInboxTitle(binding, data.Tasks),
+				Severity:          deriveBindingSeverity(binding.RunStatus),
+				IsBlocking:        isBlockingBindingStatus(binding.RunStatus),
+				RecommendedAction: "open_task_review",
+				TargetID:          firstNonEmpty(binding.TaskId, binding.Id),
+			})
+		}
 	}
 
 	if len(items) < projectWorkspaceInboxLimit {
@@ -974,17 +1056,122 @@ func normalizeBindingStatus(status string) string {
 	if status == "" {
 		return "running"
 	}
+	if !strings.HasPrefix(status, "run_") {
+		status = mapBrainRunStatus(status)
+	}
 	return strings.ReplaceAll(status, " ", "_")
 }
 
+func deriveWorkspaceExplanationFallbackMode(data *projectWorkspaceAggregate, err error) string {
+	if mode := deriveWorkspaceExplanationFallbackModeFromError(err); mode != "" {
+		return mode
+	}
+	hasUnsupported := false
+	for _, binding := range data.RunBindings {
+		switch normalizeBindingStatus(binding.RunStatus) {
+		case "run_denied":
+			return "denied"
+		case "run_unsupported":
+			hasUnsupported = true
+		}
+	}
+	if hasUnsupported {
+		return "unsupported"
+	}
+	return ""
+}
+
+func deriveWorkspaceExplanationFallbackModeFromError(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(message, "run_denied"),
+		strings.Contains(message, "permission_denied"),
+		strings.Contains(message, "tool_denied"),
+		strings.Contains(message, "forbidden"),
+		strings.Contains(message, "denied by runtime policy"):
+		return "denied"
+	case strings.Contains(message, "run_unsupported"),
+		strings.Contains(message, "tool_unsupported"),
+		strings.Contains(message, "not_supported"),
+		strings.Contains(message, "unsupported capability"):
+		return "unsupported"
+	default:
+		return ""
+	}
+}
+
+func bindingActivityEventType(status string) string {
+	normalized := normalizeBindingStatus(status)
+	return "brain_run_" + strings.TrimPrefix(normalized, "run_")
+}
+
+func bindingNeedsAttention(status string) bool {
+	switch normalizeBindingStatus(status) {
+	case "run_failed", "run_unsupported", "run_denied":
+		return true
+	default:
+		return false
+	}
+}
+
+func isBlockingBindingStatus(status string) bool {
+	switch normalizeBindingStatus(status) {
+	case "run_failed", "run_denied":
+		return true
+	default:
+		return false
+	}
+}
+
 func deriveBindingTitle(binding entity.BrainRunBindings, tasks []entity.DomainTasks) string {
-	title := "Brain run " + normalizeBindingStatus(binding.RunStatus)
+	title := "Brain run " + bindingDisplayStatus(binding.RunStatus)
 	for _, task := range tasks {
 		if task.Id == binding.TaskId {
 			return firstNonEmpty(task.Name, title)
 		}
 	}
 	return title
+}
+
+func bindingDisplayStatus(status string) string {
+	raw := strings.ToLower(strings.TrimSpace(status))
+	if raw == "" {
+		return "running"
+	}
+	if strings.HasPrefix(raw, "run_") {
+		return strings.TrimPrefix(raw, "run_")
+	}
+	return strings.ReplaceAll(raw, " ", "_")
+}
+
+func deriveBindingInboxTitle(binding entity.BrainRunBindings, tasks []entity.DomainTasks) string {
+	base := deriveBindingTitle(binding, tasks)
+	switch normalizeBindingStatus(binding.RunStatus) {
+	case "run_unsupported":
+		return base + " requires fallback because runtime reported unsupported capability"
+	case "run_denied":
+		return base + " was denied by runtime policy and needs manual follow-up"
+	case "run_failed":
+		return base + " failed and needs review"
+	default:
+		return base
+	}
+}
+
+func deriveBindingSeverity(status string) string {
+	switch normalizeBindingStatus(status) {
+	case "run_denied":
+		return "error"
+	case "run_unsupported":
+		return "warning"
+	case "run_failed":
+		return "error"
+	default:
+		return "warning"
+	}
 }
 
 func deriveIssueRecommendedAction(issue entity.AcceptanceIssues) string {

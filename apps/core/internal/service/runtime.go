@@ -476,7 +476,7 @@ func maybeAutoAdjudicateAcceptanceRun(ctx context.Context, projectID string, tas
 		return nil
 	}
 
-	result, err := Acceptance().AdjudicateLatestAcceptanceRun(ctx, projectID)
+	result, err := Acceptance().AdjudicateAcceptanceRunByID(ctx, projectID, run.Id)
 	if err != nil {
 		return err
 	}

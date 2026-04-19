@@ -640,6 +640,10 @@ func mapBrainRunStatus(status string) string {
 		return "run_succeeded"
 	case "failed", "error", "crashed":
 		return "run_failed"
+	case "unsupported", "tool_unsupported", "not_supported":
+		return "run_unsupported"
+	case "denied", "permission_denied", "tool_denied", "forbidden":
+		return "run_denied"
 	case "cancelled", "canceled", "stopped", "aborted":
 		return "run_cancelled"
 	default:
@@ -653,7 +657,7 @@ func normalizeRuntimeStatus(status string) string {
 
 func isTerminalBrainRunStatus(status string) bool {
 	switch strings.TrimSpace(status) {
-	case "run_succeeded", "run_failed", "run_cancelled":
+	case "run_succeeded", "run_failed", "run_unsupported", "run_denied", "run_cancelled":
 		return true
 	default:
 		return false
@@ -670,6 +674,8 @@ func domainTaskStatusForRunStatus(runStatus string) string {
 		return "verify_pending"
 	case "run_failed":
 		return "failed"
+	case "run_unsupported", "run_denied":
+		return "blocked"
 	case "run_cancelled":
 		return "cancelled"
 	default:
@@ -681,7 +687,7 @@ func eventLevelForRunStatus(runStatus string) string {
 	switch runStatus {
 	case "run_failed":
 		return "error"
-	case "run_cancelled":
+	case "run_denied", "run_unsupported", "run_cancelled":
 		return "warning"
 	default:
 		return "info"

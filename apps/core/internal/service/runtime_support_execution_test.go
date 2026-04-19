@@ -50,3 +50,26 @@ func TestPrioritizeExecutionBinding(t *testing.T) {
 		t.Fatalf("unexpected prioritized order for missing selected: %#v", got)
 	}
 }
+
+func TestMapBrainRunStatusPreservesUnsupportedAndDenied(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		input  string
+		expect string
+	}{
+		{input: "unsupported", expect: "run_unsupported"},
+		{input: "tool_unsupported", expect: "run_unsupported"},
+		{input: "denied", expect: "run_denied"},
+		{input: "permission_denied", expect: "run_denied"},
+	}
+
+	for _, item := range cases {
+		if got := mapBrainRunStatus(item.input); got != item.expect {
+			t.Fatalf("unexpected mapped status for %q: got %s want %s", item.input, got, item.expect)
+		}
+		if !isTerminalBrainRunStatus(item.expect) {
+			t.Fatalf("expected %s to be terminal", item.expect)
+		}
+	}
+}

@@ -269,8 +269,11 @@ func executeTypedContract[T any](
 	if err != nil {
 		return nil, nil, err
 	}
-	if execResult == nil || execResult.Envelope == nil {
+	if execResult == nil {
 		return nil, nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "brain contract envelope is required", nil)
+	}
+	if execResult.Envelope == nil {
+		return nil, nil, deriveEasyMVPBrainExecutionError(execResult)
 	}
 	var typedResult T
 	if err := json.Unmarshal(execResult.Envelope.ResultJSON, &typedResult); err != nil {
@@ -280,4 +283,28 @@ func executeTypedContract[T any](
 		return nil, nil, err
 	}
 	return execResult.Envelope, &typedResult, nil
+}
+
+func deriveEasyMVPBrainExecutionError(result *EasyMVPBrainExecuteResult) error {
+	if result == nil {
+		return wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "brain contract envelope is required", nil)
+	}
+
+	status := strings.ToLower(strings.TrimSpace(result.Status))
+	detail := strings.TrimSpace(result.Error)
+	if detail == "" {
+		detail = strings.TrimSpace(result.Summary)
+	}
+
+	switch status {
+	case "unsupported", "tool_unsupported", "not_supported", "run_unsupported":
+		return wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "brain execution reported unsupported capability", gerror.New(detail))
+	case "denied", "permission_denied", "tool_denied", "forbidden", "run_denied":
+		return wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "brain execution was denied by runtime policy", gerror.New(detail))
+	default:
+		if detail == "" {
+			return wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "brain contract envelope is required", nil)
+		}
+		return wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "brain contract envelope is required", gerror.New(detail))
+	}
 }

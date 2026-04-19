@@ -31,6 +31,10 @@ func runEventTypeForStatus(runStatus string) string {
 		return "run.completed"
 	case "run_failed":
 		return "run.failed"
+	case "run_unsupported":
+		return "run.unsupported"
+	case "run_denied":
+		return "run.denied"
 	case "run_cancelled":
 		return "run.cancelled"
 	default:
@@ -48,6 +52,10 @@ func runEventSummaryForStatus(runStatus string) string {
 		return "brain run completed successfully"
 	case "run_failed":
 		return "brain run failed in runtime"
+	case "run_unsupported":
+		return "brain run hit an unsupported runtime capability"
+	case "run_denied":
+		return "brain run was denied by runtime policy"
 	case "run_cancelled":
 		return "brain run was cancelled"
 	default:

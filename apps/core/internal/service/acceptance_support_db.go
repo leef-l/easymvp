@@ -125,6 +125,86 @@ func loadAcceptanceAggregate(ctx context.Context, db *sql.DB, projectID string) 
 	return aggregate, nil
 }
 
+func loadAcceptanceAggregateByRunID(ctx context.Context, db *sql.DB, projectID string, acceptanceRunID string) (*acceptanceAggregate, error) {
+	aggregate, err := loadAcceptanceAggregate(ctx, db, projectID)
+	if err != nil {
+		return nil, err
+	}
+
+	acceptanceRunID = strings.TrimSpace(acceptanceRunID)
+	if acceptanceRunID == "" {
+		return nil, gerror.New("acceptance run id is required")
+	}
+	if aggregate.LatestAcceptanceRun != nil && aggregate.LatestAcceptanceRun.Id == acceptanceRunID {
+		return aggregate, nil
+	}
+
+	run, err := getAcceptanceRunByID(ctx, db, acceptanceRunID)
+	if err != nil {
+		return nil, err
+	}
+	if run == nil || strings.TrimSpace(run.ProjectId) != strings.TrimSpace(projectID) {
+		return nil, gerror.New("acceptance run does not belong to project")
+	}
+
+	aggregate.LatestAcceptanceRun = run
+	aggregate.SurfaceCoverage, err = listAcceptanceSurfaceCoverageByRun(ctx, db, run.Id)
+	if err != nil {
+		return nil, err
+	}
+	aggregate.JourneyCoverage, err = listAcceptanceJourneyCoverageByRun(ctx, db, run.Id)
+	if err != nil {
+		return nil, err
+	}
+	aggregate.Issues, err = listAcceptanceIssuesByRun(ctx, db, run.Id, acceptanceIssuesLimit)
+	if err != nil {
+		return nil, err
+	}
+	aggregate.Judgements, err = listAcceptanceJudgementsByRun(ctx, db, run.Id)
+	if err != nil {
+		return nil, err
+	}
+	return aggregate, nil
+}
+
+func getAcceptanceRunByID(ctx context.Context, db *sql.DB, acceptanceRunID string) (*entity.AcceptanceRuns, error) {
+	row := db.QueryRowContext(ctx, `
+SELECT
+  id,
+  project_id,
+  COALESCE(task_id, ''),
+  profile_version,
+  status,
+  functional_status,
+  production_status,
+  manual_release_required,
+  created_at,
+  COALESCE(finished_at, '')
+FROM `+dao.AcceptanceRuns.Table()+`
+WHERE id = ?
+LIMIT 1`, acceptanceRunID)
+
+	var run entity.AcceptanceRuns
+	if err := row.Scan(
+		&run.Id,
+		&run.ProjectId,
+		&run.TaskId,
+		&run.ProfileVersion,
+		&run.Status,
+		&run.FunctionalStatus,
+		&run.ProductionStatus,
+		&run.ManualReleaseRequired,
+		&run.CreatedAt,
+		&run.FinishedAt,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, gerror.Wrap(err, "query acceptance run by id failed")
+	}
+	return &run, nil
+}
+
 func listAcceptanceIssuesByRun(ctx context.Context, db *sql.DB, acceptanceRunID string, limit int) ([]entity.AcceptanceIssues, error) {
 	query := `
 SELECT

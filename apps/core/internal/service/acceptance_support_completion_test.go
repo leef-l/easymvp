@@ -8,6 +8,8 @@ import (
 )
 
 type workspaceExplanationBrainStub struct {
+	executeResult   *EasyMVPBrainExecuteResult
+	executeErr      error
 	workspaceResult *braincontracts.WorkspaceExplanationResult
 	workspaceErr    error
 }
@@ -20,7 +22,7 @@ func (s *workspaceExplanationBrainStub) ResolveClientConfig(ctx context.Context)
 func (s *workspaceExplanationBrainStub) ExecuteContract(ctx context.Context, cmd EasyMVPBrainExecuteCommand) (*EasyMVPBrainExecuteResult, error) {
 	_ = ctx
 	_ = cmd
-	return nil, nil
+	return s.executeResult, s.executeErr
 }
 
 func (s *workspaceExplanationBrainStub) CallPlanReview(ctx context.Context, input braincontracts.PlanReviewInput) (*braincontracts.BrainContractEnvelope, *braincontracts.PlanReviewResult, error) {

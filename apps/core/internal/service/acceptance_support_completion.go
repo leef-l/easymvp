@@ -26,6 +26,30 @@ func adjudicateLatestAcceptanceRun(ctx context.Context, projectID string) (*brai
 	if aggregate.LatestAcceptanceRun == nil {
 		return nil, gerror.New("latest acceptance run is required")
 	}
+	return adjudicateAcceptanceAggregate(ctx, db, aggregate)
+}
+
+func adjudicateAcceptanceRunByID(ctx context.Context, projectID string, acceptanceRunID string) (*braincontracts.CompletionAdjudicationResult, error) {
+	db, closeFn, err := openProjectDatabase(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer closeFn()
+
+	aggregate, err := loadAcceptanceAggregateByRunID(ctx, db, projectID, acceptanceRunID)
+	if err != nil {
+		return nil, err
+	}
+	if aggregate.LatestAcceptanceRun == nil {
+		return nil, gerror.New("acceptance run is required")
+	}
+	return adjudicateAcceptanceAggregate(ctx, db, aggregate)
+}
+
+func adjudicateAcceptanceAggregate(ctx context.Context, db *sql.DB, aggregate *acceptanceAggregate) (*braincontracts.CompletionAdjudicationResult, error) {
+	if aggregate == nil || aggregate.LatestAcceptanceRun == nil {
+		return nil, gerror.New("latest acceptance run is required")
+	}
 
 	_, result, err := EasyMVPBrain().CallCompletionAdjudication(ctx, braincontracts.CompletionAdjudicationInput{
 		ExecutionSummaryJSON:    mustMarshalRawJSON(buildCompletionExecutionSummary(aggregate)),

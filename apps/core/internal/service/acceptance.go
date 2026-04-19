@@ -29,6 +29,7 @@ type IAcceptance interface {
 	AdjudicateAcceptanceRun(ctx context.Context, projectID string) (res *acceptancev1.AdjudicateAcceptanceRes, err error)
 	ApplyManualRelease(ctx context.Context, req ApplyManualReleaseCommand) (res *acceptancev1.ApplyManualReleaseRes, err error)
 	AdjudicateLatestAcceptanceRun(ctx context.Context, projectID string) (res *braincontracts.CompletionAdjudicationResult, err error)
+	AdjudicateAcceptanceRunByID(ctx context.Context, projectID string, acceptanceRunID string) (res *braincontracts.CompletionAdjudicationResult, err error)
 	GetAcceptanceView(ctx context.Context, projectID string) (res *acceptancev1.AcceptanceViewRes, err error)
 }
 
@@ -95,6 +96,18 @@ func (s *sAcceptance) AdjudicateLatestAcceptanceRun(ctx context.Context, project
 		return nil, gerror.New("project id is required")
 	}
 	return adjudicateLatestAcceptanceRun(ctx, projectID)
+}
+
+func (s *sAcceptance) AdjudicateAcceptanceRunByID(ctx context.Context, projectID string, acceptanceRunID string) (res *braincontracts.CompletionAdjudicationResult, err error) {
+	projectID = strings.TrimSpace(projectID)
+	acceptanceRunID = strings.TrimSpace(acceptanceRunID)
+	if projectID == "" {
+		return nil, gerror.New("project id is required")
+	}
+	if acceptanceRunID == "" {
+		return nil, gerror.New("acceptance run id is required")
+	}
+	return adjudicateAcceptanceRunByID(ctx, projectID, acceptanceRunID)
 }
 
 func (s *sAcceptance) AdjudicateAcceptanceRun(ctx context.Context, projectID string) (res *acceptancev1.AdjudicateAcceptanceRes, err error) {
