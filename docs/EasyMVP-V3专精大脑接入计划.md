@@ -19,7 +19,26 @@
 
 > `brain-v3` 是执行内核，`easymvp-brain` 是 EasyMVP 的领域大脑，二者不是替代关系，而是上下层关系。
 
+## 1.1 文档稳定性分层
+
+由于 `/www/wwwroot/project/brain-v3` 当前仍在持续开发，本专题必须分成两层阅读：
+
+1. `稳定抽象`
+2. `当前实现映射`
+
+其中：
+
+- `稳定抽象` 表示 EasyMVP V3 无论 `brain-v3` 如何演进，都必须依赖的能力边界
+- `当前实现映射` 表示基于当前 `brain-v3` 版本的接法，后续允许随 `brain-v3` 变化而调整
+
+后续阅读本专题时，优先以 `稳定抽象` 为准，不应把 `当前实现映射` 误当成不可变协议。
+
 ## 2. 对 `brain-v3` 的分析结论
+
+本章中的结论分两类：
+
+1. 能力边界类结论，属于 `稳定抽象`
+2. CLI / SDK / 持久化 / workflow 细节，属于 `当前实现映射`
 
 结合 `brain-v3/README.md`、`sdk/docs/32-v3-Brain架构.md`、`sdk/docs/33-Brain-Manifest规格.md`、`sdk/docs/29-第三方专精大脑开发.md`，当前可确认：
 
@@ -77,6 +96,30 @@
 结论：
 
 > EasyMVP V3 首接 `brain-v3` 时，应该优先对接服务模式和 Run 生命周期，不应该只把 CLI 当 shell 命令跑。
+
+## 2.4 EasyMVP 依赖的稳定抽象
+
+不管 `brain-v3` 内部 kernel、persistence、workflow 怎么调整，EasyMVP 侧依赖的稳定抽象应固定为：
+
+1. 能创建一个 `run`
+2. 能获取稳定 `run_id`
+3. 能查询 `status`
+4. 能读取 `logs`
+5. 能读取 `replay`
+6. 能执行 `cancel / resume`
+7. 能按 `brain_kind` 调度不同 brain
+
+只要这 7 类能力仍存在，EasyMVP 的领域设计不需要跟随 `brain-v3` 内部细节反复重写。
+
+## 2.5 当前实现映射边界
+
+以下内容都属于当前实现映射，不应在 EasyMVP 文档中写死为不可变前提：
+
+1. `brain serve` 的具体参数形态
+2. `brain-v3` 的内部持久化实现
+3. kernel 内部 workflow 结构
+4. logs / replay 的底层存储格式
+5. runtime backend 的实现细节
 
 ## 3. 为什么 EasyMVP 需要自己的专精大脑
 
@@ -257,6 +300,8 @@ EasyMVP Workflow Orchestrator
 
 ## 8. 第一阶段推荐接入方式
 
+本章默认属于 `当前实现映射`，后续如 `brain-v3` 接口变化，本章允许调整；但不应回过头修改上面的稳定抽象边界。
+
 ### 8.1 接入形态
 
 第一阶段建议使用：
@@ -420,7 +465,7 @@ EasyMVP Workflow Orchestrator
 按优先级建议下一步只做三件事：
 
 1. [EasyMVP-V3-brain-serve接口接入与Run生命周期映射](./EasyMVP-V3-brain-serve接口接入与Run生命周期映射.md)
-2. 冻结 `easymvp-brain` 第一版 Manifest / Tool Schema / Prompt 设计
+2. [EasyMVP-V3-easymvp-brain职责边界与输入输出合同设计](./EasyMVP-V3-easymvp-brain职责边界与输入输出合同设计.md)
 3. [EasyMVP-V3计划数据模型与表结构设计](./EasyMVP-V3计划数据模型与表结构设计.md)
 
 在这三件事定下来之前，不建议继续扩展新的 `execution_mode`。

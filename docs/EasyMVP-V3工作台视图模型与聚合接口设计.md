@@ -77,6 +77,13 @@ V3 的对象分三层看：
 5. `cancel`
 6. `resume`
 
+这里应理解为运行时稳定抽象，而不是 `brain-v3` 当前内部实现的直接镜像。
+
+也就是说：
+
+1. 工作台依赖的是运行时能力
+2. 不依赖 `brain-v3` 内部 kernel / persistence / workflow 结构
+
 ### 3.3 视图对象层
 
 由 EasyMVP 聚合接口提供：
@@ -145,6 +152,21 @@ V3 的对象分三层看：
 2. `source_object_id`
 3. `source_run_id`
 4. `source_task_id`
+
+### 4.5 运行时依赖必须面向抽象
+
+工作台在接入 `brain-v3` 时，前端和聚合层都不应直接依赖：
+
+1. `brain-v3` 内部数据库结构
+2. kernel 内部 workflow 结构
+3. 当前 persistence driver 细节
+
+工作台只应依赖：
+
+1. 稳定 `run_id`
+2. 可同步 `status`
+3. 可读取 `logs / replay`
+4. 可映射到 `LiveEvent`
 
 ## 5. Workspace 的视图模型
 
@@ -490,6 +512,8 @@ V3 的对象分三层看：
 4. `VerificationContract` 执行结果
 5. `AcceptanceRun`
 
+其中 `brain-v3 Run` 在聚合层应先归一化，再进入页面对象，不能把 `brain-v3` 当前实现原样透传给前端。
+
 ### 8.2 PlanView 来源
 
 主要来源：
@@ -512,6 +536,10 @@ V3 的对象分三层看：
 ## 9. 接口边界建议
 
 V3 第一版建议只开放 3 类页面接口和 1 类事件流接口。
+
+这里的页面接口属于 EasyMVP 自己的稳定边界。
+
+即使后续 `brain-v3` transport 或运行时结构变化，前端也不应因此被迫改成新的底层接口形态。
 
 ### 9.1 页面快照接口
 
@@ -603,9 +631,9 @@ V3 第一版建议只开放 3 类页面接口和 1 类事件流接口。
 
 本专题完成后，页面设计应按以下顺序继续推进：
 
-1. `Workspace` 详细页面设计
-2. `Plan` 详细页面设计
-3. `Acceptance` 详细页面设计
-4. SSE / polling 事件流设计
+1. [EasyMVP-V3-Workspace详细页面设计](./EasyMVP-V3-Workspace详细页面设计.md)
+2. [EasyMVP-V3-Plan详细页面设计](./EasyMVP-V3-Plan详细页面设计.md)
+3. [EasyMVP-V3-Acceptance详细页面设计](./EasyMVP-V3-Acceptance详细页面设计.md)
+4. [EasyMVP-V3-实时事件流推送机制设计](./EasyMVP-V3-实时事件流推送机制设计.md)
 
 页面详细设计必须基于本页定义的视图对象展开，不应重新发明数据结构。

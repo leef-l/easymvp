@@ -17,6 +17,31 @@ V3 首版不应把 `brain-v3` 当 shell 执行器接入。
 3. 持续同步 `status / logs / replay`
 4. 把 Run 生命周期映射到 `DomainTask` 和工作台事件流
 
+## 1.1 稳定抽象与当前实现
+
+本专题必须区分两层：
+
+### 稳定抽象
+
+EasyMVP 对外只依赖：
+
+1. `run_id`
+2. `status`
+3. `logs`
+4. `replay`
+5. `cancel`
+6. `resume`
+
+### 当前实现映射
+
+当前文档使用：
+
+1. `brain serve`
+2. HTTP Run API
+3. 当前 `brain-v3` 的最小状态集合
+
+如果 `brain-v3` 后续更改 transport、状态枚举或 persistence，本专题允许改写“当前实现映射”部分，但不应推翻上面的稳定抽象。
+
 ## 2. 对接边界
 
 ### 2.1 EasyMVP 负责
@@ -59,6 +84,8 @@ V3 首版不应把 `brain-v3` 当 shell 执行器接入。
 4. `failed`
 5. `cancelled`
 
+这组状态属于当前实现映射，不应被 EasyMVP 领域模型直接硬编码成唯一真相。
+
 ### 4.2 EasyMVP 映射状态
 
 建议映射为：
@@ -77,6 +104,10 @@ V3 首版不应把 `brain-v3` 当 shell 执行器接入。
 2. `completed` 需要叠加 delivery / verification 结果
 
 ## 5. 建议接口流程
+
+本章内容属于当前实现映射。
+
+如果未来 `brain-v3` 仍保留稳定抽象能力，但接口路径或 transport 变化，本章可单独更新。
 
 ### 5.1 创建 Run
 
@@ -162,6 +193,8 @@ V3 首版不应把 `brain-v3` 当 shell 执行器接入。
 2. `status` 可增量同步
 3. logs 可提炼成结构化事件
 
+这里的关键要求属于稳定抽象；而具体由 `brain serve`、SSE、轮询还是其他 transport 实现，属于当前实现映射。
+
 ## 8. 错误处理原则
 
 ### 8.1 远端不可用
@@ -193,5 +226,7 @@ V3 首版不应把 `brain-v3` 当 shell 执行器接入。
 
 1. `brain serve` 请求 schema
 2. 日志归一化规则
-3. replay 到工作台的展示映射
+3. [EasyMVP-V3-回放与审计展示设计](./EasyMVP-V3-回放与审计展示设计.md)
 4. 多脑并发运行约束
+
+以上专题都默认属于当前实现映射层。
