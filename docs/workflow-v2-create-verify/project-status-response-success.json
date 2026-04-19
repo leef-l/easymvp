@@ -1,0 +1,16 @@
+{
+  "code": 0,
+  "message": "OK",
+  "data": {
+    "status": "designing",
+    "activeBatch": 0,
+    "totalTasks": 0,
+    "statusCounts": {},
+    "isActuallyWorking": false,
+    "activeRunningTasks": 0,
+    "stalledTaskCount": 0,
+    "engineVersion": "workflow_v2",
+    "workflowStatus": "designing",
+    "currentStage": "design"
+  }
+}

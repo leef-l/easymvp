@@ -69,10 +69,6 @@ V3 文档体系分三层：
 7. V2 -> V3 迁移计划与兼容策略
 8. 单机版实时工作台产品形态与页面设计
 9. 工作台视图模型与聚合接口设计
-10. `Workspace / Plan / Acceptance` 详细页面设计
-11. `easymvp-brain` 职责边界、Manifest、Tool Schema、Prompt 设计
-12. V2 -> V3 迁移、实时事件流、回放与审计设计
-13. 分类 profile 示例库与角色目录标准化
 
 这些文档当前未全部展开，但必须围绕本总纲继续拆，不允许平铺散写。
 
@@ -207,22 +203,20 @@ V3 要改成：
 这些文档主要承接产品形态和前端实施：
 
 1. [EasyMVP-V3实时工作台页面设计](./EasyMVP-V3实时工作台页面设计.md)
-2. [EasyMVP-V3-Workspace详细页面设计](./EasyMVP-V3-Workspace详细页面设计.md)
-3. [EasyMVP-V3-Plan详细页面设计](./EasyMVP-V3-Plan详细页面设计.md)
-4. [EasyMVP-V3-Acceptance详细页面设计](./EasyMVP-V3-Acceptance详细页面设计.md)
-5. [EasyMVP-V3-easymvp-brain职责边界与输入输出合同设计](./EasyMVP-V3-easymvp-brain职责边界与输入输出合同设计.md)
-6. [EasyMVP-V3-easymvp-brain-Manifest与ToolSchema设计](./EasyMVP-V3-easymvp-brain-Manifest与ToolSchema设计.md)
-7. [EasyMVP-V3-easymvp-brain-Prompt设计](./EasyMVP-V3-easymvp-brain-Prompt设计.md)
+2. `Workspace` 详细页面设计
+3. `Plan` 详细页面设计
+4. `Acceptance` 详细页面设计
+5. `easymvp-brain` Manifest / Tool Schema / Prompt 设计
 
 ### 8.3 P2：工程化与迁移
 
 这些文档在主链路稳定后推进：
 
-1. [EasyMVP-V3-V2到V3迁移与兼容策略](./EasyMVP-V3-V2到V3迁移与兼容策略.md)
-2. [EasyMVP-V3-实时事件流推送机制设计](./EasyMVP-V3-实时事件流推送机制设计.md)
-3. [EasyMVP-V3-回放与审计展示设计](./EasyMVP-V3-回放与审计展示设计.md)
-4. [EasyMVP-V3-分类Profile示例库](./EasyMVP-V3-分类Profile示例库.md)
-5. [EasyMVP-V3-角色目录标准化设计](./EasyMVP-V3-角色目录标准化设计.md)
+1. V2 -> V3 迁移与兼容策略
+2. 事件流推送机制
+3. 回放与审计展示
+4. 分类 profile 示例库
+5. 角色目录标准化
 
 ## 9. 当前状态
 
@@ -241,9 +235,5 @@ V3 要改成：
 11. P0 RoleResolver 专题
 12. P0 ProductionAcceptanceProfile 专题
 13. P0 `brain serve` 生命周期映射专题
-14. P1 页面级详细设计专题
-15. P1 `easymvp-brain` 合同与 Manifest 专题
-16. P2 迁移与工程化专题
-17. P2 分类示例库与角色目录专题
 
 下一步开始进入细项专题展开。

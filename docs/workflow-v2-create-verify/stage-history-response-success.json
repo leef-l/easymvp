@@ -1,0 +1,15 @@
+{
+  "code": 0,
+  "message": "OK",
+  "data": {
+    "stages": [
+      {
+        "id": "317588265878163457",
+        "stageType": "design",
+        "stageNo": 1,
+        "status": "running",
+        "startedAt": "2026-04-09 15:15:43"
+      }
+    ]
+  }
+}

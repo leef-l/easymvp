@@ -182,7 +182,7 @@
 
 本专题后续继续拆：
 
-1. [EasyMVP-V3-角色目录标准化设计](./EasyMVP-V3-角色目录标准化设计.md)
+1. `RoleCatalog` 字段定义
 2. `project_role_override` schema
 3. 风险升级规则表
 4. resolve trace 可视化展示

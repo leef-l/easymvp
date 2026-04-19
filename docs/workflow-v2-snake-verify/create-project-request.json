@@ -1,0 +1,8 @@
+{
+  "name": "workflow-v2-snake-verify-20260409-recreate",
+  "categoryCode": "software_dev",
+  "description": "Workflow V2 recreate verification for a React plus GoFrame v2 snake sample on 2026-04-09",
+  "workDir": "/www/wwwroot/project/easymvp/test-workspaces/workflow-v2-snake-verify/repo",
+  "engineVersion": "workflow_v2",
+  "selectedRoles": []
+}

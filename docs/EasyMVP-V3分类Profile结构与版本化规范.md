@@ -217,4 +217,4 @@
 1. `planning_policy` json schema
 2. `role_policy` json schema
 3. `acceptance_policy` json schema
-4. [EasyMVP-V3-分类Profile示例库](./EasyMVP-V3-分类Profile示例库.md)
+4. 分类 profile 示例库

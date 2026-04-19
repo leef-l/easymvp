@@ -626,10 +626,8 @@ V3 工作台应尽量避免“手动刷新才能知道系统状态”。
 
 本专题后续继续拆：
 
-1. [EasyMVP-V3-Workspace详细页面设计](./EasyMVP-V3-Workspace详细页面设计.md)
-2. [EasyMVP-V3-Plan详细页面设计](./EasyMVP-V3-Plan详细页面设计.md)
-3. [EasyMVP-V3-Acceptance详细页面设计](./EasyMVP-V3-Acceptance详细页面设计.md)
-4. [EasyMVP-V3-实时事件流推送机制设计](./EasyMVP-V3-实时事件流推送机制设计.md)
-5. `ProjectSnapshot / LiveEvent / ActionInboxItem` 接口 schema
-6. `AcceptanceCoverage` 可视化组件设计
-7. 单机版导航与页面跳转规则
+1. `Workspace` 页面详细线框图
+2. `ProjectSnapshot / LiveEvent / ActionInboxItem` 接口 schema
+3. 实时事件流推送机制设计
+4. `AcceptanceCoverage` 可视化组件设计
+5. 单机版导航与页面跳转规则

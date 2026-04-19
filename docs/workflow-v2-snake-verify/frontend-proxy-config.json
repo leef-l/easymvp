@@ -1,0 +1,1 @@
+{"code":0,"message":"OK","data":{"config":{"gridSize":20,"initialSpeedMs":160,"minSpeedMs":80,"speedStepMs":6,"scoreStep":10,"leaderboardLimit":8,"defaultPlayer":"Player 1"}}}
