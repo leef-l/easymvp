@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gcfg"
 
+	planv1 "github.com/leef-l/easymvp/apps/core/api/plan/v1"
 	"github.com/leef-l/easymvp/apps/core/internal/model/braincontracts"
 	"github.com/leef-l/easymvp/apps/core/internal/model/do"
 )
@@ -20,6 +21,15 @@ var transactionalServiceTestMu sync.Mutex
 type completionAdjudicationBrainStub struct {
 	result *braincontracts.CompletionAdjudicationResult
 	err    error
+}
+
+type repairDraftPlanStub struct {
+	result       *CreateRepairDraftResult
+	err          error
+	calls        int
+	lastCommand  CreateRepairDraftCommand
+	lastProject  string
+	initialError error
 }
 
 func (s *completionAdjudicationBrainStub) ResolveClientConfig(ctx context.Context) (*EasyMVPBrainClientConfig, error) {
@@ -115,6 +125,48 @@ func (s *completionAdjudicationBrainStub) ValidateWorkspaceExplanationEnvelope(c
 	_ = envelope
 	_ = result
 	return nil
+}
+
+func (s *repairDraftPlanStub) CreateInitialDraft(ctx context.Context, projectID string) error {
+	_ = ctx
+	s.lastProject = projectID
+	return s.initialError
+}
+
+func (s *repairDraftPlanStub) CreateRepairDraft(ctx context.Context, req CreateRepairDraftCommand) (res *CreateRepairDraftResult, err error) {
+	_ = ctx
+	s.calls++
+	s.lastCommand = req
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.result != nil {
+		return s.result, nil
+	}
+	return &CreateRepairDraftResult{
+		CommandID:  "cmd_repair_stub",
+		Accepted:   true,
+		ResourceID: "repair_stub",
+		NextAction: "refresh_plan_view",
+	}, nil
+}
+
+func (s *repairDraftPlanStub) CompilePlan(ctx context.Context, req CompilePlanCommand) (res *planv1.CompilePlanRes, err error) {
+	_ = ctx
+	_ = req
+	return nil, nil
+}
+
+func (s *repairDraftPlanStub) GetPlanView(ctx context.Context, projectID string) (res *planv1.PlanViewRes, err error) {
+	_ = ctx
+	_ = projectID
+	return nil, nil
+}
+
+func (s *repairDraftPlanStub) GetRepairDraftView(ctx context.Context, projectID string) (res *planv1.RepairDraftRes, err error) {
+	_ = ctx
+	_ = projectID
+	return nil, nil
 }
 
 func TestApplyManualReleasePersistsAllAffectedRows(t *testing.T) {
@@ -362,6 +414,86 @@ func TestAdjudicateAcceptanceAggregatePersistsCompletedState(t *testing.T) {
 	})
 }
 
+func TestAdjudicateAcceptanceAggregatePersistsFailedStateAndTriggersRepairDraft(t *testing.T) {
+	withAcceptanceFlowDB(t, func(ctx context.Context, db *sql.DB) {
+		seedAcceptanceFlowProject(t, ctx, db, acceptanceFlowSeed{
+			projectID:             "proj_adjudicate_failed",
+			taskID:                "task_adjudicate_failed",
+			runID:                 "run_adjudicate_failed",
+			projectStatus:         "acceptance",
+			projectProduction:     "functional_passed",
+			runStatus:             "running",
+			functionalStatus:      "functional_passed",
+			productionStatus:      "functional_passed",
+			manualReleaseRequired: 0,
+			insertBlockingIssue:   true,
+		})
+
+		aggregate, err := loadAcceptanceAggregate(ctx, db, "proj_adjudicate_failed")
+		if err != nil {
+			t.Fatalf("loadAcceptanceAggregate failed: %v", err)
+		}
+
+		previousBrain := localEasyMVPBrain
+		previousPlan := localPlan
+		planStub := &repairDraftPlanStub{}
+		localEasyMVPBrain = &completionAdjudicationBrainStub{
+			result: &braincontracts.CompletionAdjudicationResult{
+				FunctionalPassed:      false,
+				ProductionPassed:      false,
+				ManualReleaseRequired: false,
+				FinalStatus:           "failed",
+				DecisionReason:        "Blocking acceptance issues remain unresolved.",
+			},
+		}
+		localPlan = planStub
+		defer func() {
+			localEasyMVPBrain = previousBrain
+			localPlan = previousPlan
+		}()
+
+		result, err := adjudicateAcceptanceAggregate(ctx, db, aggregate)
+		if err != nil {
+			t.Fatalf("adjudicateAcceptanceAggregate failed: %v", err)
+		}
+		if result.FinalStatus != "failed" {
+			t.Fatalf("unexpected adjudication result: %#v", result)
+		}
+
+		var (
+			runStatus           string
+			runFunctionalStatus string
+			runProductionStatus string
+			runFinishedAt       sql.NullString
+			projectStatus       string
+			projectProduction   string
+			totalJudgements     int
+		)
+		mustQueryRow(t, db, `SELECT status, functional_status, production_status, finished_at FROM acceptance_runs WHERE id = ?`, "run_adjudicate_failed").
+			Scan(&runStatus, &runFunctionalStatus, &runProductionStatus, &runFinishedAt)
+		mustQueryRow(t, db, `SELECT status, production_status FROM projects WHERE id = ?`, "proj_adjudicate_failed").
+			Scan(&projectStatus, &projectProduction)
+		mustQueryRow(t, db, `SELECT COUNT(*) FROM acceptance_judgements WHERE acceptance_run_id = ?`, "run_adjudicate_failed").
+			Scan(&totalJudgements)
+
+		if runStatus != "failed" || runFunctionalStatus != "failed" || runProductionStatus != "failed" || !runFinishedAt.Valid {
+			t.Fatalf("unexpected failed acceptance run state: status=%q functional=%q production=%q finished_at=%#v", runStatus, runFunctionalStatus, runProductionStatus, runFinishedAt)
+		}
+		if projectStatus != "acceptance" || projectProduction != "failed" {
+			t.Fatalf("unexpected failed project state: status=%q production=%q", projectStatus, projectProduction)
+		}
+		if totalJudgements != 3 {
+			t.Fatalf("unexpected failed judgement count: got %d want %d", totalJudgements, 3)
+		}
+		if planStub.calls != 1 {
+			t.Fatalf("expected repair draft to be triggered once, got %d", planStub.calls)
+		}
+		if planStub.lastCommand.ProjectID != "proj_adjudicate_failed" || planStub.lastCommand.CreatedBy != "acceptance.adjudication" {
+			t.Fatalf("unexpected repair draft command: %#v", planStub.lastCommand)
+		}
+	})
+}
+
 type acceptanceFlowSeed struct {
 	projectID                string
 	taskID                   string
@@ -373,6 +505,7 @@ type acceptanceFlowSeed struct {
 	productionStatus         string
 	manualReleaseRequired    int
 	existingReleaseJudgement bool
+	insertBlockingIssue      bool
 }
 
 func withAcceptanceFlowDB(t *testing.T, fn func(ctx context.Context, db *sql.DB)) {
@@ -507,6 +640,27 @@ id, project_id, task_id, profile_version, status, functional_status, production_
 	); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("insert acceptance run failed: %v", err)
+	}
+
+	if seed.insertBlockingIssue {
+		if _, err = tx.ExecContext(
+			ctx,
+			`INSERT INTO acceptance_issues (
+id, project_id, acceptance_run_id, severity, issue_kind, blocking, summary, detail_json, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			"issue_blocking_"+seed.runID,
+			seed.projectID,
+			seed.runID,
+			"error",
+			"release_blocker",
+			1,
+			"Blocking acceptance issue",
+			`{"reason":"still failing"}`,
+			now,
+		); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("insert blocking acceptance issue failed: %v", err)
+		}
 	}
 
 	if seed.existingReleaseJudgement {

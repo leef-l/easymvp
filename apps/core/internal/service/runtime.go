@@ -67,7 +67,7 @@ type IRuntime interface {
 	SyncBrainRunBinding(ctx context.Context, bindingID string) (*BrainRunState, error)
 }
 
-var localRuntime IRuntime = (*sRuntime)(nil)
+var localRuntime IRuntime
 
 type sRuntime struct {
 	httpClient *http.Client

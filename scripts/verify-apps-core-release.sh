@@ -9,8 +9,9 @@ echo "== Validate apps/core tests =="
 (cd "$CORE_DIR" && go test ./...)
 
 echo
-echo "== Build apps/core container =="
-docker build -f "$CORE_DIR/manifest/docker/Dockerfile" -t easymvp-core:verify "$CORE_DIR"
+echo "== Smoke test apps/core healthz =="
+chmod +x "$ROOT_DIR/scripts/verify-core-health.sh"
+"$ROOT_DIR/scripts/verify-core-health.sh"
 
 if command -v kubectl >/dev/null 2>&1; then
   echo

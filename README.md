@@ -38,6 +38,7 @@ cd apps/desktop && pnpm run build
 - 主验证：`.github/workflows/v3-guard.yml`
 - Core 发布：`.github/workflows/core-release.yml`
 - 桌面打包：`.github/workflows/desktop-package.yml`
+- Core 本地健康校验：`./scripts/verify-core-health.sh`
 - 桌面本地打包：`cd apps/desktop && pnpm run package`
 - 打包前会自动编译 `apps/core` 并把二进制带入安装包资源目录
 

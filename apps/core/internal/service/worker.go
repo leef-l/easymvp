@@ -25,7 +25,7 @@ type backgroundWorker interface {
 	RunOnce(ctx context.Context) error
 }
 
-var localWorkerManager IWorkerManager = (*sWorkerManager)(nil)
+var localWorkerManager IWorkerManager
 
 type sWorkerManager struct {
 	mu      sync.Mutex
