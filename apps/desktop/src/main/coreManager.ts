@@ -195,11 +195,80 @@ function getPackagedCoreBinaryPath() {
   return path.join(process.resourcesPath, "bin", fileName);
 }
 
+function stripWrappedQuotes(value: string) {
+  const trimmed = value.trim();
+  if (trimmed.length < 2) {
+    return trimmed;
+  }
+  const first = trimmed[0];
+  const last = trimmed[trimmed.length - 1];
+  if ((first === `"` && last === `"`) || (first === `'` && last === `'`)) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
 function splitArgs(argsText?: string) {
-  return (argsText ?? "")
-    .split(/\s+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
+  const source = (argsText ?? "").trim();
+  if (!source) {
+    return [];
+  }
+
+  const args: string[] = [];
+  let current = "";
+  let quote: `"` | `'` | "" = "";
+
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+
+    if (quote) {
+      if (char === quote) {
+        quote = "";
+      } else if (
+        char === "\\"
+        && quote === `"`
+        && index + 1 < source.length
+        && (`"\\`.includes(source[index + 1] ?? ""))
+      ) {
+        index += 1;
+        current += source[index] ?? "";
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === `"` || char === `'`) {
+      quote = char;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      if (current) {
+        args.push(current);
+        current = "";
+      }
+      continue;
+    }
+
+    if (
+      char === "\\"
+      && index + 1 < source.length
+      && (`"'\\`.includes(source[index + 1] ?? ""))
+    ) {
+      index += 1;
+      current += source[index] ?? "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current) {
+    args.push(current);
+  }
+
+  return args;
 }
 
 function summarizeSpawnError(error: string) {
@@ -319,7 +388,7 @@ function resolveLaunchSpec(
   const commandFromEnv = process.env.EASYMVP_CORE_CMD?.trim();
   if (commandFromEnv) {
     return {
-      command: commandFromEnv,
+      command: stripWrappedQuotes(commandFromEnv),
       args: splitArgs(process.env.EASYMVP_CORE_ARGS),
       cwd: process.env.EASYMVP_CORE_CWD?.trim() || process.cwd(),
     };

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -331,9 +332,18 @@ func runtimeResumeRun(ctx context.Context, runID string) (*runtimeResumeRunRespo
 	commandCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 
-	output, err := exec.CommandContext(commandCtx, "brain", "resume", runID, "--json").CombinedOutput()
+	command, args := runtimeResumeCommand()
+	args = append(args, "resume", runID, "--json")
+
+	output, err := exec.CommandContext(commandCtx, command, args...).CombinedOutput()
 	if err != nil {
-		return nil, gerror.Wrapf(err, "runtime resume command failed: output=%s", strings.TrimSpace(string(output)))
+		return nil, gerror.Wrapf(
+			err,
+			"runtime resume command failed: command=%s args=%v output=%s",
+			command,
+			args,
+			strings.TrimSpace(string(output)),
+		)
 	}
 
 	var result runtimeResumeRunResponse
@@ -348,6 +358,90 @@ func runtimeResumeRun(ctx context.Context, runID string) (*runtimeResumeRunRespo
 		return nil, gerror.New("runtime resume response returned empty state")
 	}
 	return &result, nil
+}
+
+func runtimeResumeCommand() (string, []string) {
+	command := stripWrappedCommand(os.Getenv("EASYMVP_BRAIN_CMD"))
+	if command == "" {
+		command = "brain"
+	}
+	return command, splitCommandArgs(os.Getenv("EASYMVP_BRAIN_ARGS"))
+}
+
+func stripWrappedCommand(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if len(trimmed) < 2 {
+		return trimmed
+	}
+	first := trimmed[0]
+	last := trimmed[len(trimmed)-1]
+	if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+		return strings.TrimSpace(trimmed[1 : len(trimmed)-1])
+	}
+	return trimmed
+}
+
+func splitCommandArgs(value string) []string {
+	source := strings.TrimSpace(value)
+	if source == "" {
+		return nil
+	}
+
+	args := make([]string, 0, 4)
+	var (
+		current strings.Builder
+		quote   rune
+	)
+
+	for i := 0; i < len(source); i++ {
+		ch := rune(source[i])
+
+		if quote != 0 {
+			if ch == quote {
+				quote = 0
+				continue
+			}
+			if ch == '\\' && quote == '"' && i+1 < len(source) {
+				next := rune(source[i+1])
+				if next == '"' || next == '\\' {
+					i++
+					current.WriteRune(next)
+					continue
+				}
+			}
+			current.WriteRune(ch)
+			continue
+		}
+
+		if ch == '"' || ch == '\'' {
+			quote = ch
+			continue
+		}
+
+		if ch == '\\' && i+1 < len(source) {
+			next := rune(source[i+1])
+			if next == '"' || next == '\'' || next == '\\' {
+				i++
+				current.WriteRune(next)
+				continue
+			}
+		}
+
+		if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
+			if current.Len() > 0 {
+				args = append(args, current.String())
+				current.Reset()
+			}
+			continue
+		}
+
+		current.WriteRune(ch)
+	}
+
+	if current.Len() > 0 {
+		args = append(args, current.String())
+	}
+	return args
 }
 
 func insertBrainRunBinding(ctx context.Context, row *do.BrainRunBindings) error {

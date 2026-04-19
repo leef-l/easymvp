@@ -11,19 +11,20 @@ import (
 func TestCollectRunArtifactCandidateRootsSkipsEmptyExecutionID(t *testing.T) {
 	t.Parallel()
 
+	tempDir := t.TempDir()
 	roots := runArtifactRoots{
-		RunsRoot:   "/tmp/easymvp/runs",
-		ReplayRoot: "/tmp/easymvp/replay",
+		RunsRoot:   filepath.Join(tempDir, "runs"),
+		ReplayRoot: filepath.Join(tempDir, "replay"),
 	}
 
 	got := collectRunArtifactCandidateRoots(roots, "run_123", "")
 	if len(got) != 2 {
 		t.Fatalf("unexpected candidate count: got %d want %d", len(got), 2)
 	}
-	if got[0] != "/tmp/easymvp/runs/run_123" {
+	if got[0] != filepath.Join(roots.RunsRoot, "run_123") {
 		t.Fatalf("unexpected runs root candidate: got %s", got[0])
 	}
-	if got[1] != "/tmp/easymvp/replay/run_123" {
+	if got[1] != filepath.Join(roots.ReplayRoot, "run_123") {
 		t.Fatalf("unexpected replay root candidate: got %s", got[1])
 	}
 }
@@ -81,16 +82,16 @@ func TestClassifyLogStreamKindUsesFilenameHints(t *testing.T) {
 func TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles(t *testing.T) {
 	t.Parallel()
 
-	root := "/tmp/easymvp/runs/run_123"
+	root := filepath.Join(t.TempDir(), "runs", "run_123")
 	cases := []struct {
 		name string
 		path string
 		want string
 	}{
-		{name: "checkpoint json", path: "/tmp/easymvp/runs/run_123/checkpoints/20260419_checkpoint_run_123.json", want: ""},
-		{name: "meta json", path: "/tmp/easymvp/runs/run_123/meta.json", want: ""},
-		{name: "replay json", path: "/tmp/easymvp/runs/run_123/replay/20260419_replay_run_123_step_0001.json", want: "replay"},
-		{name: "stdout log", path: "/tmp/easymvp/runs/run_123/logs/20260419_stdout_0001.log", want: "log"},
+		{name: "checkpoint json", path: filepath.Join(root, "checkpoints", "20260419_checkpoint_run_123.json"), want: ""},
+		{name: "meta json", path: filepath.Join(root, "meta.json"), want: ""},
+		{name: "replay json", path: filepath.Join(root, "replay", "20260419_replay_run_123_step_0001.json"), want: "replay"},
+		{name: "stdout log", path: filepath.Join(root, "logs", "20260419_stdout_0001.log"), want: "log"},
 	}
 
 	for _, tc := range cases {
