@@ -14,7 +14,7 @@ EasyMVP 当前只保留 V3 主线。
 
 ## 当前口径
 
-- 已删除旧的 V2 代码、前端、CI/CD、Docker 和专项验证资料
+- 历史旧实现、前端、CI/CD、Docker 和专项验证资料已完成清理
 - 当前开发与验证只围绕 `apps/core` 和 `apps/desktop`
 - 本地联调入口以桌面端 + core 服务为准
 

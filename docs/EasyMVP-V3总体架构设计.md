@@ -31,7 +31,7 @@ EasyMVP V3 的顶层结构分为三层：
 
 ## 2. V3 要解决的根因
 
-V2 的主要根因有：
+当前需要修正的主要根因有：
 
 1. 架构师输出直接落任务，缺方案编译层
 2. review / execute / rework / accept 的决策逻辑散落
@@ -111,7 +111,7 @@ PlanDraft
   -> completed 或 reworking
 ```
 
-与 V2 最大的区别是：
+当前架构的关键变化是：
 
 - 方案不能直接进入 execute
 - 验收目标不是普通通过，而是生产级通过

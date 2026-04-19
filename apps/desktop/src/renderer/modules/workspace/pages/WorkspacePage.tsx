@@ -243,7 +243,7 @@ export function WorkspacePage() {
               <div className="stack-list">
                 <SummaryCard
                   title="Workspace Overview"
-                  primary={firstText(workspaceOverview?.stage_status, workspaceOverview?.production_status, projectSnapshot?.production_status, "legacy only")}
+                  primary={firstText(workspaceOverview?.stage_status, workspaceOverview?.production_status, projectSnapshot?.production_status, "not ready")}
                   secondary={firstText(
                     state.data.workspace_explanation.summary,
                     "Structured workspace overview becomes primary when the backend emits overview fields.",
@@ -268,7 +268,7 @@ export function WorkspacePage() {
                 />
                 <SummaryCard
                   title="Verification Result"
-                  primary={firstText(verificationResult?.decision, verificationResult?.status, "legacy only")}
+                  primary={firstText(verificationResult?.decision, verificationResult?.status, "not ready")}
                   secondary={
                     verificationResult?.summary ||
                     "Workspace is still falling back to production_status because no structured verification result is attached."

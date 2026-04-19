@@ -250,7 +250,7 @@ EasyMVP Workflow Orchestrator
 
 ## 7. EasyMVP 不该怎么接 `brain-v3`
 
-为了避免 V2 的问题在 V3 重演，以下接法明确不推荐：
+为了避免旧问题在 V3 重演，以下接法明确不推荐：
 
 ### 7.1 不推荐把 `brain-v3` 直接塞进现有 `execution_mode`
 
@@ -431,7 +431,7 @@ EasyMVP Workflow Orchestrator
 
 ## 12. 对 EasyMVP V3 的最终判断
 
-如果 EasyMVP V3 要真正解决当前 V2 暴露出来的根因，正确路径不是：
+如果 EasyMVP V3 要真正解决当前暴露出来的根因，正确路径不是：
 
 - 再换一个更强的代码执行器
 - 再堆更多 runtime fallback

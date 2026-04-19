@@ -173,7 +173,7 @@ export function AcceptancePage() {
           <div className="metrics-grid">
             <MetricCard
               label="Verification"
-              value={firstText(verificationResult?.decision, verificationResult?.status, acceptanceOverview?.overall_status, "legacy")}
+              value={firstText(verificationResult?.decision, verificationResult?.status, acceptanceOverview?.overall_status, "pending")}
               tone="calm"
             />
             <MetricCard
@@ -352,7 +352,7 @@ export function AcceptancePage() {
                     acceptanceOverview?.overall_status,
                     acceptanceOverview?.release_gate_status,
                     releaseGate?.status,
-                    "legacy only",
+                    "not ready",
                   )}
                   secondary={firstText(
                     releaseGate?.summary,
@@ -377,7 +377,7 @@ export function AcceptancePage() {
                 />
                 <SummaryCard
                   title="Verification Result"
-                  primary={firstText(verificationResult?.decision, verificationResult?.status, "legacy only")}
+                  primary={firstText(verificationResult?.decision, verificationResult?.status, "not ready")}
                   secondary={firstText(verificationResult?.summary, "The backend has not emitted a structured verification result yet.")}
                   pills={[
                     verificationResult?.completed !== undefined ? `completed ${String(verificationResult.completed)}` : undefined,
@@ -398,11 +398,11 @@ export function AcceptancePage() {
                 />
                 <SummaryCard
                   title="Completion Verdict"
-                  primary={firstText(completionVerdict?.decision, completionVerdict?.final_status, "legacy gate")}
+                  primary={firstText(completionVerdict?.decision, completionVerdict?.final_status, "pending")}
                   secondary={firstText(
                     completionVerdict?.summary,
                     completionVerdict?.reason,
-                    "Release gate remains the compatibility fallback until completion verdict lands.",
+                    "Release gate remains the current fallback until completion verdict lands.",
                   )}
                   pills={[
                     completionVerdict?.completed !== undefined ? `completed ${String(completionVerdict.completed)}` : undefined,

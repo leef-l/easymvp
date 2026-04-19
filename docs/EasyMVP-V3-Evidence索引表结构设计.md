@@ -279,7 +279,7 @@ Coverage 不应直接从文件目录推断，而应基于 `workflow_evidence_ind
 2. 导出时按 `evidence_type / surface / journey` 分组
 3. 保留 evidence 索引清单，便于离线阅读
 
-## 14. 迁移与兼容约束
+## 14. 演进与兼容约束
 
 考虑未来从 `SQLite` 迁移到 `Postgres`，建议：
 
