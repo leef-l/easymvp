@@ -25,6 +25,7 @@ export type CompletionVerdictSummary = {
   manual_release_completed?: boolean;
   blocker_count?: number;
   next_action?: string;
+  source_run_id?: string;
   updated_at?: string;
 };
 

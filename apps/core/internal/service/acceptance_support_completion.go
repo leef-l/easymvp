@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"database/sql"
+	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
+	acceptancev1 "github.com/leef-l/easymvp/apps/core/api/acceptance/v1"
 	"github.com/leef-l/easymvp/apps/core/internal/dao"
 	"github.com/leef-l/easymvp/apps/core/internal/model/braincontracts"
 	"github.com/leef-l/easymvp/apps/core/internal/model/entity"
@@ -68,7 +70,12 @@ func adjudicateAcceptanceAggregate(ctx context.Context, db *sql.DB, aggregate *a
 	}
 
 	now := nowText()
+	verdict := buildPersistedCompletionVerdict(aggregate, result, now)
 	if err = updateAcceptanceRunFromAdjudication(ctx, tx, aggregate.LatestAcceptanceRun.Id, result, now); err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	if err = persistCompletionVerdict(ctx, tx, aggregate.Project.Id, aggregate.LatestAcceptanceRun.Id, verdict, now); err != nil {
 		_ = tx.Rollback()
 		return nil, err
 	}
@@ -91,6 +98,85 @@ func adjudicateAcceptanceAggregate(ctx context.Context, db *sql.DB, aggregate *a
 		}
 	}
 	return result, nil
+}
+
+func buildPersistedCompletionVerdict(
+	data *acceptanceAggregate,
+	result *braincontracts.CompletionAdjudicationResult,
+	now string,
+) acceptancev1.CompletionVerdictView {
+	verdict := deriveCompletionVerdictView(
+		buildVerificationResultView(data),
+		buildRuntimeEscalationView(data),
+		buildFaultSummaryView(data),
+		acceptanceHasVerificationConflict(data),
+		result.ManualReleaseRequired,
+		projectHasBlockingManualReview(data.Issues),
+		countBlockingIssues(data.Issues),
+		now,
+		firstNonEmpty(strings.TrimSpace(acceptanceRunID(data)), strings.TrimSpace(data.Project.Id)),
+	)
+	if summary := strings.TrimSpace(result.DecisionReason); summary != "" {
+		verdict.Reason = summary
+		verdict.Summary = summary
+	}
+	return verdict
+}
+
+func persistCompletionVerdict(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID string,
+	acceptanceRunID string,
+	verdict acceptancev1.CompletionVerdictView,
+	now string,
+) error {
+	result, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO completion_verdicts (
+id, project_id, acceptance_run_id, decision, final_status, reason, summary, next_action, blocker_count,
+release_ready, completed, manual_review_required, manual_release_required, manual_release_completed,
+source_run_id, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(acceptance_run_id) DO UPDATE SET
+decision = excluded.decision,
+final_status = excluded.final_status,
+reason = excluded.reason,
+summary = excluded.summary,
+next_action = excluded.next_action,
+blocker_count = excluded.blocker_count,
+release_ready = excluded.release_ready,
+completed = excluded.completed,
+manual_review_required = excluded.manual_review_required,
+manual_release_required = excluded.manual_release_required,
+manual_release_completed = excluded.manual_release_completed,
+source_run_id = excluded.source_run_id,
+updated_at = excluded.updated_at`,
+		newResourceID("verdict"),
+		projectID,
+		acceptanceRunID,
+		verdict.Decision,
+		verdict.FinalStatus,
+		verdict.Reason,
+		verdict.Summary,
+		verdict.NextAction,
+		verdict.BlockerCount,
+		boolToInt(verdict.ReleaseReady),
+		boolToInt(verdict.Completed),
+		boolToInt(verdict.ManualReviewRequired),
+		boolToInt(verdict.ManualReleaseRequired),
+		boolToInt(verdict.ManualReleaseCompleted),
+		firstNonEmpty(strings.TrimSpace(verdict.SourceRunID), acceptanceRunID, projectID),
+		now,
+		now,
+	)
+	if err != nil {
+		return gerror.Wrap(err, "persist completion verdict failed")
+	}
+	if affected, _ := result.RowsAffected(); affected < 1 {
+		return gerror.New("persist completion verdict affected unexpected rows")
+	}
+	return nil
 }
 
 func buildCompletionExecutionSummary(data *acceptanceAggregate) map[string]any {

@@ -40,6 +40,7 @@ type acceptanceAggregate struct {
 	ProductionProfile   *productionAcceptanceProfileRecord
 	AcceptanceRuns      []entity.AcceptanceRuns
 	LatestAcceptanceRun *entity.AcceptanceRuns
+	PersistedVerdict    *acceptancev1.CompletionVerdictView
 	SurfaceCoverage     []entity.AcceptanceSurfaceCoverage
 	JourneyCoverage     []entity.AcceptanceJourneyCoverage
 	Issues              []entity.AcceptanceIssues
@@ -144,6 +145,10 @@ func loadAcceptanceAggregate(ctx context.Context, db *sql.DB, projectID string) 
 			return nil, err
 		}
 	}
+	aggregate.PersistedVerdict, err = loadPersistedCompletionVerdict(ctx, db, projectID, acceptanceRunID(aggregate))
+	if err != nil {
+		return nil, err
+	}
 
 	return aggregate, nil
 }
@@ -187,7 +192,81 @@ func loadAcceptanceAggregateByRunID(ctx context.Context, db *sql.DB, projectID s
 	if err != nil {
 		return nil, err
 	}
+	aggregate.PersistedVerdict, err = loadPersistedCompletionVerdict(ctx, db, projectID, run.Id)
+	if err != nil {
+		return nil, err
+	}
 	return aggregate, nil
+}
+
+func loadPersistedCompletionVerdict(
+	ctx context.Context,
+	db *sql.DB,
+	projectID string,
+	acceptanceRunID string,
+) (*acceptancev1.CompletionVerdictView, error) {
+	query := `
+SELECT
+  decision,
+  final_status,
+  reason,
+  manual_review_required,
+  manual_release_required,
+  manual_release_completed,
+  release_ready,
+  blocker_count,
+  next_action,
+  source_run_id,
+  updated_at,
+  completed,
+  summary
+FROM completion_verdicts
+WHERE project_id = ?`
+
+	args := []any{projectID}
+	if strings.TrimSpace(acceptanceRunID) != "" {
+		query += ` AND acceptance_run_id = ?`
+		args = append(args, acceptanceRunID)
+	}
+	query += `
+ORDER BY updated_at DESC
+LIMIT 1`
+
+	var (
+		view                  acceptancev1.CompletionVerdictView
+		manualReviewRequired  int
+		manualReleaseRequired int
+		manualReleaseDone     int
+		releaseReady          int
+		completed             int
+	)
+	row := db.QueryRowContext(ctx, query, args...)
+	if err := row.Scan(
+		&view.Decision,
+		&view.FinalStatus,
+		&view.Reason,
+		&manualReviewRequired,
+		&manualReleaseRequired,
+		&manualReleaseDone,
+		&releaseReady,
+		&view.BlockerCount,
+		&view.NextAction,
+		&view.SourceRunID,
+		&view.UpdatedAt,
+		&completed,
+		&view.Summary,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, gerror.Wrap(err, "query persisted completion verdict failed")
+	}
+	view.ManualReviewRequired = manualReviewRequired == 1
+	view.ManualReleaseRequired = manualReleaseRequired == 1
+	view.ManualReleaseCompleted = manualReleaseDone == 1
+	view.ReleaseReady = releaseReady == 1
+	view.Completed = completed == 1
+	return &view, nil
 }
 
 func getAcceptanceRunByID(ctx context.Context, db *sql.DB, acceptanceRunID string) (*entity.AcceptanceRuns, error) {
@@ -460,6 +539,7 @@ LIMIT ?`
 
 func buildAcceptanceRunView(data *acceptanceAggregate) acceptancev1.AcceptanceRunView {
 	releaseGate := buildAcceptanceReleaseGate(data)
+	completionVerdict := buildCompletionVerdictView(data)
 	blockingCount := countBlockingIssues(data.Issues)
 	if data.LatestAcceptanceRun == nil {
 		return acceptancev1.AcceptanceRunView{
@@ -469,8 +549,8 @@ func buildAcceptanceRunView(data *acceptanceAggregate) acceptancev1.AcceptanceRu
 			ProductionStatus:       normalizeProductionStatus(data.Project.ProductionStatus),
 			ManualReleaseRequired:  false,
 			LatestJudgementSummary: "",
-			ReleaseGateStatus:      releaseGate.Status,
-			NextAction:             releaseGate.NextAction,
+			ReleaseGateStatus:      normalizeAcceptanceOverviewStatus(completionVerdict),
+			NextAction:             firstNonEmpty(completionVerdict.NextAction, releaseGate.NextAction),
 			BlockingIssueCount:     blockingCount,
 		}
 	}
@@ -484,8 +564,8 @@ func buildAcceptanceRunView(data *acceptanceAggregate) acceptancev1.AcceptanceRu
 		ProductionStatus:      normalizeProductionStatus(data.LatestAcceptanceRun.ProductionStatus),
 		ManualReleaseRequired: data.LatestAcceptanceRun.ManualReleaseRequired == 1,
 		FinishedAt:            strings.TrimSpace(data.LatestAcceptanceRun.FinishedAt),
-		ReleaseGateStatus:     releaseGate.Status,
-		NextAction:            releaseGate.NextAction,
+		ReleaseGateStatus:     normalizeAcceptanceOverviewStatus(completionVerdict),
+		NextAction:            firstNonEmpty(completionVerdict.NextAction, releaseGate.NextAction),
 		BlockingIssueCount:    blockingCount,
 	}
 	if len(data.Judgements) > 0 {
@@ -499,10 +579,10 @@ func buildAcceptanceRunView(data *acceptanceAggregate) acceptancev1.AcceptanceRu
 
 func buildAcceptanceOverview(data *acceptanceAggregate) acceptancev1.AcceptanceOverview {
 	var (
-		releaseGate      = buildAcceptanceReleaseGate(data)
-		coverageMatrix   = buildAcceptanceCoverageMatrix(data)
-		acceptanceRun    = buildAcceptanceRunView(data)
-		coveredItemCount int
+		completionVerdict = buildCompletionVerdictView(data)
+		coverageMatrix    = buildAcceptanceCoverageMatrix(data)
+		acceptanceRun     = buildAcceptanceRunView(data)
+		coveredItemCount  int
 	)
 
 	for _, item := range coverageMatrix {
@@ -515,16 +595,35 @@ func buildAcceptanceOverview(data *acceptanceAggregate) acceptancev1.AcceptanceO
 	return acceptancev1.AcceptanceOverview{
 		ProjectID:           data.Project.Id,
 		CurrentStage:        normalizeProjectStage(data.Project.Status),
-		OverallStatus:       releaseGate.Status,
+		OverallStatus:       normalizeAcceptanceOverviewStatus(completionVerdict),
 		FunctionalStatus:    acceptanceRun.FunctionalStatus,
 		ProductionStatus:    acceptanceRun.ProductionStatus,
-		ReleaseGateStatus:   releaseGate.Status,
-		NextAction:          releaseGate.NextAction,
+		ReleaseGateStatus:   normalizeAcceptanceOverviewStatus(completionVerdict),
+		NextAction:          firstNonEmpty(completionVerdict.NextAction, "inspect_acceptance"),
 		BlockingIssueCount:  countBlockingIssues(data.Issues),
 		CoveredItemCount:    coveredItemCount,
 		RequiredItemCount:   len(coverageMatrix),
 		EvidenceCardCount:   len(data.EvidenceItems),
 		ManualReleaseNeeded: acceptanceRun.ManualReleaseRequired,
+	}
+}
+
+func normalizeAcceptanceOverviewStatus(verdict acceptancev1.CompletionVerdictView) string {
+	switch strings.TrimSpace(verdict.FinalStatus) {
+	case "completed":
+		return "completed"
+	case "accepting", "reworking":
+		return strings.TrimSpace(verdict.FinalStatus)
+	}
+	switch strings.TrimSpace(verdict.Decision) {
+	case "complete":
+		return "completed"
+	case "rework":
+		return "reworking"
+	case "collect_evidence", "manual_review", "manual_checkpoint":
+		return "accepting"
+	default:
+		return "pending"
 	}
 }
 
@@ -547,7 +646,7 @@ func buildVerificationResultView(data *acceptanceAggregate) acceptancev1.Verific
 	}
 
 	missingEvidence := make([]string, 0, len(requiredEvidence))
-	evidenceReady := buildAcceptanceOverview(data).EvidenceCardCount
+	evidenceReady := len(data.EvidenceItems)
 	if len(requiredEvidence) > evidenceReady {
 		missingEvidence = append(missingEvidence, requiredEvidence[evidenceReady:]...)
 	}
@@ -618,18 +717,48 @@ func profileVersionForVerification(
 }
 
 func buildCompletionVerdictView(data *acceptanceAggregate) acceptancev1.CompletionVerdictView {
-	verification := buildVerificationResultView(data)
-	runtimeEscalation := buildRuntimeEscalationView(data)
-	faultSummary := buildFaultSummaryView(data)
-	manualReleaseRequired := data.LatestAcceptanceRun != nil && data.LatestAcceptanceRun.ManualReleaseRequired == 1
-	manualReviewRequired := manualReleaseRequired
-	for _, issue := range data.Issues {
+	if data != nil && data.PersistedVerdict != nil {
+		return *data.PersistedVerdict
+	}
+	return deriveCompletionVerdictView(
+		deriveVerificationResultForCompletion(data),
+		buildRuntimeEscalationView(data),
+		buildFaultSummaryView(data),
+		acceptanceHasVerificationConflict(data),
+		data.LatestAcceptanceRun != nil && data.LatestAcceptanceRun.ManualReleaseRequired == 1,
+		projectHasBlockingManualReview(data.Issues),
+		countBlockingIssues(data.Issues),
+		firstNonEmpty(latestAcceptanceUpdatedAt(data), strings.TrimSpace(data.Project.UpdatedAt)),
+		firstNonEmpty(strings.TrimSpace(acceptanceRunID(data)), strings.TrimSpace(data.Project.Id)),
+	)
+}
+
+func projectHasBlockingManualReview(items []entity.AcceptanceIssues) bool {
+	for _, issue := range items {
 		if issue.Blocking == 1 {
-			manualReviewRequired = true
-			break
+			return true
 		}
 	}
+	return false
+}
 
+func deriveVerificationResultForCompletion(data *acceptanceAggregate) acceptancev1.VerificationResultView {
+	verification := buildVerificationResultView(data)
+	return verification
+}
+
+func deriveCompletionVerdictView(
+	verification acceptancev1.VerificationResultView,
+	runtimeEscalation acceptancev1.RuntimeEscalationView,
+	faultSummary acceptancev1.FaultSummaryView,
+	verificationConflict bool,
+	manualReleaseRequired bool,
+	manualReviewRequired bool,
+	blockerCount int,
+	updatedAt string,
+	sourceRunID string,
+) acceptancev1.CompletionVerdictView {
+	manualReviewRequired = manualReviewRequired || manualReleaseRequired
 	decision := "pending"
 	finalStatus := ""
 	reason := "Awaiting acceptance adjudication."
@@ -660,7 +789,7 @@ func buildCompletionVerdictView(data *acceptanceAggregate) acceptancev1.Completi
 			finalStatus = "reworking"
 			reason = "Verification passed, but repeated acceptance faults require manual review before completion."
 			nextAction = "review_fault_loop"
-		case acceptanceHasVerificationConflict(data):
+		case verificationConflict:
 			decision = "manual_checkpoint"
 			finalStatus = "accepting"
 			reason = "Verification passed, but conflicting blocking signals require manual review before completion."
@@ -693,9 +822,10 @@ func buildCompletionVerdictView(data *acceptanceAggregate) acceptancev1.Completi
 		ManualReleaseRequired:  manualReleaseRequired,
 		ManualReleaseCompleted: manualReleaseCompleted,
 		ReleaseReady:           completed,
-		BlockerCount:           countBlockingIssues(data.Issues),
+		BlockerCount:           blockerCount,
 		NextAction:             nextAction,
-		UpdatedAt:              firstNonEmpty(latestAcceptanceUpdatedAt(data), strings.TrimSpace(data.Project.UpdatedAt)),
+		SourceRunID:            sourceRunID,
+		UpdatedAt:              updatedAt,
 		Completed:              completed,
 		Summary:                reason,
 	}

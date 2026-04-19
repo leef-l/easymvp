@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"database/sql"
+	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 
+	acceptancev1 "github.com/leef-l/easymvp/apps/core/api/acceptance/v1"
 	"github.com/leef-l/easymvp/apps/core/internal/dao"
 	"github.com/leef-l/easymvp/apps/core/internal/model/entity"
 )
@@ -28,6 +30,40 @@ func applyManualRelease(ctx context.Context, req ApplyManualReleaseCommand) (str
 		return "", gerror.New("manual release is not required for the latest acceptance run")
 	}
 	if hasHumanReleaseApproval(aggregate) {
+		now := nowText()
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return "", gerror.Wrap(err, "begin manual release backfill transaction failed")
+		}
+		if err = updateAcceptanceRunAfterManualRelease(ctx, tx, aggregate.LatestAcceptanceRun.Id, now); err != nil {
+			_ = tx.Rollback()
+			return "", err
+		}
+		if err = updateProjectAfterManualRelease(ctx, tx, aggregate.Project.Id, now); err != nil {
+			_ = tx.Rollback()
+			return "", err
+		}
+		if err = persistCompletionVerdict(ctx, tx, aggregate.Project.Id, aggregate.LatestAcceptanceRun.Id, acceptancev1.CompletionVerdictView{
+			Decision:               "complete",
+			FinalStatus:            "completed",
+			Reason:                 "Manual release was already approved.",
+			Summary:                "Manual release was already approved.",
+			ManualReviewRequired:   false,
+			ManualReleaseRequired:  true,
+			ManualReleaseCompleted: true,
+			ReleaseReady:           true,
+			BlockerCount:           countBlockingIssues(aggregate.Issues),
+			NextAction:             "complete_project",
+			SourceRunID:            aggregate.LatestAcceptanceRun.Id,
+			UpdatedAt:              now,
+			Completed:              true,
+		}, now); err != nil {
+			_ = tx.Rollback()
+			return "", err
+		}
+		if err = tx.Commit(); err != nil {
+			return "", gerror.Wrap(err, "commit manual release backfill transaction failed")
+		}
 		return aggregate.LatestAcceptanceRun.Id, nil
 	}
 
@@ -65,6 +101,24 @@ func applyManualRelease(ctx context.Context, req ApplyManualReleaseCommand) (str
 		return "", err
 	}
 	if err = updateProjectAfterManualRelease(ctx, tx, aggregate.Project.Id, now); err != nil {
+		_ = tx.Rollback()
+		return "", err
+	}
+	if err = persistCompletionVerdict(ctx, tx, aggregate.Project.Id, aggregate.LatestAcceptanceRun.Id, acceptancev1.CompletionVerdictView{
+		Decision:               "complete",
+		FinalStatus:            "completed",
+		Reason:                 firstNonEmpty(strings.TrimSpace(req.Comment), "Manual release approved and the project is completed."),
+		Summary:                firstNonEmpty(strings.TrimSpace(req.Comment), "Manual release approved and the project is completed."),
+		ManualReviewRequired:   false,
+		ManualReleaseRequired:  true,
+		ManualReleaseCompleted: true,
+		ReleaseReady:           true,
+		BlockerCount:           countBlockingIssues(aggregate.Issues),
+		NextAction:             "complete_project",
+		SourceRunID:            aggregate.LatestAcceptanceRun.Id,
+		UpdatedAt:              now,
+		Completed:              true,
+	}, now); err != nil {
 		_ = tx.Rollback()
 		return "", err
 	}

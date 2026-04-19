@@ -59,12 +59,7 @@ export function AcceptancePage() {
   const acceptanceOverview = state.data?.overview;
   const acceptanceRun = state.data?.acceptance_run;
   const releaseGate = state.data?.release_gate;
-  const acceptanceNextAction = firstText(
-    completionVerdict?.next_action,
-    acceptanceOverview?.next_action,
-    acceptanceRun?.next_action,
-    releaseGate?.next_action,
-  );
+  const acceptanceNextAction = firstText(completionVerdict?.next_action, "inspect_acceptance");
 
   useEffect(() => {
     if (selectedTaskFromUrl) {
@@ -108,22 +103,10 @@ export function AcceptancePage() {
             <div>
               <p className="placeholder-section">Acceptance</p>
               <h3 className="placeholder-title">
-                {firstText(
-                  completionVerdict?.decision,
-                  verificationResult?.decision,
-                  acceptanceOverview?.overall_status,
-                  acceptanceOverview?.release_gate_status,
-                  releaseGate?.status,
-                  "pending",
-                )}
+                {firstText(completionVerdict?.decision, completionVerdict?.final_status, "pending")}
               </h3>
               <p className="placeholder-description">
-                {firstText(
-                  completionVerdict?.summary,
-                  verificationResult?.summary,
-                  releaseGate?.summary,
-                  "Acceptance overview is waiting for structured adjudication output.",
-                )}
+                {firstText(completionVerdict?.summary, "Acceptance overview is waiting for the persisted completion verdict.")}
               </p>
             </div>
             <div className="summary-stack action-stack">
@@ -178,7 +161,7 @@ export function AcceptancePage() {
             />
             <MetricCard
               label="Completion"
-              value={firstText(completionVerdict?.decision, completionVerdict?.final_status, acceptanceOverview?.release_gate_status, releaseGate?.status, "pending")}
+              value={firstText(completionVerdict?.decision, completionVerdict?.final_status, "pending")}
               tone="neutral"
             />
             <MetricCard

@@ -202,6 +202,9 @@ func TestApplyManualReleasePersistsAllAffectedRows(t *testing.T) {
 			projectProduction string
 			judgementCount    int
 			auditCount        int
+			verdictDecision   string
+			verdictStatus     string
+			verdictCompleted  int
 			gateKind          string
 			gateStatus        string
 			gateComment       sql.NullString
@@ -215,6 +218,8 @@ func TestApplyManualReleasePersistsAllAffectedRows(t *testing.T) {
 			Scan(&judgementCount)
 		mustQueryRow(t, db, `SELECT COUNT(*) FROM audit_logs WHERE project_id = ? AND event_type = ?`, "proj_manual_release_success", "manual_release.approved").
 			Scan(&auditCount)
+		mustQueryRow(t, db, `SELECT decision, final_status, completed FROM completion_verdicts WHERE acceptance_run_id = ?`, "run_manual_release_success").
+			Scan(&verdictDecision, &verdictStatus, &verdictCompleted)
 		mustQueryRow(t, db, `SELECT gate_kind, gate_status, comment FROM task_manual_gates WHERE project_id = ? AND task_id = ?`, "proj_manual_release_success", "task_manual_release_success").
 			Scan(&gateKind, &gateStatus, &gateComment)
 
@@ -229,6 +234,9 @@ func TestApplyManualReleasePersistsAllAffectedRows(t *testing.T) {
 		}
 		if auditCount != 1 {
 			t.Fatalf("unexpected audit count: got %d want %d", auditCount, 1)
+		}
+		if verdictDecision != "complete" || verdictStatus != "completed" || verdictCompleted != 1 {
+			t.Fatalf("unexpected completion verdict row: decision=%q status=%q completed=%d", verdictDecision, verdictStatus, verdictCompleted)
 		}
 		if gateKind != "manual_release" || gateStatus != "approved" || gateComment.String != "Ship it" {
 			t.Fatalf("unexpected manual gate row: kind=%q status=%q comment=%#v", gateKind, gateStatus, gateComment)
@@ -324,6 +332,9 @@ func TestAdjudicateAcceptanceAggregatePersistsAwaitingManualReleaseState(t *test
 			projectProductionStatus   string
 			totalJudgements           int
 			releaseGateJudgementCount int
+			verdictDecision           string
+			verdictNextAction         string
+			verdictManualRelease      int
 		)
 		mustQueryRow(t, db, `SELECT status, functional_status, production_status, manual_release_required, finished_at FROM acceptance_runs WHERE id = ?`, "run_adjudicate_manual").
 			Scan(&runStatus, &runFunctionalStatus, &runProductionStatus, &runManualReleaseRequired, &runFinishedAt)
@@ -333,6 +344,8 @@ func TestAdjudicateAcceptanceAggregatePersistsAwaitingManualReleaseState(t *test
 			Scan(&totalJudgements)
 		mustQueryRow(t, db, `SELECT COUNT(*) FROM acceptance_judgements WHERE acceptance_run_id = ? AND judgement_kind = ? AND judgement_result = ?`, "run_adjudicate_manual", "release_gate", "awaiting_manual_release").
 			Scan(&releaseGateJudgementCount)
+		mustQueryRow(t, db, `SELECT decision, next_action, manual_release_required FROM completion_verdicts WHERE acceptance_run_id = ?`, "run_adjudicate_manual").
+			Scan(&verdictDecision, &verdictNextAction, &verdictManualRelease)
 
 		if runStatus != "awaiting_manual_release" || runFunctionalStatus != "functional_passed" || runProductionStatus != "production_passed" || runManualReleaseRequired != 1 || runFinishedAt.Valid {
 			t.Fatalf("unexpected acceptance run state: status=%q functional=%q production=%q manual_release=%d finished_at=%#v", runStatus, runFunctionalStatus, runProductionStatus, runManualReleaseRequired, runFinishedAt)
@@ -342,6 +355,9 @@ func TestAdjudicateAcceptanceAggregatePersistsAwaitingManualReleaseState(t *test
 		}
 		if totalJudgements != 4 || releaseGateJudgementCount != 1 {
 			t.Fatalf("unexpected judgement counts: total=%d release_gate=%d", totalJudgements, releaseGateJudgementCount)
+		}
+		if verdictDecision != "manual_review" || verdictNextAction != "apply_manual_release" || verdictManualRelease != 1 {
+			t.Fatalf("unexpected persisted awaiting manual release verdict: decision=%q next_action=%q manual_release=%d", verdictDecision, verdictNextAction, verdictManualRelease)
 		}
 	})
 }
@@ -394,6 +410,9 @@ func TestAdjudicateAcceptanceAggregatePersistsCompletedState(t *testing.T) {
 			projectStatus       string
 			projectProduction   string
 			totalJudgements     int
+			verdictDecision     string
+			verdictStatus       string
+			verdictCompleted    int
 		)
 		mustQueryRow(t, db, `SELECT status, production_status, finished_at FROM acceptance_runs WHERE id = ?`, "run_adjudicate_complete").
 			Scan(&runStatus, &runProductionStatus, &runFinishedAt)
@@ -401,6 +420,8 @@ func TestAdjudicateAcceptanceAggregatePersistsCompletedState(t *testing.T) {
 			Scan(&projectStatus, &projectProduction)
 		mustQueryRow(t, db, `SELECT COUNT(*) FROM acceptance_judgements WHERE acceptance_run_id = ?`, "run_adjudicate_complete").
 			Scan(&totalJudgements)
+		mustQueryRow(t, db, `SELECT decision, final_status, completed FROM completion_verdicts WHERE acceptance_run_id = ?`, "run_adjudicate_complete").
+			Scan(&verdictDecision, &verdictStatus, &verdictCompleted)
 
 		if runStatus != "completed" || runProductionStatus != "production_passed" || !runFinishedAt.Valid {
 			t.Fatalf("unexpected acceptance run state: status=%q production=%q finished_at=%#v", runStatus, runProductionStatus, runFinishedAt)
@@ -410,6 +431,9 @@ func TestAdjudicateAcceptanceAggregatePersistsCompletedState(t *testing.T) {
 		}
 		if totalJudgements != 3 {
 			t.Fatalf("unexpected judgement count: got %d want %d", totalJudgements, 3)
+		}
+		if verdictDecision != "complete" || verdictStatus != "completed" || verdictCompleted != 1 {
+			t.Fatalf("unexpected persisted completion verdict: decision=%q status=%q completed=%d", verdictDecision, verdictStatus, verdictCompleted)
 		}
 	})
 }
@@ -468,6 +492,9 @@ func TestAdjudicateAcceptanceAggregatePersistsFailedStateAndTriggersRepairDraft(
 			projectStatus       string
 			projectProduction   string
 			totalJudgements     int
+			verdictDecision     string
+			verdictStatus       string
+			verdictCompleted    int
 		)
 		mustQueryRow(t, db, `SELECT status, functional_status, production_status, finished_at FROM acceptance_runs WHERE id = ?`, "run_adjudicate_failed").
 			Scan(&runStatus, &runFunctionalStatus, &runProductionStatus, &runFinishedAt)
@@ -475,6 +502,8 @@ func TestAdjudicateAcceptanceAggregatePersistsFailedStateAndTriggersRepairDraft(
 			Scan(&projectStatus, &projectProduction)
 		mustQueryRow(t, db, `SELECT COUNT(*) FROM acceptance_judgements WHERE acceptance_run_id = ?`, "run_adjudicate_failed").
 			Scan(&totalJudgements)
+		mustQueryRow(t, db, `SELECT decision, final_status, completed FROM completion_verdicts WHERE acceptance_run_id = ?`, "run_adjudicate_failed").
+			Scan(&verdictDecision, &verdictStatus, &verdictCompleted)
 
 		if runStatus != "failed" || runFunctionalStatus != "failed" || runProductionStatus != "failed" || !runFinishedAt.Valid {
 			t.Fatalf("unexpected failed acceptance run state: status=%q functional=%q production=%q finished_at=%#v", runStatus, runFunctionalStatus, runProductionStatus, runFinishedAt)
@@ -484,6 +513,9 @@ func TestAdjudicateAcceptanceAggregatePersistsFailedStateAndTriggersRepairDraft(
 		}
 		if totalJudgements != 3 {
 			t.Fatalf("unexpected failed judgement count: got %d want %d", totalJudgements, 3)
+		}
+		if verdictDecision != "rework" || verdictStatus != "reworking" || verdictCompleted != 0 {
+			t.Fatalf("unexpected persisted failed verdict: decision=%q status=%q completed=%d", verdictDecision, verdictStatus, verdictCompleted)
 		}
 		if planStub.calls != 1 {
 			t.Fatalf("expected repair draft to be triggered once, got %d", planStub.calls)

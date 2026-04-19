@@ -92,6 +92,7 @@ type CompletionVerdictView struct {
 	ReleaseReady           bool   `json:"release_ready"`
 	BlockerCount           int    `json:"blocker_count"`
 	NextAction             string `json:"next_action,omitempty"`
+	SourceRunID            string `json:"source_run_id,omitempty"`
 	UpdatedAt              string `json:"updated_at,omitempty"`
 	Completed              bool   `json:"completed"`
 	Summary                string `json:"summary,omitempty"`

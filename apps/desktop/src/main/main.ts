@@ -31,6 +31,11 @@ function isSmokeTestMode() {
   return process.argv.includes("--smoke-test");
 }
 
+if (isSmokeTestMode()) {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch("disable-gpu");
+}
+
 function buildRelaunchArgs(mode: "normal" | "safe-mode") {
   const filtered = process.argv.slice(1).filter((arg) => arg !== "--safe-mode");
   if (mode === "safe-mode") {
@@ -196,16 +201,42 @@ function createWindow() {
       app.exit(1);
     });
 
-    window.webContents.once("did-finish-load", () => {
-      clearTimeout(timeout);
-      setTimeout(() => app.exit(0), 800);
+    window.webContents.once("did-finish-load", async () => {
+      try {
+        let smokeState: { pathname?: string } | null = null;
+        let bootstrap = getCoreBootstrapSnapshot();
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          smokeState = await window.webContents.executeJavaScript(`({ pathname: window.location.pathname })`);
+          bootstrap = getCoreBootstrapSnapshot();
+          if (smokeState?.pathname === "/workspace" && bootstrap.lastProbe?.reachable) {
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        clearTimeout(timeout);
+        if (!bootstrap.lastProbe?.reachable) {
+          console.error(`desktop smoke test failed: core not reachable (${bootstrap.lastProbe?.status || "unknown"})`);
+          app.exit(1);
+          return;
+        }
+        if (smokeState?.pathname !== "/workspace") {
+          console.error(`desktop smoke test failed: unexpected startup route ${smokeState?.pathname || "<empty>"}`);
+          app.exit(1);
+          return;
+        }
+        setTimeout(() => app.exit(0), 500);
+      } catch (error) {
+        clearTimeout(timeout);
+        console.error("desktop smoke test failed during renderer assertion", error);
+        app.exit(1);
+      }
     });
   }
 
   const devUrl = process.env.EASYMVP_DESKTOP_DEV_URL ?? "http://127.0.0.1:5173";
 
   if (app.isPackaged) {
-    void window.loadFile(path.join(__dirname, "../../dist/index.html"));
+    void window.loadFile(path.join(__dirname, "../../../dist/index.html"));
   } else {
     void window.loadURL(devUrl);
     window.webContents.openDevTools({ mode: "detach" });
@@ -217,7 +248,7 @@ app.whenReady().then(async () => {
   await waitForCoreBootstrap({
     baseUrl: resolveCoreBaseUrl(),
     launchMode: resolveLaunchMode(),
-    timeoutMs: 1800,
+    timeoutMs: isSmokeTestMode() ? 12000 : 1800,
   });
   createWindow();
 

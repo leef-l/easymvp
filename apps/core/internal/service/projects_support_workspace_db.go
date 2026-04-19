@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"time"
 
@@ -46,6 +47,7 @@ type projectWorkspaceAggregate struct {
 	AcceptanceIssues    []entity.AcceptanceIssues
 	AuditLogs           []entity.AuditLogs
 	LatestAcceptanceRun *entity.AcceptanceRuns
+	PersistedVerdict    *acceptancev1.CompletionVerdictView
 }
 
 func loadProjectWorkspaceData(ctx context.Context, projectID string) (*projectWorkspaceData, error) {
@@ -88,8 +90,11 @@ func buildProjectWorkspaceOverview(
 	projectSnapshot projectsv1.ProjectSnapshot,
 	actionInbox []projectsv1.ActionInboxItem,
 ) projectsv1.WorkspaceOverview {
+	completionVerdict := buildWorkspaceCompletionVerdict(data, buildProjectAcceptanceCoverage(data))
 	nextAction := "open_project_plan"
-	if len(actionInbox) > 0 {
+	if strings.TrimSpace(completionVerdict.NextAction) != "" {
+		nextAction = strings.TrimSpace(completionVerdict.NextAction)
+	} else if len(actionInbox) > 0 {
 		nextAction = firstNonEmpty(actionInbox[0].RecommendedAction, nextAction)
 	}
 
@@ -132,6 +137,7 @@ func buildProjectWorkspaceExplanation(
 			"live_activity":        liveActivity,
 			"action_inbox":         actionInbox,
 			"acceptance_coverage":  acceptanceCoverage,
+			"completion_verdict":   buildWorkspaceCompletionVerdict(data, acceptanceCoverage),
 			"task_count":           len(data.Tasks),
 			"run_binding_count":    len(data.RunBindings),
 			"acceptance_run_count": len(data.AcceptanceRuns),
@@ -150,16 +156,18 @@ func buildProjectWorkspaceExplanation(
 		}),
 	}
 
+	baseView := buildStructuredWorkspaceExplanation(data, actionInbox)
+
 	_, result, err := EasyMVPBrain().CallWorkspaceExplanation(ctx, input)
 	if err != nil || result == nil {
-		return buildProjectWorkspaceExplanationFallback(data, actionInbox, err)
+		return baseView
 	}
 
 	view := projectsv1.WorkspaceExplanation{
-		Headline:     result.Headline,
-		Summary:      result.Summary,
-		TopBlockers:  result.TopBlockers,
-		ExplainLinks: result.ExplainLinks,
+		Headline:     firstNonEmpty(strings.TrimSpace(result.Headline), baseView.Headline),
+		Summary:      firstNonEmpty(strings.TrimSpace(result.Summary), baseView.Summary),
+		TopBlockers:  append([]string(nil), result.TopBlockers...),
+		ExplainLinks: append([]string(nil), result.ExplainLinks...),
 	}
 	for _, item := range result.RecommendedActions {
 		view.RecommendedActions = append(view.RecommendedActions, projectsv1.WorkspaceRecommendedAction{
@@ -169,27 +177,38 @@ func buildProjectWorkspaceExplanation(
 			DeepLink:  item.DeepLink,
 		})
 	}
-	if strings.TrimSpace(view.Headline) == "" || strings.TrimSpace(view.Summary) == "" {
-		return buildProjectWorkspaceExplanationFallback(data, actionInbox, nil)
+	if len(view.TopBlockers) == 0 {
+		view.TopBlockers = baseView.TopBlockers
+	}
+	if len(view.RecommendedActions) == 0 {
+		view.RecommendedActions = baseView.RecommendedActions
+	}
+	if len(view.ExplainLinks) == 0 {
+		view.ExplainLinks = baseView.ExplainLinks
 	}
 	return view
 }
 
-func buildProjectWorkspaceExplanationFallback(data *projectWorkspaceAggregate, actionInbox []projectsv1.ActionInboxItem, err error) projectsv1.WorkspaceExplanation {
-	switch deriveWorkspaceExplanationFallbackMode(data, err) {
+func buildStructuredWorkspaceExplanation(data *projectWorkspaceAggregate, actionInbox []projectsv1.ActionInboxItem) projectsv1.WorkspaceExplanation {
+	switch deriveWorkspaceExplanationFallbackMode(data, nil) {
 	case "denied":
 		return buildRuntimeLimitedWorkspaceExplanation(data, "denied")
 	case "unsupported":
 		return buildRuntimeLimitedWorkspaceExplanation(data, "unsupported")
 	default:
-		return buildFallbackWorkspaceExplanation(data, actionInbox)
+		return buildDeterministicWorkspaceExplanation(data, actionInbox)
 	}
 }
 
-func buildFallbackWorkspaceExplanation(data *projectWorkspaceAggregate, actionInbox []projectsv1.ActionInboxItem) projectsv1.WorkspaceExplanation {
+func buildDeterministicWorkspaceExplanation(data *projectWorkspaceAggregate, actionInbox []projectsv1.ActionInboxItem) projectsv1.WorkspaceExplanation {
 	view := projectsv1.WorkspaceExplanation{
 		Headline: "Project status overview",
-		Summary:  "Workspace explanation is temporarily using a local summary.",
+		Summary:  deriveDeterministicWorkspaceSummary(data, actionInbox),
+		ExplainLinks: []string{
+			"workspace",
+			"acceptance",
+			"runtime",
+		},
 	}
 	for _, item := range actionInbox {
 		view.TopBlockers = append(view.TopBlockers, item.Title)
@@ -232,7 +251,7 @@ func buildRuntimeLimitedWorkspaceExplanation(data *projectWorkspaceAggregate, mo
 		view.Headline = "Workspace explanation limited by runtime capability"
 		view.Summary = "The latest workspace explanation could not be generated because the runtime reported an unsupported capability. Review the affected task and continue with manual handling."
 	default:
-		return buildFallbackWorkspaceExplanation(data, nil)
+		return buildDeterministicWorkspaceExplanation(data, nil)
 	}
 
 	targetStatus := "run_" + strings.ToLower(strings.TrimSpace(mode))
@@ -264,12 +283,29 @@ func buildRuntimeLimitedWorkspaceExplanation(data *projectWorkspaceAggregate, mo
 			{
 				ActionKey: "open_project_plan",
 				Label:     "Open project plan",
-				Reason:    "Use the project plan and action inbox while workspace explanation is unavailable.",
+				Reason:    "Use the project plan and action inbox to continue delivery while runtime capability is limited.",
 				DeepLink:  data.Project.Id,
 			},
 		}
 	}
 	return view
+}
+
+func deriveDeterministicWorkspaceSummary(data *projectWorkspaceAggregate, actionInbox []projectsv1.ActionInboxItem) string {
+	projectName := firstNonEmpty(strings.TrimSpace(data.Project.Name), strings.TrimSpace(data.Project.Id), "project")
+	productionStatus := deriveProjectProductionStatus(data)
+	blockingCount := countBlockingIssues(data.AcceptanceIssues)
+	nextAction := "review workspace signals"
+	verdict := buildWorkspaceCompletionVerdict(data, buildProjectAcceptanceCoverage(data))
+	if strings.TrimSpace(verdict.NextAction) != "" {
+		nextAction = strings.TrimSpace(verdict.NextAction)
+	} else if len(actionInbox) > 0 {
+		nextAction = firstNonEmpty(strings.TrimSpace(actionInbox[0].Title), nextAction)
+	}
+	if strings.TrimSpace(verdict.Summary) != "" {
+		return fmt.Sprintf("%s Status: %s Next action: %s", projectName, verdict.Summary, nextAction)
+	}
+	return fmt.Sprintf("%s is currently %s with %d blocking issue(s). Next focus: %s.", projectName, productionStatus, blockingCount, nextAction)
 }
 
 func loadProjectWorkspaceAggregate(ctx context.Context, db *sql.DB, projectID string) (*projectWorkspaceAggregate, error) {
@@ -321,6 +357,10 @@ func loadProjectWorkspaceAggregate(ctx context.Context, db *sql.DB, projectID st
 	}
 	if len(acceptanceRuns) > 0 {
 		aggregate.LatestAcceptanceRun = &acceptanceRuns[0]
+	}
+	aggregate.PersistedVerdict, err = loadPersistedCompletionVerdict(ctx, db, projectID, latestWorkspaceRunID(aggregate))
+	if err != nil {
+		return nil, err
 	}
 	return aggregate, nil
 }
@@ -1018,81 +1058,26 @@ func buildWorkspaceCompletionVerdict(
 	data *projectWorkspaceAggregate,
 	coverage projectsv1.AcceptanceCoverage,
 ) acceptancev1.CompletionVerdictView {
+	if data != nil && data.PersistedVerdict != nil {
+		return *data.PersistedVerdict
+	}
 	verification := buildWorkspaceVerificationResult(data, coverage)
 	runtimeEscalation := buildWorkspaceRuntimeEscalation(data)
 	faultSummary := buildWorkspaceFaultSummary(data)
 	verificationConflict := projectHasVerificationConflict(data)
 	manualReleaseRequired := data.LatestAcceptanceRun != nil && data.LatestAcceptanceRun.ManualReleaseRequired == 1
 	manualReviewRequired := projectHasManualReviewRequirement(data)
-	decision := "pending"
-	finalStatus := ""
-	reason := "Workspace is awaiting completion verdict."
-	completed := false
-	manualReleaseCompleted := false
-	nextAction := verification.Decision
-
-	switch verification.Status {
-	case "failed":
-		decision = "rework"
-		finalStatus = "reworking"
-		reason = verification.Summary
-		nextAction = "prepare_rework"
-	case "incomplete":
-		decision = "collect_evidence"
-		finalStatus = "accepting"
-		reason = verification.Summary
-		nextAction = "collect_evidence"
-	case "passed":
-		switch {
-		case runtimeEscalation.Status != "none":
-			decision = "manual_checkpoint"
-			finalStatus = "accepting"
-			reason = "Verification passed, but runtime escalation must be resolved before completion."
-			nextAction = "resolve_runtime_escalation"
-		case faultSummary.FaultLoopDetected:
-			decision = "manual_checkpoint"
-			finalStatus = "reworking"
-			reason = "Verification passed, but repeated fault loops require manual review before completion."
-			nextAction = "review_fault_loop"
-		case verificationConflict:
-			decision = "manual_checkpoint"
-			finalStatus = "accepting"
-			reason = "Verification passed, but conflicting blocking signals require manual review before completion."
-			nextAction = "resolve_verification_conflict"
-		case manualReleaseRequired:
-			decision = "manual_review"
-			finalStatus = "accepting"
-			reason = "Verification passed, but manual release confirmation is still required."
-			nextAction = "apply_manual_release"
-		case manualReviewRequired:
-			decision = "manual_checkpoint"
-			finalStatus = "accepting"
-			reason = "Verification passed, but manual review is still required before completion."
-			nextAction = "manual_checkpoint"
-		default:
-			decision = "complete"
-			finalStatus = "completed"
-			reason = "Verification passed and the project can move to completed."
-			completed = true
-			manualReleaseCompleted = true
-			nextAction = "complete_project"
-		}
-	}
-
-	return acceptancev1.CompletionVerdictView{
-		Decision:               decision,
-		FinalStatus:            finalStatus,
-		Reason:                 reason,
-		ManualReviewRequired:   manualReviewRequired,
-		ManualReleaseRequired:  manualReleaseRequired,
-		ManualReleaseCompleted: manualReleaseCompleted,
-		ReleaseReady:           completed,
-		BlockerCount:           countBlockingIssues(data.AcceptanceIssues),
-		NextAction:             nextAction,
-		UpdatedAt:              firstNonEmpty(latestWorkspaceUpdateAt(data), data.Project.UpdatedAt),
-		Completed:              completed,
-		Summary:                reason,
-	}
+	return deriveCompletionVerdictView(
+		verification,
+		runtimeEscalation,
+		faultSummary,
+		verificationConflict,
+		manualReleaseRequired,
+		manualReviewRequired,
+		countBlockingIssues(data.AcceptanceIssues),
+		firstNonEmpty(latestWorkspaceUpdateAt(data), data.Project.UpdatedAt),
+		firstNonEmpty(latestWorkspaceRunID(data), data.Project.Id),
+	)
 }
 
 func buildWorkspaceRuntimeEscalation(data *projectWorkspaceAggregate) acceptancev1.RuntimeEscalationView {

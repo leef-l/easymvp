@@ -24,10 +24,7 @@ export function WorkspacePage() {
   const runtimeEscalation = state.data?.runtime_escalation;
   const faultSummary = state.data?.fault_summary;
   const repairPlanDraft = state.data?.repair_plan_draft;
-  const workspaceNextAction = firstText(
-    completionVerdict?.next_action,
-    workspaceOverview?.next_action,
-  );
+  const workspaceNextAction = firstText(completionVerdict?.next_action);
   const workspaceFlags = [
     workspaceOverview?.manual_review_required || projectSnapshot?.manual_review_required ? "manual review required" : undefined,
     workspaceOverview?.verification_conflict || projectSnapshot?.verification_conflict ? "verification conflict" : undefined,
@@ -147,7 +144,7 @@ export function WorkspacePage() {
               <p className="placeholder-section">Workspace</p>
               <h3 className="placeholder-title">{firstText(state.data.workspace_explanation.headline, projectSnapshot?.name, projectId)}</h3>
               <p className="placeholder-description">
-                {firstText(completionVerdict?.summary, verificationResult?.summary, state.data.workspace_explanation.summary)}
+                {firstText(completionVerdict?.summary, state.data.workspace_explanation.summary)}
               </p>
             </div>
             <div className="summary-stack action-stack">

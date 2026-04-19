@@ -11,7 +11,7 @@ import (
 	"github.com/leef-l/easymvp/apps/core/internal/model/entity"
 )
 
-func TestBuildFallbackWorkspaceExplanationMirrorsInboxItems(t *testing.T) {
+func TestBuildDeterministicWorkspaceExplanationMirrorsInboxItems(t *testing.T) {
 	t.Parallel()
 
 	data := &projectWorkspaceAggregate{
@@ -41,7 +41,7 @@ func TestBuildFallbackWorkspaceExplanationMirrorsInboxItems(t *testing.T) {
 		},
 	}
 
-	view := buildFallbackWorkspaceExplanation(data, actionInbox)
+	view := buildDeterministicWorkspaceExplanation(data, actionInbox)
 
 	if len(view.TopBlockers) != 3 {
 		t.Fatalf("unexpected blocker count: got %d want %d", len(view.TopBlockers), 3)
@@ -57,14 +57,14 @@ func TestBuildFallbackWorkspaceExplanationMirrorsInboxItems(t *testing.T) {
 	}
 }
 
-func TestBuildFallbackWorkspaceExplanationUsesDefaultActionWhenInboxEmpty(t *testing.T) {
+func TestBuildDeterministicWorkspaceExplanationUsesDefaultActionWhenInboxEmpty(t *testing.T) {
 	t.Parallel()
 
 	data := &projectWorkspaceAggregate{
 		Project: entity.Projects{Id: "proj_456"},
 	}
 
-	view := buildFallbackWorkspaceExplanation(data, nil)
+	view := buildDeterministicWorkspaceExplanation(data, nil)
 
 	if len(view.TopBlockers) != 1 || view.TopBlockers[0] != "No blocking issue is currently detected." {
 		t.Fatalf("unexpected blockers: %#v", view.TopBlockers)
