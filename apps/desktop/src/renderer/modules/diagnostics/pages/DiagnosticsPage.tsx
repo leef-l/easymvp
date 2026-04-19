@@ -16,7 +16,7 @@ import type {
 import { QueryPanel } from "@/shared/ui/QueryPanel";
 
 export function DiagnosticsPage() {
-  const { projectId, routes } = useProjectState();
+  const { projectId, routes, buildRoute } = useProjectState();
   const [exportBusy, setExportBusy] = useState(false);
   const [exportError, setExportError] = useState("");
   const [exportMessage, setExportMessage] = useState("");

@@ -23,13 +23,13 @@ cd /d "%ROOT%" || goto :fail
 call :run git pull || goto :fail
 call :run git status --short || goto :fail
 
-call :log.
+call :log
 call :log == 2. Validate apps\core ==
 cd /d "%ROOT%\apps\core" || goto :fail
 call :run go version || goto :fail
 call :run go test ./... || goto :fail
 
-call :log.
+call :log
 call :log == 3. Validate apps\desktop ==
 cd /d "%ROOT%\apps\desktop" || goto :fail
 call :run node -v || goto :fail
@@ -45,29 +45,38 @@ if exist pnpm-lock.yaml (
 
 call :run pnpm run build || goto :fail
 
-call :log.
+call :log
 call :log == 4. Validation Passed ==
 call :log apps\core go test passed
 call :log apps\desktop build passed
-call :log.
+call :log
 call :log Optional smoke test:
-call :log   cd /d "%ROOT%\apps\desktop" ^&^& npm run dev
+call :log   cd /d "%ROOT%\apps\desktop" ^&^& pnpm run dev
 exit /b 0
 
 :fail
-call :log.
+call :log
 call :log == Validation Failed ==
 exit /b 1
 
 :log
-echo %*
->> "%LOGFILE%" echo %*
+if "%~1"=="" (
+  echo(
+  >> "%LOGFILE%" echo(
+  exit /b 0
+)
+set "_VERIFY_LINE=%*"
+echo %_VERIFY_LINE%
+>> "%LOGFILE%" echo %_VERIFY_LINE%
+set "_VERIFY_LINE="
 exit /b 0
 
 :run
 set "_VERIFY_CMD=%*"
 call :log ^> %_VERIFY_CMD%
-call %*
+>> "%LOGFILE%" echo [command] %_VERIFY_CMD%
+cmd /d /s /c "%_VERIFY_CMD%"
 set "_VERIFY_EXIT=%errorlevel%"
 >> "%LOGFILE%" echo [exit %_VERIFY_EXIT%] %_VERIFY_CMD%
+set "_VERIFY_CMD="
 exit /b %_VERIFY_EXIT%

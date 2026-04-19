@@ -38,8 +38,18 @@ export type DesktopRuntimeInfo = {
   source: "bridge-runtime" | "bridge-static" | "defaults";
   issue: string;
   startupDiagnostics?: unknown[];
+  startup_diagnostics?: unknown[];
   recoveryIssues?: unknown[];
+  recovery_issues?: unknown[];
   coreDiagnostics?: unknown[];
+  core_diagnostics?: unknown[];
+  core?: {
+    startupDiagnostics?: unknown[];
+    startup_diagnostics?: unknown[];
+    recoveryIssues?: unknown[];
+    recovery_issues?: unknown[];
+    diagnostics?: unknown[];
+  };
 };
 
 export type DesktopRecoverySeverity = "info" | "warning" | "error" | "critical";

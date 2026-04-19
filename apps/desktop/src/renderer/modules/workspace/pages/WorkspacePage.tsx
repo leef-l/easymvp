@@ -619,7 +619,13 @@ function formatChecklistLine(label: string, items?: string[]) {
 
 function buildProjectRoute(
   projectId: string,
-  section: "workspace" | "plan" | "execution" | "acceptance" | "repair-draft",
+  section:
+    | "workspace"
+    | "plan"
+    | "execution"
+    | "acceptance"
+    | "diagnostics"
+    | "repair-draft",
   extraParams?: Record<string, string | undefined>,
 ) {
   const search = new URLSearchParams();
