@@ -34,17 +34,17 @@ echo.
 echo == 3. Validate apps\desktop ==
 cd /d "%ROOT%\apps\desktop" || goto :fail
 node -v || goto :fail
-npm -v || goto :fail
+call npm -v || goto :fail
 
 if exist package-lock.json (
   echo package-lock.json detected, running npm ci
-  npm ci || goto :fail
+  call npm ci || goto :fail
 ) else (
   echo package-lock.json not found, running npm install
-  npm install || goto :fail
+  call npm install || goto :fail
 )
 
-npm run build || goto :fail
+call npm run build || goto :fail
 
 echo.
 echo == 4. Validation Passed ==
