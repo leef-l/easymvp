@@ -24,6 +24,10 @@ export function WorkspacePage() {
   const runtimeEscalation = state.data?.runtime_escalation;
   const faultSummary = state.data?.fault_summary;
   const repairPlanDraft = state.data?.repair_plan_draft;
+  const workspaceNextAction = firstText(
+    completionVerdict?.next_action,
+    workspaceOverview?.next_action,
+  );
   const workspaceFlags = [
     workspaceOverview?.manual_review_required || projectSnapshot?.manual_review_required ? "manual review required" : undefined,
     workspaceOverview?.verification_conflict || projectSnapshot?.verification_conflict ? "verification conflict" : undefined,
@@ -98,6 +102,7 @@ export function WorkspacePage() {
 
     switch (actionKey) {
       case "open_repair_draft":
+      case "prepare_rework":
         navigate(buildProjectRoute(targetProjectId, "repair-draft"));
         return;
       case "open_project_plan":
@@ -107,10 +112,16 @@ export function WorkspacePage() {
         navigate(buildProjectRoute(targetProjectId, "execution", { task: targetTaskId }));
         return;
       case "open_acceptance_center":
+      case "open_acceptance_issue":
+      case "collect_evidence":
+      case "manual_checkpoint":
+      case "resolve_verification_conflict":
+      case "complete_project":
         navigate(buildProjectRoute(targetProjectId, "acceptance", { task: targetTaskId }));
         return;
-      case "open_acceptance_issue":
-        navigate(buildProjectRoute(targetProjectId, "acceptance", { task: targetTaskId }));
+      case "resolve_runtime_escalation":
+      case "review_fault_loop":
+        navigate(buildProjectRoute(targetProjectId, "diagnostics", { task: targetTaskId }));
         return;
       default:
         navigate(buildProjectRoute(targetProjectId, "workspace"));
@@ -147,9 +158,17 @@ export function WorkspacePage() {
               {verificationResult?.preferred_verification_channel ? (
                 <span className="status-pill">verify {verificationResult.preferred_verification_channel}</span>
               ) : null}
-              {workspaceOverview?.next_action ? <span className="status-pill">next {workspaceOverview.next_action}</span> : null}
+              {workspaceNextAction ? <span className="status-pill">next {workspaceNextAction}</span> : null}
               <span className="status-pill">core {getCoreBaseUrl()}</span>
               <span className="status-pill">stream {streamState}</span>
+              {workspaceNextAction ? (
+                <button
+                  className="secondary-button"
+                  onClick={() => handleAction(workspaceNextAction, { targetId: runtimeEscalation?.task_id || runtimeEscalation?.source_task_id || projectId })}
+                >
+                  Follow Next Action
+                </button>
+              ) : null}
               <button className="secondary-button" onClick={() => setRefreshTick((value) => value + 1)}>
                 Refresh View
               </button>

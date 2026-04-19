@@ -59,6 +59,12 @@ export function AcceptancePage() {
   const acceptanceOverview = state.data?.overview;
   const acceptanceRun = state.data?.acceptance_run;
   const releaseGate = state.data?.release_gate;
+  const acceptanceNextAction = firstText(
+    completionVerdict?.next_action,
+    acceptanceOverview?.next_action,
+    acceptanceRun?.next_action,
+    releaseGate?.next_action,
+  );
 
   useEffect(() => {
     if (selectedTaskFromUrl) {
@@ -193,7 +199,7 @@ export function AcceptancePage() {
             </div>
             <div className="inline-metrics">
               <span className="status-pill">
-                next {firstText(acceptanceOverview?.next_action, acceptanceRun?.next_action, releaseGate?.next_action, "inspect_acceptance")}
+                next {firstText(acceptanceNextAction, "inspect_acceptance")}
               </span>
               <span className="status-pill">run {acceptanceRun?.id || "none"}</span>
               <span className="status-pill">task {acceptanceRun?.task_id || "auto"}</span>
@@ -242,7 +248,7 @@ export function AcceptancePage() {
                 <button className="secondary-button" disabled={busyAction !== ""} onClick={() => setRefreshTick((value) => value + 1)}>
                   Refresh View
                 </button>
-                {firstText(acceptanceOverview?.next_action, acceptanceRun?.next_action, releaseGate?.next_action) === "start_acceptance_run" ? (
+                {acceptanceNextAction === "start_acceptance_run" ? (
                   <button
                     className="secondary-button"
                     disabled={busyAction !== ""}
@@ -259,7 +265,7 @@ export function AcceptancePage() {
                     Start from Release Gate
                   </button>
                 ) : null}
-                {firstText(acceptanceOverview?.next_action, acceptanceRun?.next_action, releaseGate?.next_action) === "apply_manual_release" ? (
+                {acceptanceNextAction === "apply_manual_release" ? (
                   <button
                     className="primary-button"
                     disabled={busyAction !== ""}
@@ -273,6 +279,35 @@ export function AcceptancePage() {
                     }
                   >
                     {busyAction === "apply_manual_release" ? "Applying..." : "Approve Manual Release"}
+                  </button>
+                ) : null}
+                {acceptanceNextAction === "resolve_runtime_escalation" ? (
+                  <button className="secondary-button" onClick={() => navigate(routes.diagnostics)}>
+                    Open Runtime Diagnostics
+                  </button>
+                ) : null}
+                {acceptanceNextAction === "resolve_verification_conflict" || acceptanceNextAction === "manual_checkpoint" ? (
+                  <button className="secondary-button" onClick={() => navigate(routes.diagnostics)}>
+                    Open Manual Checkpoint
+                  </button>
+                ) : null}
+                {acceptanceNextAction === "collect_evidence" ? (
+                  <button
+                    className="secondary-button"
+                    onClick={() =>
+                      navigate(
+                        currentAcceptanceTaskId
+                          ? buildRoute("/execution", { task: currentAcceptanceTaskId })
+                          : routes.diagnostics,
+                      )
+                    }
+                  >
+                    Collect Evidence
+                  </button>
+                ) : null}
+                {acceptanceNextAction === "prepare_rework" || acceptanceNextAction === "review_fault_loop" ? (
+                  <button className="secondary-button" onClick={() => navigate(planState.data?.repair_draft.id ? routes.repairDraft : routes.diagnostics)}>
+                    Open Rework Path
                   </button>
                 ) : null}
                 {currentAcceptanceTaskId ? (
@@ -327,7 +362,7 @@ export function AcceptancePage() {
                     acceptanceOverview?.current_stage ? `stage ${acceptanceOverview.current_stage}` : undefined,
                     acceptanceOverview?.functional_status ? `functional ${acceptanceOverview.functional_status}` : undefined,
                     acceptanceOverview?.production_status ? `production ${acceptanceOverview.production_status}` : undefined,
-                    acceptanceOverview?.next_action ? `next ${acceptanceOverview.next_action}` : undefined,
+                    acceptanceNextAction ? `next ${acceptanceNextAction}` : undefined,
                     acceptanceOverview ? `evidence ${acceptanceOverview.evidence_card_count}` : undefined,
                     acceptanceOverview?.manual_release_required !== undefined
                       ? `manual release ${String(acceptanceOverview.manual_release_required)}`

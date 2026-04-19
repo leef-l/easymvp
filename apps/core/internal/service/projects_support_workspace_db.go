@@ -975,6 +975,7 @@ func buildWorkspaceVerificationResult(
 	decision := "continue_verification"
 	completed := false
 	summary := "Workspace is waiting for verification evidence."
+	manualReviewRequired := projectHasManualReviewRequirement(data)
 	if len(failedChecks) > 0 {
 		status = "failed"
 		decision = "repair_required"
@@ -991,18 +992,25 @@ func buildWorkspaceVerificationResult(
 	}
 
 	return acceptancev1.VerificationResultView{
-		Status:                   status,
-		Decision:                 decision,
-		Completed:                completed,
-		Summary:                  summary,
-		PreferredChannel:         "github_actions",
-		RequiredChecks:           requiredChecks,
-		RequiredEvidence:         requiredEvidence,
-		MissingEvidence:          missingEvidence,
-		FailedChecks:             failedChecks,
-		VerificationContractJSON: "",
-		SourceRunID:              firstNonEmpty(latestWorkspaceRunID(data), data.Project.Id),
-		UpdatedAt:                firstNonEmpty(latestWorkspaceUpdateAt(data), data.Project.UpdatedAt),
+		Status:           status,
+		Decision:         decision,
+		Completed:        completed,
+		Summary:          summary,
+		PreferredChannel: deriveVerificationCurrentChannel(manualReviewRequired),
+		RequiredChecks:   requiredChecks,
+		RequiredEvidence: requiredEvidence,
+		MissingEvidence:  missingEvidence,
+		FailedChecks:     failedChecks,
+		VerificationContractJSON: buildVerificationContractJSON(verificationContractParams{
+			ProjectCategory:      strings.TrimSpace(data.Project.ProjectCategory),
+			ProfileVersion:       firstNonEmpty(profileVersionForVerification(data.AcceptanceProfile, data.ProductionProfile), strings.TrimSpace(data.Project.Id)),
+			RequiredChecks:       requiredChecks,
+			RequiredEvidence:     requiredEvidence,
+			ManualReviewRequired: manualReviewRequired,
+			ManualReviewSummary:  summary,
+		}),
+		SourceRunID: firstNonEmpty(latestWorkspaceRunID(data), data.Project.Id),
+		UpdatedAt:   firstNonEmpty(latestWorkspaceUpdateAt(data), data.Project.UpdatedAt),
 	}
 }
 

@@ -556,6 +556,7 @@ func buildVerificationResultView(data *acceptanceAggregate) acceptancev1.Verific
 	decision := "continue_verification"
 	completed := false
 	summary := "Verification is waiting for acceptance evidence."
+	manualReviewRequired := false
 	if len(failedChecks) > 0 {
 		status = "failed"
 		decision = "repair_required"
@@ -570,21 +571,50 @@ func buildVerificationResultView(data *acceptanceAggregate) acceptancev1.Verific
 		completed = true
 		summary = "Verification requirements are currently satisfied."
 	}
+	if data.LatestAcceptanceRun != nil && data.LatestAcceptanceRun.ManualReleaseRequired == 1 {
+		manualReviewRequired = true
+	}
+	for _, issue := range data.Issues {
+		if issue.Blocking == 1 {
+			manualReviewRequired = true
+			break
+		}
+	}
 
 	return acceptancev1.VerificationResultView{
-		Status:                   status,
-		PreferredChannel:         "github_actions",
-		RequiredChecks:           requiredChecks,
-		RequiredEvidence:         requiredEvidence,
-		MissingEvidence:          missingEvidence,
-		FailedChecks:             failedChecks,
-		VerificationContractJSON: "",
-		SourceRunID:              firstNonEmpty(strings.TrimSpace(acceptanceRunID(data)), strings.TrimSpace(data.Project.Id)),
-		UpdatedAt:                firstNonEmpty(latestAcceptanceUpdatedAt(data), strings.TrimSpace(data.Project.UpdatedAt)),
-		Decision:                 decision,
-		Completed:                completed,
-		Summary:                  summary,
+		Status:           status,
+		PreferredChannel: deriveVerificationCurrentChannel(manualReviewRequired),
+		RequiredChecks:   requiredChecks,
+		RequiredEvidence: requiredEvidence,
+		MissingEvidence:  missingEvidence,
+		FailedChecks:     failedChecks,
+		VerificationContractJSON: buildVerificationContractJSON(verificationContractParams{
+			ProjectCategory:      strings.TrimSpace(data.Project.ProjectCategory),
+			ProfileVersion:       firstNonEmpty(profileVersionForVerification(data.AcceptanceProfile, data.ProductionProfile), strings.TrimSpace(data.Project.Id)),
+			RequiredChecks:       requiredChecks,
+			RequiredEvidence:     requiredEvidence,
+			ManualReviewRequired: manualReviewRequired,
+			ManualReviewSummary:  summary,
+		}),
+		SourceRunID: firstNonEmpty(strings.TrimSpace(acceptanceRunID(data)), strings.TrimSpace(data.Project.Id)),
+		UpdatedAt:   firstNonEmpty(latestAcceptanceUpdatedAt(data), strings.TrimSpace(data.Project.UpdatedAt)),
+		Decision:    decision,
+		Completed:   completed,
+		Summary:     summary,
 	}
+}
+
+func profileVersionForVerification(
+	acceptanceProfile *acceptanceProfileRecord,
+	productionProfile *productionAcceptanceProfileRecord,
+) string {
+	if productionProfile != nil && strings.TrimSpace(productionProfile.ProfileVersion) != "" {
+		return strings.TrimSpace(productionProfile.ProfileVersion)
+	}
+	if acceptanceProfile != nil {
+		return strings.TrimSpace(acceptanceProfile.ProfileVersion)
+	}
+	return ""
 }
 
 func buildCompletionVerdictView(data *acceptanceAggregate) acceptancev1.CompletionVerdictView {
