@@ -40,9 +40,14 @@ echo apps\desktop build passed
 echo.
 echo Optional smoke test:
 echo   cd /d "%ROOT%\apps\desktop" ^&^& npm run dev
-goto :eof
+echo.
+echo ExitCode=0
+pause
+exit /b 0
 
 :fail
 echo.
 echo == Validation Failed ==
+echo ExitCode=1
+pause
 exit /b 1
