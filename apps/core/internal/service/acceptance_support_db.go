@@ -589,6 +589,8 @@ func buildVerificationResultView(data *acceptanceAggregate) acceptancev1.Verific
 
 func buildCompletionVerdictView(data *acceptanceAggregate) acceptancev1.CompletionVerdictView {
 	verification := buildVerificationResultView(data)
+	runtimeEscalation := buildRuntimeEscalationView(data)
+	faultSummary := buildFaultSummaryView(data)
 	manualReleaseRequired := data.LatestAcceptanceRun != nil && data.LatestAcceptanceRun.ManualReleaseRequired == 1
 	manualReviewRequired := manualReleaseRequired
 	for _, issue := range data.Issues {
@@ -603,27 +605,53 @@ func buildCompletionVerdictView(data *acceptanceAggregate) acceptancev1.Completi
 	reason := "Awaiting acceptance adjudication."
 	completed := false
 	manualReleaseCompleted := false
+	nextAction := verification.Decision
 
 	switch verification.Status {
 	case "failed":
 		decision = "rework"
 		finalStatus = "reworking"
 		reason = verification.Summary
+		nextAction = "prepare_rework"
 	case "incomplete":
 		decision = "collect_evidence"
 		finalStatus = "accepting"
 		reason = verification.Summary
+		nextAction = "collect_evidence"
 	case "passed":
-		if manualReleaseRequired {
+		switch {
+		case runtimeEscalation.Status != "none":
+			decision = "manual_checkpoint"
+			finalStatus = "accepting"
+			reason = "Verification passed, but runtime escalation must be resolved before completion."
+			nextAction = "resolve_runtime_escalation"
+		case faultSummary.FaultLoopDetected:
+			decision = "manual_checkpoint"
+			finalStatus = "reworking"
+			reason = "Verification passed, but repeated acceptance faults require manual review before completion."
+			nextAction = "review_fault_loop"
+		case acceptanceHasVerificationConflict(data):
+			decision = "manual_checkpoint"
+			finalStatus = "accepting"
+			reason = "Verification passed, but conflicting blocking signals require manual review before completion."
+			nextAction = "resolve_verification_conflict"
+		case manualReleaseRequired:
 			decision = "manual_review"
 			finalStatus = "accepting"
 			reason = "Verification passed, but manual release confirmation is still required."
-		} else {
+			nextAction = "apply_manual_release"
+		case manualReviewRequired:
+			decision = "manual_checkpoint"
+			finalStatus = "accepting"
+			reason = "Verification passed, but manual review is still required before completion."
+			nextAction = "manual_checkpoint"
+		default:
 			decision = "complete"
 			finalStatus = "completed"
 			reason = "Verification passed and no manual release hold remains."
 			completed = true
 			manualReleaseCompleted = true
+			nextAction = "complete_project"
 		}
 	}
 
@@ -636,7 +664,7 @@ func buildCompletionVerdictView(data *acceptanceAggregate) acceptancev1.Completi
 		ManualReleaseCompleted: manualReleaseCompleted,
 		ReleaseReady:           completed,
 		BlockerCount:           countBlockingIssues(data.Issues),
-		NextAction:             verification.Decision,
+		NextAction:             nextAction,
 		UpdatedAt:              firstNonEmpty(latestAcceptanceUpdatedAt(data), strings.TrimSpace(data.Project.UpdatedAt)),
 		Completed:              completed,
 		Summary:                reason,
@@ -753,6 +781,15 @@ func acceptanceRunID(data *acceptanceAggregate) string {
 		return ""
 	}
 	return data.LatestAcceptanceRun.Id
+}
+
+func acceptanceHasVerificationConflict(data *acceptanceAggregate) bool {
+	if countBlockingIssues(data.Issues) == 0 || data.LatestAcceptanceRun == nil {
+		return false
+	}
+	return isFunctionalPassed(data.LatestAcceptanceRun.FunctionalStatus) ||
+		isProductionReady(data.LatestAcceptanceRun.ProductionStatus) ||
+		data.LatestAcceptanceRun.ManualReleaseRequired == 1
 }
 
 func latestAcceptanceUpdatedAt(data *acceptanceAggregate) string {
