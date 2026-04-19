@@ -8,6 +8,7 @@ type PlanViewReq struct {
 }
 
 type PlanViewRes struct {
+	Overview       PlanOverview       `json:"overview"`
 	Draft          PlanDraftView      `json:"draft"`
 	Review         PlanReviewView     `json:"review"`
 	Compiled       CompiledPlanView   `json:"compiled"`
@@ -95,4 +96,19 @@ type DiffSummaryItem struct {
 	AfterLabel          string `json:"after_label"`
 	Reason              string `json:"reason"`
 	SourceReviewIssueID string `json:"source_review_issue_id,omitempty"`
+}
+
+type PlanOverview struct {
+	ProjectID             string `json:"project_id"`
+	DraftStatus           string `json:"draft_status"`
+	ReviewDecision        string `json:"review_decision"`
+	CompiledStatus        string `json:"compiled_status"`
+	RepairDraftStatus     string `json:"repair_draft_status"`
+	CurrentStage          string `json:"current_stage"`
+	NextAction            string `json:"next_action"`
+	TaskCount             int    `json:"task_count"`
+	ManualReviewTaskCount int    `json:"manual_review_task_count"`
+	BlockingIssueCount    int    `json:"blocking_issue_count"`
+	AdvisoryIssueCount    int    `json:"advisory_issue_count"`
+	CompiledVersion       int    `json:"compiled_version"`
 }

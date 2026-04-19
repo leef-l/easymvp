@@ -1,5 +1,7 @@
 # 2026-04-09 Workflow V2 创建项目验证
 
+> 历史说明：本文是 2026-04-09 的专项验证记录。文中出现的本机接口调用与 `go test` 结果仅作为历史修复证据保留，不代表当前仓库允许的正式验证入口；现行口径统一只认 GitHub Actions。
+
 ## 1. 验证目标
 
 在真实后端服务上验证 Workflow V2 `create-project` 主链是否可以成功创建项目、创建会话并启动阶段化工作流，同时记录接口问题并及时修复。
@@ -83,7 +85,7 @@
 - `POST /workflow/create-project` 成功
 - `GET /workflow/project-status` 返回 `workflowStatus=designing`、`currentStage=design`
 - `GET /workflow/stage-history` 与 `GET /workflow/project-trace` 时间口径一致，均返回 `2026-04-09 15:15:43`
-- `go test ./app/mvp/internal/controller/chat` 通过
+- 历史复测中，`go test ./app/mvp/internal/controller/chat` 通过
 
 ## 7. 本次验证边界
 

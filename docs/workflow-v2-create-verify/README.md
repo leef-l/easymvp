@@ -1,5 +1,7 @@
 # Workflow V2 验证记录
 
+> 历史说明：本目录是 2026-04-09 至 2026-04-10 的专项验证留档。文中出现的本机 API 调用、`go test`、受控推进命令都只代表当时的历史证据，不代表当前仓库的正式验证入口。现行口径统一只认 GitHub Actions workflow run、日志、artifact 与 `.easymvp/ci/latest.json`。
+
 本目录专门记录 Workflow V2 的真实接口验证、问题复现、修复结论和复测结果，避免信息继续散落在总进度文档里。
 
 当前文件：

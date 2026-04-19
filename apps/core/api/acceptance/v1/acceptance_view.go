@@ -10,11 +10,17 @@ type AcceptanceViewReq struct {
 }
 
 type AcceptanceViewRes struct {
-	AcceptanceRun  AcceptanceRunView `json:"acceptance_run"`
-	CoverageMatrix []CoverageItem    `json:"coverage_matrix"`
-	Issues         []AcceptanceIssue `json:"issues"`
-	EvidenceCards  []EvidenceCard    `json:"evidence_cards"`
-	ReleaseGate    ReleaseGateView   `json:"release_gate"`
+	Overview           AcceptanceOverview     `json:"overview"`
+	AcceptanceRun      AcceptanceRunView      `json:"acceptance_run"`
+	CoverageMatrix     []CoverageItem         `json:"coverage_matrix"`
+	Issues             []AcceptanceIssue      `json:"issues"`
+	EvidenceCards      []EvidenceCard         `json:"evidence_cards"`
+	ReleaseGate        ReleaseGateView        `json:"release_gate"`
+	VerificationResult VerificationResultView `json:"verification_result"`
+	CompletionVerdict  CompletionVerdictView  `json:"completion_verdict"`
+	RuntimeEscalation  RuntimeEscalationView  `json:"runtime_escalation"`
+	FaultSummary       FaultSummaryView       `json:"fault_summary"`
+	RepairPlanDraft    RepairPlanDraftSummary `json:"repair_plan_draft"`
 }
 
 type StartAcceptanceReq struct {

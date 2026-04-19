@@ -1,14 +1,35 @@
 package v1
 
 type ProjectSnapshot struct {
-	ProjectID         string `json:"project_id"`
-	Name              string `json:"name"`
-	ProjectCategory   string `json:"project_category"`
-	CurrentStage      string `json:"current_stage"`
-	ProgressPercent   int    `json:"progress_percent"`
-	RiskLevel         string `json:"risk_level"`
-	ProductionStatus  string `json:"production_status"`
-	ManualReleaseNeed bool   `json:"manual_release_required"`
+	ProjectID            string `json:"project_id"`
+	Name                 string `json:"name"`
+	ProjectCategory      string `json:"project_category"`
+	CurrentStage         string `json:"current_stage"`
+	ProgressPercent      int    `json:"progress_percent"`
+	RiskLevel            string `json:"risk_level"`
+	ProductionStatus     string `json:"production_status"`
+	ManualReleaseNeed    bool   `json:"manual_release_required"`
+	ManualReviewRequired bool   `json:"manual_review_required"`
+	VerificationConflict bool   `json:"verification_conflict"`
+	FaultLoopDetected    bool   `json:"fault_loop_detected"`
+	PolicyDenied         bool   `json:"policy_denied"`
+}
+
+type WorkspaceOverview struct {
+	ProjectID            string `json:"project_id"`
+	CurrentStage         string `json:"current_stage"`
+	StageStatus          string `json:"stage_status"`
+	RiskLevel            string `json:"risk_level"`
+	ProductionStatus     string `json:"production_status"`
+	NextAction           string `json:"next_action"`
+	ActionRequiredCount  int    `json:"action_required_count"`
+	BlockingIssueCount   int    `json:"blocking_issue_count"`
+	ManualReleaseNeeded  bool   `json:"manual_release_required"`
+	AcceptanceRunStatus  string `json:"acceptance_run_status,omitempty"`
+	ManualReviewRequired bool   `json:"manual_review_required"`
+	VerificationConflict bool   `json:"verification_conflict"`
+	FaultLoopDetected    bool   `json:"fault_loop_detected"`
+	PolicyDenied         bool   `json:"policy_denied"`
 }
 
 type StageProgressItem struct {

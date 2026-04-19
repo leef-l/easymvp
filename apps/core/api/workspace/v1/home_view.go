@@ -9,6 +9,7 @@ type HomeViewReq struct {
 }
 
 type HomeViewRes struct {
+	Overview         HomeOverview        `json:"overview"`
 	Summary          HomeSummary         `json:"summary"`
 	ActiveProjects   []ProjectCard       `json:"active_projects"`
 	NeedAttention    []NeedAttentionItem `json:"need_attention"`

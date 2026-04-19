@@ -116,12 +116,18 @@ func (s *sProjects) GetProjectWorkspaceView(ctx context.Context, projectID strin
 	}
 
 	res = &projectsv1.ProjectWorkspaceViewRes{
+		Overview:             data.Overview,
 		ProjectSnapshot:      data.ProjectSnapshot,
 		StageProgress:        data.StageProgress,
 		LiveActivity:         data.LiveActivity,
 		ActionInbox:          data.ActionInbox,
 		AcceptanceCoverage:   data.AcceptanceCoverage,
 		WorkspaceExplanation: data.WorkspaceExplanation,
+		VerificationResult:   data.VerificationResult,
+		CompletionVerdict:    data.CompletionVerdict,
+		RuntimeEscalation:    data.RuntimeEscalation,
+		FaultSummary:         data.FaultSummary,
+		RepairPlanDraft:      data.RepairPlanDraft,
 	}
 	_ = persistProjectSnapshot(ctx, projectID, res)
 	return res, nil

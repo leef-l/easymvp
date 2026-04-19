@@ -7,6 +7,16 @@ type HomeSummary struct {
 	PendingActions  int `json:"pending_actions"`
 }
 
+type HomeOverview struct {
+	TotalProjects        int `json:"total_projects"`
+	ActiveProjects       int `json:"active_projects"`
+	BlockedProjects      int `json:"blocked_projects"`
+	PendingActions       int `json:"pending_actions"`
+	AttentionItemCount   int `json:"attention_item_count"`
+	ReleaseWatchCount    int `json:"release_watch_count"`
+	ProductionReadyCount int `json:"production_ready_count"`
+}
+
 type ProjectCard struct {
 	ProjectID        string `json:"project_id"`
 	Name             string `json:"name"`

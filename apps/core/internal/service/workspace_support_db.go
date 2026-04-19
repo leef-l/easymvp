@@ -20,6 +20,7 @@ const (
 )
 
 type workspaceHomeData struct {
+	Overview         workspacev1.HomeOverview
 	TotalProjects    int
 	ActiveProjects   int
 	BlockedProjects  int
@@ -68,6 +69,15 @@ func loadWorkspaceHomeData(ctx context.Context) (*workspaceHomeData, error) {
 	}
 
 	return &workspaceHomeData{
+		Overview: workspacev1.HomeOverview{
+			TotalProjects:        len(projects),
+			ActiveProjects:       activeProjects,
+			BlockedProjects:      blockedProjects,
+			PendingActions:       pendingActions,
+			AttentionItemCount:   len(needAttention),
+			ReleaseWatchCount:    len(releaseReadiness),
+			ProductionReadyCount: countProductionReadyProjects(projects),
+		},
 		TotalProjects:    len(projects),
 		ActiveProjects:   activeProjects,
 		BlockedProjects:  blockedProjects,
@@ -77,6 +87,16 @@ func loadWorkspaceHomeData(ctx context.Context) (*workspaceHomeData, error) {
 		RecentActivity:   recentActivity,
 		ReleaseReadiness: releaseReadiness,
 	}, nil
+}
+
+func countProductionReadyProjects(projects []projectHomeAggregate) int {
+	count := 0
+	for _, item := range projects {
+		if isProductionReady(item.Project.ProductionStatus) {
+			count++
+		}
+	}
+	return count
 }
 
 func listWorkspaceProjects(ctx context.Context, db *sql.DB, limit int) ([]projectHomeAggregate, error) {

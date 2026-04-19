@@ -17,6 +17,19 @@ export function WorkspacePage() {
     [projectId, refreshTick],
   );
   const homeState = useQuery(() => apiGet<WorkspaceHomeView>("/api/v3/workspace/home-view"), [refreshTick]);
+  const workspaceOverview = state.data?.overview;
+  const projectSnapshot = state.data?.project_snapshot;
+  const verificationResult = state.data?.verification_result;
+  const completionVerdict = state.data?.completion_verdict;
+  const runtimeEscalation = state.data?.runtime_escalation;
+  const faultSummary = state.data?.fault_summary;
+  const repairPlanDraft = state.data?.repair_plan_draft;
+  const workspaceFlags = [
+    workspaceOverview?.manual_review_required || projectSnapshot?.manual_review_required ? "manual review required" : undefined,
+    workspaceOverview?.verification_conflict || projectSnapshot?.verification_conflict ? "verification conflict" : undefined,
+    workspaceOverview?.fault_loop_detected || projectSnapshot?.fault_loop_detected ? "fault loop detected" : undefined,
+    workspaceOverview?.policy_denied || projectSnapshot?.policy_denied ? "policy denied" : undefined,
+  ].filter(Boolean) as string[];
 
   useEffect(() => {
     setStreamState("connecting");
@@ -121,11 +134,20 @@ export function WorkspacePage() {
           <div className="dashboard-intro">
             <div>
               <p className="placeholder-section">Workspace</p>
-              <h3 className="placeholder-title">{state.data.workspace_explanation.headline || state.data.project_snapshot.name || projectId}</h3>
-              <p className="placeholder-description">{state.data.workspace_explanation.summary}</p>
+              <h3 className="placeholder-title">{firstText(state.data.workspace_explanation.headline, projectSnapshot?.name, projectId)}</h3>
+              <p className="placeholder-description">
+                {firstText(completionVerdict?.summary, verificationResult?.summary, state.data.workspace_explanation.summary)}
+              </p>
             </div>
             <div className="summary-stack action-stack">
-              <span className="status-pill">{state.data.project_snapshot.current_stage}</span>
+              <span className="status-pill">{firstText(workspaceOverview?.current_stage, projectSnapshot?.current_stage, "unknown")}</span>
+              {firstText(completionVerdict?.decision, completionVerdict?.final_status) ? (
+                <span className="status-pill">{firstText(completionVerdict?.decision, completionVerdict?.final_status)}</span>
+              ) : null}
+              {verificationResult?.preferred_verification_channel ? (
+                <span className="status-pill">verify {verificationResult.preferred_verification_channel}</span>
+              ) : null}
+              {workspaceOverview?.next_action ? <span className="status-pill">next {workspaceOverview.next_action}</span> : null}
               <span className="status-pill">core {getCoreBaseUrl()}</span>
               <span className="status-pill">stream {streamState}</span>
               <button className="secondary-button" onClick={() => setRefreshTick((value) => value + 1)}>
@@ -133,6 +155,22 @@ export function WorkspacePage() {
               </button>
             </div>
           </div>
+
+          {workspaceFlags.length > 0 ? (
+            <section className="data-panel">
+              <div className="panel-header">
+                <h3>Workspace Guards</h3>
+                <span className="status-pill">{workspaceFlags.length}</span>
+              </div>
+              <div className="inline-metrics">
+                {workspaceFlags.map((item) => (
+                  <span key={item} className="severity-badge severity-warning">
+                    {item}
+                  </span>
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           <section className="data-panel">
             <div className="panel-header">
@@ -158,9 +196,18 @@ export function WorkspacePage() {
           </section>
 
           <div className="metrics-grid">
-            <MetricCard label="Progress" value={`${state.data.project_snapshot.progress_percent}%`} tone="calm" />
-            <MetricCard label="Risk" value={state.data.project_snapshot.risk_level} tone="warn" />
-            <MetricCard label="Production" value={state.data.project_snapshot.production_status} tone="neutral" />
+            <MetricCard label="Progress" value={`${projectSnapshot?.progress_percent ?? 0}%`} tone="calm" />
+            <MetricCard label="Risk" value={firstText(workspaceOverview?.risk_level, projectSnapshot?.risk_level, "unknown")} tone="warn" />
+            <MetricCard
+              label="Verification"
+              value={firstText(verificationResult?.decision, verificationResult?.status, workspaceOverview?.stage_status, projectSnapshot?.production_status, "pending")}
+              tone="neutral"
+            />
+            <MetricCard
+              label="Completion"
+              value={firstText(completionVerdict?.decision, completionVerdict?.final_status, workspaceOverview?.production_status, projectSnapshot?.production_status, "pending")}
+              tone="neutral"
+            />
             <MetricCard
               label="Evidence"
               value={`${state.data.acceptance_coverage.evidence_ready}/${state.data.acceptance_coverage.evidence_required}`}
@@ -169,6 +216,140 @@ export function WorkspacePage() {
           </div>
 
           <div className="content-grid">
+            <section className="data-panel">
+              <div className="panel-header">
+                <h3>Total-Outline Snapshot</h3>
+                <span className="status-pill">{countOutlineArtifacts(state.data)}</span>
+              </div>
+              <div className="stack-list">
+                <SummaryCard
+                  title="Workspace Overview"
+                  primary={firstText(workspaceOverview?.stage_status, workspaceOverview?.production_status, projectSnapshot?.production_status, "legacy only")}
+                  secondary={firstText(
+                    state.data.workspace_explanation.summary,
+                    "Structured workspace overview becomes primary when the backend emits overview fields.",
+                  )}
+                  pills={[
+                    workspaceOverview?.current_stage ? `stage ${workspaceOverview.current_stage}` : undefined,
+                    workspaceOverview?.risk_level ? `risk ${workspaceOverview.risk_level}` : undefined,
+                    workspaceOverview?.acceptance_run_status ? `acceptance ${workspaceOverview.acceptance_run_status}` : undefined,
+                    workspaceOverview?.next_action ? `next ${workspaceOverview.next_action}` : undefined,
+                    workspaceOverview ? `actions ${workspaceOverview.action_required_count}` : undefined,
+                    workspaceOverview?.manual_release_required !== undefined
+                      ? `manual release ${String(workspaceOverview.manual_release_required)}`
+                      : undefined,
+                  ]}
+                  lines={[
+                    workspaceOverview ? `Blocking issues: ${workspaceOverview.blocking_issue_count}` : undefined,
+                    formatBooleanLine("Manual review required", workspaceOverview?.manual_review_required),
+                    formatBooleanLine("Verification conflict", workspaceOverview?.verification_conflict),
+                    formatBooleanLine("Fault loop detected", workspaceOverview?.fault_loop_detected),
+                    formatBooleanLine("Policy denied", workspaceOverview?.policy_denied),
+                  ]}
+                />
+                <SummaryCard
+                  title="Verification Result"
+                  primary={firstText(verificationResult?.decision, verificationResult?.status, "legacy only")}
+                  secondary={
+                    verificationResult?.summary ||
+                    "Workspace is still falling back to production_status because no structured verification result is attached."
+                  }
+                  pills={[
+                    verificationResult?.completed !== undefined
+                      ? `completed ${String(verificationResult.completed)}`
+                      : undefined,
+                    verificationResult?.preferred_verification_channel
+                      ? `channel ${verificationResult.preferred_verification_channel}`
+                      : undefined,
+                    verificationResult?.updated_at || undefined,
+                  ]}
+                  lines={[
+                    formatChecklistLine("Required checks", verificationResult?.required_checks),
+                    formatChecklistLine("Missing evidence", verificationResult?.missing_evidence),
+                    formatChecklistLine("Failed checks", verificationResult?.failed_checks),
+                  ]}
+                />
+                <SummaryCard
+                  title="Completion Verdict"
+                  primary={firstText(completionVerdict?.decision, completionVerdict?.final_status, "not emitted")}
+                  secondary={firstText(completionVerdict?.summary, completionVerdict?.reason, "Workspace explanation is still the compatibility fallback.")}
+                  pills={[
+                    completionVerdict?.completed !== undefined
+                      ? `completed ${String(completionVerdict.completed)}`
+                      : undefined,
+                    completionVerdict?.release_ready !== undefined
+                      ? `release ${String(completionVerdict.release_ready)}`
+                      : undefined,
+                    completionVerdict?.manual_review_required !== undefined
+                      ? `manual review ${String(completionVerdict.manual_review_required)}`
+                      : undefined,
+                    completionVerdict?.manual_release_required !== undefined
+                      ? `manual release ${String(completionVerdict.manual_release_required)}`
+                      : undefined,
+                    completionVerdict?.manual_release_completed !== undefined
+                      ? `release done ${String(completionVerdict.manual_release_completed)}`
+                      : undefined,
+                    completionVerdict?.blocker_count !== undefined
+                      ? `blockers ${completionVerdict.blocker_count}`
+                      : undefined,
+                    completionVerdict?.next_action ? `next ${completionVerdict.next_action}` : undefined,
+                    completionVerdict?.updated_at || undefined,
+                  ]}
+                />
+                <SummaryCard
+                  title="Runtime Escalation"
+                  primary={firstText(runtimeEscalation?.reason_class, runtimeEscalation?.status, "none")}
+                  secondary={firstText(runtimeEscalation?.summary, "No structured runtime escalation is attached to this workspace snapshot.")}
+                  pills={[
+                    runtimeEscalation?.severity || undefined,
+                    runtimeEscalation?.source_brain ? `brain ${runtimeEscalation.source_brain}` : undefined,
+                    runtimeEscalation?.source_task_id ? `source task ${runtimeEscalation.source_task_id}` : undefined,
+                    runtimeEscalation?.run_binding_id ? `binding ${runtimeEscalation.run_binding_id}` : undefined,
+                    runtimeEscalation?.run_status ? `run status ${runtimeEscalation.run_status}` : undefined,
+                    runtimeEscalation?.action ? `action ${runtimeEscalation.action}` : undefined,
+                    runtimeEscalation?.task_id ? `task ${runtimeEscalation.task_id}` : undefined,
+                    runtimeEscalation?.run_id ? `run ${runtimeEscalation.run_id}` : undefined,
+                    runtimeEscalation?.policy_denied !== undefined ? `policy denied ${String(runtimeEscalation.policy_denied)}` : undefined,
+                    runtimeEscalation?.updated_at || undefined,
+                  ]}
+                />
+                <SummaryCard
+                  title="Fault Summary"
+                  primary={firstText(faultSummary?.fault_kind, faultSummary?.status, "none")}
+                  secondary={firstText(faultSummary?.summary, faultSummary?.top_issue, "No aggregated fault summary is attached to the current workspace view.")}
+                  pills={[
+                    faultSummary?.severity || undefined,
+                    faultSummary?.fault_loop_detected !== undefined ? `fault loop ${String(faultSummary.fault_loop_detected)}` : undefined,
+                    faultSummary?.blocking_issue_count !== undefined ? `blocking ${faultSummary.blocking_issue_count}` : undefined,
+                    faultSummary?.advisory_issue_count !== undefined ? `advisory ${faultSummary.advisory_issue_count}` : undefined,
+                    faultSummary?.updated_at || undefined,
+                  ]}
+                  lines={[
+                    formatChecklistLine("Failed checks", faultSummary?.failed_checks),
+                    formatChecklistLine("Affected tasks", faultSummary?.affected_tasks),
+                  ]}
+                />
+                <SummaryCard
+                  title="Repair Plan Draft"
+                  primary={firstText(repairPlanDraft?.repair_strategy, repairPlanDraft?.status, "idle")}
+                  secondary={firstText(
+                    repairPlanDraft?.summary,
+                    repairPlanDraft?.reasoning_summary,
+                    "The workspace has not received a structured repair draft summary yet.",
+                  )}
+                  pills={[
+                    repairPlanDraft?.id || undefined,
+                    repairPlanDraft?.reason_class || undefined,
+                    repairPlanDraft?.manual_review_required !== undefined
+                      ? `manual review ${String(repairPlanDraft.manual_review_required)}`
+                      : undefined,
+                    repairPlanDraft?.updated_at || undefined,
+                  ]}
+                  lines={[formatChecklistLine("Updated tasks", repairPlanDraft?.updated_tasks)]}
+                />
+              </div>
+            </section>
+
             <section className="data-panel">
               <div className="panel-header">
                 <h3>Action Inbox</h3>
@@ -239,7 +420,7 @@ export function WorkspacePage() {
                       <strong>{item.name}</strong>
                       <span className="status-pill">{item.current_stage}</span>
                     </div>
-                    <p>{item.project_category} · progress {item.progress_percent}% · {item.production_status}</p>
+                    <p>{item.project_category} · progress {item.progress_percent}% · {firstText(item.stage_status, item.production_status, "pending")}</p>
                   </button>
                 ))}
                 {(homeState.data?.active_projects.length ?? 0) === 0 ? (
@@ -365,6 +546,58 @@ function MetricCard(props: { label: string; value: string; tone: "calm" | "warn"
   );
 }
 
+function SummaryCard(props: {
+  title: string;
+  primary: string;
+  secondary: string;
+  pills?: Array<string | undefined>;
+  lines?: Array<string | undefined>;
+}) {
+  const pills = (props.pills ?? []).filter(Boolean) as string[];
+  const lines = (props.lines ?? []).filter(Boolean) as string[];
+
+  return (
+    <article className="list-card">
+      <div className="list-card-head">
+        <strong>{props.title}</strong>
+        <span className="status-pill">{props.primary}</span>
+      </div>
+      <p>{props.secondary}</p>
+      {pills.length > 0 ? (
+        <div className="inline-metrics">
+          {pills.map((item) => (
+            <span key={item} className="status-pill">
+              {item}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {lines.map((line) => (
+        <p key={line} className="muted-copy">
+          {line}
+        </p>
+      ))}
+    </article>
+  );
+}
+
+function countOutlineArtifacts(view: WorkspaceView) {
+  return [
+    view.verification_result,
+    view.completion_verdict,
+    view.runtime_escalation,
+    view.fault_summary,
+    view.repair_plan_draft,
+  ].filter(Boolean).length;
+}
+
+function formatChecklistLine(label: string, items?: string[]) {
+  if (!items || items.length === 0) {
+    return undefined;
+  }
+  return `${label}: ${items.join(" / ")}`;
+}
+
 function buildProjectRoute(
   projectId: string,
   section: "workspace" | "plan" | "execution" | "acceptance" | "repair-draft",
@@ -460,4 +693,20 @@ function describeExplainLink(linkKey: string) {
     default:
       return "Open the project workspace view.";
   }
+}
+
+function firstText(...values: Array<string | undefined>) {
+  for (const value of values) {
+    if (value && value.trim() !== "") {
+      return value;
+    }
+  }
+  return "";
+}
+
+function formatBooleanLine(label: string, value?: boolean) {
+  if (value === undefined) {
+    return undefined;
+  }
+  return `${label}: ${String(value)}`;
 }

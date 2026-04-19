@@ -5,6 +5,8 @@
 > 关联文档：[EasyMVP-V3-本地配置与启动参数设计](./EasyMVP-V3-本地配置与启动参数设计.md)
 > 关联文档：[EasyMVP-V3-单机版启动时序与进程内调用链设计](./EasyMVP-V3-单机版启动时序与进程内调用链设计.md)
 > 目标：定义 V3 推荐的 Electron + GoFrame v2 单仓结构、开发命令和本地协作方式，避免仓库组织混乱。
+>
+> 历史口径说明：本文里的本地命令只表示开发调试方式，不代表当前测试/编译验收入口。现行工程铁律下，正式验证统一只认 GitHub Actions workflow run、日志、artifact 与 `.easymvp/ci/latest.json`。
 
 ## 1. 设计结论
 
@@ -53,7 +55,7 @@ docs/
 建议：
 
 1. `go run main.go`
-2. `go test ./...`
+2. 若需要完整测试/编译验收，改走 GitHub Actions，对应入口见 `.github/workflows/backend-guard.yml`
 
 ### 3.3 联调开发
 
@@ -76,14 +78,15 @@ docs/
 
 建议：
 
-1. `go build -o bin/easymvp-core main.go`
+1. 本地开发阶段可用 `go run main.go` 做最小启动联调
+2. 正式构建产物与验收统一走 GitHub Actions，不再以本机 `go build` 作为当前口径
 
 ### 4.2 Desktop
 
 建议：
 
-1. `pnpm --dir apps/desktop build`
-2. `pnpm --dir apps/desktop package`
+1. UI 日常开发以 `pnpm --dir apps/desktop dev` 为主
+2. 正式构建、类型检查与打包统一走 GitHub Actions，不再以本机 `pnpm --dir apps/desktop build/package` 作为当前口径
 
 ## 5. 联调约束
 

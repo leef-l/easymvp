@@ -21,11 +21,17 @@ const (
 )
 
 type acceptanceViewData struct {
-	AcceptanceRun  acceptancev1.AcceptanceRunView
-	CoverageMatrix []acceptancev1.CoverageItem
-	Issues         []acceptancev1.AcceptanceIssue
-	EvidenceCards  []acceptancev1.EvidenceCard
-	ReleaseGate    acceptancev1.ReleaseGateView
+	Overview           acceptancev1.AcceptanceOverview
+	AcceptanceRun      acceptancev1.AcceptanceRunView
+	CoverageMatrix     []acceptancev1.CoverageItem
+	Issues             []acceptancev1.AcceptanceIssue
+	EvidenceCards      []acceptancev1.EvidenceCard
+	ReleaseGate        acceptancev1.ReleaseGateView
+	VerificationResult acceptancev1.VerificationResultView
+	CompletionVerdict  acceptancev1.CompletionVerdictView
+	RuntimeEscalation  acceptancev1.RuntimeEscalationView
+	FaultSummary       acceptancev1.FaultSummaryView
+	RepairPlanDraft    acceptancev1.RepairPlanDraftSummary
 }
 
 type acceptanceAggregate struct {
@@ -40,6 +46,8 @@ type acceptanceAggregate struct {
 	EvidenceItems       []entity.EvidenceItems
 	AuditLogs           []entity.AuditLogs
 	Judgements          []entity.AcceptanceJudgements
+	RepairDraft         *repairPlanDraftRecord
+	RunBindings         []entity.BrainRunBindings
 }
 
 func loadAcceptanceViewData(ctx context.Context, projectID string) (*acceptanceViewData, error) {
@@ -55,11 +63,17 @@ func loadAcceptanceViewData(ctx context.Context, projectID string) (*acceptanceV
 	}
 
 	return &acceptanceViewData{
-		AcceptanceRun:  buildAcceptanceRunView(aggregate),
-		CoverageMatrix: buildAcceptanceCoverageMatrix(aggregate),
-		Issues:         buildAcceptanceIssues(aggregate),
-		EvidenceCards:  buildAcceptanceEvidenceCards(aggregate),
-		ReleaseGate:    buildAcceptanceReleaseGate(aggregate),
+		Overview:           buildAcceptanceOverview(aggregate),
+		AcceptanceRun:      buildAcceptanceRunView(aggregate),
+		CoverageMatrix:     buildAcceptanceCoverageMatrix(aggregate),
+		Issues:             buildAcceptanceIssues(aggregate),
+		EvidenceCards:      buildAcceptanceEvidenceCards(aggregate),
+		ReleaseGate:        buildAcceptanceReleaseGate(aggregate),
+		VerificationResult: buildVerificationResultView(aggregate),
+		CompletionVerdict:  buildCompletionVerdictView(aggregate),
+		RuntimeEscalation:  buildRuntimeEscalationView(aggregate),
+		FaultSummary:       buildFaultSummaryView(aggregate),
+		RepairPlanDraft:    buildRepairPlanDraftSummary(aggregate),
 	}, nil
 }
 
@@ -81,18 +95,27 @@ func loadAcceptanceAggregate(ctx context.Context, db *sql.DB, projectID string) 
 	if err != nil {
 		return nil, err
 	}
+	runBindings, err := listProjectBrainRunBindings(ctx, db, projectID, acceptanceRunsLoadLimit)
+	if err != nil {
+		return nil, err
+	}
 
 	aggregate := &acceptanceAggregate{
 		Project:        *project,
 		AcceptanceRuns: runs,
 		EvidenceItems:  evidenceItems,
 		AuditLogs:      auditLogs,
+		RunBindings:    runBindings,
 	}
 	aggregate.AcceptanceProfile, err = getLatestAcceptanceProfile(ctx, db, projectID)
 	if err != nil {
 		return nil, err
 	}
 	aggregate.ProductionProfile, err = getLatestProductionAcceptanceProfile(ctx, db, projectID)
+	if err != nil {
+		return nil, err
+	}
+	aggregate.RepairDraft, err = getLatestRepairDraftForProject(ctx, db, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -436,6 +459,8 @@ LIMIT ?`
 }
 
 func buildAcceptanceRunView(data *acceptanceAggregate) acceptancev1.AcceptanceRunView {
+	releaseGate := buildAcceptanceReleaseGate(data)
+	blockingCount := countBlockingIssues(data.Issues)
 	if data.LatestAcceptanceRun == nil {
 		return acceptancev1.AcceptanceRunView{
 			ID:                     "",
@@ -444,6 +469,9 @@ func buildAcceptanceRunView(data *acceptanceAggregate) acceptancev1.AcceptanceRu
 			ProductionStatus:       normalizeProductionStatus(data.Project.ProductionStatus),
 			ManualReleaseRequired:  false,
 			LatestJudgementSummary: "",
+			ReleaseGateStatus:      releaseGate.Status,
+			NextAction:             releaseGate.NextAction,
+			BlockingIssueCount:     blockingCount,
 		}
 	}
 
@@ -456,6 +484,9 @@ func buildAcceptanceRunView(data *acceptanceAggregate) acceptancev1.AcceptanceRu
 		ProductionStatus:      normalizeProductionStatus(data.LatestAcceptanceRun.ProductionStatus),
 		ManualReleaseRequired: data.LatestAcceptanceRun.ManualReleaseRequired == 1,
 		FinishedAt:            strings.TrimSpace(data.LatestAcceptanceRun.FinishedAt),
+		ReleaseGateStatus:     releaseGate.Status,
+		NextAction:            releaseGate.NextAction,
+		BlockingIssueCount:    blockingCount,
 	}
 	if len(data.Judgements) > 0 {
 		view.LatestJudgementKind = strings.TrimSpace(data.Judgements[0].JudgementKind)
@@ -464,6 +495,333 @@ func buildAcceptanceRunView(data *acceptanceAggregate) acceptancev1.AcceptanceRu
 		view.LatestJudgementAt = strings.TrimSpace(data.Judgements[0].CreatedAt)
 	}
 	return view
+}
+
+func buildAcceptanceOverview(data *acceptanceAggregate) acceptancev1.AcceptanceOverview {
+	var (
+		releaseGate      = buildAcceptanceReleaseGate(data)
+		coverageMatrix   = buildAcceptanceCoverageMatrix(data)
+		acceptanceRun    = buildAcceptanceRunView(data)
+		coveredItemCount int
+	)
+
+	for _, item := range coverageMatrix {
+		switch normalizeCoverageStatus(item.CoverageStatus) {
+		case "covered", "ready", "passed":
+			coveredItemCount++
+		}
+	}
+
+	return acceptancev1.AcceptanceOverview{
+		ProjectID:           data.Project.Id,
+		CurrentStage:        normalizeProjectStage(data.Project.Status),
+		OverallStatus:       releaseGate.Status,
+		FunctionalStatus:    acceptanceRun.FunctionalStatus,
+		ProductionStatus:    acceptanceRun.ProductionStatus,
+		ReleaseGateStatus:   releaseGate.Status,
+		NextAction:          releaseGate.NextAction,
+		BlockingIssueCount:  countBlockingIssues(data.Issues),
+		CoveredItemCount:    coveredItemCount,
+		RequiredItemCount:   len(coverageMatrix),
+		EvidenceCardCount:   len(data.EvidenceItems),
+		ManualReleaseNeeded: acceptanceRun.ManualReleaseRequired,
+	}
+}
+
+func buildVerificationResultView(data *acceptanceAggregate) acceptancev1.VerificationResultView {
+	requiredChecks := []string{"acceptance_profile", "coverage_matrix", "evidence_artifacts"}
+	requiredEvidence := []string(nil)
+	if data.ProductionProfile != nil {
+		if items := parseStringArrayJSON(data.ProductionProfile.ReleaseRequirementsJSON); len(items) > 0 {
+			requiredChecks = items
+		}
+		requiredEvidence = parseStringArrayJSON(data.ProductionProfile.RequiredEvidenceJSON)
+	}
+
+	failedChecks := make([]string, 0, len(data.Issues))
+	for _, issue := range data.Issues {
+		label := firstNonEmpty(strings.TrimSpace(issue.IssueKind), strings.TrimSpace(issue.Summary), issue.Id)
+		if label != "" {
+			failedChecks = append(failedChecks, label)
+		}
+	}
+
+	missingEvidence := make([]string, 0, len(requiredEvidence))
+	evidenceReady := buildAcceptanceOverview(data).EvidenceCardCount
+	if len(requiredEvidence) > evidenceReady {
+		missingEvidence = append(missingEvidence, requiredEvidence[evidenceReady:]...)
+	}
+
+	status := "pending"
+	decision := "continue_verification"
+	completed := false
+	summary := "Verification is waiting for acceptance evidence."
+	if len(failedChecks) > 0 {
+		status = "failed"
+		decision = "repair_required"
+		summary = fmt.Sprintf("%d verification check(s) failed", len(failedChecks))
+	} else if len(missingEvidence) > 0 {
+		status = "incomplete"
+		decision = "collect_evidence"
+		summary = fmt.Sprintf("%d required evidence item(s) are still missing", len(missingEvidence))
+	} else if data.LatestAcceptanceRun != nil {
+		status = "passed"
+		decision = "ready_for_completion"
+		completed = true
+		summary = "Verification requirements are currently satisfied."
+	}
+
+	return acceptancev1.VerificationResultView{
+		Status:                   status,
+		PreferredChannel:         "github_actions",
+		RequiredChecks:           requiredChecks,
+		RequiredEvidence:         requiredEvidence,
+		MissingEvidence:          missingEvidence,
+		FailedChecks:             failedChecks,
+		VerificationContractJSON: "",
+		SourceRunID:              firstNonEmpty(strings.TrimSpace(acceptanceRunID(data)), strings.TrimSpace(data.Project.Id)),
+		UpdatedAt:                firstNonEmpty(latestAcceptanceUpdatedAt(data), strings.TrimSpace(data.Project.UpdatedAt)),
+		Decision:                 decision,
+		Completed:                completed,
+		Summary:                  summary,
+	}
+}
+
+func buildCompletionVerdictView(data *acceptanceAggregate) acceptancev1.CompletionVerdictView {
+	verification := buildVerificationResultView(data)
+	manualReleaseRequired := data.LatestAcceptanceRun != nil && data.LatestAcceptanceRun.ManualReleaseRequired == 1
+	manualReviewRequired := manualReleaseRequired
+	for _, issue := range data.Issues {
+		if issue.Blocking == 1 {
+			manualReviewRequired = true
+			break
+		}
+	}
+
+	decision := "pending"
+	finalStatus := ""
+	reason := "Awaiting acceptance adjudication."
+	completed := false
+	manualReleaseCompleted := false
+
+	switch verification.Status {
+	case "failed":
+		decision = "rework"
+		finalStatus = "reworking"
+		reason = verification.Summary
+	case "incomplete":
+		decision = "collect_evidence"
+		finalStatus = "accepting"
+		reason = verification.Summary
+	case "passed":
+		if manualReleaseRequired {
+			decision = "manual_review"
+			finalStatus = "accepting"
+			reason = "Verification passed, but manual release confirmation is still required."
+		} else {
+			decision = "complete"
+			finalStatus = "completed"
+			reason = "Verification passed and no manual release hold remains."
+			completed = true
+			manualReleaseCompleted = true
+		}
+	}
+
+	return acceptancev1.CompletionVerdictView{
+		Decision:               decision,
+		FinalStatus:            finalStatus,
+		Reason:                 reason,
+		ManualReviewRequired:   manualReviewRequired,
+		ManualReleaseRequired:  manualReleaseRequired,
+		ManualReleaseCompleted: manualReleaseCompleted,
+		ReleaseReady:           completed,
+		BlockerCount:           countBlockingIssues(data.Issues),
+		NextAction:             verification.Decision,
+		UpdatedAt:              firstNonEmpty(latestAcceptanceUpdatedAt(data), strings.TrimSpace(data.Project.UpdatedAt)),
+		Completed:              completed,
+		Summary:                reason,
+	}
+}
+
+func buildRuntimeEscalationView(data *acceptanceAggregate) acceptancev1.RuntimeEscalationView {
+	for _, binding := range data.RunBindings {
+		status := normalizeBindingStatus(binding.RunStatus)
+		if !bindingNeedsAttention(status) {
+			continue
+		}
+		reasonClass := "runtime_attention"
+		policyDenied := false
+		switch status {
+		case "run_denied":
+			reasonClass = "policy_denied"
+			policyDenied = true
+		case "run_unsupported":
+			reasonClass = "capability_gap"
+		case "run_failed":
+			reasonClass = "execution_failed"
+		}
+		return acceptancev1.RuntimeEscalationView{
+			Status:       "escalated",
+			ReasonClass:  reasonClass,
+			SourceBrain:  strings.TrimSpace(binding.BrainKind),
+			SourceTaskID: strings.TrimSpace(binding.TaskId),
+			RunBindingID: strings.TrimSpace(binding.Id),
+			RunStatus:    status,
+			Severity:     deriveBindingSeverity(status),
+			Action:       "open_task_review",
+			TaskID:       strings.TrimSpace(binding.TaskId),
+			RunID:        firstNonEmpty(strings.TrimSpace(binding.BrainRunId), strings.TrimSpace(binding.Id)),
+			UpdatedAt:    firstNonEmpty(strings.TrimSpace(binding.LastSyncAt), strings.TrimSpace(binding.UpdatedAt)),
+			Summary:      deriveBindingInboxTitle(binding, nil),
+			PolicyDenied: policyDenied,
+		}
+	}
+	return acceptancev1.RuntimeEscalationView{
+		Status: "none",
+	}
+}
+
+func buildFaultSummaryView(data *acceptanceAggregate) acceptancev1.FaultSummaryView {
+	blocking := 0
+	advisory := 0
+	topIssue := ""
+	for _, issue := range data.Issues {
+		if strings.TrimSpace(topIssue) == "" {
+			topIssue = firstNonEmpty(strings.TrimSpace(issue.Summary), strings.TrimSpace(issue.IssueKind), issue.Id)
+		}
+		if issue.Blocking == 1 {
+			blocking++
+		} else {
+			advisory++
+		}
+	}
+
+	faultLoopDetected := false
+	failedRuns := 0
+	for _, run := range data.AcceptanceRuns {
+		if normalizeAcceptanceRunStatus(run.Status) == "failed" {
+			failedRuns++
+		}
+	}
+	if failedRuns >= 2 && data.RepairDraft != nil {
+		faultLoopDetected = true
+	}
+
+	status := "healthy"
+	if blocking > 0 {
+		status = "blocking"
+	} else if advisory > 0 || faultLoopDetected {
+		status = "attention"
+	}
+
+	return acceptancev1.FaultSummaryView{
+		Status:             status,
+		BlockingIssueCount: blocking,
+		AdvisoryIssueCount: advisory,
+		TopIssue:           topIssue,
+		FaultLoopDetected:  faultLoopDetected,
+		FaultKind:          firstNonEmpty(topIssue, status),
+		Severity:           deriveFaultSeverity(blocking, advisory),
+		Summary:            deriveFaultSummaryText(status, topIssue, blocking, advisory, faultLoopDetected),
+		FailedChecks:       summarizeIssueLabels(data.Issues),
+		AffectedTasks:      summarizeEscalatedTasks(data.RunBindings),
+		UpdatedAt:          firstNonEmpty(latestAcceptanceUpdatedAt(data), strings.TrimSpace(data.Project.UpdatedAt)),
+	}
+}
+
+func buildRepairPlanDraftSummary(data *acceptanceAggregate) acceptancev1.RepairPlanDraftSummary {
+	if data.RepairDraft == nil {
+		return acceptancev1.RepairPlanDraftSummary{
+			Status: "idle",
+		}
+	}
+	return acceptancev1.RepairPlanDraftSummary{
+		ID:                   strings.TrimSpace(data.RepairDraft.ID),
+		Status:               normalizePlanState(data.RepairDraft.Status, "ready"),
+		ReasonClass:          "acceptance_failure",
+		RepairStrategy:       "repair_plan_draft",
+		ReasoningSummary:     strings.TrimSpace(data.RepairDraft.RepairReasoningSummary),
+		Summary:              strings.TrimSpace(data.RepairDraft.RepairReasoningSummary),
+		UpdatedTasks:         summarizeEscalatedTasks(data.RunBindings),
+		ManualReviewRequired: buildCompletionVerdictView(data).ManualReviewRequired,
+		UpdatedAt:            strings.TrimSpace(data.RepairDraft.UpdatedAt),
+	}
+}
+
+func acceptanceRunID(data *acceptanceAggregate) string {
+	if data.LatestAcceptanceRun == nil {
+		return ""
+	}
+	return data.LatestAcceptanceRun.Id
+}
+
+func latestAcceptanceUpdatedAt(data *acceptanceAggregate) string {
+	if data.LatestAcceptanceRun != nil {
+		return firstNonEmpty(strings.TrimSpace(data.LatestAcceptanceRun.FinishedAt), strings.TrimSpace(data.LatestAcceptanceRun.CreatedAt))
+	}
+	if len(data.Judgements) > 0 {
+		return strings.TrimSpace(data.Judgements[0].CreatedAt)
+	}
+	return ""
+}
+
+func deriveFaultSeverity(blocking, advisory int) string {
+	switch {
+	case blocking > 0:
+		return "error"
+	case advisory > 0:
+		return "warning"
+	default:
+		return "info"
+	}
+}
+
+func deriveFaultSummaryText(status, topIssue string, blocking, advisory int, faultLoopDetected bool) string {
+	switch {
+	case faultLoopDetected && topIssue != "":
+		return "Repeated acceptance faults detected: " + topIssue
+	case faultLoopDetected:
+		return "Repeated acceptance faults detected."
+	case status == "blocking" && topIssue != "":
+		return topIssue
+	case status == "attention" && advisory > 0:
+		return fmt.Sprintf("%d advisory acceptance issue(s) remain open", advisory)
+	default:
+		return "No blocking acceptance fault is currently aggregated."
+	}
+}
+
+func summarizeIssueLabels(items []entity.AcceptanceIssues) []string {
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		label := firstNonEmpty(strings.TrimSpace(item.Summary), strings.TrimSpace(item.IssueKind), item.Id)
+		if label == "" {
+			continue
+		}
+		result = append(result, label)
+		if len(result) >= 5 {
+			break
+		}
+	}
+	return result
+}
+
+func summarizeEscalatedTasks(bindings []entity.BrainRunBindings) []string {
+	result := make([]string, 0, len(bindings))
+	for _, item := range bindings {
+		if !bindingNeedsAttention(item.RunStatus) {
+			continue
+		}
+		label := firstNonEmpty(strings.TrimSpace(item.TaskId), strings.TrimSpace(item.Id))
+		if label == "" {
+			continue
+		}
+		result = append(result, label)
+		if len(result) >= 5 {
+			break
+		}
+	}
+	return result
 }
 
 func buildAcceptanceCoverageMatrix(data *acceptanceAggregate) []acceptancev1.CoverageItem {
@@ -538,10 +896,14 @@ func buildAcceptanceIssues(data *acceptanceAggregate) []acceptancev1.AcceptanceI
 	items := make([]acceptancev1.AcceptanceIssue, 0, len(data.Issues))
 	for _, issue := range data.Issues {
 		items = append(items, acceptancev1.AcceptanceIssue{
-			ID:       issue.Id,
-			Severity: normalizeSeverity(issue.Severity),
-			Blocking: issue.Blocking == 1,
-			Summary:  firstNonEmpty(issue.Summary, fmt.Sprintf("Acceptance issue: %s", issue.IssueKind)),
+			ID:              issue.Id,
+			AcceptanceRunID: strings.TrimSpace(issue.AcceptanceRunId),
+			Severity:        normalizeSeverity(issue.Severity),
+			IssueKind:       strings.TrimSpace(issue.IssueKind),
+			Blocking:        issue.Blocking == 1,
+			Summary:         firstNonEmpty(issue.Summary, fmt.Sprintf("Acceptance issue: %s", issue.IssueKind)),
+			DetailJSON:      strings.TrimSpace(issue.DetailJson),
+			CreatedAt:       strings.TrimSpace(issue.CreatedAt),
 		})
 	}
 	return items

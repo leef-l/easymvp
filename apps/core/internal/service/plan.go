@@ -104,6 +104,7 @@ func (s *sPlan) GetPlanView(ctx context.Context, projectID string) (res *planv1.
 	}
 
 	return &planv1.PlanViewRes{
+		Overview:       data.Overview,
 		Draft:          data.Draft,
 		Review:         data.Review,
 		Compiled:       data.Compiled,

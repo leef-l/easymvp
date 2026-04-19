@@ -8,6 +8,7 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 
+	acceptancev1 "github.com/leef-l/easymvp/apps/core/api/acceptance/v1"
 	projectsv1 "github.com/leef-l/easymvp/apps/core/api/projects/v1"
 	"github.com/leef-l/easymvp/apps/core/internal/dao"
 	"github.com/leef-l/easymvp/apps/core/internal/model/braincontracts"
@@ -20,12 +21,18 @@ const (
 )
 
 type projectWorkspaceData struct {
+	Overview             projectsv1.WorkspaceOverview
 	ProjectSnapshot      projectsv1.ProjectSnapshot
 	StageProgress        []projectsv1.StageProgressItem
 	LiveActivity         []projectsv1.LiveActivityItem
 	ActionInbox          []projectsv1.ActionInboxItem
 	AcceptanceCoverage   projectsv1.AcceptanceCoverage
 	WorkspaceExplanation projectsv1.WorkspaceExplanation
+	VerificationResult   acceptancev1.VerificationResultView
+	CompletionVerdict    acceptancev1.CompletionVerdictView
+	RuntimeEscalation    acceptancev1.RuntimeEscalationView
+	FaultSummary         acceptancev1.FaultSummaryView
+	RepairPlanDraft      acceptancev1.RepairPlanDraftSummary
 }
 
 type projectWorkspaceAggregate struct {
@@ -61,13 +68,52 @@ func loadProjectWorkspaceData(ctx context.Context, projectID string) (*projectWo
 	workspaceExplanation := buildProjectWorkspaceExplanation(ctx, aggregate, projectSnapshot, stageProgress, liveActivity, actionInbox, acceptanceCoverage)
 
 	return &projectWorkspaceData{
+		Overview:             buildProjectWorkspaceOverview(aggregate, projectSnapshot, actionInbox),
 		ProjectSnapshot:      projectSnapshot,
 		StageProgress:        stageProgress,
 		LiveActivity:         liveActivity,
 		ActionInbox:          actionInbox,
 		AcceptanceCoverage:   acceptanceCoverage,
 		WorkspaceExplanation: workspaceExplanation,
+		VerificationResult:   buildWorkspaceVerificationResult(aggregate, acceptanceCoverage),
+		CompletionVerdict:    buildWorkspaceCompletionVerdict(aggregate, acceptanceCoverage),
+		RuntimeEscalation:    buildWorkspaceRuntimeEscalation(aggregate),
+		FaultSummary:         buildWorkspaceFaultSummary(aggregate),
+		RepairPlanDraft:      buildWorkspaceRepairPlanDraft(aggregate),
 	}, nil
+}
+
+func buildProjectWorkspaceOverview(
+	data *projectWorkspaceAggregate,
+	projectSnapshot projectsv1.ProjectSnapshot,
+	actionInbox []projectsv1.ActionInboxItem,
+) projectsv1.WorkspaceOverview {
+	nextAction := "open_project_plan"
+	if len(actionInbox) > 0 {
+		nextAction = firstNonEmpty(actionInbox[0].RecommendedAction, nextAction)
+	}
+
+	acceptanceRunStatus := ""
+	if data.LatestAcceptanceRun != nil {
+		acceptanceRunStatus = normalizeAcceptanceRunStatus(data.LatestAcceptanceRun.Status)
+	}
+
+	return projectsv1.WorkspaceOverview{
+		ProjectID:            data.Project.Id,
+		CurrentStage:         projectSnapshot.CurrentStage,
+		StageStatus:          deriveProjectStageStatus(data.Project.Status, countBlockingIssues(data.AcceptanceIssues)),
+		RiskLevel:            projectSnapshot.RiskLevel,
+		ProductionStatus:     projectSnapshot.ProductionStatus,
+		NextAction:           nextAction,
+		ActionRequiredCount:  len(actionInbox),
+		BlockingIssueCount:   countBlockingIssues(data.AcceptanceIssues),
+		ManualReleaseNeeded:  projectSnapshot.ManualReleaseNeed,
+		AcceptanceRunStatus:  acceptanceRunStatus,
+		ManualReviewRequired: projectSnapshot.ManualReviewRequired,
+		VerificationConflict: projectSnapshot.VerificationConflict,
+		FaultLoopDetected:    projectSnapshot.FaultLoopDetected,
+		PolicyDenied:         projectSnapshot.PolicyDenied,
+	}
 }
 
 func buildProjectWorkspaceExplanation(
@@ -609,14 +655,18 @@ LIMIT ?`
 
 func buildProjectSnapshot(data *projectWorkspaceAggregate) projectsv1.ProjectSnapshot {
 	return projectsv1.ProjectSnapshot{
-		ProjectID:         data.Project.Id,
-		Name:              data.Project.Name,
-		ProjectCategory:   data.Project.ProjectCategory,
-		CurrentStage:      normalizeProjectStage(data.Project.Status),
-		ProgressPercent:   deriveProjectProgress(data.Project.Status, data.Project.ProductionStatus),
-		RiskLevel:         deriveProjectRiskLevel(data),
-		ProductionStatus:  deriveProjectProductionStatus(data),
-		ManualReleaseNeed: data.LatestAcceptanceRun != nil && data.LatestAcceptanceRun.ManualReleaseRequired == 1,
+		ProjectID:            data.Project.Id,
+		Name:                 data.Project.Name,
+		ProjectCategory:      data.Project.ProjectCategory,
+		CurrentStage:         normalizeProjectStage(data.Project.Status),
+		ProgressPercent:      deriveProjectProgress(data.Project.Status, data.Project.ProductionStatus),
+		RiskLevel:            deriveProjectRiskLevel(data),
+		ProductionStatus:     deriveProjectProductionStatus(data),
+		ManualReleaseNeed:    data.LatestAcceptanceRun != nil && data.LatestAcceptanceRun.ManualReleaseRequired == 1,
+		ManualReviewRequired: projectHasManualReviewRequirement(data),
+		VerificationConflict: projectHasVerificationConflict(data),
+		FaultLoopDetected:    projectHasFaultLoop(data),
+		PolicyDenied:         projectHasPolicyDeniedRun(data),
 	}
 }
 
@@ -895,11 +945,300 @@ func buildProjectAcceptanceCoverage(data *projectWorkspaceAggregate) projectsv1.
 	}
 }
 
+func buildWorkspaceVerificationResult(
+	data *projectWorkspaceAggregate,
+	coverage projectsv1.AcceptanceCoverage,
+) acceptancev1.VerificationResultView {
+	requiredChecks := []string{"acceptance_profile", "coverage_matrix", "evidence_artifacts"}
+	requiredEvidence := []string(nil)
+	if data.ProductionProfile != nil {
+		if items := parseStringArrayJSON(data.ProductionProfile.ReleaseRequirementsJSON); len(items) > 0 {
+			requiredChecks = items
+		}
+		requiredEvidence = parseStringArrayJSON(data.ProductionProfile.RequiredEvidenceJSON)
+	}
+
+	failedChecks := make([]string, 0, len(data.AcceptanceIssues))
+	for _, issue := range data.AcceptanceIssues {
+		label := firstNonEmpty(strings.TrimSpace(issue.IssueKind), strings.TrimSpace(issue.Summary), issue.Id)
+		if label != "" {
+			failedChecks = append(failedChecks, label)
+		}
+	}
+
+	missingEvidence := make([]string, 0, len(requiredEvidence))
+	if len(requiredEvidence) > coverage.EvidenceReady {
+		missingEvidence = append(missingEvidence, requiredEvidence[coverage.EvidenceReady:]...)
+	}
+
+	status := "pending"
+	decision := "continue_verification"
+	completed := false
+	summary := "Workspace is waiting for verification evidence."
+	if len(failedChecks) > 0 {
+		status = "failed"
+		decision = "repair_required"
+		summary = "Blocking acceptance issues require repair."
+	} else if len(missingEvidence) > 0 {
+		status = "incomplete"
+		decision = "collect_evidence"
+		summary = "Verification evidence is still incomplete."
+	} else if coverage.ProductionPassed {
+		status = "passed"
+		decision = "ready_for_completion"
+		completed = true
+		summary = "Verification requirements are currently satisfied."
+	}
+
+	return acceptancev1.VerificationResultView{
+		Status:                   status,
+		Decision:                 decision,
+		Completed:                completed,
+		Summary:                  summary,
+		PreferredChannel:         "github_actions",
+		RequiredChecks:           requiredChecks,
+		RequiredEvidence:         requiredEvidence,
+		MissingEvidence:          missingEvidence,
+		FailedChecks:             failedChecks,
+		VerificationContractJSON: "",
+		SourceRunID:              firstNonEmpty(latestWorkspaceRunID(data), data.Project.Id),
+		UpdatedAt:                firstNonEmpty(latestWorkspaceUpdateAt(data), data.Project.UpdatedAt),
+	}
+}
+
+func buildWorkspaceCompletionVerdict(
+	data *projectWorkspaceAggregate,
+	coverage projectsv1.AcceptanceCoverage,
+) acceptancev1.CompletionVerdictView {
+	verification := buildWorkspaceVerificationResult(data, coverage)
+	manualReleaseRequired := data.LatestAcceptanceRun != nil && data.LatestAcceptanceRun.ManualReleaseRequired == 1
+	manualReviewRequired := projectHasManualReviewRequirement(data)
+	decision := "pending"
+	finalStatus := ""
+	reason := "Workspace is awaiting completion verdict."
+	completed := false
+	manualReleaseCompleted := false
+
+	switch verification.Status {
+	case "failed":
+		decision = "rework"
+		finalStatus = "reworking"
+		reason = verification.Summary
+	case "incomplete":
+		decision = "collect_evidence"
+		finalStatus = "accepting"
+		reason = verification.Summary
+	case "passed":
+		if manualReleaseRequired {
+			decision = "manual_review"
+			finalStatus = "accepting"
+			reason = "Verification passed, but manual release confirmation is still required."
+		} else {
+			decision = "complete"
+			finalStatus = "completed"
+			reason = "Verification passed and the project can move to completed."
+			completed = true
+			manualReleaseCompleted = true
+		}
+	}
+
+	return acceptancev1.CompletionVerdictView{
+		Decision:               decision,
+		FinalStatus:            finalStatus,
+		Reason:                 reason,
+		ManualReviewRequired:   manualReviewRequired,
+		ManualReleaseRequired:  manualReleaseRequired,
+		ManualReleaseCompleted: manualReleaseCompleted,
+		ReleaseReady:           completed,
+		BlockerCount:           countBlockingIssues(data.AcceptanceIssues),
+		NextAction:             verification.Decision,
+		UpdatedAt:              firstNonEmpty(latestWorkspaceUpdateAt(data), data.Project.UpdatedAt),
+		Completed:              completed,
+		Summary:                reason,
+	}
+}
+
+func buildWorkspaceRuntimeEscalation(data *projectWorkspaceAggregate) acceptancev1.RuntimeEscalationView {
+	for _, binding := range data.RunBindings {
+		status := normalizeBindingStatus(binding.RunStatus)
+		if !bindingNeedsAttention(status) {
+			continue
+		}
+		reasonClass := "runtime_attention"
+		policyDenied := false
+		switch status {
+		case "run_denied":
+			reasonClass = "policy_denied"
+			policyDenied = true
+		case "run_unsupported":
+			reasonClass = "capability_gap"
+		case "run_failed":
+			reasonClass = "execution_failed"
+		}
+		return acceptancev1.RuntimeEscalationView{
+			Status:       "escalated",
+			ReasonClass:  reasonClass,
+			SourceBrain:  strings.TrimSpace(binding.BrainKind),
+			SourceTaskID: strings.TrimSpace(binding.TaskId),
+			RunBindingID: strings.TrimSpace(binding.Id),
+			RunStatus:    status,
+			Severity:     deriveBindingSeverity(status),
+			Action:       "open_task_review",
+			TaskID:       strings.TrimSpace(binding.TaskId),
+			RunID:        firstNonEmpty(strings.TrimSpace(binding.BrainRunId), strings.TrimSpace(binding.Id)),
+			UpdatedAt:    firstNonEmpty(strings.TrimSpace(binding.LastSyncAt), strings.TrimSpace(binding.UpdatedAt)),
+			Summary:      deriveBindingInboxTitle(binding, data.Tasks),
+			PolicyDenied: policyDenied,
+		}
+	}
+	return acceptancev1.RuntimeEscalationView{Status: "none"}
+}
+
+func buildWorkspaceFaultSummary(data *projectWorkspaceAggregate) acceptancev1.FaultSummaryView {
+	blocking := 0
+	advisory := 0
+	topIssue := ""
+	failedChecks := make([]string, 0, len(data.AcceptanceIssues))
+	affectedTasks := make([]string, 0, len(data.Tasks))
+	for _, issue := range data.AcceptanceIssues {
+		label := firstNonEmpty(strings.TrimSpace(issue.Summary), strings.TrimSpace(issue.IssueKind), issue.Id)
+		if strings.TrimSpace(topIssue) == "" {
+			topIssue = label
+		}
+		if label != "" {
+			failedChecks = append(failedChecks, label)
+		}
+		if issue.Blocking == 1 {
+			blocking++
+		} else {
+			advisory++
+		}
+	}
+	for _, task := range data.Tasks {
+		if task.ManualReviewRequired == 1 || isBlockingTaskStatus(task.Status) {
+			affectedTasks = append(affectedTasks, firstNonEmpty(strings.TrimSpace(task.Name), task.Id))
+		}
+		if len(affectedTasks) >= 5 {
+			break
+		}
+	}
+	status := "healthy"
+	if blocking > 0 {
+		status = "blocking"
+	} else if advisory > 0 || projectHasFaultLoop(data) {
+		status = "attention"
+	}
+	return acceptancev1.FaultSummaryView{
+		Status:             status,
+		BlockingIssueCount: blocking,
+		AdvisoryIssueCount: advisory,
+		TopIssue:           topIssue,
+		FaultLoopDetected:  projectHasFaultLoop(data),
+		FaultKind:          firstNonEmpty(topIssue, status),
+		Severity:           deriveFaultSeverity(blocking, advisory),
+		Summary:            deriveFaultSummaryText(status, topIssue, blocking, advisory, projectHasFaultLoop(data)),
+		FailedChecks:       failedChecks,
+		AffectedTasks:      affectedTasks,
+		UpdatedAt:          firstNonEmpty(latestWorkspaceUpdateAt(data), data.Project.UpdatedAt),
+	}
+}
+
+func buildWorkspaceRepairPlanDraft(data *projectWorkspaceAggregate) acceptancev1.RepairPlanDraftSummary {
+	if data.RepairDraft == nil {
+		return acceptancev1.RepairPlanDraftSummary{Status: "idle"}
+	}
+	updatedTasks := make([]string, 0, 4)
+	for _, task := range data.Tasks {
+		if task.ManualReviewRequired == 1 || isBlockingTaskStatus(task.Status) {
+			updatedTasks = append(updatedTasks, firstNonEmpty(strings.TrimSpace(task.Name), task.Id))
+		}
+		if len(updatedTasks) >= 4 {
+			break
+		}
+	}
+	return acceptancev1.RepairPlanDraftSummary{
+		ID:                   strings.TrimSpace(data.RepairDraft.ID),
+		Status:               normalizePlanState(data.RepairDraft.Status, "ready"),
+		ReasonClass:          "acceptance_failure",
+		RepairStrategy:       "repair_plan_draft",
+		ReasoningSummary:     strings.TrimSpace(data.RepairDraft.RepairReasoningSummary),
+		Summary:              strings.TrimSpace(data.RepairDraft.RepairReasoningSummary),
+		UpdatedAt:            strings.TrimSpace(data.RepairDraft.UpdatedAt),
+		UpdatedTasks:         updatedTasks,
+		ManualReviewRequired: projectHasManualReviewRequirement(data),
+	}
+}
+
+func latestWorkspaceRunID(data *projectWorkspaceAggregate) string {
+	if data.LatestAcceptanceRun != nil {
+		return strings.TrimSpace(data.LatestAcceptanceRun.Id)
+	}
+	if len(data.RunBindings) > 0 {
+		return firstNonEmpty(strings.TrimSpace(data.RunBindings[0].BrainRunId), strings.TrimSpace(data.RunBindings[0].Id))
+	}
+	return ""
+}
+
+func latestWorkspaceUpdateAt(data *projectWorkspaceAggregate) string {
+	if data.LatestAcceptanceRun != nil {
+		return firstNonEmpty(strings.TrimSpace(data.LatestAcceptanceRun.FinishedAt), strings.TrimSpace(data.LatestAcceptanceRun.CreatedAt))
+	}
+	if len(data.RunBindings) > 0 {
+		return firstNonEmpty(strings.TrimSpace(data.RunBindings[0].LastSyncAt), strings.TrimSpace(data.RunBindings[0].UpdatedAt))
+	}
+	return ""
+}
+
 func deriveProjectProductionStatus(data *projectWorkspaceAggregate) string {
 	if data.LatestAcceptanceRun != nil && strings.TrimSpace(data.LatestAcceptanceRun.ProductionStatus) != "" {
 		return normalizeProductionStatus(data.LatestAcceptanceRun.ProductionStatus)
 	}
 	return normalizeProductionStatus(data.Project.ProductionStatus)
+}
+
+func projectHasManualReviewRequirement(data *projectWorkspaceAggregate) bool {
+	if data.LatestAcceptanceRun != nil && data.LatestAcceptanceRun.ManualReleaseRequired == 1 {
+		return true
+	}
+	for _, task := range data.Tasks {
+		if task.ManualReviewRequired == 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func projectHasVerificationConflict(data *projectWorkspaceAggregate) bool {
+	if countBlockingIssues(data.AcceptanceIssues) == 0 {
+		return false
+	}
+	if data.LatestAcceptanceRun == nil {
+		return false
+	}
+	if isFunctionalPassed(data.LatestAcceptanceRun.FunctionalStatus) || isProductionReady(data.LatestAcceptanceRun.ProductionStatus) {
+		return true
+	}
+	return data.LatestAcceptanceRun.ManualReleaseRequired == 1
+}
+
+func projectHasFaultLoop(data *projectWorkspaceAggregate) bool {
+	failedCount := 0
+	for _, run := range data.AcceptanceRuns {
+		switch normalizeAcceptanceRunStatus(run.Status) {
+		case "failed", "blocked":
+			failedCount++
+		}
+	}
+	return failedCount >= 2 && data.RepairDraft != nil
+}
+
+func projectHasPolicyDeniedRun(data *projectWorkspaceAggregate) bool {
+	for _, binding := range data.RunBindings {
+		if normalizeBindingStatus(binding.RunStatus) == "run_denied" {
+			return true
+		}
+	}
+	return false
 }
 
 func deriveProjectRiskLevel(data *projectWorkspaceAggregate) string {

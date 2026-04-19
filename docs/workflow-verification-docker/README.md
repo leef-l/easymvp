@@ -88,9 +88,9 @@
   - `vite build --mode production` 在 `heap=768MB` 下会在 `transforming...` 阶段被 `1G` 限制终止，退出码 `143`
 - 这意味着：当前 `web-antd` 的 full typecheck/build 不是“还没跑”，而是“已确认无法在 1 core / 1G 限制下完整通过”
 - 在同一条硬限制下，`objective / situation / dashboard / execution / review / accept / verification / autonomy` 8 个 `workflow` 页面已通过单入口类型检查
-- 当前还额外具备 `workflow` 最小 bundle、单页面 bundle、轻量验证构建这三条静态补齐的构建验证入口；它们都应继续遵守同样的 `1 core / 1G` 硬限制
+- 当前还额外具备 `workflow` 最小 bundle、单页面 bundle、轻量验证构建这三条静态补齐链路；它们都应继续遵守同样的 `1 core / 1G` 硬限制，并且只允许由 GitHub Actions workflow 调用
 - 其中轻量验证构建当前还会关闭附加插件，并禁用 `minify / cssMinify / reportCompressedSize / modulePreload / treeshake`，优先降低验证峰值
-- 这些拆分验证路径可作为当前 `workflow` 控制台改动的受限验证入口，但它们不能替代 full typecheck/build
+- 这些拆分验证路径当前只应作为 GitHub Actions 内部受限 job 的实现资产，不再作为人工、本机或 AI 会话的直接验证入口；同时它们不能替代 full typecheck/build
 - 若后续必须坚持这条资源上限，下一步应继续降低 full typecheck/build 峰值，而不是恢复裸跑
 
 当前 `.easymvp/verification.json` 建议只保留 GitHub Actions 验证模式声明，例如：

@@ -3,6 +3,8 @@
 > 更新时间：2026-04-19
 > 上游文档：[EasyMVP-V3-AgentTeam开机计划总表](./EasyMVP-V3-AgentTeam开机计划总表.md)
 > 目标：作为持续更新的执行状态面板，在中断后可直接恢复当前推进位置。
+>
+> 口径说明：本文保留的大量 `go test`、`npm run build`、`cd apps/desktop && npm run build` 均为历史完成证据，不代表当前仍允许本机执行。现行正式验证入口统一只认 GitHub Actions workflow run、日志、artifact 与 `.easymvp/ci/latest.json`。
 
 ## 1. 当前总状态
 
@@ -10,10 +12,10 @@
 |---|---|---|---|
 | docs-finalization | done | `easymvp-brain`、AgentTeam 计划/实施、页面聚合、Evidence、事件流、实现架构、重启接续等文档已统一到同一套边界语义 | 2026-04-19 |
 | backend-core | in_progress | 基础查询、项目创建、runtime adapter、replay 查询、worker manager、workspace SSE 首版均已可用；`plan compile -> domain_tasks` 桥接、acceptance profile refresh、`acceptance-runs.task_id`、repair API `artifact_refs`、run terminal 自动 adjudication、workspace snapshot 真刷新、manual release 命令入口、audit 日志列表 API、formal replay/log 写侧首版均已落地，当前主要剩更厚的 replay 语义投影与端到端联调 | 2026-04-19 |
-| frontend-workbench | in_progress | `apps/desktop` 已完成应用壳、统一 API client、基础 Query/Recovery 协议，以及 Workspace / Plan / Execution / Acceptance / Settings 页面接线；本轮继续补了创建项目入口、Diagnostics 页面、Execution 深链、manual release 按钮、Audit 页面与 Replay 路由别名，并修正 replay summary/timeline/detail 契约消费、diagnostics→replay/audit 跳转与 audit pretty-json 展示，`npm run build` 已通过 | 2026-04-19 |
+| frontend-workbench | in_progress | `apps/desktop` 已完成应用壳、统一 API client、基础 Query/Recovery 协议，以及 Workspace / Plan / Execution / Acceptance / Settings 页面接线；本轮继续补了 desktop runtime 探活、启动分流、Recovery 页面、safe-mode/normal-mode 重启动作、目录选择与 data dir 原生操作，并新增 diagnostics/recovery JSON 导出与 core working dir 原生打开动作，当前主要剩更厚的恢复视图与更多诊断上下文消费 | 2026-04-19 |
 | runtime-storage | done | migration、dao/entity/do、项目目录初始化、runtime adapter、replay 正式索引链路都已验证通过，当前进入维护与投影增强阶段 | 2026-04-19 |
-| domain-brain | in_progress | `BE-019 / P-BR-001` 已完成；`BE-020 / P-BR-002` 已补统一客户端骨架、合同 DTO 的 `json.RawMessage` 编码修正，以及 `plan_review / plan_compile / acceptance_mapping / completion_adjudication / repair_design / workspace_explanation` typed wrapper；`BE-021 / P-BR-003` 已落 `plan compile -> domain_tasks`、acceptance mapping/profile refresh、acceptance start、repair API artifact refs、workspace explain 与自动 adjudication 首版链路 | 2026-04-19 |
-| agent-team | in_progress | 总章程、总表、状态板、后端/前端/运行时专项计划已重排，已把新关键路径切到 domain-brain lane | 2026-04-19 |
+| domain-brain | done | `BE-019 / P-BR-001`、`BE-020 / P-BR-002`、`BE-021 / P-BR-003` 与 `BE-022` 已完成主链路收口：统一客户端、typed wrapper、plan compile -> domain_tasks、acceptance mapping/profile refresh、completion adjudication、repair draft、workspace explanation 均已真实落地并被业务读写链路消费 | 2026-04-19 |
+| agent-team | in_progress | 总章程、总表、状态板、后端/前端/运行时专项计划已重排；当前关键路径已从 domain-brain lane 切到 desktop/runtime 启动握手与恢复链 | 2026-04-19 |
 
 ## 2. 当前已完成
 
@@ -64,26 +66,26 @@
 45. 已补 `BE-018`/recovery 最小闭环：新增 `GET /api/v3/projects/{project_id}/diagnostic-records`，后端会按 `diagnostic_records.detail_json` 投影 `project_id / task_id / run_id / binding_id`，桌面端 `DiagnosticsPage` 已接入真实诊断记录列表、结构化恢复上下文与跳转入口；`go test ./internal/service/... ./internal/controller/... ./api/...` 与 `cd apps/desktop && npm run build` 已通过
 46. 已继续补 `BE-022` 与 execution 深链闭环：`plan_support_repair.go` 现已按 `failed_task_context / failure_reason / original_contracts / runtime_summary / artifact_refs` 做 repair draft 幂等复用，相同失败上下文不会重复生成新草稿或重复调领域脑；桌面端 `ExecutionPage` 已接入相关 diagnostics 列表、runtime event payload pretty-json，以及从 replay/detail/diagnostics 跳 acceptance / diagnostics 的深链；`go test ./internal/service/... ./internal/controller/... ./api/...` 与 `cd apps/desktop && npm run build` 已通过
 47. 已继续补 `Acceptance -> Repair` 页面联动：`AcceptancePage` 现已接入 related diagnostics、repair context 卡片，并从 issue/diagnostic 卡片直接跳 `Execution / Diagnostics / Repair Draft`；`RepairDraftPage` 现已从 `failed_task_context_json` 解析 task 上下文，并提供回到 `Acceptance / Execution / Diagnostics / Plan` 的真实入口；`cd apps/desktop && npm run build` 已通过
+48. 已继续补 desktop diagnostics / recovery 原生动作：通过 Electron save dialog 可把当前 diagnostics 或 recovery 页面导出为 JSON 包；Recovery 页面同时已补 core working dir 的 reveal/open 动作，便于交接启动期故障事实
 
 ## 3. 当前进行中
 
-1. `BE-020 / P-BR-002` 继续进行中，当前已完成统一客户端骨架与三类 P0 合同 typed wrapper，待继续完成与业务服务的最终收口后关闭
-2. `BE-021 / P-BR-003` 进行中，当前已接通 `plan_review / plan_compile / domain_tasks / acceptance_mapping / acceptance profile refresh / acceptance-runs / repair artifact refs / auto adjudication / workspace snapshot refresh / formal replay-log indexing` 首版写侧链路，并补了 replay metadata 投影与 repair draft 幂等，下一步补 acceptance / replay 读取侧更深消费与联调
-3. `FE-003 / FE-004 / FE-007 / FE-008 / FE-011 / FE-012 / FE-014 / FE-015 / FE-016 / FE-017 / FE-018 / FE-020` 继续进行中，当前主任务已切到 execution / acceptance / diagnostics / audit 更细粒度联动、更多 recovery 视图，以及 diagnostics -> execution -> acceptance -> repair 的页面级联调验证补齐
+1. `FE-007 / FE-015 / FE-016 / FE-017 / FE-018 / FE-020` 继续进行中，当前主任务已切到 diagnostics / recovery / acceptance / repair 更细粒度联动，以及更多恢复态、诊断导出与结构化诊断上下文消费
+2. `RT-003 / IN-002 / DG-002` 进行中，当前已补启动参数、`safe-mode` 配置入口、startup redirect、Recovery 页面与最小 desktop runtime bridge；下一步继续收口 Electron 托管 Go core、启动失败原因细分展示与诊断导出
 
 文档层当前不再是阻塞项；剩余主工作均转入代码实现与联调。
 
 ## 4. 当前待做
 
-1. 完成 `BE-020 / P-BR-002` 的业务服务接线与最终收口
-2. 继续完成 `BE-021 / P-BR-003` 中 acceptance / execution / replay 读取侧对更厚 replay/log 语义投影的消费与收口
-3. 继续把 `workspace_explanation` 的前端消费链路向 execution / acceptance / diagnostics / repair 深化联调
-4. 继续补齐前端 recovery 视图、审计详情结构化展示，以及 acceptance / repair 对诊断上下文的更深消费
-5. 继续完成前后端联调与页面级验证
+1. 继续完成 Electron 托管或显式守护 Go core 的正式启动握手，补齐不只是探活而是可控启动/重连
+2. 继续把 recovery 视图细化到 migration 失败、目录不可写、核心服务不可用等分型展示
+3. 继续补齐诊断导出、恢复建议与更多 data dir / diagnostics 原生动作
+4. 继续完成 acceptance / execution / replay 读取侧对更厚 replay/log 语义投影的消费与收口
+5. 继续把 `workspace_explanation` 的前端消费链路向 execution / acceptance / diagnostics / repair 深化联调
 
 ## 5. 阻塞记录
 
-1. `easymvp-brain` 已进入真实代码层并完成 DTO / client / typed wrapper 首版接线；当前阻塞点不在“是否开工”，而在 completion / repair / explain 三条合同的最终业务收口。
+1. 当前主要阻塞点已从领域脑接线转到 desktop/runtime 启动期恢复链，以及 Electron 对 Go core 的正式托管能力。
 
 ## 6. 更新约定
 

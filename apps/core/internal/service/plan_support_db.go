@@ -17,6 +17,7 @@ import (
 const planTaskProjectionLimit = 64
 
 type planViewData struct {
+	Overview       planv1.PlanOverview
 	Draft          planv1.PlanDraftView
 	Review         planv1.PlanReviewView
 	Compiled       planv1.CompiledPlanView
@@ -64,6 +65,7 @@ func loadPlanViewData(ctx context.Context, projectID string) (*planViewData, err
 	}
 
 	return &planViewData{
+		Overview:       buildPlanOverview(aggregate),
 		Draft:          buildPlanDraftView(aggregate),
 		Review:         buildPlanReviewView(aggregate),
 		Compiled:       buildCompiledPlanView(aggregate),
@@ -691,6 +693,52 @@ func buildPlanDiffSummary(aggregate *planAggregate) planv1.DiffSummary {
 		ReviewIssueCount: reviewIssueCount(aggregate.Review),
 		Summary:          summary,
 		Items:            items,
+	}
+}
+
+func buildPlanOverview(aggregate *planAggregate) planv1.PlanOverview {
+	var (
+		draft      = buildPlanDraftView(aggregate)
+		review     = buildPlanReviewView(aggregate)
+		compiled   = buildCompiledPlanView(aggregate)
+		repair     = buildRepairDraftView(aggregate)
+		tasks      = buildPlanTaskProjection(aggregate)
+		nextAction = "refresh_plan_view"
+		manualCnt  int
+	)
+
+	for _, item := range tasks {
+		if item.ManualReviewRequired {
+			manualCnt++
+		}
+	}
+
+	switch {
+	case repair.Status != "" && repair.Status != "idle":
+		nextAction = "open_repair_draft"
+	case compiled.Status == "ready" || compiled.Status == "active":
+		nextAction = "open_task_projection"
+	case review.Decision == "blocked":
+		nextAction = "resolve_review_issues"
+	case draft.Status == "pending":
+		nextAction = "complete_plan_draft"
+	default:
+		nextAction = "refresh_plan_view"
+	}
+
+	return planv1.PlanOverview{
+		ProjectID:             aggregate.Project.Id,
+		DraftStatus:           draft.Status,
+		ReviewDecision:        review.Decision,
+		CompiledStatus:        compiled.Status,
+		RepairDraftStatus:     repair.Status,
+		CurrentStage:          normalizeProjectStage(aggregate.Project.Status),
+		NextAction:            nextAction,
+		TaskCount:             len(tasks),
+		ManualReviewTaskCount: manualCnt,
+		BlockingIssueCount:    review.BlockingIssueCount,
+		AdvisoryIssueCount:    review.AdvisoryIssueCount,
+		CompiledVersion:       compiled.CompiledVersion,
 	}
 }
 

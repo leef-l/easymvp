@@ -1,5 +1,7 @@
 # 2026-04-09 Workflow V2 全链路完成验证
 
+> 历史说明：本文是 2026-04-09 的专项留档，文中受控推进方式和本机接口操作仅表示当时的历史证据，不是当前正式验证入口。现行测试与编译验收统一只认 GitHub Actions。
+
 ## 1. 验证目标
 
 在真实后端服务上验证 Workflow V2 从 `create-project` 开始，经过 `design -> review -> execute -> accept -> complete`，直到项目状态进入 `completed` 的整条链路；同时记录真实问题、完成修复并进行复测。

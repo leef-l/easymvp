@@ -162,10 +162,16 @@ func (s *sAcceptance) GetAcceptanceView(ctx context.Context, projectID string) (
 	}
 
 	return &acceptancev1.AcceptanceViewRes{
-		AcceptanceRun:  data.AcceptanceRun,
-		CoverageMatrix: data.CoverageMatrix,
-		Issues:         data.Issues,
-		EvidenceCards:  data.EvidenceCards,
-		ReleaseGate:    data.ReleaseGate,
+		Overview:           data.Overview,
+		AcceptanceRun:      data.AcceptanceRun,
+		CoverageMatrix:     data.CoverageMatrix,
+		Issues:             data.Issues,
+		EvidenceCards:      data.EvidenceCards,
+		ReleaseGate:        data.ReleaseGate,
+		VerificationResult: data.VerificationResult,
+		CompletionVerdict:  data.CompletionVerdict,
+		RuntimeEscalation:  data.RuntimeEscalation,
+		FaultSummary:       data.FaultSummary,
+		RepairPlanDraft:    data.RepairPlanDraft,
 	}, nil
 }

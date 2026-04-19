@@ -39,6 +39,7 @@ func (s *sWorkspace) GetHomeView(ctx context.Context) (res *workspacev1.HomeView
 	}
 
 	res = &workspacev1.HomeViewRes{
+		Overview: data.Overview,
 		Summary: workspacev1.HomeSummary{
 			TotalProjects:   data.TotalProjects,
 			ActiveProjects:  data.ActiveProjects,
