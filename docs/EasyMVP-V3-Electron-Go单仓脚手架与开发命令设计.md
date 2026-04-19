@@ -55,7 +55,7 @@ docs/
 建议：
 
 1. `go run main.go`
-2. 若需要完整测试/编译验收，改走 GitHub Actions，对应入口见 `.github/workflows/backend-guard.yml`
+2. 若需要完整测试/编译验收，统一以当前 V3 验证脚本和 `apps/core` / `apps/desktop` 的本地构建测试入口为准
 
 ### 3.3 联调开发
 

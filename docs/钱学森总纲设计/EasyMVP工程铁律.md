@@ -70,14 +70,8 @@
 - 后端测试、前端测试、lint、typecheck、bundle、生产构建、Go 二进制编译、镜像构建，统一不得在当前低配宿主机上直接执行。
 - 禁止在宿主机、本地低配开发机、线上低配机器、AI 执行会话中直接执行任何 `go test`、`go build`、`pnpm test`、`npm test`、`pnpm build`、`pnpm exec vite build`、`pnpm exec vue-tsc`、`docker build` 等重验证或重编译命令。
 - 正式验收口径只认**高配验证环境**的结果；当前阶段由于服务器配置不足，GitHub Actions 暂时承担远端高配验证角色，因此现阶段可以接受 GitHub Actions 的 workflow run、日志和 artifact 作为正式验证证据。
-- 需要新增验证项时，优先修改远端验证通道；当前阶段即修改 `.github/workflows/` 或其调用脚本，再通过 `push`、`pull_request` 或 `workflow_dispatch` 触发。
-- 仓库中的 `scripts/web-antd-*-safe.sh` 等本机受控脚本只保留为历史资产或 CI 迁移参考，不再作为最终验收入口。
-
-当前主入口：
-
-- 后端守卫链：`.github/workflows/backend-guard.yml`
-- 后端与部署链：`.github/workflows/deploy.yml`
-- `web-antd` 守卫链：`.github/workflows/web-antd-guard.yml`
+- 需要新增验证项时，优先补齐 V3 主线自己的验证入口，而不是恢复旧链路。
+- 当前仓库的本地验证入口是 `scripts/local-verify-apps-core-desktop.bat` 与 `apps/core` / `apps/desktop` 对应构建测试命令。
 
 ## 铁律 5：服务器负载保护
 
