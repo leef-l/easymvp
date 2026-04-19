@@ -70,6 +70,7 @@ export function WorkspacePage() {
     const deepLink = options?.deepLink?.trim();
     const explicitTargetId = options?.targetId?.trim();
     const targetProjectId = deepLink && !deepLink.startsWith("/") ? deepLink : explicitTargetId || projectId;
+    const targetTaskId = explicitTargetId && explicitTargetId !== projectId ? explicitTargetId : undefined;
 
     if (deepLink) {
       if (deepLink.startsWith("/")) {
@@ -90,11 +91,13 @@ export function WorkspacePage() {
         navigate(buildProjectRoute(targetProjectId, "plan"));
         return;
       case "open_task_review":
-        navigate(buildProjectRoute(targetProjectId, "execution"));
+        navigate(buildProjectRoute(targetProjectId, "execution", { task: targetTaskId }));
         return;
       case "open_acceptance_center":
+        navigate(buildProjectRoute(targetProjectId, "acceptance", { task: targetTaskId }));
+        return;
       case "open_acceptance_issue":
-        navigate(buildProjectRoute(targetProjectId, "acceptance"));
+        navigate(buildProjectRoute(targetProjectId, "acceptance", { task: targetTaskId }));
         return;
       default:
         navigate(buildProjectRoute(targetProjectId, "workspace"));
@@ -180,9 +183,11 @@ export function WorkspacePage() {
                   >
                     <div className="action-card-head">
                       <strong>{item.title}</strong>
-                      <span className={`severity-badge severity-${item.severity}`}>{item.severity}</span>
+                      <span className={`severity-badge severity-${item.severity}`}>{formatInboxBadge(item)}</span>
                     </div>
-                    <p>{item.recommended_action}</p>
+                    <p>
+                      {describeInboxAction(item)} · {item.recommended_action}
+                    </p>
                   </button>
                 ))}
                 {state.data.action_inbox.length === 0 ? (
@@ -273,13 +278,28 @@ export function WorkspacePage() {
               </div>
               <div className="stack-list">
                 {state.data.live_activity.map((item) => (
-                  <article key={item.event_id} className="list-card">
+                  <button
+                    key={item.event_id}
+                    className="action-card"
+                    onClick={() =>
+                      navigate(
+                        item.source_task_id
+                          ? buildProjectRoute(projectId, "execution", { task: item.source_task_id })
+                          : buildProjectRoute(projectId, "execution"),
+                      )
+                    }
+                  >
                     <div className="list-card-head">
                       <strong>{item.title}</strong>
-                      <span className="status-pill">{item.event_type}</span>
+                      <span className={item.requires_action ? "severity-badge severity-warning" : "status-pill"}>
+                        {item.requires_action ? "needs action" : item.event_type}
+                      </span>
                     </div>
-                    <p>{item.source_brain} · {item.occurred_at}</p>
-                  </article>
+                    <p>
+                      {item.source_brain} · {item.occurred_at}
+                      {item.source_task_id ? ` · task ${item.source_task_id}` : ""}
+                    </p>
+                  </button>
                 ))}
                 {state.data.live_activity.length === 0 ? (
                   <article className="list-card">
@@ -314,9 +334,13 @@ export function WorkspacePage() {
               </div>
               <div className="stack-list">
                 {(state.data.workspace_explanation.explain_links ?? []).map((item) => (
-                  <article key={item} className="list-card">
-                    <p>{item}</p>
-                  </article>
+                  <button key={item} className="action-card" onClick={() => handleExplainLink(item, projectId, navigate)}>
+                    <div className="action-card-head">
+                      <strong>{formatExplainLinkLabel(item)}</strong>
+                      <span className="status-pill">{item}</span>
+                    </div>
+                    <p>{describeExplainLink(item)}</p>
+                  </button>
                 ))}
                 {(state.data.workspace_explanation.explain_links?.length ?? 0) === 0 ? (
                   <article className="list-card">
@@ -341,6 +365,99 @@ function MetricCard(props: { label: string; value: string; tone: "calm" | "warn"
   );
 }
 
-function buildProjectRoute(projectId: string, section: "workspace" | "plan" | "execution" | "acceptance" | "repair-draft") {
-  return `/${section}?project=${encodeURIComponent(projectId)}`;
+function buildProjectRoute(
+  projectId: string,
+  section: "workspace" | "plan" | "execution" | "acceptance" | "repair-draft",
+  extraParams?: Record<string, string | undefined>,
+) {
+  const search = new URLSearchParams();
+  search.set("project", projectId);
+  for (const [key, value] of Object.entries(extraParams ?? {})) {
+    if (!value) {
+      continue;
+    }
+    search.set(key, value);
+  }
+  return `/${section}?${search.toString()}`;
+}
+
+function formatInboxBadge(item: WorkspaceView["action_inbox"][number]) {
+  return item.is_blocking ? `${item.severity} · blocking` : item.severity;
+}
+
+function describeInboxAction(item: WorkspaceView["action_inbox"][number]) {
+  if (item.target_id) {
+    return `target ${item.target_id}`;
+  }
+  return item.is_blocking ? "blocking attention item" : "recommended follow-up";
+}
+
+function handleExplainLink(linkKey: string, projectId: string, navigate: ReturnType<typeof useNavigate>) {
+  switch (linkKey) {
+    case "runtime":
+      navigate(`/execution?project=${encodeURIComponent(projectId)}`);
+      return;
+    case "task_review":
+      navigate(`/execution?project=${encodeURIComponent(projectId)}`);
+      return;
+    case "diagnostics":
+      navigate(`/diagnostics?project=${encodeURIComponent(projectId)}`);
+      return;
+    case "replay":
+      navigate(`/replay?project=${encodeURIComponent(projectId)}`);
+      return;
+    case "audit":
+      navigate(`/audit?project=${encodeURIComponent(projectId)}`);
+      return;
+    case "acceptance":
+      navigate(`/acceptance?project=${encodeURIComponent(projectId)}`);
+      return;
+    case "plan":
+      navigate(`/plan?project=${encodeURIComponent(projectId)}`);
+      return;
+    default:
+      navigate(`/workspace?project=${encodeURIComponent(projectId)}`);
+  }
+}
+
+function formatExplainLinkLabel(linkKey: string) {
+  switch (linkKey) {
+    case "runtime":
+      return "Inspect runtime state";
+    case "task_review":
+      return "Review affected task";
+    case "diagnostics":
+      return "Open diagnostics";
+    case "replay":
+      return "Inspect replay timeline";
+    case "audit":
+      return "Review audit records";
+    case "acceptance":
+      return "Open acceptance center";
+    case "plan":
+      return "Open project plan";
+    default:
+      return "Open workspace detail";
+  }
+}
+
+function describeExplainLink(linkKey: string) {
+  switch (linkKey) {
+    case "runtime":
+      return "Jump to the execution board and verify the latest runtime binding, events, and replay artifacts.";
+    case "task_review":
+      return "Open task execution review when workspace explanation recommends manual follow-up.";
+    case "diagnostics":
+      return "Check runtime and system health before retrying the current project workflow.";
+    case "replay":
+      return "Inspect replay artifacts and timeline entries for the most recent run.";
+    case "audit":
+      return "Review persisted audit facts and release actions for this project.";
+    case "acceptance":
+      return "Open acceptance commands, gate status, and issue coverage.";
+    case "plan":
+      return "Return to the latest compiled plan and repair draft context.";
+    default:
+      return "Open the project workspace view.";
+  }
 }

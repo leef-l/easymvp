@@ -16,6 +16,7 @@ export function SettingsPage() {
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState("");
   const [createMessage, setCreateMessage] = useState("");
+  const [createdProjectId, setCreatedProjectId] = useState("");
   const [createPayload, setCreatePayload] = useState<CreateProjectPayload>({
     name: "",
     project_category: "web_app",
@@ -42,16 +43,25 @@ export function SettingsPage() {
     setCreateBusy(true);
     setCreateError("");
     setCreateMessage("");
+    setCreatedProjectId("");
     try {
       const result = await apiPost<CreateProjectResponse>("/api/v3/projects", createPayload);
       const nextProjectId = result.resource_id.trim();
       if (nextProjectId) {
+        setCreatedProjectId(nextProjectId);
         setDraftProjectId(nextProjectId);
         updateProjectId(nextProjectId);
         setStoredProjectId(nextProjectId);
         navigate(buildRoute("/workspace", { project: nextProjectId }));
       }
       setCreateMessage(`${result.next_action} · ${nextProjectId || "project created"}`);
+      setCreatePayload({
+        name: "",
+        project_category: createPayload.project_category,
+        goal_summary: "",
+        workspace_root: createPayload.workspace_root,
+        repo_root: createPayload.repo_root,
+      });
       setSaveTick((value) => value + 1);
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : "Create project failed");
@@ -103,12 +113,14 @@ export function SettingsPage() {
             <section className="data-panel">
               <div className="panel-header">
                 <h3>Create Project</h3>
+                <span className="status-pill">{createBusy ? "creating" : createdProjectId ? "created" : "ready"}</span>
               </div>
               <div className="form-grid">
                 <label className="form-field">
                   <span>Name</span>
                   <input
                     className="project-input"
+                    disabled={createBusy}
                     value={createPayload.name}
                     onChange={(event) => setCreatePayload((current) => ({ ...current, name: event.target.value }))}
                   />
@@ -117,6 +129,7 @@ export function SettingsPage() {
                   <span>Project Category</span>
                   <input
                     className="project-input"
+                    disabled={createBusy}
                     value={createPayload.project_category}
                     onChange={(event) => setCreatePayload((current) => ({ ...current, project_category: event.target.value }))}
                   />
@@ -125,6 +138,7 @@ export function SettingsPage() {
                   <span>Goal Summary</span>
                   <textarea
                     className="project-input project-textarea"
+                    disabled={createBusy}
                     value={createPayload.goal_summary}
                     onChange={(event) => setCreatePayload((current) => ({ ...current, goal_summary: event.target.value }))}
                   />
@@ -133,6 +147,7 @@ export function SettingsPage() {
                   <span>Workspace Root</span>
                   <input
                     className="project-input"
+                    disabled={createBusy}
                     value={createPayload.workspace_root}
                     onChange={(event) => setCreatePayload((current) => ({ ...current, workspace_root: event.target.value }))}
                   />
@@ -141,6 +156,7 @@ export function SettingsPage() {
                   <span>Repo Root</span>
                   <input
                     className="project-input"
+                    disabled={createBusy}
                     value={createPayload.repo_root}
                     onChange={(event) => setCreatePayload((current) => ({ ...current, repo_root: event.target.value }))}
                   />
@@ -149,9 +165,25 @@ export function SettingsPage() {
                   <button className="primary-button" disabled={createBusy} onClick={() => void handleCreateProject()}>
                     {createBusy ? "Creating..." : "Create Project"}
                   </button>
+                  {createdProjectId ? (
+                    <>
+                      <button className="secondary-button" onClick={() => navigate(buildRoute("/workspace", { project: createdProjectId }))}>
+                        Open Workspace
+                      </button>
+                      <button className="secondary-button" onClick={() => navigate(buildRoute("/plan", { project: createdProjectId }))}>
+                        Open Plan
+                      </button>
+                      <button className="secondary-button" onClick={() => navigate(buildRoute("/execution", { project: createdProjectId }))}>
+                        Open Execution
+                      </button>
+                    </>
+                  ) : null}
                 </div>
                 {createError ? <p className="error-copy">{createError}</p> : null}
                 {createMessage ? <p className="muted-copy">{createMessage}</p> : null}
+                {!createError && !createMessage ? (
+                  <p className="muted-copy">Create a project, then jump directly into workspace, plan, or execution triage from here.</p>
+                ) : null}
               </div>
             </section>
 

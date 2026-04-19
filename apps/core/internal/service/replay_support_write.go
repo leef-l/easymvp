@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"io/fs"
 	"mime"
@@ -38,6 +39,9 @@ type replayArtifactRecord struct {
 	SHA256           string
 	SourceObjectKind string
 	SourceObjectID   string
+	EventID          string
+	TraceID          string
+	SpanID           string
 	Status           string
 }
 
@@ -62,6 +66,16 @@ type runArtifactFile struct {
 	SHA256   string
 	MimeType string
 	FileExt  string
+}
+
+type replayArtifactMetadata struct {
+	Title            string
+	Summary          string
+	SourceObjectKind string
+	SourceObjectID   string
+	EventID          string
+	TraceID          string
+	SpanID           string
 }
 
 func refreshReplayArtifactsForRun(ctx context.Context, binding *entity.BrainRunBindings, runState *BrainRunState) error {
@@ -301,23 +315,198 @@ func buildReplayArtifactRecords(binding *entity.BrainRunBindings, files []runArt
 	records := make([]replayArtifactRecord, 0, len(files))
 	for index, item := range files {
 		seqNo := index + 1
+		replayKind := classifyReplayKind(item)
+		metadata := extractReplayArtifactMetadata(item, replayKind)
 		records = append(records, replayArtifactRecord{
 			ReplayID:         buildReplayArtifactID(binding.BrainRunId, seqNo),
-			ReplayKind:       classifyReplayKind(item),
+			ReplayKind:       replayKind,
 			SeqNo:            seqNo,
-			Title:            buildReplayArtifactTitle(item),
-			Summary:          item.RelPath,
+			Title:            firstNonEmpty(metadata.Title, buildReplayArtifactTitle(item)),
+			Summary:          firstNonEmpty(metadata.Summary, item.RelPath),
 			FilePath:         item.AbsPath,
 			FileExt:          item.FileExt,
 			MimeType:         item.MimeType,
 			FileSize:         item.Size,
 			SHA256:           item.SHA256,
-			SourceObjectKind: "brain_run",
-			SourceObjectID:   binding.BrainRunId,
+			SourceObjectKind: firstNonEmpty(metadata.SourceObjectKind, "brain_run"),
+			SourceObjectID:   firstNonEmpty(metadata.SourceObjectID, binding.BrainRunId),
+			EventID:          metadata.EventID,
+			TraceID:          metadata.TraceID,
+			SpanID:           metadata.SpanID,
 			Status:           "available",
 		})
 	}
 	return records
+}
+
+func extractReplayArtifactMetadata(item runArtifactFile, replayKind string) replayArtifactMetadata {
+	if !mayContainReplayMetadata(item) {
+		return replayArtifactMetadata{}
+	}
+
+	payload, err := readReplayArtifactMetadataPayload(item.AbsPath, 16*1024)
+	if err != nil || len(payload) == 0 {
+		return replayArtifactMetadata{}
+	}
+
+	var raw map[string]any
+	if err = json.Unmarshal(payload, &raw); err != nil {
+		return replayArtifactMetadata{}
+	}
+
+	toolName := extractFirstString(raw,
+		"tool_name",
+		"tool",
+		"name",
+		"action",
+	)
+	eventID := extractFirstString(raw, "event_id")
+	traceID := extractFirstString(raw, "trace_id")
+	spanID := extractFirstString(raw, "span_id")
+
+	metadata := replayArtifactMetadata{
+		Title:   buildReplayArtifactMetadataTitle(replayKind, toolName, raw),
+		Summary: buildReplayArtifactMetadataSummary(item, replayKind, toolName, raw),
+		EventID: eventID,
+		TraceID: traceID,
+		SpanID:  spanID,
+	}
+	metadata.SourceObjectKind, metadata.SourceObjectID = deriveReplaySourceObject(raw, eventID)
+	return metadata
+}
+
+func mayContainReplayMetadata(item runArtifactFile) bool {
+	switch strings.ToLower(strings.TrimSpace(item.FileExt)) {
+	case ".json", ".jsonl":
+		return true
+	default:
+		return strings.Contains(strings.ToLower(item.MimeType), "json")
+	}
+}
+
+func readReplayArtifactMetadataPayload(path string, limit int64) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, gerror.Wrap(err, "open replay artifact metadata failed")
+	}
+	defer file.Close()
+
+	payload, err := io.ReadAll(io.LimitReader(file, limit))
+	if err != nil {
+		return nil, gerror.Wrap(err, "read replay artifact metadata failed")
+	}
+	payload = []byte(strings.TrimSpace(string(payload)))
+	if len(payload) == 0 {
+		return nil, nil
+	}
+	if newline := strings.IndexByte(string(payload), '\n'); newline > 0 && payload[0] != '[' {
+		payload = payload[:newline]
+	}
+	return payload, nil
+}
+
+func buildReplayArtifactMetadataTitle(replayKind string, toolName string, raw map[string]any) string {
+	switch replayKind {
+	case "tool_call":
+		if toolName != "" {
+			return "Tool call " + toolName
+		}
+	case "tool_result":
+		if toolName != "" {
+			return "Tool result " + toolName
+		}
+	case "browser_trace":
+		if step := extractFirstString(raw, "page", "url", "target"); step != "" {
+			return "Browser trace " + step
+		}
+	case "verification_snapshot":
+		if name := extractFirstString(raw, "verification", "check_name", "name"); name != "" {
+			return "Verification " + name
+		}
+	}
+	return firstNonEmpty(
+		extractFirstString(raw, "title", "headline", "step_name", "name"),
+		"",
+	)
+}
+
+func buildReplayArtifactMetadataSummary(item runArtifactFile, replayKind string, toolName string, raw map[string]any) string {
+	summary := extractFirstString(raw,
+		"summary",
+		"message",
+		"decision_summary",
+		"reasoning_summary",
+		"description",
+	)
+	if summary != "" {
+		return summary
+	}
+
+	switch replayKind {
+	case "tool_call":
+		if toolName != "" {
+			return "Invoked tool " + toolName
+		}
+	case "tool_result":
+		status := extractFirstString(raw, "status", "result", "outcome")
+		if toolName != "" && status != "" {
+			return "Tool " + toolName + " returned " + status
+		}
+		if toolName != "" {
+			return "Received tool result from " + toolName
+		}
+	case "browser_trace":
+		if url := extractFirstString(raw, "url", "page", "target"); url != "" {
+			return "Browser trace captured for " + url
+		}
+	case "verification_snapshot":
+		if status := extractFirstString(raw, "status", "result"); status != "" {
+			return "Verification snapshot status " + status
+		}
+	}
+	return item.RelPath
+}
+
+func deriveReplaySourceObject(raw map[string]any, eventID string) (string, string) {
+	switch {
+	case extractFirstString(raw, "domain_task_id", "task_id") != "":
+		return "domain_task", extractFirstString(raw, "domain_task_id", "task_id")
+	case extractFirstString(raw, "tool_call_id") != "":
+		return "tool_call", extractFirstString(raw, "tool_call_id")
+	case eventID != "":
+		return "run_event", eventID
+	default:
+		return "", ""
+	}
+}
+
+func extractFirstString(raw map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value := extractStringValue(raw[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func extractStringValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case map[string]any:
+		for _, key := range []string{"summary", "title", "name", "id", "value"} {
+			if nested := extractStringValue(typed[key]); nested != "" {
+				return nested
+			}
+		}
+	case []any:
+		for _, item := range typed {
+			if nested := extractStringValue(item); nested != "" {
+				return nested
+			}
+		}
+	}
+	return ""
 }
 
 func buildLogSegmentRecords(files []runArtifactFile) []logSegmentRecord {
@@ -456,9 +645,9 @@ source_object_kind, source_object_id, status, created_at, updated_at
 		runID,
 		nullIfEmpty(taskID),
 		nil,
-		nil,
-		nil,
-		nil,
+		nullIfEmpty(item.EventID),
+		nullIfEmpty(item.TraceID),
+		nullIfEmpty(item.SpanID),
 		item.ReplayKind,
 		item.SeqNo,
 		item.Title,

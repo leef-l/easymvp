@@ -1,6 +1,12 @@
 package service
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/leef-l/easymvp/apps/core/internal/model/entity"
+)
 
 func TestCollectRunArtifactCandidateRootsSkipsEmptyExecutionID(t *testing.T) {
 	t.Parallel()
@@ -95,5 +101,74 @@ func TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles(t *testing.T) {
 				t.Fatalf("unexpected artifact kind: got %q want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestBuildReplayArtifactRecordsExtractsStructuredMetadata(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	path := filepath.Join(tempDir, "tool_result_0001.json")
+	if err := os.WriteFile(path, []byte(`{"tool_name":"browser.open","status":"ok","summary":"Opened dashboard","task_id":"task_123","event_id":"evt_1","trace_id":"trace_1","span_id":"span_1"}`), 0o644); err != nil {
+		t.Fatalf("write replay artifact failed: %v", err)
+	}
+
+	records := buildReplayArtifactRecords(&entity.BrainRunBindings{BrainRunId: "run_123"}, []runArtifactFile{
+		{
+			AbsPath:  path,
+			RelPath:  "replay/tool_result_0001.json",
+			FileName: "tool_result_0001.json",
+			FileExt:  ".json",
+			MimeType: "application/json",
+		},
+	})
+
+	if len(records) != 1 {
+		t.Fatalf("unexpected record count: got %d want %d", len(records), 1)
+	}
+	if records[0].Title != "Tool result browser.open" {
+		t.Fatalf("unexpected replay title: got %q", records[0].Title)
+	}
+	if records[0].Summary != "Opened dashboard" {
+		t.Fatalf("unexpected replay summary: got %q", records[0].Summary)
+	}
+	if records[0].SourceObjectKind != "domain_task" || records[0].SourceObjectID != "task_123" {
+		t.Fatalf("unexpected source object: %#v", records[0])
+	}
+	if records[0].EventID != "evt_1" || records[0].TraceID != "trace_1" || records[0].SpanID != "span_1" {
+		t.Fatalf("unexpected trace fields: %#v", records[0])
+	}
+}
+
+func TestBuildReplayArtifactRecordsFallsBackWhenMetadataCannotBeParsed(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	path := filepath.Join(tempDir, "tool_call_0001.json")
+	if err := os.WriteFile(path, []byte(`{"tool_name":`), 0o644); err != nil {
+		t.Fatalf("write replay artifact failed: %v", err)
+	}
+
+	records := buildReplayArtifactRecords(&entity.BrainRunBindings{BrainRunId: "run_123"}, []runArtifactFile{
+		{
+			AbsPath:  path,
+			RelPath:  "replay/tool_call_0001.json",
+			FileName: "tool_call_0001.json",
+			FileExt:  ".json",
+			MimeType: "application/json",
+		},
+	})
+
+	if len(records) != 1 {
+		t.Fatalf("unexpected record count: got %d want %d", len(records), 1)
+	}
+	if records[0].Title != "tool call 0001" {
+		t.Fatalf("expected fallback title, got %q", records[0].Title)
+	}
+	if records[0].Summary != "replay/tool_call_0001.json" {
+		t.Fatalf("expected fallback summary, got %q", records[0].Summary)
+	}
+	if records[0].SourceObjectKind != "brain_run" || records[0].SourceObjectID != "run_123" {
+		t.Fatalf("expected fallback source object, got %#v", records[0])
 	}
 }
