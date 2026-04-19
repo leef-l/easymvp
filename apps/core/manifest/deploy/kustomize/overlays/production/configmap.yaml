@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: easymvp-core-config
+data:
+  config.yaml: |
+    server:
+      address: ":8000"
+      openapiPath: "/api.json"
+      swaggerPath: "/swagger"
+
+    logger:
+      level: "info"
+      stdout: true
+
+    easymvp:
+      dataRoot: "/app/var"
+      dbPath: "/app/var/data/easymvp.db"
+      migrationPath: "/app/manifest/migrations"
+      brainServeBaseURL: "http://easymvp-brain.default.svc.cluster.local:7701"
+      safeMode: false
+      easymvpBrain:
+        mode: "remote-service"
+        localEndpoint: ""
+        remoteEndpoint: "http://easymvp-brain.default.svc.cluster.local:7701"
+        apiKey: ""
+        timeout: "30s"
+        maxTurns: 6
