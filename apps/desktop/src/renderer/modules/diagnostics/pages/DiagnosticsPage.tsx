@@ -1,10 +1,16 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { apiGet } from "@/shared/lib/api";
 import {
   exportDesktopDiagnostics,
   getDesktopRuntimeDiagnosis,
   getDesktopRuntimeInfo,
   getDesktopRuntimeRecoveryHint,
+  relaunchDesktopNormalMode,
+  relaunchDesktopSafeMode,
+  restartManagedCore,
+  showDesktopItemInFolder,
+  startManagedCore,
 } from "@/shared/lib/preferences";
 import { useProjectState } from "@/shared/lib/project";
 import { useQuery } from "@/shared/lib/query";
@@ -16,10 +22,14 @@ import type {
 import { QueryPanel } from "@/shared/ui/QueryPanel";
 
 export function DiagnosticsPage() {
+  const navigate = useNavigate();
   const { projectId, routes, buildRoute } = useProjectState();
   const [exportBusy, setExportBusy] = useState(false);
   const [exportError, setExportError] = useState("");
   const [exportMessage, setExportMessage] = useState("");
+  const [actionBusy, setActionBusy] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
   const systemState = useQuery(
     () => apiGet<SystemHealthView>("/api/v3/system/healthz"),
     [],
@@ -91,6 +101,63 @@ export function DiagnosticsPage() {
     }
   }
 
+  async function runAction(
+    actionKey: string,
+    action: () => Promise<{ ok: boolean; error?: string; path?: string; canceled?: boolean }>,
+  ) {
+    setActionBusy(actionKey);
+    setActionError("");
+    setActionMessage("");
+    try {
+      const result = await action();
+      if (!result.ok) {
+        if (result.canceled) {
+          setActionMessage(result.error || "Desktop action canceled");
+        } else {
+          setActionError(result.error || "Desktop action failed");
+        }
+      } else {
+        setActionMessage(result.path ? `Saved to ${result.path}` : "Action completed");
+      }
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Desktop action failed");
+    } finally {
+      setActionBusy("");
+    }
+  }
+
+  function runStructuredAction(
+    actionID: string,
+    options?: { dataDirectory?: string },
+  ) {
+    switch (actionID) {
+      case "retry-health-probe":
+        window.location.reload();
+        return Promise.resolve();
+      case "start-managed-core":
+        return runAction(actionID, () => startManagedCore());
+      case "restart-managed-core":
+        return runAction(actionID, () => restartManagedCore());
+      case "relaunch-safe-mode":
+        return runAction(actionID, () => relaunchDesktopSafeMode());
+      case "relaunch-normal-mode":
+        return runAction(actionID, () => relaunchDesktopNormalMode());
+      case "open-settings":
+        navigate(routes.settings);
+        return Promise.resolve();
+      case "open-diagnostics":
+        navigate(routes.diagnostics);
+        return Promise.resolve();
+      case "open-data-folder":
+        return runAction(actionID, () =>
+          showDesktopItemInFolder(options?.dataDirectory || ""),
+        );
+      default:
+        setActionError(`Unsupported recovery action: ${actionID}`);
+        return Promise.resolve();
+    }
+  }
+
   return (
     <QueryPanel
       loading={
@@ -137,6 +204,8 @@ export function DiagnosticsPage() {
           </div>
           {exportError ? <p className="error-copy">{exportError}</p> : null}
           {exportMessage ? <p className="muted-copy">{exportMessage}</p> : null}
+          {actionError ? <p className="error-copy">{actionError}</p> : null}
+          {actionMessage ? <p className="muted-copy">{actionMessage}</p> : null}
 
           <div className="content-grid">
             <section className="data-panel">
@@ -286,13 +355,19 @@ export function DiagnosticsPage() {
                           {issue.actions.length ? (
                             <div className="recovery-action-list">
                               {issue.actions.map((action) => (
-                                <article
+                                <button
                                   key={`${issue.code}-${action.id}`}
                                   className="recovery-action-card"
+                                  disabled={actionBusy !== ""}
+                                  onClick={() =>
+                                    void runStructuredAction(action.id, {
+                                      dataDirectory: desktopRuntimeState.data?.dataDirectory || "",
+                                    })
+                                  }
                                 >
                                   <strong>{action.label}</strong>
                                   <p>{action.description}</p>
-                                </article>
+                                </button>
                               ))}
                             </div>
                           ) : null}
@@ -308,9 +383,9 @@ export function DiagnosticsPage() {
                         </span>
                       </div>
                       <p>
-                        Renderer startup issue rendering is in place. Structured startup issue
-                        arrays from main/core can render here without another
-                        page refactor.
+                        Renderer startup issue rendering is in place. The
+                        current desktop snapshot did not report a structured
+                        startup issue.
                       </p>
                     </article>
                   )}

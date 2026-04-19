@@ -58,6 +58,38 @@ export function RecoveryPage() {
     }
   }
 
+  function runStructuredAction(
+    actionID: string,
+    options?: { dataDirectory?: string },
+  ) {
+    switch (actionID) {
+      case "retry-health-probe":
+        setRefreshTick((value) => value + 1);
+        return Promise.resolve();
+      case "start-managed-core":
+        return runAction(actionID, () => startManagedCore());
+      case "restart-managed-core":
+        return runAction(actionID, () => restartManagedCore());
+      case "relaunch-safe-mode":
+        return runAction(actionID, () => relaunchDesktopSafeMode());
+      case "relaunch-normal-mode":
+        return runAction(actionID, () => relaunchDesktopNormalMode());
+      case "open-settings":
+        navigate(routes.settings);
+        return Promise.resolve();
+      case "open-diagnostics":
+        navigate(routes.diagnostics);
+        return Promise.resolve();
+      case "open-data-folder":
+        return runAction(actionID, () =>
+          showDesktopItemInFolder(options?.dataDirectory || ""),
+        );
+      default:
+        setActionError(`Unsupported recovery action: ${actionID}`);
+        return Promise.resolve();
+    }
+  }
+
   return (
     <section className="dashboard-page">
       <div className="dashboard-intro">
@@ -179,13 +211,19 @@ export function RecoveryPage() {
                   {issue.actions.length ? (
                     <div className="recovery-action-list">
                       {issue.actions.map((action) => (
-                        <article
+                        <button
                           key={`${issue.code}-${action.id}`}
                           className="recovery-action-card"
+                          disabled={actionBusy !== ""}
+                          onClick={() =>
+                            void runStructuredAction(action.id, {
+                              dataDirectory: runtimeState.data?.dataDirectory || "",
+                            })
+                          }
                         >
                           <strong>{action.label}</strong>
                           <p>{action.description}</p>
-                        </article>
+                        </button>
                       ))}
                     </div>
                   ) : null}

@@ -378,7 +378,7 @@ export function AcceptancePage() {
                 <SummaryCard
                   title="Verification Result"
                   primary={firstText(verificationResult?.decision, verificationResult?.status, "not ready")}
-                  secondary={firstText(verificationResult?.summary, "The backend has not emitted a structured verification result yet.")}
+                  secondary={firstText(verificationResult?.summary, "The current acceptance snapshot does not include a structured verification result.")}
                   pills={[
                     verificationResult?.completed !== undefined ? `completed ${String(verificationResult.completed)}` : undefined,
                     verificationResult?.preferred_verification_channel
@@ -402,7 +402,7 @@ export function AcceptancePage() {
                   secondary={firstText(
                     completionVerdict?.summary,
                     completionVerdict?.reason,
-                    "Release gate is used when a structured completion verdict is not yet available.",
+                    "The current acceptance snapshot does not include a structured completion verdict.",
                   )}
                   pills={[
                     completionVerdict?.completed !== undefined ? `completed ${String(completionVerdict.completed)}` : undefined,
