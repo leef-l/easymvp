@@ -3,17 +3,22 @@ package v1
 import "github.com/gogf/gf/v2/frame/g"
 
 type ProjectDiagnosticItem struct {
-	ID         string `json:"id"`
-	Scope      string `json:"scope"`
-	Severity   string `json:"severity"`
-	ErrorCode  string `json:"error_code"`
-	Summary    string `json:"summary"`
-	DetailJSON string `json:"detail_json,omitempty"`
-	ProjectID  string `json:"project_id,omitempty"`
-	TaskID     string `json:"task_id,omitempty"`
-	RunID      string `json:"run_id,omitempty"`
-	BindingID  string `json:"binding_id,omitempty"`
-	CreatedAt  string `json:"created_at"`
+	ID                string `json:"id"`
+	Scope             string `json:"scope"`
+	Severity          string `json:"severity"`
+	ErrorCode         string `json:"error_code"`
+	Summary           string `json:"summary"`
+	Category          string `json:"category,omitempty"`
+	Component         string `json:"component,omitempty"`
+	Field             string `json:"field,omitempty"`
+	RecommendedAction string `json:"recommended_action,omitempty"`
+	RelatedPage       string `json:"related_page,omitempty"`
+	DetailJSON        string `json:"detail_json,omitempty"`
+	ProjectID         string `json:"project_id,omitempty"`
+	TaskID            string `json:"task_id,omitempty"`
+	RunID             string `json:"run_id,omitempty"`
+	BindingID         string `json:"binding_id,omitempty"`
+	CreatedAt         string `json:"created_at"`
 }
 
 type ListProjectDiagnosticsReq struct {
@@ -23,6 +28,7 @@ type ListProjectDiagnosticsReq struct {
 }
 
 type ListProjectDiagnosticsRes struct {
-	Items       []ProjectDiagnosticItem `json:"items"`
-	RefreshHint string                  `json:"refresh_hint"`
+	Items          []ProjectDiagnosticItem `json:"items"`
+	CategoryCounts map[string]int          `json:"category_counts,omitempty"`
+	RefreshHint    string                  `json:"refresh_hint"`
 }

@@ -200,6 +200,11 @@ export function DiagnosticsPage() {
               <span className="status-pill">
                 {diagnosticsState.data.items.length} diagnostics
               </span>
+              {Object.entries(diagnosticsState.data.category_counts || {}).slice(0, 3).map(([category, count]) => (
+                <span key={category} className="status-pill">
+                  {category} {count}
+                </span>
+              ))}
             </div>
           </div>
           {exportError ? <p className="error-copy">{exportError}</p> : null}
@@ -349,7 +354,7 @@ export function DiagnosticsPage() {
                             </span>
                           </div>
                           <p>
-                            {issue.code} · {issue.source} · {issue.mode}
+                            {issue.code} · {issue.category} · {issue.source} · {issue.mode}
                           </p>
                           <p>{issue.detail}</p>
                           {issue.actions.length ? (
@@ -482,6 +487,13 @@ export function DiagnosticsPage() {
                     <p>
                       {item.scope} · {item.error_code} · {item.created_at}
                     </p>
+                    {item.category || item.component || item.field ? (
+                      <p>
+                        {item.category ? `category ${item.category}` : ""}
+                        {item.component ? ` · component ${item.component}` : ""}
+                        {item.field ? ` · field ${item.field}` : ""}
+                      </p>
+                    ) : null}
                     {item.project_id ||
                     item.task_id ||
                     item.run_id ||
@@ -515,7 +527,22 @@ export function DiagnosticsPage() {
                       <a className="secondary-button" href={routes.audit}>
                         Open Audit
                       </a>
+                      {item.related_page === "acceptance" ? (
+                        <a className="secondary-button" href={routes.acceptance}>
+                          Open Acceptance
+                        </a>
+                      ) : null}
+                      {item.related_page === "replay" ? (
+                        <a className="secondary-button" href={routes.replay}>
+                          Open Replay
+                        </a>
+                      ) : null}
                     </div>
+                    {item.recommended_action ? (
+                      <p className="muted-copy">
+                        Recommended: {item.recommended_action}
+                      </p>
+                    ) : null}
                     {item.detail_json ? (
                       <pre className="json-block">
                         {prettyJson(item.detail_json)}

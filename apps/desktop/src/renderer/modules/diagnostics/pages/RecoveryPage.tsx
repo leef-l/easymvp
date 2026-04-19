@@ -196,7 +196,7 @@ export function RecoveryPage() {
                     </span>
                   </div>
                   <p>
-                    {issue.code} · {issue.source} · {issue.mode}
+                    {issue.code} · {issue.category} · {issue.source} · {issue.mode}
                   </p>
                   <p>{issue.detail}</p>
                   {issue.evidence.length ? (

@@ -54,6 +54,10 @@
       {
         "from": "resources/bin",
         "to": "bin"
+      },
+      {
+        "from": "../core/manifest",
+        "to": "manifest"
       }
     ],
     "asar": true,

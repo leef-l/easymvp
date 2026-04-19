@@ -338,7 +338,7 @@
   - 建立 `ExecutionPage` 基础页
   - 统一承接运行态列表、活跃 run、失败 run、人工介入入口
   - 不与 Project Workspace 的实时区职责冲突
-- 状态：`in_progress`
+- 状态：`done`
 
 ### FE-015
 

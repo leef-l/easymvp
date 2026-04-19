@@ -1,4 +1,10 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import {
+  BrowserRouter,
+  HashRouter,
+  Navigate,
+  Route,
+  Routes,
+} from "react-router-dom";
 import { AppShell } from "./shell";
 import { AcceptancePage } from "@/modules/acceptance/pages/AcceptancePage";
 import { AuditPage } from "@/modules/audit/pages/AuditPage";
@@ -45,8 +51,13 @@ function StartupRedirect() {
 }
 
 export function AppRouter() {
+  const Router =
+    typeof window !== "undefined" && window.location.protocol === "file:"
+      ? HashRouter
+      : BrowserRouter;
+
   return (
-    <BrowserRouter>
+    <Router>
       <Routes>
         <Route element={<AppShell />}>
           <Route path="/" element={<StartupRedirect />} />
@@ -62,6 +73,6 @@ export function AppRouter() {
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Routes>
-    </BrowserRouter>
+    </Router>
   );
 }

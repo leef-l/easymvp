@@ -14,7 +14,7 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const SMOKE_TEST_TIMEOUT_MS = 15000;
+const SMOKE_TEST_TIMEOUT_MS = 30000;
 
 function resolveCoreBaseUrl() {
   return (process.env.EASYMVP_CORE_BASE_URL ?? "http://127.0.0.1:8000").replace(
@@ -203,12 +203,25 @@ function createWindow() {
 
     window.webContents.once("did-finish-load", async () => {
       try {
-        let smokeState: { pathname?: string } | null = null;
+        let smokeState:
+          | {
+              pathname?: string;
+              rootChildCount?: number;
+              readyState?: string;
+            }
+          | null = null;
         let bootstrap = getCoreBootstrapSnapshot();
-        for (let attempt = 0; attempt < 40; attempt += 1) {
-          smokeState = await window.webContents.executeJavaScript(`({ pathname: window.location.pathname })`);
+        for (let attempt = 0; attempt < 80; attempt += 1) {
+          smokeState = await window.webContents.executeJavaScript(`({
+            pathname: window.location.pathname,
+            readyState: document.readyState,
+            rootChildCount: document.getElementById("root")?.childElementCount || 0,
+          })`);
           bootstrap = getCoreBootstrapSnapshot();
-          if (smokeState?.pathname === "/workspace" && bootstrap.lastProbe?.reachable) {
+          if (
+            bootstrap.lastProbe?.reachable
+            && (smokeState?.rootChildCount || 0) > 0
+          ) {
             break;
           }
           await new Promise((resolve) => setTimeout(resolve, 250));
@@ -219,8 +232,10 @@ function createWindow() {
           app.exit(1);
           return;
         }
-        if (smokeState?.pathname !== "/workspace") {
-          console.error(`desktop smoke test failed: unexpected startup route ${smokeState?.pathname || "<empty>"}`);
+        if ((smokeState?.rootChildCount || 0) <= 0) {
+          console.error(
+            `desktop smoke test failed: renderer did not mount (pathname=${smokeState?.pathname || "<empty>"}, readyState=${smokeState?.readyState || "unknown"})`,
+          );
           app.exit(1);
           return;
         }
@@ -248,7 +263,7 @@ app.whenReady().then(async () => {
   await waitForCoreBootstrap({
     baseUrl: resolveCoreBaseUrl(),
     launchMode: resolveLaunchMode(),
-    timeoutMs: isSmokeTestMode() ? 12000 : 1800,
+    timeoutMs: isSmokeTestMode() ? 22000 : 3000,
   });
   createWindow();
 

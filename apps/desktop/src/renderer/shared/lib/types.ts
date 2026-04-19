@@ -418,6 +418,11 @@ export type ProjectDiagnosticsView = {
     severity: string;
     error_code: string;
     summary: string;
+    category?: string;
+    component?: string;
+    field?: string;
+    recommended_action?: string;
+    related_page?: string;
     detail_json?: string;
     project_id?: string;
     task_id?: string;
@@ -425,6 +430,7 @@ export type ProjectDiagnosticsView = {
     binding_id?: string;
     created_at: string;
   }>;
+  category_counts?: Record<string, number>;
   refresh_hint: string;
 };
 

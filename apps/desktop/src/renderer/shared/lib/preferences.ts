@@ -79,6 +79,14 @@ export type DesktopRecoveryAction = {
 
 export type DesktopRecoveryIssue = {
   code: string;
+  category:
+    | "migration_failure"
+    | "data_directory_unwritable"
+    | "core_unavailable"
+    | "policy_denied"
+    | "verification_conflict"
+    | "fault_loop_detected"
+    | "runtime_attention";
   severity: DesktopRecoverySeverity;
   summary: string;
   detail: string;
@@ -332,6 +340,7 @@ export function getDesktopRuntimeDiagnosis(
   if (runtimeInfo.issue) {
     issues.push({
       code: "DESKTOP_BRIDGE_UNAVAILABLE",
+      category: "runtime_attention",
       severity: "error",
       summary: "Renderer could not load full desktop runtime context",
       detail:
@@ -364,6 +373,7 @@ export function getDesktopRuntimeDiagnosis(
                   : runtimeInfo.coreManagerStatus === "exited"
                     ? "MANAGED_CORE_EXITED"
                     : "MANAGED_CORE_UNREACHABLE",
+            category: "core_unavailable",
             severity:
               runtimeInfo.coreManagerStatus === "starting"
                 ? "warning"
@@ -414,6 +424,7 @@ export function getDesktopRuntimeDiagnosis(
           }
         : {
             code: "EXTERNAL_CORE_UNREACHABLE",
+            category: "core_unavailable",
             severity: "error",
             summary: "External core health probe is unreachable",
             detail:
@@ -605,12 +616,146 @@ function inferRuntimeMode(
   return "unknown";
 }
 
-function extractRuntimeDiagnostics(runtimeInfo: DesktopRuntimeInfo) {
-  if (!runtimeInfo.startup?.issue) {
+function readStartupHealthDiagnostics(runtimeInfo: DesktopRuntimeInfo) {
+  const health = runtimeInfo.core?.health;
+  if (!health || typeof health !== "object") {
     return [];
   }
-  return [
-    {
+  const startup =
+    "startup" in health ? (health.startup as Record<string, unknown>) : undefined;
+  if (!startup || typeof startup !== "object") {
+    return [];
+  }
+  const diagnostics = startup.diagnostics;
+  if (!Array.isArray(diagnostics)) {
+    return [];
+  }
+
+  return diagnostics
+    .filter((item) => item && typeof item === "object")
+    .map((item) => {
+      const record = item as Record<string, unknown>;
+      const detail = readString(record.detail);
+      return {
+        code: readString(record.code, record.error_code),
+        summary: readString(record.summary, record.message),
+        detail,
+        severity: readString(record.severity),
+        source: "startup-diagnostic",
+        mode: runtimeInfo.coreManagerEnabled ? "managed" : "external",
+        evidence: compactEvidence([
+          readString(record.component),
+          readString(record.field),
+          detail,
+        ]),
+        actions: Array.isArray(record.actions)
+          ? record.actions.map((action) => {
+              const text =
+                typeof action === "string" ? action : stringifyValue(action);
+              return {
+                id: mapRuntimeActionID(text),
+                label: text,
+                description: text,
+              };
+            })
+          : [],
+      };
+    });
+}
+
+function classifyRecoveryCategory(
+  code: string,
+  detail: string,
+  summary: string,
+): DesktopRecoveryIssue["category"] {
+  const normalized = `${code} ${detail} ${summary}`.toLowerCase();
+  if (normalized.includes("migration")) {
+    return "migration_failure";
+  }
+  if (
+    normalized.includes("data root")
+    || normalized.includes("db_path")
+    || normalized.includes("directory")
+    || normalized.includes("writable")
+    || normalized.includes("permission denied")
+  ) {
+    return "data_directory_unwritable";
+  }
+  if (
+    normalized.includes("policy_denied")
+    || normalized.includes("permission_denied")
+    || normalized.includes("forbidden")
+    || normalized.includes("run_denied")
+  ) {
+    return "policy_denied";
+  }
+  if (
+    normalized.includes("verification_conflict")
+    || normalized.includes("missing_evidence")
+    || normalized.includes("failed_checks")
+    || normalized.includes("verification contract")
+  ) {
+    return "verification_conflict";
+  }
+  if (normalized.includes("fault_loop") || normalized.includes("fault loop")) {
+    return "fault_loop_detected";
+  }
+  if (
+    normalized.includes("runtime")
+    || normalized.includes("core")
+    || normalized.includes("econnrefused")
+    || normalized.includes("connection refused")
+    || normalized.includes("unreachable")
+  ) {
+    return "core_unavailable";
+  }
+  return "runtime_attention";
+}
+
+function mapRuntimeActionID(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  if (
+    normalized.includes("restart managed core")
+    || normalized.includes("restart the managed core")
+  ) {
+    return "restart-managed-core";
+  }
+  if (
+    normalized.includes("start managed core")
+    || normalized.includes("configure managed core startup")
+  ) {
+    return "start-managed-core";
+  }
+  if (normalized.includes("safe mode")) {
+    return "relaunch-safe-mode";
+  }
+  if (normalized.includes("settings") || normalized.includes("base url")) {
+    return "open-settings";
+  }
+  if (
+    normalized.includes("data folder")
+    || normalized.includes("data directory")
+    || normalized.includes("permissions")
+  ) {
+    return "open-data-folder";
+  }
+  if (normalized.includes("diagnostics") || normalized.includes("inspect")) {
+    return "open-diagnostics";
+  }
+  if (normalized.includes("retry") || normalized.includes("wait a moment")) {
+    return "retry-health-probe";
+  }
+  return normalized.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function extractRuntimeDiagnostics(runtimeInfo: DesktopRuntimeInfo) {
+  const diagnostics: Array<Record<string, unknown>> = [];
+
+  if (runtimeInfo.startup?.issue) {
+    diagnostics.push({
       code: runtimeInfo.startup.issue.code,
       summary: runtimeInfo.startup.issue.summary,
       detail: runtimeInfo.startup.issue.details.join(" "),
@@ -619,11 +764,14 @@ function extractRuntimeDiagnostics(runtimeInfo: DesktopRuntimeInfo) {
       mode: runtimeInfo.startup.managed ? "managed" : "external",
       evidence: runtimeInfo.startup.issue.details,
       actions: runtimeInfo.startup.issue.actions.map((action) => ({
+        id: mapRuntimeActionID(action),
         label: action,
         description: action,
       })),
-    },
-  ];
+    });
+  }
+
+  return diagnostics.concat(readStartupHealthDiagnostics(runtimeInfo));
 }
 
 function normalizeExternalDiagnostic(
@@ -659,6 +807,7 @@ function normalizeExternalDiagnostic(
 
   return {
     code: code || "STARTUP_DIAGNOSTIC",
+    category: classifyRecoveryCategory(code, detail, summary),
     severity,
     summary: summary || "Startup diagnostic reported by runtime",
     detail:
@@ -749,7 +898,9 @@ function normalizeActions(value: unknown): DesktopRecoveryAction[] {
       continue;
     }
     const record = item as Record<string, unknown>;
-    const id = readString(record.id, record.code, record.action);
+    const id = mapRuntimeActionID(
+      readString(record.id, record.code, record.action),
+    );
     const label = readString(record.label, record.title);
     const description = readString(
       record.description,

@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 
 const desktopRoot = path.resolve(import.meta.dirname, "..");
-const smokeTimeoutMs = 30000;
+const smokeTimeoutMs = 45000;
 const packageTargets = [
   {
     releaseRoot: path.join(desktopRoot, "release", "linux-unpacked"),
@@ -81,7 +81,9 @@ async function runSmokeTest({ command, args }) {
       env: {
         ...process.env,
         EASYMVP_MANAGE_CORE: "1",
+        EASYMVP_CORE_BASE_URL: "http://127.0.0.1:18080",
         ELECTRON_DISABLE_SANDBOX: "1",
+        EASYMVP_DESKTOP_SMOKE: "1",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });

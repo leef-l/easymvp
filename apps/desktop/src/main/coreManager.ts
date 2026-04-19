@@ -68,6 +68,8 @@ type LaunchSpec = {
 
 const MAX_LOG_LINES = 24;
 const LOG_LINE_LENGTH_LIMIT = 280;
+const MANAGED_CORE_PROBE_ATTEMPTS = 24;
+const MANAGED_CORE_PROBE_INTERVAL_MS = 750;
 
 let childProcess: ChildProcessWithoutNullStreams | null = null;
 let startPromise: Promise<CoreManagerSnapshot> | null = null;
@@ -295,11 +297,87 @@ function summarizeSpawnError(error: string) {
   };
 }
 
+function collectStartupHealthDiagnostics(health?: Record<string, unknown>) {
+  const startup =
+    health && typeof health === "object" && "startup" in health
+      ? (health.startup as Record<string, unknown> | undefined)
+      : undefined;
+  const diagnostics =
+    startup && typeof startup === "object" && "diagnostics" in startup
+      ? startup.diagnostics
+      : undefined;
+  return Array.isArray(diagnostics)
+    ? diagnostics.filter((item) => item && typeof item === "object")
+    : [];
+}
+
+function detectClassifiedStartupIssue(text: string) {
+  const normalized = text.toLowerCase();
+  if (normalized.includes("migration")) {
+    return {
+      code: "migration_failure",
+      severity: "error" as const,
+      summary: "Core startup is blocked by a migration failure.",
+      actions: [
+        "Inspect migration diagnostics and verify the packaged migration path.",
+        "Fix the schema or migration directory problem before restarting the managed core.",
+      ],
+    };
+  }
+  if (
+    normalized.includes("directory is not writable")
+    || normalized.includes("permission denied")
+    || normalized.includes("read-only file system")
+    || normalized.includes("data root")
+    || normalized.includes("db_path")
+  ) {
+    return {
+      code: "data_directory_unwritable",
+      severity: "error" as const,
+      summary: "Core startup cannot write to the configured data directory.",
+      actions: [
+        "Open the desktop data folder and verify permissions, free space, and path ownership.",
+        "Adjust the configured data root or relaunch in safe mode after fixing filesystem access.",
+      ],
+    };
+  }
+  if (
+    normalized.includes("eaddrinuse")
+    || normalized.includes("address already in use")
+  ) {
+    return {
+      code: "core_port_in_use",
+      severity: "warning" as const,
+      summary: "Core startup could not bind the configured port.",
+      actions: [
+        "Stop the conflicting process or change the configured core port.",
+        "Retry managed core startup after the port is free.",
+      ],
+    };
+  }
+  return null;
+}
+
 function classifyStartupIssue(params: {
   baseUrl: string;
   health: CoreHealthProbe;
 }): CoreStartupIssue {
   const { baseUrl, health } = params;
+  const healthDiagnostics = collectStartupHealthDiagnostics(health.health);
+  const healthSummary = JSON.stringify(health.health ?? {});
+  const classifiedFromHealth = detectClassifiedStartupIssue(healthSummary);
+  if (classifiedFromHealth) {
+    return {
+      code: classifiedFromHealth.code,
+      severity: classifiedFromHealth.severity,
+      summary: classifiedFromHealth.summary,
+      details: [
+        `Configured base URL: ${baseUrl}`,
+        health.error || "Health snapshot exposed a blocking startup diagnostic.",
+      ],
+      actions: classifiedFromHealth.actions,
+    };
+  }
 
   if (!state.enabled) {
     return {
@@ -336,6 +414,24 @@ function classifyStartupIssue(params: {
   }
 
   if (state.lastError) {
+    const classified = detectClassifiedStartupIssue(
+      `${state.lastError}\n${logTail.join("\n")}`,
+    );
+    if (classified) {
+      return {
+        code: classified.code,
+        severity: classified.severity,
+        summary: classified.summary,
+        details: [
+          `Configured base URL: ${baseUrl}`,
+          state.command
+            ? `Launch command: ${state.command}`
+            : "Launch command is unavailable.",
+          state.lastError,
+        ],
+        actions: classified.actions,
+      };
+    }
     const mapped = summarizeSpawnError(state.lastError);
     return {
       code: mapped.code,
@@ -363,6 +459,34 @@ function classifyStartupIssue(params: {
         "Check whether another process owns the port or the core exited immediately after launch.",
         "Restart the managed core and inspect the recent log tail for port bind or migration errors.",
       ],
+    };
+  }
+
+  if (healthDiagnostics.length > 0) {
+    const item = healthDiagnostics[0] as Record<string, unknown>;
+    return {
+      code:
+        (typeof item.code === "string" && item.code.trim()) ||
+        "core_startup_attention",
+      severity:
+        typeof item.severity === "string" && item.severity.trim() === "error"
+          ? "error"
+          : "warning",
+      summary:
+        (typeof item.summary === "string" && item.summary.trim()) ||
+        "Core startup reported a structured diagnostic.",
+      details: [
+        `Configured base URL: ${baseUrl}`,
+        typeof item.detail === "string" ? item.detail : "",
+      ].filter(Boolean),
+      actions: Array.isArray(item.actions)
+        ? item.actions
+            .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+            .filter(Boolean)
+        : [
+            "Inspect the startup diagnostics and recent log tail in Recovery.",
+            "Retry the health probe after addressing the reported startup warning.",
+          ],
     };
   }
 
@@ -403,7 +527,7 @@ function resolveLaunchSpec(
     return {
       command: packagedBinary,
       args,
-      cwd: path.dirname(packagedBinary),
+      cwd: process.resourcesPath,
     };
   }
 
@@ -597,8 +721,10 @@ export async function ensureManagedCore(params: {
       childProcess = null;
     });
 
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 600));
+    for (let attempt = 0; attempt < MANAGED_CORE_PROBE_ATTEMPTS; attempt += 1) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, MANAGED_CORE_PROBE_INTERVAL_MS),
+      );
       const probe = await probeCoreHealth(baseUrl);
       if (probe.reachable) {
         state.status = "running";
@@ -695,7 +821,11 @@ async function runCoreBootstrap(params: {
   });
 
   const snapshot = await ensureManagedCore(params);
-  const probe = await probeCoreHealth(baseUrl);
+  let probe = await probeCoreHealth(baseUrl);
+  for (let attempt = 0; attempt < 6 && !probe.reachable; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    probe = await probeCoreHealth(baseUrl);
+  }
   const issue = probe.reachable
     ? null
     : (snapshot.startupIssue ??
