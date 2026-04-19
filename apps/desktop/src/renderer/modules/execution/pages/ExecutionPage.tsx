@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { apiDelete, apiGet, apiPost } from "@/shared/lib/api";
 import { useProjectState } from "@/shared/lib/project";
 import { useQuery } from "@/shared/lib/query";
-import type { CommandResponse, ExecutionView, LogSegmentRawView, ProjectDiagnosticsView, ReplayDetailView, ReplayRawView, StartRunResponse, SyncRunResponse } from "@/shared/lib/types";
+import type { AcceptanceView, CommandResponse, ExecutionView, LogSegmentRawView, ProjectDiagnosticsView, ReplayDetailView, ReplayRawView, StartRunResponse, SyncRunResponse } from "@/shared/lib/types";
 import { QueryPanel } from "@/shared/ui/QueryPanel";
 
 const executionViewLimits = {
@@ -183,6 +183,10 @@ export function ExecutionPage(props: { mode?: ExecutionPageMode }) {
     () => apiGet<ProjectDiagnosticsView>(`/api/v3/projects/${encodeURIComponent(projectId)}/diagnostic-records?limit=20`),
     [projectId, refreshTick],
   );
+  const acceptanceState = useQuery(
+    () => apiGet<AcceptanceView>(`/api/v3/projects/${encodeURIComponent(projectId)}/acceptance-view`),
+    [projectId, refreshTick],
+  );
 
   const replayPreview = useMemo(() => {
     return formatRawPreview(replayRawState.data?.content, replayRawState.data?.truncated);
@@ -229,6 +233,10 @@ export function ExecutionPage(props: { mode?: ExecutionPageMode }) {
       return false;
     });
   }, [activeRunID, diagnosticsState.data?.items, selectedBinding?.task_id, selectedBindingId, taskFromUrl]);
+  const verificationResult = acceptanceState.data?.verification_result;
+  const completionVerdict = acceptanceState.data?.completion_verdict;
+  const faultSummary = acceptanceState.data?.fault_summary;
+  const repairPlanDraft = acceptanceState.data?.repair_plan_draft;
 
   async function runBindingMutation<T extends CommandResponse | StartRunResponse | SyncRunResponse>(
     actionKey: string,
@@ -431,6 +439,91 @@ export function ExecutionPage(props: { mode?: ExecutionPageMode }) {
               </div>
             </section>
           ) : null}
+
+          <section className="data-panel">
+            <div className="panel-header">
+              <h3>Verification And Fault Closure</h3>
+            </div>
+            <div className="metrics-grid">
+              <MetricCard
+                label="Verification"
+                value={verificationResult?.decision || verificationResult?.status || "pending"}
+              />
+              <MetricCard
+                label="Completion"
+                value={completionVerdict?.decision || completionVerdict?.final_status || "pending"}
+              />
+              <MetricCard
+                label="Fault"
+                value={
+                  faultSummary?.fault_kind ||
+                  (faultSummary?.fault_loop_detected ? "fault_loop" : faultSummary?.status) ||
+                  "none"
+                }
+              />
+              <MetricCard
+                label="Repair"
+                value={repairPlanDraft?.status || repairPlanDraft?.repair_strategy || "none"}
+              />
+            </div>
+            <div className="stack-list">
+              {verificationResult ? (
+                <article className="list-card">
+                  <div className="list-card-head">
+                    <strong>{verificationResult.summary || "Verification contract"}</strong>
+                    <span className="status-pill">
+                      {verificationResult.preferred_verification_channel || verificationResult.status || "n/a"}
+                    </span>
+                  </div>
+                  {verificationResult.missing_evidence?.length ? (
+                    <p>missing evidence: {verificationResult.missing_evidence.join(", ")}</p>
+                  ) : null}
+                  {verificationResult.failed_checks?.length ? (
+                    <p>failed checks: {verificationResult.failed_checks.join(", ")}</p>
+                  ) : null}
+                  {verificationResult.verification_contract_json ? (
+                    <pre className="json-block">
+                      {prettyPayload(verificationResult.verification_contract_json)}
+                    </pre>
+                  ) : null}
+                </article>
+              ) : null}
+              {faultSummary ? (
+                <article className="list-card">
+                  <div className="list-card-head">
+                    <strong>{faultSummary.summary || "Fault summary"}</strong>
+                    <span className="status-pill">
+                      {faultSummary.fault_loop_detected ? "fault loop" : faultSummary.severity || "steady"}
+                    </span>
+                  </div>
+                  <p>
+                    {faultSummary.fault_kind || "fault"} · blocking {faultSummary.blocking_issue_count || 0} · advisory{" "}
+                    {faultSummary.advisory_issue_count || 0}
+                  </p>
+                  {faultSummary.failed_checks?.length ? (
+                    <p>failed checks: {faultSummary.failed_checks.join(", ")}</p>
+                  ) : null}
+                </article>
+              ) : null}
+              {repairPlanDraft ? (
+                <article className="list-card">
+                  <div className="list-card-head">
+                    <strong>{repairPlanDraft.summary || repairPlanDraft.reasoning_summary || "Repair draft"}</strong>
+                    <span className="status-pill">{repairPlanDraft.status || "n/a"}</span>
+                  </div>
+                  <p>{repairPlanDraft.repair_strategy || repairPlanDraft.reason_class || "repair_plan_draft"}</p>
+                  <div className="action-row">
+                    <button className="secondary-button" onClick={() => navigate(routes.repairDraft)}>
+                      Open Repair
+                    </button>
+                    <button className="secondary-button" onClick={() => navigate(routes.acceptance)}>
+                      Open Acceptance
+                    </button>
+                  </div>
+                </article>
+              ) : null}
+            </div>
+          </section>
 
           <div className="content-grid">
             <section className="data-panel">

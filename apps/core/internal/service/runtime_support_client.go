@@ -594,13 +594,43 @@ func appendRunEventIndex(
 	}
 
 	var payloadJSON any
+	var payloadText string
 	if payload != nil {
 		encoded, marshalErr := json.Marshal(payload)
 		if marshalErr != nil {
 			_ = tx.Rollback()
 			return gerror.Wrap(marshalErr, "marshal run event payload failed")
 		}
-		payloadJSON = string(encoded)
+		payloadText = string(encoded)
+		payloadJSON = payloadText
+	}
+
+	var (
+		lastEventType  string
+		lastEventLevel sql.NullString
+		lastSummary    string
+		lastPayload    sql.NullString
+	)
+	lastErr := tx.QueryRowContext(
+		ctx,
+		`SELECT event_type, COALESCE(event_level, ''), summary, COALESCE(payload_json, '')
+FROM `+dao.RunEventIndex.Table()+`
+WHERE run_binding_id = ?
+ORDER BY sequence_no DESC
+LIMIT 1`,
+		runBindingID,
+	).Scan(&lastEventType, &lastEventLevel, &lastSummary, &lastPayload)
+	if lastErr != nil && lastErr != sql.ErrNoRows {
+		_ = tx.Rollback()
+		return gerror.Wrap(lastErr, "query last run event failed")
+	}
+	if lastErr == nil &&
+		strings.EqualFold(strings.TrimSpace(lastEventType), strings.TrimSpace(eventType)) &&
+		strings.EqualFold(strings.TrimSpace(lastEventLevel.String), strings.TrimSpace(eventLevel)) &&
+		strings.TrimSpace(lastSummary) == strings.TrimSpace(summary) &&
+		strings.TrimSpace(lastPayload.String) == strings.TrimSpace(payloadText) {
+		_ = tx.Rollback()
+		return nil
 	}
 
 	result, err := tx.ExecContext(

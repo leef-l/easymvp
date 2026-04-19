@@ -27,6 +27,7 @@ func listProjectDiagnosticsView(ctx context.Context, projectID string, limit int
 
 	items := make([]systemv1.ProjectDiagnosticItem, 0, limit)
 	categoryCounts := make(map[string]int)
+	runSet := make(map[string]struct{})
 	for _, row := range rows {
 		item := buildProjectDiagnosticItem(row)
 		if !diagnosticMatchesProject(item, projectID) {
@@ -35,16 +36,36 @@ func listProjectDiagnosticsView(ctx context.Context, projectID string, limit int
 		if item.Category != "" {
 			categoryCounts[item.Category] += 1
 		}
+		if strings.TrimSpace(item.RunID) != "" {
+			runSet[strings.TrimSpace(item.RunID)] = struct{}{}
+		}
 		items = append(items, item)
 		if len(items) >= limit {
 			break
 		}
 	}
 
+	auditLogs, err := listProjectAuditLogs(ctx, db, projectID, 6)
+	if err != nil {
+		return nil, err
+	}
+	acceptanceAggregate, err := loadAcceptanceAggregate(ctx, db, projectID)
+	if err != nil {
+		return nil, err
+	}
+	linkedRuns, err := buildProjectLinkedRuns(ctx, projectID, runSet)
+	if err != nil {
+		return nil, err
+	}
+
 	return &systemv1.ListProjectDiagnosticsRes{
-		Items:          items,
-		CategoryCounts: categoryCounts,
-		RefreshHint:    "refresh_project_diagnostics",
+		Items:            items,
+		CategoryCounts:   categoryCounts,
+		LatestAuditLogs:  mapProjectAuditFacts(auditLogs),
+		LinkedRuns:       linkedRuns,
+		EvidenceOverview: buildProjectEvidenceOverview(acceptanceAggregate),
+		VerificationRead: buildProjectVerificationRead(acceptanceAggregate),
+		RefreshHint:      "refresh_project_diagnostics",
 	}, nil
 }
 
@@ -252,4 +273,119 @@ func fallbackString(value string, fallback string) string {
 		return strings.TrimSpace(value)
 	}
 	return strings.TrimSpace(fallback)
+}
+
+func mapProjectAuditFacts(rows []entity.AuditLogs) []systemv1.ProjectAuditFact {
+	items := make([]systemv1.ProjectAuditFact, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, systemv1.ProjectAuditFact{
+			ID:        row.Id,
+			EventType: row.EventType,
+			ActorKind: row.ActorKind,
+			Summary:   row.Summary,
+			CreatedAt: row.CreatedAt,
+		})
+	}
+	return items
+}
+
+func buildProjectLinkedRuns(ctx context.Context, projectID string, runSet map[string]struct{}) ([]systemv1.ProjectLinkedRun, error) {
+	runIDs := make([]string, 0, len(runSet))
+	for runID := range runSet {
+		runIDs = append(runIDs, runID)
+	}
+	if len(runIDs) == 0 {
+		return []systemv1.ProjectLinkedRun{}, nil
+	}
+
+	items := make([]systemv1.ProjectLinkedRun, 0, len(runIDs))
+	for _, runID := range runIDs {
+		binding, err := getBrainRunBindingByRunID(ctx, projectID, runID)
+		if err != nil {
+			continue
+		}
+		replayCount, err := countReplayIndexByRunID(ctx, projectID, runID)
+		if err != nil {
+			return nil, err
+		}
+		logSegmentCount, err := countLogSegmentsByRunID(ctx, projectID, runID)
+		if err != nil {
+			return nil, err
+		}
+		artifactSummary, err := summarizeReplayArtifactStatus(ctx, projectID, runID)
+		if err != nil {
+			return nil, err
+		}
+		entryPoints, err := listReplayEntryPoints(ctx, projectID, runID, 1)
+		if err != nil {
+			return nil, err
+		}
+
+		item := systemv1.ProjectLinkedRun{
+			RunID:           runID,
+			BindingID:       binding.ID,
+			TaskID:          binding.TaskID,
+			RunStatus:       binding.RunStatus,
+			ReplayCount:     replayCount,
+			LogSegmentCount: logSegmentCount,
+			ArtifactReady:   artifactSummary.Available,
+			ArtifactMissing: artifactSummary.Missing,
+			ArtifactPruned:  artifactSummary.Pruned,
+		}
+		if len(entryPoints) > 0 {
+			item.LatestReplayID = entryPoints[0].ReplayID
+			item.LatestReplayType = entryPoints[0].ReplayType
+			item.LatestReplayTitle = entryPoints[0].Summary
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func buildProjectEvidenceOverview(data *acceptanceAggregate) systemv1.ProjectEvidenceOverview {
+	result := systemv1.ProjectEvidenceOverview{
+		TotalCount:     len(data.EvidenceItems),
+		LatestEvidence: make([]systemv1.ProjectEvidenceRef, 0, len(data.EvidenceItems)),
+	}
+	limit := len(data.EvidenceItems)
+	if limit > 6 {
+		limit = 6
+	}
+	for _, item := range data.EvidenceItems[:limit] {
+		result.LatestEvidence = append(result.LatestEvidence, systemv1.ProjectEvidenceRef{
+			ID:           item.Id,
+			Surface:      item.Surface,
+			Journey:      item.Journey,
+			EvidenceType: item.EvidenceType,
+			FilePath:     item.FilePath,
+			CapturedAt:   item.CapturedAt,
+		})
+	}
+	verification := buildVerificationResultView(data)
+	result.MissingRequired = append([]string{}, verification.MissingEvidence...)
+	result.FailedChecks = append([]string{}, verification.FailedChecks...)
+	return result
+}
+
+func buildProjectVerificationRead(data *acceptanceAggregate) systemv1.ProjectVerificationRead {
+	verification := buildVerificationResultView(data)
+	completion := buildCompletionVerdictView(data)
+	fault := buildFaultSummaryView(data)
+	repair := buildRepairPlanDraftSummary(data)
+	return systemv1.ProjectVerificationRead{
+		Decision:                 verification.Decision,
+		Status:                   verification.Status,
+		CompletionDecision:       completion.Decision,
+		CompletionStatus:         completion.FinalStatus,
+		RepairDraftStatus:        repair.Status,
+		RepairStrategy:           repair.RepairStrategy,
+		FaultKind:                fault.FaultKind,
+		FaultSummary:             fault.Summary,
+		FaultLoopDetected:        fault.FaultLoopDetected,
+		VerificationContractJSON: verification.VerificationContractJSON,
+		MissingEvidence:          append([]string{}, verification.MissingEvidence...),
+		FailedChecks:             append([]string{}, verification.FailedChecks...),
+		RequiredChecks:           append([]string{}, verification.RequiredChecks...),
+		RequiredEvidence:         append([]string{}, verification.RequiredEvidence...),
+	}
 }

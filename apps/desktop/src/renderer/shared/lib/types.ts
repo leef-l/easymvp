@@ -431,6 +431,56 @@ export type ProjectDiagnosticsView = {
     created_at: string;
   }>;
   category_counts?: Record<string, number>;
+  latest_audit_logs?: Array<{
+    id: string;
+    event_type: string;
+    actor_kind: string;
+    summary: string;
+    created_at: string;
+  }>;
+  linked_runs?: Array<{
+    run_id: string;
+    binding_id?: string;
+    task_id?: string;
+    run_status?: string;
+    replay_count: number;
+    log_segment_count: number;
+    artifact_ready: number;
+    artifact_missing: number;
+    artifact_pruned: number;
+    latest_replay_id?: string;
+    latest_replay_type?: string;
+    latest_replay_title?: string;
+  }>;
+  evidence_overview?: {
+    total_count: number;
+    latest_evidence: Array<{
+      id: string;
+      surface: string;
+      journey?: string;
+      evidence_type: string;
+      file_path: string;
+      captured_at: string;
+    }>;
+    missing_required?: string[];
+    failed_checks?: string[];
+  };
+  verification_read?: {
+    decision?: string;
+    status?: string;
+    completion_decision?: string;
+    completion_status?: string;
+    repair_draft_status?: string;
+    repair_strategy?: string;
+    fault_kind?: string;
+    fault_summary?: string;
+    fault_loop_detected: boolean;
+    verification_contract_json?: string;
+    missing_evidence?: string[];
+    failed_checks?: string[];
+    required_checks?: string[];
+    required_evidence?: string[];
+  };
   refresh_hint: string;
 };
 

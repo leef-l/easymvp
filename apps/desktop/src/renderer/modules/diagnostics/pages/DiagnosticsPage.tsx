@@ -560,6 +560,160 @@ export function DiagnosticsPage() {
                 ) : null}
               </div>
             </section>
+
+            <section className="data-panel">
+              <div className="panel-header">
+                <h3>Verification Read Side</h3>
+              </div>
+              <div className="stack-list">
+                <article className="list-card">
+                  <div className="list-card-head">
+                    <strong>
+                      {diagnosticsState.data.verification_read?.decision ||
+                        diagnosticsState.data.verification_read?.completion_decision ||
+                        "pending"}
+                    </strong>
+                    <span className="status-pill">
+                      {diagnosticsState.data.verification_read?.fault_loop_detected
+                        ? "fault loop"
+                        : diagnosticsState.data.verification_read?.repair_draft_status || "steady"}
+                    </span>
+                  </div>
+                  <p>
+                    verification{" "}
+                    {diagnosticsState.data.verification_read?.status || "n/a"} ·
+                    completion{" "}
+                    {diagnosticsState.data.verification_read?.completion_status || "n/a"}
+                  </p>
+                  {diagnosticsState.data.verification_read?.fault_summary ? (
+                    <p>{diagnosticsState.data.verification_read.fault_summary}</p>
+                  ) : null}
+                  {diagnosticsState.data.verification_read?.missing_evidence?.length ? (
+                    <p>
+                      missing evidence:{" "}
+                      {diagnosticsState.data.verification_read.missing_evidence.join(", ")}
+                    </p>
+                  ) : null}
+                  {diagnosticsState.data.verification_read?.failed_checks?.length ? (
+                    <p>
+                      failed checks:{" "}
+                      {diagnosticsState.data.verification_read.failed_checks.join(", ")}
+                    </p>
+                  ) : null}
+                  <div className="action-row">
+                    <a className="secondary-button" href={routes.acceptance}>
+                      Open Acceptance
+                    </a>
+                    <a className="secondary-button" href={routes.repairDraft}>
+                      Open Repair
+                    </a>
+                  </div>
+                  {diagnosticsState.data.verification_read?.verification_contract_json ? (
+                    <pre className="json-block">
+                      {prettyJson(
+                        diagnosticsState.data.verification_read.verification_contract_json,
+                      )}
+                    </pre>
+                  ) : null}
+                </article>
+              </div>
+            </section>
+
+            <section className="data-panel">
+              <div className="panel-header">
+                <h3>Replay And Evidence</h3>
+              </div>
+              <div className="stack-list">
+                {(diagnosticsState.data.linked_runs || []).map((item) => (
+                  <article key={item.run_id} className="list-card">
+                    <div className="list-card-head">
+                      <strong>{item.run_id}</strong>
+                      <span className="status-pill">{item.run_status || "unknown"}</span>
+                    </div>
+                    <p>
+                      replay {item.replay_count} · logs {item.log_segment_count} · ready{" "}
+                      {item.artifact_ready} · missing {item.artifact_missing}
+                    </p>
+                    {item.latest_replay_title || item.latest_replay_type ? (
+                      <p>
+                        {item.latest_replay_type || "replay"} ·{" "}
+                        {item.latest_replay_title || item.latest_replay_id}
+                      </p>
+                    ) : null}
+                    <div className="action-row">
+                      <a
+                        className="secondary-button"
+                        href={buildRoute("/execution", {
+                          binding: item.binding_id,
+                          task: item.task_id,
+                        })}
+                      >
+                        Open Execution
+                      </a>
+                      <a
+                        className="secondary-button"
+                        href={buildRoute("/replay", {
+                          binding: item.binding_id,
+                          replay: item.latest_replay_id,
+                          task: item.task_id,
+                        })}
+                      >
+                        Open Replay
+                      </a>
+                    </div>
+                  </article>
+                ))}
+                <article className="list-card">
+                  <div className="list-card-head">
+                    <strong>Evidence overview</strong>
+                    <span className="status-pill">
+                      {diagnosticsState.data.evidence_overview?.total_count || 0} evidence
+                    </span>
+                  </div>
+                  {diagnosticsState.data.evidence_overview?.missing_required?.length ? (
+                    <p>
+                      missing required:{" "}
+                      {diagnosticsState.data.evidence_overview.missing_required.join(", ")}
+                    </p>
+                  ) : null}
+                  {diagnosticsState.data.evidence_overview?.failed_checks?.length ? (
+                    <p>
+                      failed checks:{" "}
+                      {diagnosticsState.data.evidence_overview.failed_checks.join(", ")}
+                    </p>
+                  ) : null}
+                  {(diagnosticsState.data.evidence_overview?.latest_evidence || []).map((item) => (
+                    <p key={item.id}>
+                      {item.surface} · {item.evidence_type} · {item.captured_at}
+                    </p>
+                  ))}
+                  <div className="action-row">
+                    <a className="secondary-button" href={routes.acceptance}>
+                      Open Acceptance
+                    </a>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section className="data-panel">
+              <div className="panel-header">
+                <h3>Latest Audit Facts</h3>
+              </div>
+              <div className="stack-list">
+                {(diagnosticsState.data.latest_audit_logs || []).map((item) => (
+                  <article key={item.id} className="list-card">
+                    <div className="list-card-head">
+                      <strong>{item.summary}</strong>
+                      <span className="status-pill">{item.event_type}</span>
+                    </div>
+                    <p>
+                      {item.actor_kind} · {item.created_at}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            </section>
           </div>
         </section>
       ) : null}
