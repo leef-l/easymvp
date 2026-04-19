@@ -7,10 +7,9 @@ rem Run this on your local high-spec machine after git pull.
 set "ROOT=%~dp0.."
 set "LOGFILE=%~dp0local-verify-apps-core-desktop.log"
 
-call :main > "%LOGFILE%" 2>&1
+break > "%LOGFILE%"
+call :main
 set "EXIT_CODE=%errorlevel%"
-
-type "%LOGFILE%"
 echo.
 echo LogFile=%LOGFILE%
 echo ExitCode=%EXIT_CODE%
@@ -19,43 +18,56 @@ exit /b %EXIT_CODE%
 
 :main
 
-echo == 1. Update Repository ==
+call :log == 1. Update Repository ==
 cd /d "%ROOT%" || goto :fail
-git pull || goto :fail
-git status --short || goto :fail
+call :run git pull || goto :fail
+call :run git status --short || goto :fail
 
-echo.
-echo == 2. Validate apps\core ==
+call :log.
+call :log == 2. Validate apps\core ==
 cd /d "%ROOT%\apps\core" || goto :fail
-go version || goto :fail
-go test ./... || goto :fail
+call :run go version || goto :fail
+call :run go test ./... || goto :fail
 
-echo.
-echo == 3. Validate apps\desktop ==
+call :log.
+call :log == 3. Validate apps\desktop ==
 cd /d "%ROOT%\apps\desktop" || goto :fail
-node -v || goto :fail
-call npm -v || goto :fail
+call :run node -v || goto :fail
+call :run pnpm -v || goto :fail
 
-if exist package-lock.json (
-  echo package-lock.json detected, running npm ci
-  call npm ci || goto :fail
+if exist pnpm-lock.yaml (
+  call :log pnpm-lock.yaml detected, running pnpm install --frozen-lockfile
+  call :run pnpm install --frozen-lockfile || goto :fail
 ) else (
-  echo package-lock.json not found, running npm install
-  call npm install || goto :fail
+  call :log pnpm-lock.yaml not found, running pnpm install
+  call :run pnpm install || goto :fail
 )
 
-call npm run build || goto :fail
+call :run pnpm run build || goto :fail
 
-echo.
-echo == 4. Validation Passed ==
-echo apps\core go test passed
-echo apps\desktop build passed
-echo.
-echo Optional smoke test:
-echo   cd /d "%ROOT%\apps\desktop" ^&^& npm run dev
+call :log.
+call :log == 4. Validation Passed ==
+call :log apps\core go test passed
+call :log apps\desktop build passed
+call :log.
+call :log Optional smoke test:
+call :log   cd /d "%ROOT%\apps\desktop" ^&^& npm run dev
 exit /b 0
 
 :fail
-echo.
-echo == Validation Failed ==
+call :log.
+call :log == Validation Failed ==
 exit /b 1
+
+:log
+echo %*
+>> "%LOGFILE%" echo %*
+exit /b 0
+
+:run
+set "_VERIFY_CMD=%*"
+call :log ^> %_VERIFY_CMD%
+call %*
+set "_VERIFY_EXIT=%errorlevel%"
+>> "%LOGFILE%" echo [exit %_VERIFY_EXIT%] %_VERIFY_CMD%
+exit /b %_VERIFY_EXIT%
