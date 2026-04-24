@@ -42,6 +42,15 @@ function smokeLine(fields: Record<string, string | number | boolean>) {
 let smokeExitStarted = false;
 let quitAfterCoreStop = false;
 
+function configureManagedCoreEnvironment() {
+  if (!process.env.EASYMVP_CORE_DATA_ROOT?.trim()) {
+    process.env.EASYMVP_CORE_DATA_ROOT = path.join(
+      app.getPath("userData"),
+      "core",
+    );
+  }
+}
+
 async function finishSmokeTest(code: number, reason: string) {
   if (smokeExitStarted) {
     return;
@@ -77,6 +86,23 @@ function relaunchDesktop(mode: "normal" | "safe-mode") {
     args: buildRelaunchArgs(mode),
   });
   void stopManagedCore("relaunch").finally(() => app.exit(0));
+}
+
+function logSmokeCoreDiagnostics() {
+  const manager = getCoreManagerSnapshot();
+  console.error(
+    [
+      "desktop smoke test core manager diagnostics:",
+      `status=${manager.status}`,
+      `pid=${manager.pid}`,
+      `lastExitCode=${manager.lastExitCode}`,
+      `command=${manager.command || "<empty>"}`,
+      `cwd=${manager.cwd || "<empty>"}`,
+      `lastError=${manager.lastError || "<empty>"}`,
+      "logTail:",
+      ...manager.logTail.map((line) => `  ${line}`),
+    ].join("\n"),
+  );
 }
 
 function registerDesktopBridgeHandlers() {
@@ -275,6 +301,7 @@ function createWindow() {
         });
         if (!bootstrap.lastProbe?.reachable) {
           console.error(`desktop smoke test failed: core not reachable (${bootstrap.lastProbe?.status || "unknown"})`);
+          logSmokeCoreDiagnostics();
           void finishSmokeTest(1, "core-health-failed");
           return;
         }
@@ -307,6 +334,7 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  configureManagedCoreEnvironment();
   registerDesktopBridgeHandlers();
   await waitForCoreBootstrap({
     baseUrl: resolveCoreBaseUrl(),

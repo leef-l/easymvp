@@ -198,6 +198,18 @@ function getPackagedCoreBinaryPath() {
   return path.join(process.resourcesPath, "bin", fileName);
 }
 
+function getPackagedCoreDataRoot() {
+  const configured = process.env.EASYMVP_CORE_DATA_ROOT?.trim();
+  if (configured) {
+    return configured;
+  }
+  return path.join(process.cwd(), "var");
+}
+
+function getPackagedCoreMigrationPath() {
+  return path.join(process.resourcesPath, "manifest", "migrations");
+}
+
 function stripWrappedQuotes(value: string) {
   const trimmed = value.trim();
   if (trimmed.length < 2) {
@@ -521,7 +533,13 @@ function resolveLaunchSpec(
 
   const packagedBinary = getPackagedCoreBinaryPath();
   if (fs.existsSync(packagedBinary)) {
-    const args = [`--port=${parsePort(baseUrl)}`];
+    const dataRoot = getPackagedCoreDataRoot();
+    const args = [
+      `--port=${parsePort(baseUrl)}`,
+      `--data-root=${dataRoot}`,
+      `--db-path=${path.join(dataRoot, "data", "easymvp.db")}`,
+      `--migration-path=${getPackagedCoreMigrationPath()}`,
+    ];
     if (launchMode === "safe-mode") {
       args.push("--safe-mode");
     }
@@ -711,10 +729,12 @@ export async function ensureManagedCore(params: {
     child.once("exit", (code, signal) => {
       state.status = code === 0 || stoppingManagedCore ? "exited" : "failed";
       state.lastExitCode = code ?? 0;
-      state.lastError =
-        signal && !state.lastError && !stoppingManagedCore
-          ? `Managed core exited from signal ${signal}`
-          : state.lastError;
+      if (!stoppingManagedCore && code !== 0) {
+        state.lastError =
+          `Managed core exited code=${code ?? "null"} signal=${signal ?? "none"}`;
+      } else if (signal && !state.lastError && !stoppingManagedCore) {
+        state.lastError = `Managed core exited from signal ${signal}`;
+      }
       state.pid = 0;
       pushLog(
         `[manager] core exited code=${code ?? "null"} signal=${signal ?? "none"}`,

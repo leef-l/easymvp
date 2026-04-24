@@ -1,12 +1,14 @@
-import { access } from "node:fs/promises";
+import { access, mkdtemp, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 
 const desktopRoot = path.resolve(import.meta.dirname, "..");
 const smokeTimeoutMs = 45000;
 const packageTargets = [
   {
+    platform: "linux",
     releaseRoot: path.join(desktopRoot, "release", "linux-unpacked"),
     binaryPath: path.join(
       desktopRoot,
@@ -16,6 +18,14 @@ const packageTargets = [
       "bin",
       "easymvp-core",
     ),
+    migrationPath: path.join(
+      desktopRoot,
+      "release",
+      "linux-unpacked",
+      "resources",
+      "manifest",
+      "migrations",
+    ),
     executablePath: path.join(
       desktopRoot,
       "release",
@@ -24,6 +34,7 @@ const packageTargets = [
     ),
   },
   {
+    platform: "win32",
     releaseRoot: path.join(desktopRoot, "release", "win-unpacked"),
     binaryPath: path.join(
       desktopRoot,
@@ -32,6 +43,14 @@ const packageTargets = [
       "resources",
       "bin",
       "easymvp-core.exe",
+    ),
+    migrationPath: path.join(
+      desktopRoot,
+      "release",
+      "win-unpacked",
+      "resources",
+      "manifest",
+      "migrations",
     ),
     executablePath: path.join(
       desktopRoot,
@@ -43,25 +62,39 @@ const packageTargets = [
 ];
 
 const packageTarget = await resolvePackageTarget();
-const { releaseRoot, binaryPath, executablePath } = packageTarget;
+const { releaseRoot, binaryPath, migrationPath, executablePath } = packageTarget;
 
 console.log(`verified desktop package at ${releaseRoot}`);
 console.log(`verified bundled core binary at ${binaryPath}`);
+console.log(`verified bundled core migrations at ${migrationPath}`);
 
 const smokePort = await allocateSmokePort();
 const smokeBaseUrl = `http://127.0.0.1:${smokePort}`;
+const smokeDataRoot = await mkdtemp(
+  path.join(os.tmpdir(), "easymvp-desktop-smoke-"),
+);
 
-await runSmokeTest({
-  command: executablePath,
-  args: ["--smoke-test"],
-  baseUrl: smokeBaseUrl,
-});
+try {
+  await runSmokeTest({
+    command: executablePath,
+    args: ["--smoke-test"],
+    baseUrl: smokeBaseUrl,
+    dataRoot: smokeDataRoot,
+  });
+} finally {
+  await rm(smokeDataRoot, { recursive: true, force: true });
+}
 
 async function resolvePackageTarget() {
-  for (const target of packageTargets) {
+  const orderedTargets = [
+    ...packageTargets.filter((target) => target.platform === process.platform),
+    ...packageTargets.filter((target) => target.platform !== process.platform),
+  ];
+  for (const target of orderedTargets) {
     if (
       (await pathExists(target.releaseRoot))
       && (await pathExists(target.binaryPath))
+      && (await pathExists(target.migrationPath))
       && (await pathExists(target.executablePath))
     ) {
       return target;
@@ -96,7 +129,7 @@ async function allocateSmokePort() {
   });
 }
 
-async function runSmokeTest({ command, args, baseUrl }) {
+async function runSmokeTest({ command, args, baseUrl, dataRoot }) {
   const { stdout, stderr } = await new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: releaseRoot,
@@ -104,6 +137,7 @@ async function runSmokeTest({ command, args, baseUrl }) {
         ...process.env,
         EASYMVP_MANAGE_CORE: "1",
         EASYMVP_CORE_BASE_URL: baseUrl,
+        EASYMVP_CORE_DATA_ROOT: dataRoot,
         ELECTRON_DISABLE_SANDBOX: "1",
         EASYMVP_DESKTOP_SMOKE: "1",
       },
