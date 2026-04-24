@@ -18,6 +18,9 @@ node_modules/
 # CI artifacts
 .easymvp/ci/
 
+# Docker dev build outputs
+docker/dev/bin/
+
 # Env
 .env.local
 *.local

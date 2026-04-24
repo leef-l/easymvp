@@ -41,6 +41,8 @@ dev_docker.bat
 ```
 
 - 统一配置文件：`docker/dev/config.yaml`
+- 依赖：Docker Desktop、Go 1.24+
+- 启动脚本会先在宿主机交叉编译 Linux core，再用 `FROM scratch` 组装镜像，避免 Docker Hub 基础镜像拉取
 - API 地址：`http://127.0.0.1:8000`
 - 健康检查：`http://127.0.0.1:8000/api/v3/system/healthz`
 - 查看日志：`dev_docker.bat logs`

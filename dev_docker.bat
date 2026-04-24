@@ -23,6 +23,7 @@ goto :start
 echo == EasyMVP Docker dev start ==
 echo Compose=%COMPOSE%
 echo Config=docker\dev\config.yaml
+call :build_core || goto :fail
 %COMPOSE% -f "%COMPOSE_FILE%" up --build -d || goto :fail
 %COMPOSE% -f "%COMPOSE_FILE%" ps
 call :wait_health || goto :health_fail
@@ -46,6 +47,7 @@ goto :success
 
 :clean
 %COMPOSE% -f "%COMPOSE_FILE%" down -v --remove-orphans || goto :fail
+if exist "%ROOT%docker\dev\bin" rmdir /s /q "%ROOT%docker\dev\bin"
 goto :success
 
 :logs
@@ -80,6 +82,27 @@ if "%errorlevel%"=="0" (
 )
 echo Docker Compose was not found. Install Docker Desktop or docker-compose.
 exit /b 1
+
+:build_core
+echo Building Linux core binary for Docker...
+where go >nul 2>nul
+if not "%errorlevel%"=="0" (
+  echo Go was not found. Install Go 1.24+ and make sure go.exe is in PATH.
+  exit /b 1
+)
+if not exist "%ROOT%docker\dev\bin" mkdir "%ROOT%docker\dev\bin" || exit /b 1
+pushd "%ROOT%apps\core" || exit /b 1
+set "CGO_ENABLED=0"
+set "GOOS=linux"
+set "GOARCH=amd64"
+go build -trimpath -ldflags "-s -w" -o "%ROOT%docker\dev\bin\easymvp-core-linux-amd64" .\main.go
+set "_BUILD_EXIT=%errorlevel%"
+popd
+if not "%_BUILD_EXIT%"=="0" (
+  echo Core Linux binary build failed.
+  exit /b %_BUILD_EXIT%
+)
+exit /b 0
 
 :usage
 echo Usage:
