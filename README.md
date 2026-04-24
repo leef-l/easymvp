@@ -34,6 +34,19 @@ Windows:
 scripts\local-verify-apps-core-desktop.bat
 ```
 
+本地 Docker 启动 core 测试环境:
+
+```powershell
+dev_docker.bat
+```
+
+- 统一配置文件：`docker/dev/config.yaml`
+- API 地址：`http://127.0.0.1:8000`
+- 健康检查：`http://127.0.0.1:8000/api/v3/system/healthz`
+- 查看日志：`dev_docker.bat logs`
+- 停止环境：`dev_docker.bat down`
+- 清理容器和数据卷：`dev_docker.bat clean`
+
 手动执行：
 
 ```bash

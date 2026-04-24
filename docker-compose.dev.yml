@@ -1,0 +1,29 @@
+name: easymvp-dev
+
+services:
+  easymvp-core:
+    container_name: easymvp-core-dev
+    image: easymvp-core:dev
+    build:
+      context: .
+      dockerfile: docker/dev/Dockerfile.core
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./docker/dev/config.yaml:/app/manifest/config/config.yaml:ro
+      - easymvp_core_var:/app/var
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O - http://127.0.0.1:8000/api/v3/system/healthz >/dev/null || exit 1",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+volumes:
+  easymvp_core_var:

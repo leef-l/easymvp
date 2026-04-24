@@ -1,0 +1,22 @@
+server:
+  address: ":8000"
+  openapiPath: "/api.json"
+  swaggerPath: "/swagger"
+
+logger:
+  level: "all"
+  stdout: true
+
+easymvp:
+  dataRoot: "/app/var"
+  dbPath: "/app/var/data/easymvp.db"
+  migrationPath: "/app/manifest/migrations"
+  brainServeBaseURL: "http://host.docker.internal:7701"
+  safeMode: false
+  easymvpBrain:
+    mode: "local-sidecar"
+    localEndpoint: "http://host.docker.internal:7801"
+    remoteEndpoint: ""
+    apiKey: ""
+    timeout: "30s"
+    maxTurns: 6
