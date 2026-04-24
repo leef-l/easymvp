@@ -39,6 +39,10 @@ function smokeLine(fields: Record<string, string | number | boolean>) {
   console.log(`EASYMVP_SMOKE ${text}`);
 }
 
+function smokeValue(value: string) {
+  return encodeURIComponent(value || "");
+}
+
 let smokeExitStarted = false;
 let quitAfterCoreStop = false;
 
@@ -302,6 +306,15 @@ function createWindow() {
         if (!bootstrap.lastProbe?.reachable) {
           console.error(`desktop smoke test failed: core not reachable (${bootstrap.lastProbe?.status || "unknown"})`);
           logSmokeCoreDiagnostics();
+          smokeLine({
+            coreDiagnostics: true,
+            status: manager.status,
+            lastExitCode: manager.lastExitCode,
+            command: smokeValue(manager.command),
+            cwd: smokeValue(manager.cwd),
+            lastError: smokeValue(manager.lastError),
+            logTail: smokeValue(manager.logTail.join(" | ")),
+          });
           void finishSmokeTest(1, "core-health-failed");
           return;
         }
