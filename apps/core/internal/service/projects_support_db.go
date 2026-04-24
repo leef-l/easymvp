@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -35,6 +37,8 @@ type derivedWorkspacePaths struct {
 	CacheRoot       string
 	DiagnosticsRoot string
 }
+
+var resourceIDCounter uint64
 
 func normalizeCreateProjectCommand(req CreateProjectCommand) (*normalizedCreateProjectCommand, error) {
 	normalized := &normalizedCreateProjectCommand{
@@ -124,7 +128,8 @@ func nowText() string {
 }
 
 func newResourceID(prefix string) string {
-	return prefix + "_" + time.Now().Format("20060102150405.000000000")
+	sequence := atomic.AddUint64(&resourceIDCounter, 1)
+	return prefix + "_" + time.Now().UTC().Format("20060102150405.000000000") + "_" + strconv.FormatUint(sequence, 36)
 }
 
 func openProjectDatabase(ctx context.Context) (*sql.DB, func(), error) {
