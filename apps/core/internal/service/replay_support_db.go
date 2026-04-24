@@ -55,6 +55,18 @@ func (s *sReplay) GetReplaySummary(ctx context.Context, projectID string, runID 
 	if err != nil {
 		return nil, err
 	}
+	missingArtifacts, err := listRunArtifactIssues(ctx, projectID, runID, 8)
+	if err != nil {
+		return nil, err
+	}
+	latestEvent, err := getLatestRunEvent(ctx, binding.ID)
+	if err != nil {
+		return nil, err
+	}
+	latestCheckpoint, err := getLatestRunCheckpoint(ctx, binding.ID)
+	if err != nil {
+		return nil, err
+	}
 
 	return &replayv1.GetReplaySummaryRes{
 		RunID:                 runID,
@@ -67,6 +79,10 @@ func (s *sReplay) GetReplaySummary(ctx context.Context, projectID string, runID 
 		ReplayCount:           replayCount,
 		LogSegmentCount:       logSegmentCount,
 		ArtifactStatusSummary: artifactSummary,
+		MissingArtifacts:      missingArtifacts,
+		LatestEvent:           latestEvent,
+		LatestCheckpoint:      latestCheckpoint,
+		DiagnosticHints:       buildReplayDiagnosticHints(artifactSummary, missingArtifacts, latestEvent, latestCheckpoint),
 		EntryPoints:           entryPoints,
 	}, nil
 }
@@ -95,6 +111,7 @@ func (s *sReplay) GetReplayTimeline(ctx context.Context, projectID string, runID
 
 	timeline := make([]replayv1.ReplayTimelineItem, 0, len(items))
 	for _, item := range items {
+		issue := buildReplayArtifactIssueFromReplay(item)
 		timeline = append(timeline, replayv1.ReplayTimelineItem{
 			ReplayID:         item.ReplayID,
 			DomainTaskID:     item.DomainTaskID,
@@ -106,6 +123,8 @@ func (s *sReplay) GetReplayTimeline(ctx context.Context, projectID string, runID
 			Status:           item.Status,
 			PreviewAvailable: item.Status == "available" && item.FilePath != "",
 			RawTarget:        item.FilePath,
+			ArtifactIssue:    issue,
+			DiagnosticHints:  buildItemDiagnosticHints(issue),
 			CreatedAt:        item.CreatedAt,
 		})
 	}
@@ -127,6 +146,11 @@ func (s *sReplay) GetReplayDetail(ctx context.Context, projectID string, runID s
 	if err != nil {
 		return nil, err
 	}
+	relatedEvent, err := getRunEventByEventID(ctx, item.EventID)
+	if err != nil {
+		return nil, err
+	}
+	issue := buildReplayArtifactIssueFromReplay(*item)
 
 	return &replayv1.GetReplayDetailRes{
 		ReplayID:         item.ReplayID,
@@ -146,6 +170,9 @@ func (s *sReplay) GetReplayDetail(ctx context.Context, projectID string, runID s
 			PreviewAvailable: item.Status == "available" && item.FilePath != "",
 			RawTarget:        item.FilePath,
 		},
+		ArtifactIssue:      issue,
+		RelatedEvent:       relatedEvent,
+		DiagnosticHints:    buildItemDiagnosticHints(issue),
 		RelatedLogSegments: mapLogSegments(logSegments),
 	}, nil
 }
@@ -260,6 +287,21 @@ type logSegmentRow struct {
 	CreatedAt  string
 }
 
+type runEventRow struct {
+	ID         string
+	SequenceNo int
+	EventType  string
+	EventLevel string
+	Summary    string
+	CreatedAt  string
+}
+
+type runCheckpointRow struct {
+	ID             string
+	CheckpointType string
+	CreatedAt      string
+}
+
 func getBrainRunBindingByRunID(ctx context.Context, projectID string, runID string) (*brainRunBindingViewRow, error) {
 	db, closeFn, err := openProjectDatabase(ctx)
 	if err != nil {
@@ -349,6 +391,90 @@ func countByQuery(ctx context.Context, query string, args ...any) (int, error) {
 	return count, nil
 }
 
+func getLatestRunEvent(ctx context.Context, bindingID string) (*replayv1.ReplayEventRef, error) {
+	if strings.TrimSpace(bindingID) == "" {
+		return nil, nil
+	}
+	db, closeFn, err := openProjectDatabase(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer closeFn()
+
+	row := db.QueryRowContext(ctx, `SELECT id, sequence_no, event_type, COALESCE(event_level, ''), summary, created_at
+FROM run_event_index
+WHERE run_binding_id = ?
+ORDER BY sequence_no DESC, created_at DESC
+LIMIT 1`, bindingID)
+	return scanRunEventRef(row, "query latest run event failed")
+}
+
+func getRunEventByEventID(ctx context.Context, eventID string) (*replayv1.ReplayEventRef, error) {
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return nil, nil
+	}
+	db, closeFn, err := openProjectDatabase(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer closeFn()
+
+	row := db.QueryRowContext(ctx, `SELECT id, sequence_no, event_type, COALESCE(event_level, ''), summary, created_at
+FROM run_event_index
+WHERE id = ?
+LIMIT 1`, eventID)
+	return scanRunEventRef(row, "query run event by id failed")
+}
+
+func scanRunEventRef(row *sql.Row, wrapMessage string) (*replayv1.ReplayEventRef, error) {
+	var item runEventRow
+	if err := row.Scan(&item.ID, &item.SequenceNo, &item.EventType, &item.EventLevel, &item.Summary, &item.CreatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, gerror.Wrap(err, wrapMessage)
+	}
+	return &replayv1.ReplayEventRef{
+		EventID:    item.ID,
+		SequenceNo: item.SequenceNo,
+		EventType:  item.EventType,
+		EventLevel: item.EventLevel,
+		Summary:    item.Summary,
+		CreatedAt:  item.CreatedAt,
+	}, nil
+}
+
+func getLatestRunCheckpoint(ctx context.Context, bindingID string) (*replayv1.ReplayCheckpointRef, error) {
+	if strings.TrimSpace(bindingID) == "" {
+		return nil, nil
+	}
+	db, closeFn, err := openProjectDatabase(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer closeFn()
+
+	row := db.QueryRowContext(ctx, `SELECT id, checkpoint_type, created_at
+FROM run_checkpoints
+WHERE run_binding_id = ?
+ORDER BY created_at DESC, id DESC
+LIMIT 1`, bindingID)
+
+	var item runCheckpointRow
+	if err = row.Scan(&item.ID, &item.CheckpointType, &item.CreatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, gerror.Wrap(err, "query latest run checkpoint failed")
+	}
+	return &replayv1.ReplayCheckpointRef{
+		CheckpointID:   item.ID,
+		CheckpointType: item.CheckpointType,
+		CreatedAt:      item.CreatedAt,
+	}, nil
+}
+
 func summarizeReplayArtifactStatus(ctx context.Context, projectID string, runID string) (replayv1.ReplayArtifactSummary, error) {
 	db, closeFn, err := openProjectDatabase(ctx)
 	if err != nil {
@@ -396,14 +522,44 @@ func listReplayEntryPoints(ctx context.Context, projectID string, runID string, 
 		items = append(items, replayv1.ReplayEntryPointItem{
 			DomainTaskID:   item.DomainTaskID,
 			CompiledTaskID: item.CompiledTaskID,
-			ReplayID:   item.ReplayID,
-			ReplayType: item.ReplayKind,
-			Summary:    item.Summary,
-			FilePath:   item.FilePath,
-			CreatedAt:  item.CreatedAt,
+			ReplayID:       item.ReplayID,
+			ReplayType:     item.ReplayKind,
+			Summary:        item.Summary,
+			FilePath:       item.FilePath,
+			CreatedAt:      item.CreatedAt,
 		})
 	}
 	return items, nil
+}
+
+func listRunArtifactIssues(ctx context.Context, projectID string, runID string, limit int) ([]replayv1.ReplayArtifactIssue, error) {
+	replayRows, err := listReplayTimelineRows(ctx, projectID, runID, "", replayTimelineMaxLimit)
+	if err != nil {
+		return nil, err
+	}
+	logRows, err := listLogSegmentRows(ctx, projectID, runID, logSegmentMaxLimit)
+	if err != nil {
+		return nil, err
+	}
+
+	issues := make([]replayv1.ReplayArtifactIssue, 0, limit)
+	for _, row := range replayRows {
+		if issue := buildReplayArtifactIssueFromReplay(row); issue != nil {
+			issues = append(issues, *issue)
+			if len(issues) >= limit {
+				return issues, nil
+			}
+		}
+	}
+	for _, row := range logRows {
+		if issue := buildReplayArtifactIssueFromLog(row); issue != nil {
+			issues = append(issues, *issue)
+			if len(issues) >= limit {
+				return issues, nil
+			}
+		}
+	}
+	return issues, nil
 }
 
 func listReplayTimelineRows(ctx context.Context, projectID string, runID string, replayKind string, limit int) ([]replayIndexRow, error) {
@@ -570,6 +726,126 @@ func mapLogSegments(rows []logSegmentRow) []replayv1.LogSegmentListItem {
 		})
 	}
 	return items
+}
+
+func buildReplayArtifactIssueFromReplay(item replayIndexRow) *replayv1.ReplayArtifactIssue {
+	return buildArtifactIssue("replay", item.ReplayID, item.Status, item.FilePath, item.Title)
+}
+
+func buildReplayArtifactIssueFromLog(item logSegmentRow) *replayv1.ReplayArtifactIssue {
+	return buildArtifactIssue("log_segment", item.SegmentID, item.Status, item.FilePath, item.StreamKind)
+}
+
+func buildArtifactIssue(source string, id string, status string, filePath string, summary string) *replayv1.ReplayArtifactIssue {
+	status = strings.TrimSpace(status)
+	filePath = strings.TrimSpace(filePath)
+	switch {
+	case status == "artifact_missing":
+		return &replayv1.ReplayArtifactIssue{
+			Kind:              "missing_artifact",
+			Source:            source,
+			ID:                id,
+			Status:            status,
+			FilePath:          filePath,
+			Summary:           summary,
+			RecommendedAction: "refresh_replay_artifacts_or_restore_raw_file",
+		}
+	case status == "artifact_pruned":
+		return &replayv1.ReplayArtifactIssue{
+			Kind:              "pruned_artifact",
+			Source:            source,
+			ID:                id,
+			Status:            status,
+			FilePath:          filePath,
+			Summary:           summary,
+			RecommendedAction: "rerun_or_restore_pruned_artifact",
+		}
+	case status == "available" && filePath != "" && fileIsMissing(filePath):
+		return &replayv1.ReplayArtifactIssue{
+			Kind:              "stale_index",
+			Source:            source,
+			ID:                id,
+			Status:            status,
+			FilePath:          filePath,
+			Summary:           summary,
+			RecommendedAction: "refresh_replay_artifact_index",
+		}
+	default:
+		return nil
+	}
+}
+
+func fileIsMissing(filePath string) bool {
+	if strings.TrimSpace(filePath) == "" {
+		return false
+	}
+	_, err := os.Stat(filePath)
+	return os.IsNotExist(err)
+}
+
+func buildReplayDiagnosticHints(
+	artifactSummary replayv1.ReplayArtifactSummary,
+	issues []replayv1.ReplayArtifactIssue,
+	latestEvent *replayv1.ReplayEventRef,
+	latestCheckpoint *replayv1.ReplayCheckpointRef,
+) []replayv1.ReplayDiagnosticHint {
+	hints := make([]replayv1.ReplayDiagnosticHint, 0, 4)
+	if artifactSummary.Missing > 0 {
+		hints = append(hints, replayv1.ReplayDiagnosticHint{
+			Code:              "missing_artifact",
+			Severity:          "warning",
+			Summary:           "Replay index contains missing artifact entries.",
+			RecommendedAction: "refresh_replay_artifacts_or_restore_raw_file",
+		})
+	}
+	if artifactSummary.Pruned > 0 {
+		hints = append(hints, replayv1.ReplayDiagnosticHint{
+			Code:              "pruned_artifact",
+			Severity:          "info",
+			Summary:           "Some replay artifacts were pruned and raw preview is unavailable.",
+			RecommendedAction: "rerun_or_restore_pruned_artifact",
+		})
+	}
+	if hasArtifactIssueKind(issues, "stale_index") {
+		hints = append(hints, replayv1.ReplayDiagnosticHint{
+			Code:              "stale_index",
+			Severity:          "warning",
+			Summary:           "Replay index points to a file that no longer exists.",
+			RecommendedAction: "refresh_replay_artifact_index",
+		})
+	}
+	if latestEvent == nil && latestCheckpoint == nil {
+		hints = append(hints, replayv1.ReplayDiagnosticHint{
+			Code:              "missing_runtime_markers",
+			Severity:          "info",
+			Summary:           "No latest event or checkpoint is available for this run.",
+			RecommendedAction: "sync_run_events_and_checkpoints",
+		})
+	}
+	return hints
+}
+
+func buildItemDiagnosticHints(issue *replayv1.ReplayArtifactIssue) []replayv1.ReplayDiagnosticHint {
+	if issue == nil {
+		return nil
+	}
+	return []replayv1.ReplayDiagnosticHint{
+		{
+			Code:              issue.Kind,
+			Severity:          "warning",
+			Summary:           issue.Summary,
+			RecommendedAction: issue.RecommendedAction,
+		},
+	}
+}
+
+func hasArtifactIssueKind(issues []replayv1.ReplayArtifactIssue, kind string) bool {
+	for _, issue := range issues {
+		if issue.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func loadRawFileSnippet(filePath string, status string, limit int) (string, bool, error) {

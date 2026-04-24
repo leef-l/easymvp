@@ -74,6 +74,7 @@ const MANAGED_CORE_PROBE_INTERVAL_MS = 750;
 let childProcess: ChildProcessWithoutNullStreams | null = null;
 let startPromise: Promise<CoreManagerSnapshot> | null = null;
 let bootstrapPromise: Promise<CoreBootstrapSnapshot> | null = null;
+let stoppingManagedCore = false;
 const logTail: string[] = [];
 
 const state: CoreManagerSnapshot = {
@@ -708,10 +709,10 @@ export async function ensureManagedCore(params: {
     });
 
     child.once("exit", (code, signal) => {
-      state.status = code === 0 ? "exited" : "failed";
+      state.status = code === 0 || stoppingManagedCore ? "exited" : "failed";
       state.lastExitCode = code ?? 0;
       state.lastError =
-        signal && !state.lastError
+        signal && !state.lastError && !stoppingManagedCore
           ? `Managed core exited from signal ${signal}`
           : state.lastError;
       state.pid = 0;
@@ -878,15 +879,7 @@ export async function restartManagedCore(params: {
   baseUrl: string;
   launchMode: string;
 }): Promise<CoreManagerSnapshot> {
-  if (childProcess && childProcess.exitCode === null) {
-    childProcess.kill();
-    childProcess = null;
-    state.pid = 0;
-    state.status = "idle";
-    state.startupIssue = null;
-    pushLog("[manager] stopping existing managed core before restart");
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
+  await stopManagedCore("restart");
   return ensureManagedCore(params);
 }
 
@@ -896,4 +889,52 @@ export async function restartCoreBootstrap(params: {
 }): Promise<CoreBootstrapSnapshot> {
   await restartManagedCore(params);
   return runCoreBootstrap(params);
+}
+
+export async function stopManagedCore(reason = "shutdown"): Promise<CoreManagerSnapshot> {
+  const child = childProcess;
+  if (!child || child.exitCode !== null) {
+    childProcess = null;
+    state.pid = 0;
+    if (state.enabled && state.status === "running") {
+      state.status = "exited";
+    }
+    return getCoreManagerSnapshot();
+  }
+
+  stoppingManagedCore = true;
+  state.status = "exited";
+  state.pid = child.pid ?? 0;
+  state.startupIssue = null;
+  pushLog(`[manager] stopping managed core for ${reason}`);
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve();
+    };
+    const killTimer = setTimeout(() => {
+      if (child.exitCode === null) {
+        child.kill("SIGKILL");
+      }
+    }, 2500);
+    const doneTimer = setTimeout(finish, 4000);
+    child.once("exit", () => {
+      clearTimeout(killTimer);
+      clearTimeout(doneTimer);
+      finish();
+    });
+    child.kill("SIGTERM");
+  });
+
+  stoppingManagedCore = false;
+  childProcess = null;
+  state.pid = 0;
+  state.status = "exited";
+  state.lastError = "";
+  return getCoreManagerSnapshot();
 }

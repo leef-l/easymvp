@@ -9,6 +9,7 @@ import {
   restartCoreBootstrap,
   restartManagedCore,
   startCoreBootstrap,
+  stopManagedCore,
   waitForCoreBootstrap,
 } from "./coreManager.js";
 
@@ -31,6 +32,33 @@ function isSmokeTestMode() {
   return process.argv.includes("--smoke-test");
 }
 
+function smokeLine(fields: Record<string, string | number | boolean>) {
+  const text = Object.entries(fields)
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join(" ");
+  console.log(`EASYMVP_SMOKE ${text}`);
+}
+
+let smokeExitStarted = false;
+let quitAfterCoreStop = false;
+
+async function finishSmokeTest(code: number, reason: string) {
+  if (smokeExitStarted) {
+    return;
+  }
+  smokeExitStarted = true;
+  const pid = getCoreManagerSnapshot().pid;
+  if (pid > 0) {
+    await stopManagedCore(`smoke-${reason}`);
+  }
+  smokeLine({
+    cleanup: pid > 0 ? "stopped" : "none",
+    corePid: pid,
+    reason,
+  });
+  app.exit(code);
+}
+
 if (isSmokeTestMode()) {
   app.disableHardwareAcceleration();
   app.commandLine.appendSwitch("disable-gpu");
@@ -48,7 +76,7 @@ function relaunchDesktop(mode: "normal" | "safe-mode") {
   app.relaunch({
     args: buildRelaunchArgs(mode),
   });
-  app.exit(0);
+  void stopManagedCore("relaunch").finally(() => app.exit(0));
 }
 
 function registerDesktopBridgeHandlers() {
@@ -192,13 +220,13 @@ function createWindow() {
   if (smokeTestMode) {
     const timeout = setTimeout(() => {
       console.error("desktop smoke test timed out before renderer finished loading");
-      app.exit(1);
+      void finishSmokeTest(1, "timeout");
     }, SMOKE_TEST_TIMEOUT_MS);
 
     window.webContents.once("did-fail-load", (_event, errorCode, errorDescription) => {
       clearTimeout(timeout);
       console.error(`desktop smoke test failed to load renderer: ${errorCode} ${errorDescription}`);
-      app.exit(1);
+      void finishSmokeTest(1, "renderer-load-failed");
     });
 
     window.webContents.once("did-finish-load", async () => {
@@ -227,23 +255,43 @@ function createWindow() {
           await new Promise((resolve) => setTimeout(resolve, 250));
         }
         clearTimeout(timeout);
+        const manager = getCoreManagerSnapshot();
+        smokeLine({
+          managed: bootstrap.managed,
+          phase: bootstrap.phase,
+          baseUrl: bootstrap.baseUrl,
+          corePid: manager.pid,
+          managerStatus: manager.status,
+        });
+        smokeLine({
+          healthOk: Boolean(bootstrap.lastProbe?.reachable),
+          httpStatus: bootstrap.lastProbe?.httpStatus ?? 0,
+          endpoint: "/api/v3/system/healthz",
+        });
+        smokeLine({
+          rendererMounted: (smokeState?.rootChildCount || 0) > 0,
+          rootChildCount: smokeState?.rootChildCount || 0,
+          readyState: smokeState?.readyState || "unknown",
+        });
         if (!bootstrap.lastProbe?.reachable) {
           console.error(`desktop smoke test failed: core not reachable (${bootstrap.lastProbe?.status || "unknown"})`);
-          app.exit(1);
+          void finishSmokeTest(1, "core-health-failed");
           return;
         }
         if ((smokeState?.rootChildCount || 0) <= 0) {
           console.error(
             `desktop smoke test failed: renderer did not mount (pathname=${smokeState?.pathname || "<empty>"}, readyState=${smokeState?.readyState || "unknown"})`,
           );
-          app.exit(1);
+          void finishSmokeTest(1, "renderer-not-mounted");
           return;
         }
-        setTimeout(() => app.exit(0), 500);
+        setTimeout(() => {
+          void finishSmokeTest(0, "ok");
+        }, 500);
       } catch (error) {
         clearTimeout(timeout);
         console.error("desktop smoke test failed during renderer assertion", error);
-        app.exit(1);
+        void finishSmokeTest(1, "assertion-error");
       }
     });
   }
@@ -278,4 +326,13 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+app.on("before-quit", (event) => {
+  if (quitAfterCoreStop || getCoreManagerSnapshot().pid <= 0) {
+    return;
+  }
+  event.preventDefault();
+  quitAfterCoreStop = true;
+  void stopManagedCore("app-quit").finally(() => app.quit());
 });

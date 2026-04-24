@@ -1,8 +1,15 @@
 package service
 
 import (
+	"context"
+	"database/sql"
+	"os"
+	"path/filepath"
 	"testing"
 
+	_ "modernc.org/sqlite"
+
+	replayv1 "github.com/leef-l/easymvp/apps/core/api/replay/v1"
 	systemv1 "github.com/leef-l/easymvp/apps/core/api/system/v1"
 	"github.com/leef-l/easymvp/apps/core/internal/model/entity"
 )
@@ -63,5 +70,61 @@ func TestBuildProjectDiagnosticItemClassifiesStructuredDiagnostics(t *testing.T)
 	}
 	if item.RelatedPage != "acceptance" {
 		t.Fatalf("unexpected related page: got %s", item.RelatedPage)
+	}
+}
+
+func TestMapProjectArtifactContextIncludesRunAndAction(t *testing.T) {
+	t.Parallel()
+
+	got := mapProjectArtifactContext("run_1", replayv1.ReplayArtifactIssue{
+		Kind:              "stale_index",
+		Source:            "replay",
+		ID:                "replay_1",
+		Status:            "available",
+		FilePath:          "/tmp/replay.json",
+		Summary:           "step",
+		RecommendedAction: "refresh_replay_artifact_index",
+	})
+
+	if got.RunID != "run_1" || got.Kind != "stale_index" || got.RecommendedAction != "refresh_replay_artifact_index" {
+		t.Fatalf("unexpected artifact context: %#v", got)
+	}
+}
+
+func TestBuildProjectEvidenceOverviewCountsAndFlagsMissingFiles(t *testing.T) {
+	t.Parallel()
+
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite failed: %v", err)
+	}
+	defer db.Close()
+	if _, err = db.Exec(`CREATE TABLE evidence_items (id TEXT PRIMARY KEY, project_id TEXT NOT NULL)`); err != nil {
+		t.Fatalf("create evidence table failed: %v", err)
+	}
+	if _, err = db.Exec(`INSERT INTO evidence_items (id, project_id) VALUES ('ev_1', 'proj_1'), ('ev_2', 'proj_1')`); err != nil {
+		t.Fatalf("insert evidence rows failed: %v", err)
+	}
+
+	existingPath := filepath.Join(t.TempDir(), "screen.png")
+	if err = os.WriteFile(existingPath, []byte("ok"), 0o644); err != nil {
+		t.Fatalf("write evidence file failed: %v", err)
+	}
+	missingPath := filepath.Join(t.TempDir(), "missing.png")
+	overview, err := buildProjectEvidenceOverview(context.Background(), db, &acceptanceAggregate{
+		Project: entity.Projects{Id: "proj_1"},
+		EvidenceItems: []entity.EvidenceItems{
+			{Id: "ev_1", ProjectId: "proj_1", EvidenceType: "screenshot", FilePath: existingPath, CapturedAt: "2026-04-20T10:00:00Z"},
+			{Id: "ev_2", ProjectId: "proj_1", EvidenceType: "screenshot", FilePath: missingPath, CapturedAt: "2026-04-20T10:01:00Z"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build evidence overview failed: %v", err)
+	}
+	if overview.TotalCount != 2 {
+		t.Fatalf("unexpected total count: got %d want 2", overview.TotalCount)
+	}
+	if len(overview.MissingFiles) != 1 || overview.MissingFiles[0].ID != "ev_2" {
+		t.Fatalf("unexpected missing evidence files: %#v", overview.MissingFiles)
 	}
 }

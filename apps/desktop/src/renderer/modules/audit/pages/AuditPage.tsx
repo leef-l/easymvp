@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { apiGet } from "@/shared/lib/api";
 import { useProjectState } from "@/shared/lib/project";
 import { useQuery } from "@/shared/lib/query";
@@ -6,10 +7,12 @@ import type { AuditLogsView } from "@/shared/lib/types";
 import { QueryPanel } from "@/shared/ui/QueryPanel";
 
 export function AuditPage() {
-  const { projectId, routes } = useProjectState();
+  const { projectId, routes, searchParams, buildRoute } = useProjectState();
+  const runFromUrl = searchParams.get("run")?.trim() || "";
+  const taskFromUrl = searchParams.get("task")?.trim() || "";
   const [eventTypeFilter, setEventTypeFilter] = useState("all");
   const [actorFilter, setActorFilter] = useState("all");
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchTerm, setSearchTerm] = useState(runFromUrl || taskFromUrl);
   const state = useQuery(
     () => apiGet<AuditLogsView>(`/api/v3/projects/${encodeURIComponent(projectId)}/audit-logs?limit=50`),
     [projectId],
@@ -31,6 +34,7 @@ export function AuditPage() {
       return `${item.summary} ${item.payload_json ?? ""}`.toLowerCase().includes(keyword);
     });
   }, [actorFilter, eventTypeFilter, searchTerm, state.data?.items]);
+  const activeContext = searchTerm.trim() || runFromUrl || taskFromUrl;
 
   return (
     <QueryPanel
@@ -57,6 +61,7 @@ export function AuditPage() {
             <div className="summary-stack">
               <span className="status-pill">{state.data.items.length} items</span>
               <span className="status-pill">{state.data.refresh_hint}</span>
+              {activeContext ? <span className="status-pill">context {activeContext}</span> : null}
             </div>
           </div>
 
@@ -100,25 +105,95 @@ export function AuditPage() {
             </div>
             <div className="stack-list">
               <div className="action-row">
-                <a className="secondary-button" href={routes.replay}>
+                <Link
+                  className="secondary-button"
+                  to={buildRoute("/replay", {
+                    run: runFromUrl || undefined,
+                    task: taskFromUrl || undefined,
+                  })}
+                >
                   Open Replay
-                </a>
-                <a className="secondary-button" href={routes.execution}>
+                </Link>
+                <Link
+                  className="secondary-button"
+                  to={buildRoute("/execution", {
+                    run: runFromUrl || undefined,
+                    task: taskFromUrl || undefined,
+                  })}
+                >
                   Open Execution
-                </a>
+                </Link>
+                <Link
+                  className="secondary-button"
+                  to={buildRoute("/diagnostics", {
+                    run: runFromUrl || undefined,
+                    task: taskFromUrl || undefined,
+                  })}
+                >
+                  Open Diagnostics
+                </Link>
               </div>
-              {filteredItems.map((item) => (
-                <article key={item.id} className="list-card">
-                  <div className="list-card-head">
-                    <strong>{item.summary}</strong>
-                    <span className="status-pill">{item.event_type}</span>
-                  </div>
-                  <p>
-                    {item.actor_kind} · {item.created_at}
-                  </p>
-                  {item.payload_json ? <pre className="json-block">{prettyJson(item.payload_json)}</pre> : null}
-                </article>
-              ))}
+              {filteredItems.map((item) => {
+                const auditContext = readAuditContext(item.payload_json);
+                const runID = auditContext.run_id || runFromUrl;
+                const taskID = auditContext.task_id || taskFromUrl;
+                return (
+                  <article key={item.id} className="list-card">
+                    <div className="list-card-head">
+                      <strong>{item.summary}</strong>
+                      <span className="status-pill">{item.event_type}</span>
+                    </div>
+                    <p>
+                      {item.actor_kind} · {item.created_at}
+                    </p>
+                    {runID || taskID || auditContext.binding_id || auditContext.replay_id ? (
+                      <p>
+                        {taskID ? `task ${taskID}` : "task n/a"} · {runID ? `run ${runID}` : "run n/a"} ·{" "}
+                        {auditContext.binding_id ? `binding ${auditContext.binding_id}` : "binding n/a"}
+                      </p>
+                    ) : null}
+                    <div className="action-row">
+                      <Link
+                        className="secondary-button"
+                        to={buildRoute("/execution", {
+                          binding: auditContext.binding_id || undefined,
+                          run: runID || undefined,
+                          task: taskID || undefined,
+                        })}
+                      >
+                        Open Execution
+                      </Link>
+                      <Link
+                        className="secondary-button"
+                        to={buildRoute("/replay", {
+                          binding: auditContext.binding_id || undefined,
+                          run: runID || undefined,
+                          replay: auditContext.replay_id || undefined,
+                          task: taskID || undefined,
+                        })}
+                      >
+                        Open Replay
+                      </Link>
+                      <Link
+                        className="secondary-button"
+                        to={buildRoute("/diagnostics", {
+                          binding: auditContext.binding_id || undefined,
+                          run: runID || undefined,
+                          task: taskID || undefined,
+                        })}
+                      >
+                        Open Diagnostics
+                      </Link>
+                      {taskID ? (
+                        <Link className="secondary-button" to={buildRoute("/acceptance", { task: taskID })}>
+                          Open Acceptance
+                        </Link>
+                      ) : null}
+                    </div>
+                    {item.payload_json ? <pre className="json-block">{prettyJson(item.payload_json)}</pre> : null}
+                  </article>
+                );
+              })}
               {filteredItems.length === 0 ? (
                 <article className="list-card">
                   <p>No audit records match the current filters for this project.</p>
@@ -145,4 +220,42 @@ function prettyJson(raw?: string) {
 
 function buildOptions(items: string[]) {
   return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right));
+}
+
+function readAuditContext(raw?: string) {
+  const parsed = safeParseJSONObject(raw);
+  return {
+    binding_id: readStringField(parsed, "binding_id", "run_binding_id"),
+    replay_id: readStringField(parsed, "replay_id", "latest_replay_id"),
+    run_id: readStringField(parsed, "run_id", "source_run_id"),
+    task_id: readStringField(parsed, "task_id", "source_task_id", "domain_task_id"),
+  };
+}
+
+function safeParseJSONObject(raw?: string): Record<string, unknown> | null {
+  if (!raw || raw.trim() === "") {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function readStringField(source: Record<string, unknown> | null, ...keys: string[]) {
+  if (!source) {
+    return "";
+  }
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim() !== "") {
+      return value.trim();
+    }
+  }
+  return "";
 }

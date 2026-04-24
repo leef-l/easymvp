@@ -414,6 +414,64 @@ id, project_id, task_id, brain_kind, brain_run_id, run_status, started_at, finis
 	return nil
 }
 
+func findReusableRunBindingForTask(ctx context.Context, projectID string, taskID string, brainKind string) (*entity.BrainRunBindings, error) {
+	projectID = strings.TrimSpace(projectID)
+	taskID = strings.TrimSpace(taskID)
+	brainKind = strings.TrimSpace(brainKind)
+	if projectID == "" || taskID == "" {
+		return nil, nil
+	}
+
+	db, closeFn, err := openProjectDatabase(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer closeFn()
+
+	query := `
+SELECT
+  id,
+  project_id,
+  task_id,
+  brain_kind,
+  brain_run_id,
+  run_status,
+  started_at,
+  COALESCE(finished_at, ''),
+  COALESCE(last_sync_at, ''),
+  created_at,
+  updated_at
+FROM ` + dao.BrainRunBindings.Table() + `
+WHERE project_id = ?
+  AND task_id = ?
+  AND brain_kind = ?
+  AND run_status IN (?, ?)
+ORDER BY created_at DESC, id DESC
+LIMIT 1`
+
+	row := db.QueryRowContext(ctx, query, projectID, taskID, brainKind, "run_pending", "run_active")
+	var binding entity.BrainRunBindings
+	if err = row.Scan(
+		&binding.Id,
+		&binding.ProjectId,
+		&binding.TaskId,
+		&binding.BrainKind,
+		&binding.BrainRunId,
+		&binding.RunStatus,
+		&binding.StartedAt,
+		&binding.FinishedAt,
+		&binding.LastSyncAt,
+		&binding.CreatedAt,
+		&binding.UpdatedAt,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, gerror.Wrap(err, "query reusable brain run binding failed")
+	}
+	return &binding, nil
+}
+
 func getBrainRunBindingByID(ctx context.Context, bindingID string) (*entity.BrainRunBindings, error) {
 	db, closeFn, err := openProjectDatabase(ctx)
 	if err != nil {
@@ -605,6 +663,30 @@ func appendRunEventIndex(
 		payloadJSON = payloadText
 	}
 
+	var duplicateCount int
+	if err = tx.QueryRowContext(
+		ctx,
+		`SELECT COUNT(1)
+FROM `+dao.RunEventIndex.Table()+`
+WHERE run_binding_id = ?
+  AND event_type = ?
+  AND COALESCE(event_level, '') = ?
+  AND summary = ?
+  AND COALESCE(payload_json, '') = ?`,
+		runBindingID,
+		eventType,
+		strings.TrimSpace(eventLevel),
+		strings.TrimSpace(summary),
+		strings.TrimSpace(payloadText),
+	).Scan(&duplicateCount); err != nil {
+		_ = tx.Rollback()
+		return gerror.Wrap(err, "query duplicate run event failed")
+	}
+	if duplicateCount > 0 {
+		_ = tx.Rollback()
+		return nil
+	}
+
 	var (
 		lastEventType  string
 		lastEventLevel sql.NullString
@@ -658,6 +740,76 @@ id, project_id, run_binding_id, sequence_no, event_type, event_level, summary, p
 	}
 	if err = tx.Commit(); err != nil {
 		return gerror.Wrap(err, "commit run event transaction failed")
+	}
+	return nil
+}
+
+func appendRunCheckpointForState(ctx context.Context, binding *entity.BrainRunBindings, runState *BrainRunState, mappedStatus string) error {
+	if binding == nil || runState == nil {
+		return nil
+	}
+
+	payload := map[string]any{
+		"binding_id":     binding.Id,
+		"project_id":     binding.ProjectId,
+		"task_id":        binding.TaskId,
+		"run_id":         firstNonEmpty(strings.TrimSpace(runState.RunID), strings.TrimSpace(binding.BrainRunId)),
+		"execution_id":   strings.TrimSpace(runState.ExecutionID),
+		"runtime_status": strings.TrimSpace(runState.Status),
+		"mapped_status":  strings.TrimSpace(mappedStatus),
+		"brain_kind":     strings.TrimSpace(binding.BrainKind),
+		"created_at":     strings.TrimSpace(runState.CreatedAt),
+	}
+	if len(runState.Result) > 0 {
+		payload["result"] = json.RawMessage(runState.Result)
+	}
+
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return gerror.Wrap(err, "marshal runtime checkpoint failed")
+	}
+	payloadText := string(encoded)
+
+	db, closeFn, err := openProjectDatabase(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+
+	var lastPayload sql.NullString
+	lastErr := db.QueryRowContext(
+		ctx,
+		`SELECT COALESCE(payload_json, '')
+FROM `+dao.RunCheckpoints.Table()+`
+WHERE run_binding_id = ? AND checkpoint_type = ?
+ORDER BY created_at DESC, id DESC
+LIMIT 1`,
+		binding.Id,
+		"runtime_state",
+	).Scan(&lastPayload)
+	if lastErr != nil && lastErr != sql.ErrNoRows {
+		return gerror.Wrap(lastErr, "query latest runtime checkpoint failed")
+	}
+	if lastErr == nil && strings.TrimSpace(lastPayload.String) == strings.TrimSpace(payloadText) {
+		return nil
+	}
+
+	result, err := db.ExecContext(
+		ctx,
+		`INSERT INTO `+dao.RunCheckpoints.Table()+` (
+id, run_binding_id, checkpoint_type, payload_json, created_at
+) VALUES (?, ?, ?, ?, ?)`,
+		newResourceID("runckpt"),
+		binding.Id,
+		"runtime_state",
+		payloadText,
+		nowText(),
+	)
+	if err != nil {
+		return gerror.Wrap(err, "insert runtime checkpoint failed")
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return gerror.New("insert runtime checkpoint affected unexpected rows")
 	}
 	return nil
 }

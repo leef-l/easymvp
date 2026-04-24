@@ -1,10 +1,12 @@
 # EasyMVP V3 AgentTeam Frontend 计划
 
-> 更新时间：2026-04-19
+> 更新时间：2026-04-24
 > 上游文档：[EasyMVP-V3工作台全页面设计规范](./EasyMVP-V3-工作台全页面设计规范.md)
 > 关联文档：[EasyMVP-V3-页面组件实现终稿与代码骨架规范](./EasyMVP-V3-页面组件实现终稿与代码骨架规范.md)
 > 关联文档：[EasyMVP-V3-核心API-DTO与TypeScript类型终稿](./EasyMVP-V3-核心API-DTO与TypeScript类型终稿.md)
 > 目标：为 V3 前端实施提供可执行、可恢复、可并行的开机计划，确保中断后可按计划 ID 继续推进。
+>
+> 当前完成度以 [EasyMVP-V3-AgentTeam状态板](./EasyMVP-V3-AgentTeam状态板.md) 为准。前端剩余重点是 diagnostics / recovery / acceptance / repair 更细粒度联动、replay/evidence 聚合展示与 packaged smoke 证明链。
 
 ## 1. 计划使用规则
 
@@ -119,7 +121,7 @@
   - 落地 `useWorkspaceEvents`、`useProjectEvents` 的基础实现
   - 能支撑项目卡片、活动流、验收覆盖等实时刷新
   - 显式处理 `unsupported / denied` 对应的 warning / blocker / attention 语义
-- 状态：`in_progress`
+- 状态：`done`
 
 ### FE-004
 
@@ -136,7 +138,7 @@
   - 建立颜色、间距、圆角、阴影、排版变量
   - 建立通用卡片、状态徽标、按钮、空态、错误态组件
   - 建立页面标题区、区块标题区、抽屉容器等共享 UI
-- 状态：`in_progress`
+- 状态：`done`
 
 ### FE-005
 
@@ -156,7 +158,7 @@
   - 首屏能展示多项目总览、待处理事项、近期活动、发布准备度
   - 符合“首屏只回答当前状态/问题/动作”的规范
   - 不直接消费 `brain-v3` 原始运行时对象或原始工具 payload
-- 状态：`in_progress`
+- 状态：`done`
 
 ### FE-006
 
@@ -180,7 +182,7 @@
   - `StageOverviewCard / NeedAttentionCard / RecentActivityCard / ReleaseReadinessCard / ProjectCard` 全部落地
   - props、交互事件、loading/empty/error 状态全部对齐文档
   - 项目卡片可跳转项目页
-- 状态：`in_progress`
+- 状态：`done`
 
 ### FE-007
 
@@ -202,7 +204,7 @@
   - 支持创建失败后的恢复与回滚提示
   - 创建成功后能跳转首次进入引导态
   - 创建页只展示 `role_type / brain_kind` 解析上下文，不把执行面职责错误归给 `easymvp-brain`
-- 状态：`in_progress`
+- 状态：`done`
 
 ### FE-008
 
@@ -220,7 +222,7 @@
   - 接入 `useProjectWorkspaceView`
   - 页面能展示项目快照、阶段流、活动流、待处理区、验收覆盖区
   - 满足实时驾驶舱定位
-- 状态：`in_progress`
+- 状态：`done`
 
 ### FE-009
 
@@ -242,7 +244,7 @@
   - `TopStatusBar / StageRail / LiveActivityPanel / ActionInboxPanel` 全部落地
   - 组件事件与跳转对齐文档
   - 支持选阶段、打开操作项、查看实时活动
-- 状态：`in_progress`
+- 状态：`done`
 
 ### FE-010
 
@@ -262,7 +264,7 @@
   - 创建后首次进入引导态可展示
   - 推荐动作卡与引导卡交互完整
   - 满足引导态向常规工作台的切换规则
-- 状态：`in_progress`
+- 状态：`done`
 
 ### FE-011
 
@@ -282,7 +284,7 @@
   - 可展示 `Draft / Review / Compiled / Diff / Task Projection`
   - 任务投影抽屉可打开
   - 页面能解释系统如何编译与修改计划
-- 状态：`in_progress`
+- 状态：`done`
 
 ### FE-012
 
@@ -301,7 +303,7 @@
   - 接入 `useAcceptanceView`
   - 页面能展示 coverage、issues、evidence、release gate
   - 页面定位保持“最终交付裁决页”而不是 issue 列表
-- 状态：`in_progress`
+- 状态：`done`
 
 ### FE-013
 
@@ -322,7 +324,7 @@
   - `CoverageMatrix / EvidenceCard / EvidenceDrawer / ReleaseGateDrawer` 全部落地
   - Evidence 预览与详情交互完整
   - 覆盖矩阵支持选中与联动
-- 状态：`in_progress`
+- 状态：`done`
 
 ### FE-014
 
@@ -358,7 +360,7 @@
   - Replay 抽屉可用
   - 审计列表、过滤器、诊断入口可用
   - 恢复模式页面与诊断模式页面具备基础交互
-- 状态：`in_progress`
+- 状态：`done`
 
 ### FE-016
 
@@ -374,7 +376,7 @@
   - 顶层导航、子跳转、抽屉跳转、深链打开全部可用
   - Workspace、Plan、Execution、Acceptance、Settings 之间跳转一致
   - 页面间推荐动作跳转与返回路径清晰
-- 状态：`in_progress`
+- 状态：`done`
 
 ### FE-017
 
@@ -389,7 +391,7 @@
   - Workspace Home、Project Workspace、Plan、Acceptance、Replay、Audit 的 loading/empty/error/recovery 状态全部收口
   - 状态文案、恢复动作、重试行为一致
   - 页面不会出现“只有报错字符串没有恢复动作”的情况
-- 状态：`in_progress`
+- 状态：`done`
 
 ### FE-018
 
@@ -406,7 +408,7 @@
   - 前端所有已实现页面都切到统一契约层
   - Mock 数据与真实 DTO 字段保持一致
   - 为后续接 GoFrame 接口联调准备稳定 client 层
-- 状态：`in_progress`
+- 状态：`done`
 
 ### FE-019
 
@@ -422,7 +424,7 @@
   - 全页面视觉语言统一
   - 卡片层级、状态色、按钮层级、空态文案统一
   - 页面达到“简单、大气、明了、一看就会用”的设计目标
-- 状态：`pending`
+- 状态：`done`
 
 ### FE-020
 
@@ -438,7 +440,7 @@
   - 已完成项更新为 `done`
   - 阻塞项更新为 `blocked` 并补充阻塞原因
   - 该文档成为前端中断恢复后的唯一计划入口
-- 状态：`in_progress`
+- 状态：`done`
 
 ## 5. 并行执行建议
 

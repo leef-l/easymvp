@@ -60,6 +60,9 @@ export function AcceptancePage() {
   const acceptanceRun = state.data?.acceptance_run;
   const releaseGate = state.data?.release_gate;
   const acceptanceNextAction = firstText(completionVerdict?.next_action, "inspect_acceptance");
+  const verificationRunID = firstText(verificationResult?.source_run_id, completionVerdict?.source_run_id, runtimeEscalation?.run_id);
+  const runtimeBindingID = runtimeEscalation?.run_binding_id || "";
+  const contextTaskID = firstText(currentAcceptanceTaskId, selectedTaskId, selectedTaskFromUrl, runtimeEscalation?.task_id);
 
   useEffect(() => {
     if (selectedTaskFromUrl) {
@@ -185,7 +188,8 @@ export function AcceptancePage() {
                 next {firstText(acceptanceNextAction, "inspect_acceptance")}
               </span>
               <span className="status-pill">run {acceptanceRun?.id || "none"}</span>
-              <span className="status-pill">task {acceptanceRun?.task_id || "auto"}</span>
+              <span className="status-pill">task {contextTaskID || "auto"}</span>
+              {verificationRunID ? <span className="status-pill">source run {verificationRunID}</span> : null}
               <span className="status-pill">profile {acceptanceRun?.profile_version || "default"}</span>
               <span className="status-pill">
                 blockers {firstNumber(acceptanceOverview?.blocking_issue_count, acceptanceRun?.blocking_issue_count, state.data.issues.length)}
@@ -279,8 +283,8 @@ export function AcceptancePage() {
                     className="secondary-button"
                     onClick={() =>
                       navigate(
-                        currentAcceptanceTaskId
-                          ? buildRoute("/execution", { task: currentAcceptanceTaskId })
+                        contextTaskID
+                          ? buildRoute("/execution", { task: contextTaskID, run: verificationRunID || undefined, binding: runtimeBindingID || undefined })
                           : routes.diagnostics,
                       )
                     }
@@ -293,12 +297,43 @@ export function AcceptancePage() {
                     Open Rework Path
                   </button>
                 ) : null}
-                {currentAcceptanceTaskId ? (
+                {contextTaskID ? (
                   <button
                     className="secondary-button"
-                    onClick={() => navigate(buildRoute("/execution", { task: currentAcceptanceTaskId }))}
+                    onClick={() => navigate(buildRoute("/execution", { task: contextTaskID, run: verificationRunID || undefined, binding: runtimeBindingID || undefined }))}
                   >
                     Open Task Execution
+                  </button>
+                ) : null}
+                {verificationRunID || runtimeBindingID || contextTaskID ? (
+                  <button
+                    className="secondary-button"
+                    onClick={() =>
+                      navigate(
+                        buildRoute("/replay", {
+                          binding: runtimeBindingID || undefined,
+                          run: verificationRunID || undefined,
+                          task: contextTaskID || undefined,
+                        }),
+                      )
+                    }
+                  >
+                    Open Replay
+                  </button>
+                ) : null}
+                {verificationRunID || contextTaskID ? (
+                  <button
+                    className="secondary-button"
+                    onClick={() =>
+                      navigate(
+                        buildRoute("/audit", {
+                          run: verificationRunID || undefined,
+                          task: contextTaskID || undefined,
+                        }),
+                      )
+                    }
+                  >
+                    Open Audit
                   </button>
                 ) : null}
                 {planState.data?.repair_draft.id ? (
@@ -346,6 +381,8 @@ export function AcceptancePage() {
                     acceptanceOverview?.functional_status ? `functional ${acceptanceOverview.functional_status}` : undefined,
                     acceptanceOverview?.production_status ? `production ${acceptanceOverview.production_status}` : undefined,
                     acceptanceNextAction ? `next ${acceptanceNextAction}` : undefined,
+                    verificationRunID ? `run ${verificationRunID}` : undefined,
+                    contextTaskID ? `task ${contextTaskID}` : undefined,
                     acceptanceOverview ? `evidence ${acceptanceOverview.evidence_card_count}` : undefined,
                     acceptanceOverview?.manual_release_required !== undefined
                       ? `manual release ${String(acceptanceOverview.manual_release_required)}`
@@ -379,6 +416,70 @@ export function AcceptancePage() {
                   rawJson={verificationResult?.verification_contract_json}
                   rawJsonLabel="Verification Contract JSON"
                 />
+                <article className="list-card">
+                  <div className="list-card-head">
+                    <strong>Linked Triage</strong>
+                    <span className="status-pill">{contextTaskID || verificationRunID ? "ready" : "pending"}</span>
+                  </div>
+                  <p>Open the same task and run across execution, replay, diagnostics, and audit.</p>
+                  <div className="action-row">
+                    <button
+                      className="secondary-button"
+                      onClick={() =>
+                        navigate(
+                          buildRoute("/execution", {
+                            binding: runtimeBindingID || undefined,
+                            run: verificationRunID || undefined,
+                            task: contextTaskID || undefined,
+                          }),
+                        )
+                      }
+                    >
+                      Open Execution
+                    </button>
+                    <button
+                      className="secondary-button"
+                      onClick={() =>
+                        navigate(
+                          buildRoute("/replay", {
+                            binding: runtimeBindingID || undefined,
+                            run: verificationRunID || undefined,
+                            task: contextTaskID || undefined,
+                          }),
+                        )
+                      }
+                    >
+                      Open Replay
+                    </button>
+                    <button
+                      className="secondary-button"
+                      onClick={() =>
+                        navigate(
+                          buildRoute("/diagnostics", {
+                            binding: runtimeBindingID || undefined,
+                            run: verificationRunID || undefined,
+                            task: contextTaskID || undefined,
+                          }),
+                        )
+                      }
+                    >
+                      Open Diagnostics
+                    </button>
+                    <button
+                      className="secondary-button"
+                      onClick={() =>
+                        navigate(
+                          buildRoute("/audit", {
+                            run: verificationRunID || undefined,
+                            task: contextTaskID || undefined,
+                          }),
+                        )
+                      }
+                    >
+                      Open Audit
+                    </button>
+                  </div>
+                </article>
                 <SummaryCard
                   title="Completion Verdict"
                   primary={firstText(completionVerdict?.decision, completionVerdict?.final_status, "pending")}
@@ -514,10 +615,10 @@ export function AcceptancePage() {
                       </details>
                     ) : null}
                     <div className="action-row">
-                      {currentAcceptanceTaskId ? (
+                      {contextTaskID ? (
                         <button
                           className="secondary-button"
-                          onClick={() => navigate(buildRoute("/execution", { task: currentAcceptanceTaskId }))}
+                          onClick={() => navigate(buildRoute("/execution", { task: contextTaskID, run: verificationRunID || undefined, binding: runtimeBindingID || undefined }))}
                         >
                           Inspect Execution
                         </button>
@@ -585,14 +686,28 @@ export function AcceptancePage() {
                         Open Plan
                       </button>
                     )}
-                    {currentAcceptanceTaskId ? (
+                    {contextTaskID ? (
                       <button
                         className="secondary-button"
-                        onClick={() => navigate(buildRoute("/execution", { task: currentAcceptanceTaskId }))}
+                        onClick={() => navigate(buildRoute("/execution", { task: contextTaskID, run: verificationRunID || undefined, binding: runtimeBindingID || undefined }))}
                       >
                         Open Execution
                       </button>
                     ) : null}
+                    <button
+                      className="secondary-button"
+                      onClick={() =>
+                        navigate(
+                          buildRoute("/diagnostics", {
+                            binding: runtimeBindingID || undefined,
+                            run: verificationRunID || undefined,
+                            task: contextTaskID || undefined,
+                          }),
+                        )
+                      }
+                    >
+                      Open Diagnostics
+                    </button>
                   </div>
                 </article>
               </div>
@@ -629,6 +744,7 @@ export function AcceptancePage() {
                               buildRoute("/execution", {
                                 task: item.task_id,
                                 binding: item.binding_id,
+                                run: item.run_id,
                               }),
                             )
                           }
@@ -636,6 +752,19 @@ export function AcceptancePage() {
                           Open Execution
                         </button>
                       ) : null}
+                      <button
+                        className="secondary-button"
+                        onClick={() =>
+                          navigate(
+                            buildRoute("/audit", {
+                              run: item.run_id || verificationRunID || undefined,
+                              task: item.task_id || contextTaskID || undefined,
+                            }),
+                          )
+                        }
+                      >
+                        Open Audit
+                      </button>
                       {planState.data?.repair_draft.id ? (
                         <button className="secondary-button" onClick={() => navigate(routes.repairDraft)}>
                           Open Repair Draft

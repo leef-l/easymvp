@@ -21,7 +21,12 @@ export function RepairDraftPage() {
   );
   const repairDraft = state.data?.repair_draft;
   const failedTaskContext = safeParseJSONObject(repairDraft?.failed_task_context_json);
-  const taskID = readStringField(failedTaskContext, "acceptance_task_id", "task_id");
+  const failureReason = safeParseJSONObject(repairDraft?.failure_reason_json);
+  const runtimeSummary = safeParseJSONObject(repairDraft?.runtime_summary_json);
+  const taskID = readStringField(failedTaskContext, failureReason, runtimeSummary, "acceptance_task_id", "task_id", "source_task_id");
+  const runID = readStringField(runtimeSummary, failureReason, failedTaskContext, "run_id", "source_run_id");
+  const bindingID = readStringField(runtimeSummary, failureReason, failedTaskContext, "binding_id", "run_binding_id");
+  const replayID = readStringField(runtimeSummary, failureReason, "replay_id", "latest_replay_id");
 
   return (
     <QueryPanel loading={state.loading} error={state.error} title="Repair draft">
@@ -37,6 +42,7 @@ export function RepairDraftPage() {
               <span className="status-pill">{repairDraft.status}</span>
               <span className="status-pill">{repairDraft.updated_at || "no timestamp"}</span>
               {taskID ? <span className="status-pill">task {taskID}</span> : null}
+              {runID ? <span className="status-pill">run {runID}</span> : null}
             </div>
           </div>
 
@@ -57,11 +63,59 @@ export function RepairDraftPage() {
                     <Link className="secondary-button" to={buildRoute("/acceptance", { task: taskID })}>
                       Open Acceptance
                     </Link>
-                    <Link className="secondary-button" to={buildRoute("/execution", { task: taskID })}>
+                    <Link
+                      className="secondary-button"
+                      to={buildRoute("/execution", {
+                        binding: bindingID || undefined,
+                        run: runID || undefined,
+                        task: taskID,
+                      })}
+                    >
                       Open Execution
                     </Link>
                   </>
                 ) : null}
+                <Link
+                  className="secondary-button"
+                  to={buildRoute("/replay", {
+                    binding: bindingID || undefined,
+                    run: runID || undefined,
+                    replay: replayID || undefined,
+                    task: taskID || undefined,
+                  })}
+                >
+                  Open Replay
+                </Link>
+                <Link
+                  className="secondary-button"
+                  to={buildRoute("/audit", {
+                    run: runID || undefined,
+                    task: taskID || undefined,
+                  })}
+                >
+                  Open Audit
+                </Link>
+              </div>
+            </section>
+
+            <section className="data-panel">
+              <div className="panel-header">
+                <h3>Repair Context</h3>
+                <span className="status-pill">{runID || taskID ? "linked" : "unlinked"}</span>
+              </div>
+              <div className="stack-list">
+                <article className="list-card">
+                  <div className="list-card-head">
+                    <strong>{taskID || "No task context"}</strong>
+                    <span className="status-pill">{runID || "no run"}</span>
+                  </div>
+                  <p>
+                    binding {bindingID || "n/a"} · replay {replayID || "n/a"}
+                  </p>
+                  <p>
+                    Use the linked pages to compare failed verification evidence, replay artifacts, audit facts, and the repair draft.
+                  </p>
+                </article>
               </div>
             </section>
 
@@ -144,14 +198,17 @@ function safeParseJSONObject(raw?: string): Record<string, unknown> | null {
   return null;
 }
 
-function readStringField(source: Record<string, unknown> | null, ...keys: string[]) {
-  if (!source) {
-    return "";
-  }
-  for (const key of keys) {
-    const value = source[key];
-    if (typeof value === "string" && value.trim() !== "") {
-      return value.trim();
+function readStringField(...args: Array<Record<string, unknown> | null | string>) {
+  const keys = args.filter((item): item is string => typeof item === "string");
+  const sources = args.filter(
+    (item): item is Record<string, unknown> => Boolean(item) && typeof item === "object",
+  );
+  for (const source of sources) {
+    for (const key of keys) {
+      const value = source[key];
+      if (typeof value === "string" && value.trim() !== "") {
+        return value.trim();
+      }
     }
   }
   return "";

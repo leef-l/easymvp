@@ -1,6 +1,6 @@
 # EasyMVP V3 Agent Team 状态板
 
-> 更新时间：2026-04-20
+> 更新时间：2026-04-24
 > 上游文档：[EasyMVP-V3-AgentTeam开机计划总表](./EasyMVP-V3-AgentTeam开机计划总表.md)
 > 目标：作为持续更新的执行状态面板，在中断后可直接恢复当前推进位置。
 >
@@ -8,14 +8,16 @@
 
 ## 1. 当前总状态
 
+当前结论：V3 本轮列出的实现与文档收口项已完成。出于服务器资源控制，本机只做窄范围 Go/TS/脚本检查，未在当前服务器执行全量 `go test ./...`、完整 Electron 打包和安装包级 smoke；正式发布验收仍以 CI 或高配机验证为准。
+
 | area | status | summary | last_updated |
 |---|---|---|---|
-| docs-finalization | done | `easymvp-brain`、AgentTeam 计划/实施、页面聚合、Evidence、事件流、实现架构、重启接续等文档已统一到同一套边界语义 | 2026-04-19 |
-| backend-core | in_progress | 基础查询、项目创建、runtime adapter、replay 查询、worker manager、workspace SSE 首版均已可用；`plan compile -> domain_tasks` 桥接、acceptance profile refresh、`acceptance-runs.task_id`、repair API `artifact_refs`、run terminal 自动 adjudication、workspace snapshot 真刷新、manual release 命令入口、audit 日志列表 API、formal replay/log 写侧首版均已落地，当前主要剩更厚的 replay 语义投影与端到端联调 | 2026-04-19 |
-| frontend-workbench | in_progress | `apps/desktop` 已完成应用壳、统一 API client、Workspace / Plan / Execution / Acceptance / Settings 页面接线；本轮继续补了 desktop runtime 探活、managed core 启动分型、Recovery/Diagnostics 分类展示、diagnostics category 计数与建议动作，当前主要剩更厚的 replay/evidence 聚合页语义与更完整 packaged smoke 证明链 | 2026-04-20 |
-| runtime-storage | in_progress | migration、dao/entity/do、项目目录初始化、runtime adapter、replay 正式索引链路已落地；但事务补偿、checkpoint/事件去重、artifact 缺失诊断、自检脚本仍未彻底收口 | 2026-04-20 |
-| domain-brain | done | `BE-019 / P-BR-001`、`BE-020 / P-BR-002`、`BE-021 / P-BR-003` 与 `BE-022` 已完成主链路收口：统一客户端、typed wrapper、plan compile -> domain_tasks、acceptance mapping/profile refresh、completion adjudication、repair draft、workspace explanation 均已真实落地并被业务读写链路消费 | 2026-04-19 |
-| agent-team | in_progress | 总章程、总表、状态板、后端/前端/运行时专项计划已重排；当前关键路径已从 domain-brain lane 切到 desktop/runtime 启动握手与恢复链 | 2026-04-19 |
+| docs-finalization | done | `easymvp-brain`、AgentTeam 计划/实施、页面聚合、Evidence、事件流、实现架构、重启接续等文档已统一到同一套边界语义；旧 V3 对齐进度、旧 V3 残留清单等过渡文档已清理 | 2026-04-24 |
+| backend-core | done | replay/evidence/audit/diagnostics 聚合读侧已补齐，artifact 缺失、stale index、latest event/checkpoint 与 recovery hints 已进入查询结果；runtime 幂等复用、事件去重与 checkpoint 写入已补单测 | 2026-04-24 |
+| frontend-workbench | done | `apps/desktop` 已完成 Workspace / Plan / Execution / Replay / Acceptance / Audit / Diagnostics / Recovery / Repair / Settings 主链路接线，深链、诊断上下文、repair/fault closure 与 verification 读取侧已联动 | 2026-04-24 |
+| runtime-storage | done | migration、目录初始化、runtime adapter、run binding、checkpoint、run_event_index 去重、replay/log/evidence 索引诊断、查询计划基线、快照读写隔离与备份快照脚本已收口 | 2026-04-24 |
+| domain-brain | done | `BE-019 / P-BR-001`、`BE-020 / P-BR-002`、`BE-021 / P-BR-003` 与 `BE-022` 已完成主链路收口：统一客户端、typed wrapper、plan compile -> domain_tasks、acceptance mapping/profile refresh、completion adjudication、repair draft、workspace explanation 均已真实落地并被业务读写链路消费 | 2026-04-24 |
+| agent-team | done | 总章程、总表、状态板、后端/前端/运行时专项计划已重排并同步到本轮完成口径；旧文档入口和过期过渡文档已清理 | 2026-04-24 |
 
 ## 2. 当前已完成
 
@@ -68,25 +70,29 @@
 47. 已继续补 `Acceptance -> Repair` 页面联动：`AcceptancePage` 现已接入 related diagnostics、repair context 卡片，并从 issue/diagnostic 卡片直接跳 `Execution / Diagnostics / Repair Draft`；`RepairDraftPage` 现已从 `failed_task_context_json` 解析 task 上下文，并提供回到 `Acceptance / Execution / Diagnostics / Plan` 的真实入口；`cd apps/desktop && npm run build` 已通过
 48. 已继续补 desktop diagnostics / recovery 原生动作：通过 Electron save dialog 可把当前 diagnostics 或 recovery 页面导出为 JSON 包；Recovery 页面同时已补 core working dir 的 reveal/open 动作，便于交接启动期故障事实
 49. 已补 `PF-001 / PF-003` 首版硬化：新增 SQLite 查询计划基线测试与 `scripts/verify-apps-core-query-plans.sh`，固定首页/Acceptance/Audit/Evidence/Replay 关键查询命中索引；同时 workspace/project snapshot 改为异步 best-effort 持久化，并给快照回退增加新鲜度窗口，避免读路径同步写库和长期陈旧快照被无条件回放
+50. 已完成文档入口清理：删除旧 V3 对齐进度、旧 V3 残留清单、旧文档与钱学森总纲对齐说明三份过渡文档；README、文档目录、钱学森总纲目录、重启接续说明均改为当前口径
+51. 已补 Electron 托管 Go core 的退出清理、重启清理、端口隔离与 packaged smoke 强断言；`verify-package.mjs` 会校验 managed core、真实 healthz、renderer mounted 与 cleanup stopped
+52. 已补 replay/evidence/audit/diagnostics 聚合读侧：返回 missing artifacts、artifact issue、diagnostic hints、latest event/checkpoint、related event、linked runs 与 evidence overview
+53. 已补 runtime 幂等硬化：同 project/task/brain_kind 的活跃 binding 会复用，重复事件按 payload 去重，运行态 checkpoint 按状态幂等写入
+54. 已补桌面端 diagnostics / execution / replay / audit / acceptance / repair 深链联动，前端会消费 category counts、linked runs、evidence overview、verification read 与结构化恢复上下文
+55. 已补备份、恢复与升级前快照脚本 `scripts/easymvp-backup-snapshot.sh`，支持 snapshot / verify / restore，默认只复制 SQLite 与 migration 元数据，避免低配服务器递归复制大目录
+56. 已完成本轮低资源验证：targeted Go service tests、replay/system API compile、desktop main TS、desktop renderer TS、package smoke 脚本语法、backup 脚本语法与实际轻量快照、`git diff --check` 均通过
 
 ## 3. 当前进行中
 
-1. `FE-007 / FE-015 / FE-016 / FE-017 / FE-018 / FE-020` 继续进行中，当前主任务已切到 diagnostics / recovery / acceptance / repair 更细粒度联动，以及更多恢复态、诊断导出与结构化诊断上下文消费
-2. `RT-003 / IN-002 / DG-002` 进行中，当前已补启动参数、`safe-mode` 配置入口、startup redirect、Recovery 页面、managed core 分类诊断与导出；下一步继续收口 Electron 托管 Go core 的正式退出清理与 packaged smoke 更强断言
+无新的代码实现项正在进行。
 
-文档层当前不再是阻塞项；剩余主工作均转入代码实现与联调。
+文档层不再是阻塞项；本轮剩余动作只属于发布前验证，不再属于功能实现待办。
 
 ## 4. 当前待做
 
-1. 继续把 packaged smoke 从“探活通过”收口到“证明 Electron 成功托管 bundled Go core 并完成真实 API 烟测”
-2. 继续完成 Electron 托管 Go core 的显式退出清理、端口隔离与重连证明链
-3. 继续补齐审计 / 回放 / Evidence 聚合读侧，减少前端分散拼接
-4. 继续补齐事务幂等、事件去重、checkpoint/索引缺失诊断等生产级硬化
-5. 继续把 `workspace_explanation`、verification contract 与 fault closure 的读侧联动向 execution / diagnostics / repair 深化收口
+1. 在 CI 或高配机运行全量 `go test ./...`
+2. 在 CI 或高配机运行 `cd apps/desktop && pnpm run package:dir && pnpm run verify:package`
+3. 用真实 `brain-v3` / `easymvp-brain` 服务做一次端到端人工冒烟
 
 ## 5. 阻塞记录
 
-1. 当前主要阻塞点已从领域脑接线转到 desktop/runtime 启动期恢复链，以及 Electron 对 Go core 的正式托管能力。
+1. 当前无代码阻塞；只因当前服务器资源受限，重型构建、打包和端到端验证未在本机执行。
 
 ## 6. 更新约定
 

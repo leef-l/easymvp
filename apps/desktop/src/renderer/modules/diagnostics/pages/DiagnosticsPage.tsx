@@ -49,6 +49,19 @@ export function DiagnosticsPage() {
       ),
     [projectId],
   );
+  const primaryLinkedRun = diagnosticsState.data?.linked_runs?.[0];
+  const primaryTaskID =
+    primaryLinkedRun?.task_id ||
+    diagnosticsState.data?.items.find((item) => item.task_id)?.task_id ||
+    "";
+  const primaryBindingID =
+    primaryLinkedRun?.binding_id ||
+    diagnosticsState.data?.items.find((item) => item.binding_id)?.binding_id ||
+    "";
+  const primaryRunID =
+    primaryLinkedRun?.run_id ||
+    diagnosticsState.data?.items.find((item) => item.run_id)?.run_id ||
+    "";
 
   async function handleExport() {
     if (
@@ -413,7 +426,14 @@ export function DiagnosticsPage() {
                     runtime health.
                   </p>
                 </a>
-                <a className="action-card" href={routes.execution}>
+                <a
+                  className="action-card"
+                  href={buildRoute("/execution", {
+                    binding: primaryBindingID || undefined,
+                    run: primaryRunID || undefined,
+                    task: primaryTaskID || undefined,
+                  })}
+                >
                   <div className="action-card-head">
                     <strong>Inspect Execution</strong>
                     <span className="status-pill">execution</span>
@@ -423,7 +443,15 @@ export function DiagnosticsPage() {
                     replay, and raw logs.
                   </p>
                 </a>
-                <a className="action-card" href={routes.replay}>
+                <a
+                  className="action-card"
+                  href={buildRoute("/replay", {
+                    binding: primaryBindingID || undefined,
+                    run: primaryRunID || undefined,
+                    replay: primaryLinkedRun?.latest_replay_id,
+                    task: primaryTaskID || undefined,
+                  })}
+                >
                   <div className="action-card-head">
                     <strong>Open Replay</strong>
                     <span className="status-pill">replay</span>
@@ -433,7 +461,13 @@ export function DiagnosticsPage() {
                     runtime is healthy but artifact indexing needs review.
                   </p>
                 </a>
-                <a className="action-card" href={routes.audit}>
+                <a
+                  className="action-card"
+                  href={buildRoute("/audit", {
+                    run: primaryRunID || undefined,
+                    task: primaryTaskID || undefined,
+                  })}
+                >
                   <div className="action-card-head">
                     <strong>Open Audit</strong>
                     <span className="status-pill">audit</span>
@@ -463,6 +497,30 @@ export function DiagnosticsPage() {
                     probe, or inspect the local data directory.
                   </p>
                 </a>
+              </div>
+            </section>
+
+            <section className="data-panel">
+              <div className="panel-header">
+                <h3>Category Counts</h3>
+                <span className="status-pill">
+                  {Object.keys(diagnosticsState.data.category_counts || {}).length} categories
+                </span>
+              </div>
+              <div className="stack-list">
+                {Object.entries(diagnosticsState.data.category_counts || {}).map(([category, count]) => (
+                  <article key={category} className="list-card">
+                    <div className="list-card-head">
+                      <strong>{category}</strong>
+                      <span className="status-pill">{count}</span>
+                    </div>
+                  </article>
+                ))}
+                {Object.keys(diagnosticsState.data.category_counts || {}).length === 0 ? (
+                  <article className="list-card">
+                    <p>No diagnostic categories have been counted yet.</p>
+                  </article>
+                ) : null}
               </div>
             </section>
 
@@ -509,34 +567,43 @@ export function DiagnosticsPage() {
                       <a className="secondary-button" href={routes.workspace}>
                         Open Workspace
                       </a>
-                      {item.task_id ? (
-                        <a
-                          className="secondary-button"
-                          href={buildRoute("/execution", {
-                            task: item.task_id,
-                            binding: item.binding_id,
-                          })}
-                        >
-                          Open Execution
-                        </a>
-                      ) : (
-                        <a className="secondary-button" href={routes.execution}>
-                          Open Execution
-                        </a>
-                      )}
-                      <a className="secondary-button" href={routes.audit}>
+                      <a
+                        className="secondary-button"
+                        href={buildRoute("/execution", {
+                          task: item.task_id,
+                          binding: item.binding_id,
+                          run: item.run_id,
+                        })}
+                      >
+                        Open Execution
+                      </a>
+                      <a
+                        className="secondary-button"
+                        href={buildRoute("/audit", {
+                          task: item.task_id,
+                          run: item.run_id,
+                        })}
+                      >
                         Open Audit
                       </a>
                       {item.related_page === "acceptance" ? (
-                        <a className="secondary-button" href={routes.acceptance}>
+                        <a
+                          className="secondary-button"
+                          href={buildRoute("/acceptance", { task: item.task_id })}
+                        >
                           Open Acceptance
                         </a>
                       ) : null}
-                      {item.related_page === "replay" ? (
-                        <a className="secondary-button" href={routes.replay}>
-                          Open Replay
-                        </a>
-                      ) : null}
+                      <a
+                        className="secondary-button"
+                        href={buildRoute("/replay", {
+                          task: item.task_id,
+                          binding: item.binding_id,
+                          run: item.run_id,
+                      })}
+                    >
+                        Open Replay
+                      </a>
                     </div>
                     {item.recommended_action ? (
                       <p className="muted-copy">
@@ -604,7 +671,10 @@ export function DiagnosticsPage() {
                     <a className="secondary-button" href={routes.acceptance}>
                       Open Acceptance
                     </a>
-                    <a className="secondary-button" href={routes.repairDraft}>
+                    <a
+                      className="secondary-button"
+                      href={buildRoute("/repair-draft", { task: primaryTaskID || undefined })}
+                    >
                       Open Repair
                     </a>
                   </div>
@@ -645,6 +715,7 @@ export function DiagnosticsPage() {
                         className="secondary-button"
                         href={buildRoute("/execution", {
                           binding: item.binding_id,
+                          run: item.run_id,
                           task: item.task_id,
                         })}
                       >
@@ -654,15 +725,30 @@ export function DiagnosticsPage() {
                         className="secondary-button"
                         href={buildRoute("/replay", {
                           binding: item.binding_id,
+                          run: item.run_id,
                           replay: item.latest_replay_id,
                           task: item.task_id,
                         })}
                       >
-                        Open Replay
+                      Open Replay
+                    </a>
+                      <a
+                        className="secondary-button"
+                        href={buildRoute("/audit", {
+                          run: item.run_id,
+                          task: item.task_id,
+                        })}
+                      >
+                        Open Audit
                       </a>
                     </div>
                   </article>
                 ))}
+                {(diagnosticsState.data.linked_runs || []).length === 0 ? (
+                  <article className="list-card">
+                    <p>No linked runtime runs are attached to the current diagnostics yet.</p>
+                  </article>
+                ) : null}
                 <article className="list-card">
                   <div className="list-card-head">
                     <strong>Evidence overview</strong>
@@ -691,6 +777,16 @@ export function DiagnosticsPage() {
                     <a className="secondary-button" href={routes.acceptance}>
                       Open Acceptance
                     </a>
+                    <a
+                      className="secondary-button"
+                      href={buildRoute("/execution", {
+                        binding: primaryBindingID || undefined,
+                        run: primaryRunID || undefined,
+                        task: primaryTaskID || undefined,
+                      })}
+                    >
+                      Collect Evidence
+                    </a>
                   </div>
                 </article>
               </div>
@@ -712,6 +808,22 @@ export function DiagnosticsPage() {
                     </p>
                   </article>
                 ))}
+                {(diagnosticsState.data.latest_audit_logs || []).length === 0 ? (
+                  <article className="list-card">
+                    <p>No recent audit facts were returned with diagnostics.</p>
+                  </article>
+                ) : null}
+                <div className="action-row">
+                  <a
+                    className="secondary-button"
+                    href={buildRoute("/audit", {
+                      run: primaryRunID || undefined,
+                      task: primaryTaskID || undefined,
+                    })}
+                  >
+                    Open Audit
+                  </a>
+                </div>
               </div>
             </section>
           </div>

@@ -1,8 +1,8 @@
 # EasyMVP V3 easymvp-brain 合同 JSON Schema 与 DTO 映射终稿
 
-> 更新时间：2026-04-19
-> 上游文档：[EasyMVP-V3-easymvp-brain职责边界与输入输出合同设计](./EasyMVP-V3-easymvp-brain职责边界与输入输出合同设计.md)
-> 关联文档：[EasyMVP-V3-easymvp-brain-Manifest与ToolSchema设计](./EasyMVP-V3-easymvp-brain-Manifest与ToolSchema设计.md)
+> 更新时间：2026-04-24
+> 上游文档：[钱学森总纲设计/easymvp-brain-职责与边界定义](./钱学森总纲设计/easymvp-brain-职责与边界定义.md)
+> 关联文档：[钱学森总纲设计/easymvp-brain-输入输出契约](./钱学森总纲设计/easymvp-brain-输入输出契约.md)
 > 关联文档：[EasyMVP-V3计划数据模型与表结构设计](./EasyMVP-V3计划数据模型与表结构设计.md)
 > 目标：把 `easymvp-brain` 六类领域合同落成可直接实现的 JSON Schema 基线，并明确与 Go DTO / SQLite 字段的映射关系。
 

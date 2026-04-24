@@ -112,6 +112,18 @@ func (s *sRuntime) StartBrainRun(ctx context.Context, req StartBrainRunCommand) 
 	if err != nil {
 		return nil, err
 	}
+	reusable, err := findReusableRunBindingForTask(ctx, normalized.ProjectID, normalized.TaskID, normalized.BrainKind)
+	if err != nil {
+		return nil, err
+	}
+	if reusable != nil {
+		return &BrainRunStartResult{
+			BindingID: reusable.Id,
+			RunID:     reusable.BrainRunId,
+			Status:    reusable.RunStatus,
+		}, nil
+	}
+
 	baseURL, err := runtimeBaseURL(ctx)
 	if err != nil {
 		return nil, wrapRuntimeError(runtimeErrorCodeUnavailable, "resolve brain serve base url failed", err)
@@ -379,6 +391,17 @@ func (s *sRuntime) SyncBrainRunBinding(ctx context.Context, bindingID string) (*
 	}
 	if err = updateProjectTaskRuntimeStatus(ctx, binding.TaskId, nextStatus); err != nil {
 		return nil, wrapRuntimeError(runtimeErrorCodeSyncRun, "update task runtime status failed", err)
+	}
+	if err = appendRunCheckpointForState(ctx, binding, runState, nextStatus); err != nil {
+		recordDiagnostic(ctx, "runtime.sync_checkpoint", "warning", "RUNTIME_CHECKPOINT_WRITE_FAILED", "write runtime checkpoint failed", map[string]any{
+			"binding_id":    binding.Id,
+			"project_id":    binding.ProjectId,
+			"task_id":       binding.TaskId,
+			"run_id":        binding.BrainRunId,
+			"execution_id":  runState.ExecutionID,
+			"mapped_status": nextStatus,
+			"error":         err.Error(),
+		})
 	}
 	if err = refreshReplayArtifactsForRun(ctx, binding, runState); err != nil {
 		recordDiagnostic(ctx, "runtime.sync_replay_index", "warning", "RUNTIME_REPLAY_INDEX_FAILED", "refresh replay artifacts failed", map[string]any{

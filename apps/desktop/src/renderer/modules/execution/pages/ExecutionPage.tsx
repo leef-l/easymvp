@@ -33,6 +33,7 @@ export function ExecutionPage(props: { mode?: ExecutionPageMode }) {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [expandedRawView, setExpandedRawView] = useState<ExpandedRawView | null>(null);
   const bindingFromUrl = searchParams.get("binding")?.trim() || "";
+  const runFromUrl = searchParams.get("run")?.trim() || "";
   const replayFromUrl = searchParams.get("replay")?.trim() || "";
   const segmentFromUrl = searchParams.get("segment")?.trim() || "";
   const taskFromUrl = searchParams.get("task")?.trim() || "";
@@ -80,9 +81,12 @@ export function ExecutionPage(props: { mode?: ExecutionPageMode }) {
       const fromTask = taskFromUrl
         ? state.data.recent_bindings.find((item) => item.task_id === taskFromUrl)?.binding_id
         : "";
-      setSelectedBindingId(fromTask || state.data.recent_bindings[0].binding_id);
+      const fromRun = runFromUrl
+        ? state.data.recent_bindings.find((item) => item.run_id === runFromUrl)?.binding_id
+        : "";
+      setSelectedBindingId(fromTask || fromRun || state.data.recent_bindings[0].binding_id);
     }
-  }, [state.data, selectedBindingId, taskFromUrl]);
+  }, [runFromUrl, state.data, selectedBindingId, taskFromUrl]);
 
   const selectedBinding = state.data?.recent_bindings.find((item) => item.binding_id === selectedBindingId) ?? null;
 
@@ -145,12 +149,13 @@ export function ExecutionPage(props: { mode?: ExecutionPageMode }) {
   useEffect(() => {
     const next = buildRoute(routeBase, {
       binding: selectedBindingId || undefined,
+      run: activeRunID || runFromUrl || undefined,
       replay: selectedReplayId || undefined,
       segment: selectedSegmentId || undefined,
       task: taskFromUrl || undefined,
     });
     window.history.replaceState(null, "", next);
-  }, [buildRoute, routeBase, selectedBindingId, selectedReplayId, selectedSegmentId, taskFromUrl]);
+  }, [activeRunID, buildRoute, routeBase, runFromUrl, selectedBindingId, selectedReplayId, selectedSegmentId, taskFromUrl]);
 
   const replayDetailState = useQuery(
     () =>
@@ -237,6 +242,12 @@ export function ExecutionPage(props: { mode?: ExecutionPageMode }) {
   const completionVerdict = acceptanceState.data?.completion_verdict;
   const faultSummary = acceptanceState.data?.fault_summary;
   const repairPlanDraft = acceptanceState.data?.repair_plan_draft;
+  const selectedTaskID = selectedBinding?.task_id || taskFromUrl || "";
+  const selectedContextRouteParams = {
+    binding: selectedBindingId || undefined,
+    run: activeRunID || undefined,
+    task: selectedTaskID || undefined,
+  };
 
   async function runBindingMutation<T extends CommandResponse | StartRunResponse | SyncRunResponse>(
     actionKey: string,
@@ -280,6 +291,8 @@ export function ExecutionPage(props: { mode?: ExecutionPageMode }) {
             <div className="summary-stack">
               <span className="status-pill">{state.data.runtime_health.base_url}</span>
               <span className="status-pill">{state.data.recent_bindings.length} recent runs</span>
+              {activeRunID ? <span className="status-pill">run {activeRunID}</span> : null}
+              {selectedTaskID ? <span className="status-pill">task {selectedTaskID}</span> : null}
             </div>
           </div>
 
@@ -482,10 +495,24 @@ export function ExecutionPage(props: { mode?: ExecutionPageMode }) {
                     <p>failed checks: {verificationResult.failed_checks.join(", ")}</p>
                   ) : null}
                   {verificationResult.verification_contract_json ? (
-                    <pre className="json-block">
-                      {prettyPayload(verificationResult.verification_contract_json)}
-                    </pre>
+                    <details>
+                      <summary>View verification contract</summary>
+                      <pre className="json-block">
+                        {prettyPayload(verificationResult.verification_contract_json)}
+                      </pre>
+                    </details>
                   ) : null}
+                  <div className="action-row">
+                    <button className="secondary-button" onClick={() => navigate(buildRoute("/acceptance", { task: selectedTaskID || undefined }))}>
+                      Open Acceptance
+                    </button>
+                    <button className="secondary-button" onClick={() => navigate(buildRoute("/diagnostics", selectedContextRouteParams))}>
+                      Open Diagnostics
+                    </button>
+                    <button className="secondary-button" onClick={() => navigate(buildRoute("/audit", { run: activeRunID || undefined, task: selectedTaskID || undefined }))}>
+                      Open Audit
+                    </button>
+                  </div>
                 </article>
               ) : null}
               {faultSummary ? (
@@ -500,6 +527,9 @@ export function ExecutionPage(props: { mode?: ExecutionPageMode }) {
                     {faultSummary.fault_kind || "fault"} · blocking {faultSummary.blocking_issue_count || 0} · advisory{" "}
                     {faultSummary.advisory_issue_count || 0}
                   </p>
+                  {faultSummary.affected_tasks?.length ? (
+                    <p>affected tasks: {faultSummary.affected_tasks.join(", ")}</p>
+                  ) : null}
                   {faultSummary.failed_checks?.length ? (
                     <p>failed checks: {faultSummary.failed_checks.join(", ")}</p>
                   ) : null}
@@ -513,10 +543,10 @@ export function ExecutionPage(props: { mode?: ExecutionPageMode }) {
                   </div>
                   <p>{repairPlanDraft.repair_strategy || repairPlanDraft.reason_class || "repair_plan_draft"}</p>
                   <div className="action-row">
-                    <button className="secondary-button" onClick={() => navigate(routes.repairDraft)}>
+                    <button className="secondary-button" onClick={() => navigate(buildRoute("/repair-draft", { task: selectedTaskID || undefined, run: activeRunID || undefined }))}>
                       Open Repair
                     </button>
-                    <button className="secondary-button" onClick={() => navigate(routes.acceptance)}>
+                    <button className="secondary-button" onClick={() => navigate(buildRoute("/acceptance", { task: selectedTaskID || undefined }))}>
                       Open Acceptance
                     </button>
                   </div>
@@ -532,10 +562,9 @@ export function ExecutionPage(props: { mode?: ExecutionPageMode }) {
               </div>
               <div className="stack-list">
                 {filteredBindings.map((item) => (
-                  <button
+                  <article
                     key={item.binding_id}
                     className={item.binding_id === selectedBindingId ? "action-card is-selected" : "action-card"}
-                    onClick={() => setSelectedBindingId(item.binding_id)}
                   >
                     <div className="list-card-head">
                       <strong>{item.run_id || item.binding_id}</strong>
@@ -544,7 +573,27 @@ export function ExecutionPage(props: { mode?: ExecutionPageMode }) {
                     <p>
                       {item.brain_kind} · task {item.task_id || "n/a"} · {item.started_at}
                     </p>
-                  </button>
+                    <div className="action-row">
+                      <button
+                        className="secondary-button"
+                        onClick={() => setSelectedBindingId(item.binding_id)}
+                      >
+                        Select Run
+                      </button>
+                      <button
+                        className="secondary-button"
+                        onClick={() => navigate(buildRoute("/replay", { binding: item.binding_id, run: item.run_id, task: item.task_id }))}
+                      >
+                        Open Replay
+                      </button>
+                      <button
+                        className="secondary-button"
+                        onClick={() => navigate(buildRoute("/audit", { run: item.run_id, task: item.task_id }))}
+                      >
+                        Open Audit
+                      </button>
+                    </div>
+                  </article>
                 ))}
                 {filteredBindings.length === 0 ? (
                   <article className="list-card">
@@ -600,6 +649,14 @@ export function ExecutionPage(props: { mode?: ExecutionPageMode }) {
                       {replaySummaryState.data.brain_kind || "unknown brain"} · started{" "}
                       {replaySummaryState.data.started_at || "n/a"} · ended {replaySummaryState.data.ended_at || "n/a"}
                     </p>
+                    <div className="action-row">
+                      <button className="secondary-button" onClick={() => navigate(buildRoute("/audit", { run: activeRunID || undefined, task: selectedTaskID || undefined }))}>
+                        Open Audit
+                      </button>
+                      <button className="secondary-button" onClick={() => navigate(buildRoute("/diagnostics", selectedContextRouteParams))}>
+                        Open Diagnostics
+                      </button>
+                    </div>
                   </article>
                   {replaySummaryState.data.entry_points.map((item) => (
                     <button
@@ -741,10 +798,23 @@ export function ExecutionPage(props: { mode?: ExecutionPageMode }) {
                           Open Acceptance
                         </button>
                       ) : null}
+                      <button
+                        className="secondary-button"
+                        onClick={() =>
+                          navigate(
+                            buildRoute("/audit", {
+                              run: activeRunID || undefined,
+                              task: replayDetailState.data!.domain_task_id || selectedTaskID || undefined,
+                            }),
+                          )
+                        }
+                      >
+                        Open Audit
+                      </button>
                       <button className="secondary-button" onClick={() => navigate(routes.plan)}>
                         Open Plan
                       </button>
-                      <button className="secondary-button" onClick={() => navigate(routes.diagnostics)}>
+                      <button className="secondary-button" onClick={() => navigate(buildRoute("/diagnostics", selectedContextRouteParams))}>
                         Open Diagnostics
                       </button>
                     </div>
@@ -859,7 +929,9 @@ export function ExecutionPage(props: { mode?: ExecutionPageMode }) {
                         onClick={() =>
                           navigate(
                             buildRoute("/diagnostics", {
-                              project: projectId,
+                              binding: item.binding_id,
+                              run: item.run_id,
+                              task: item.task_id,
                             }),
                           )
                         }
@@ -880,6 +952,19 @@ export function ExecutionPage(props: { mode?: ExecutionPageMode }) {
                           Open Acceptance
                         </button>
                       ) : null}
+                      <button
+                        className="secondary-button"
+                        onClick={() =>
+                          navigate(
+                            buildRoute("/audit", {
+                              run: item.run_id || activeRunID || undefined,
+                              task: item.task_id || selectedTaskID || undefined,
+                            }),
+                          )
+                        }
+                      >
+                        Open Audit
+                      </button>
                     </div>
                   </article>
                 ))}

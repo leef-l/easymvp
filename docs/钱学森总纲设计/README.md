@@ -1,8 +1,10 @@
 # 钱学森总纲设计
 
-> 更新时间：2026-04-20
+> 更新时间：2026-04-24
 
 这个目录用于集中存放以钱学森《工程控制论》为总纲的 EasyMVP / brain-v3 / easymvp-brain 顶层设计文档。
+
+当前目录只保留仍作为总纲、结构、落地、术语和页面读取口径使用的文档。旧 V3 对齐进度、旧 V3 残留清单等过渡文档已经删除，当前进度统一看 `../EasyMVP-V3-AgentTeam状态板.md`。
 
 当前目录清单：
 
@@ -32,9 +34,6 @@
 
 14. [EasyMVP-术语与枚举统一表.md](/www/wwwroot/project/easymvp/docs/钱学森总纲设计/EasyMVP-术语与枚举统一表.md)
 15. [EasyMVP-文档分层与使用说明.md](/www/wwwroot/project/easymvp/docs/钱学森总纲设计/EasyMVP-文档分层与使用说明.md)
-16. [EasyMVP-旧V3文档对齐进度-2026-04-20.md](/www/wwwroot/project/easymvp/docs/钱学森总纲设计/EasyMVP-旧V3文档对齐进度-2026-04-20.md)
-17. [EasyMVP-旧V3文档剩余低优先级残留清单-2026-04-20.md](/www/wwwroot/project/easymvp/docs/钱学森总纲设计/EasyMVP-旧V3文档剩余低优先级残留清单-2026-04-20.md)
-18. [EasyMVP-代码与总纲一致性审查-2026-04-20.md](/www/wwwroot/project/easymvp/docs/钱学森总纲设计/EasyMVP-代码与总纲一致性审查-2026-04-20.md)
 
 推荐阅读顺序：
 
@@ -52,4 +51,3 @@
 5. 页面入口：[EasyMVP-页面读取与展示清单.md](/www/wwwroot/project/easymvp/docs/钱学森总纲设计/EasyMVP-页面读取与展示清单.md)
 6. 状态机入口：[EasyMVP-闭环状态机补充说明.md](/www/wwwroot/project/easymvp/docs/钱学森总纲设计/EasyMVP-闭环状态机补充说明.md)
 7. 统一口径入口：[EasyMVP-术语与枚举统一表.md](/www/wwwroot/project/easymvp/docs/钱学森总纲设计/EasyMVP-术语与枚举统一表.md)
-8. 代码审查入口：[EasyMVP-代码与总纲一致性审查-2026-04-20.md](/www/wwwroot/project/easymvp/docs/钱学森总纲设计/EasyMVP-代码与总纲一致性审查-2026-04-20.md)

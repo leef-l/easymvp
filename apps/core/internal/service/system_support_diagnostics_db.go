@@ -8,6 +8,7 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 
+	replayv1 "github.com/leef-l/easymvp/apps/core/api/replay/v1"
 	systemv1 "github.com/leef-l/easymvp/apps/core/api/system/v1"
 	"github.com/leef-l/easymvp/apps/core/internal/dao"
 	"github.com/leef-l/easymvp/apps/core/internal/model/entity"
@@ -53,7 +54,22 @@ func listProjectDiagnosticsView(ctx context.Context, projectID string, limit int
 	if err != nil {
 		return nil, err
 	}
+	recentRunIDs, err := listProjectRecentRunIDs(ctx, db, projectID, 6)
+	if err != nil {
+		return nil, err
+	}
+	for _, runID := range recentRunIDs {
+		runSet[runID] = struct{}{}
+	}
 	linkedRuns, err := buildProjectLinkedRuns(ctx, projectID, runSet)
+	if err != nil {
+		return nil, err
+	}
+	artifactContexts, err := buildProjectArtifactDiagnosticContexts(ctx, projectID, runSet, acceptanceAggregate.EvidenceItems, 12)
+	if err != nil {
+		return nil, err
+	}
+	evidenceOverview, err := buildProjectEvidenceOverview(ctx, db, acceptanceAggregate)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +79,8 @@ func listProjectDiagnosticsView(ctx context.Context, projectID string, limit int
 		CategoryCounts:   categoryCounts,
 		LatestAuditLogs:  mapProjectAuditFacts(auditLogs),
 		LinkedRuns:       linkedRuns,
-		EvidenceOverview: buildProjectEvidenceOverview(acceptanceAggregate),
+		ArtifactContexts: artifactContexts,
+		EvidenceOverview: evidenceOverview,
 		VerificationRead: buildProjectVerificationRead(acceptanceAggregate),
 		RefreshHint:      "refresh_project_diagnostics",
 	}, nil
@@ -289,6 +306,33 @@ func mapProjectAuditFacts(rows []entity.AuditLogs) []systemv1.ProjectAuditFact {
 	return items
 }
 
+func listProjectRecentRunIDs(ctx context.Context, db *sql.DB, projectID string, limit int) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `SELECT brain_run_id
+FROM `+dao.BrainRunBindings.Table()+`
+WHERE project_id = ?
+ORDER BY COALESCE(last_sync_at, finished_at, started_at, created_at) DESC, created_at DESC
+LIMIT ?`, projectID, limit)
+	if err != nil {
+		return nil, gerror.Wrap(err, "query recent project run ids failed")
+	}
+	defer rows.Close()
+
+	items := make([]string, 0, limit)
+	for rows.Next() {
+		var runID string
+		if err = rows.Scan(&runID); err != nil {
+			return nil, gerror.Wrap(err, "scan recent project run id failed")
+		}
+		if strings.TrimSpace(runID) != "" {
+			items = append(items, strings.TrimSpace(runID))
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return nil, gerror.Wrap(err, "iterate recent project run ids failed")
+	}
+	return items, nil
+}
+
 func buildProjectLinkedRuns(ctx context.Context, projectID string, runSet map[string]struct{}) ([]systemv1.ProjectLinkedRun, error) {
 	runIDs := make([]string, 0, len(runSet))
 	for runID := range runSet {
@@ -337,14 +381,90 @@ func buildProjectLinkedRuns(ctx context.Context, projectID string, runSet map[st
 			item.LatestReplayType = entryPoints[0].ReplayType
 			item.LatestReplayTitle = entryPoints[0].Summary
 		}
+		latestEvent, err := getLatestRunEvent(ctx, binding.ID)
+		if err != nil {
+			return nil, err
+		}
+		if latestEvent != nil {
+			item.LatestEventID = latestEvent.EventID
+			item.LatestEventType = latestEvent.EventType
+			item.LatestEventAt = latestEvent.CreatedAt
+		}
+		latestCheckpoint, err := getLatestRunCheckpoint(ctx, binding.ID)
+		if err != nil {
+			return nil, err
+		}
+		if latestCheckpoint != nil {
+			item.LatestCheckpointID = latestCheckpoint.CheckpointID
+			item.LatestCheckpointType = latestCheckpoint.CheckpointType
+			item.LatestCheckpointAt = latestCheckpoint.CreatedAt
+		}
 		items = append(items, item)
 	}
 	return items, nil
 }
 
-func buildProjectEvidenceOverview(data *acceptanceAggregate) systemv1.ProjectEvidenceOverview {
+func buildProjectArtifactDiagnosticContexts(
+	ctx context.Context,
+	projectID string,
+	runSet map[string]struct{},
+	evidenceItems []entity.EvidenceItems,
+	limit int,
+) ([]systemv1.ProjectArtifactDiagnosticContext, error) {
+	items := make([]systemv1.ProjectArtifactDiagnosticContext, 0, limit)
+	for runID := range runSet {
+		issues, err := listRunArtifactIssues(ctx, projectID, runID, limit)
+		if err != nil {
+			return nil, err
+		}
+		for _, issue := range issues {
+			items = append(items, mapProjectArtifactContext(runID, issue))
+			if len(items) >= limit {
+				return items, nil
+			}
+		}
+	}
+	for _, item := range evidenceItems {
+		if !fileIsMissing(item.FilePath) {
+			continue
+		}
+		items = append(items, systemv1.ProjectArtifactDiagnosticContext{
+			Kind:              "missing_artifact",
+			Source:            "evidence",
+			ID:                item.Id,
+			RunID:             item.RunId,
+			Status:            "available",
+			FilePath:          item.FilePath,
+			Summary:           item.EvidenceType,
+			RecommendedAction: "restore_evidence_file_or_recapture_evidence",
+		})
+		if len(items) >= limit {
+			return items, nil
+		}
+	}
+	return items, nil
+}
+
+func mapProjectArtifactContext(runID string, issue replayv1.ReplayArtifactIssue) systemv1.ProjectArtifactDiagnosticContext {
+	return systemv1.ProjectArtifactDiagnosticContext{
+		Kind:              issue.Kind,
+		Source:            issue.Source,
+		ID:                issue.ID,
+		RunID:             runID,
+		Status:            issue.Status,
+		FilePath:          issue.FilePath,
+		Summary:           issue.Summary,
+		RecommendedAction: issue.RecommendedAction,
+	}
+}
+
+func buildProjectEvidenceOverview(ctx context.Context, db *sql.DB, data *acceptanceAggregate) (systemv1.ProjectEvidenceOverview, error) {
+	totalCount, err := countProjectEvidenceItems(ctx, db, data.Project.Id)
+	if err != nil {
+		return systemv1.ProjectEvidenceOverview{}, err
+	}
 	result := systemv1.ProjectEvidenceOverview{
-		TotalCount:     len(data.EvidenceItems),
+		TotalCount:     totalCount,
 		LatestEvidence: make([]systemv1.ProjectEvidenceRef, 0, len(data.EvidenceItems)),
 	}
 	limit := len(data.EvidenceItems)
@@ -360,11 +480,29 @@ func buildProjectEvidenceOverview(data *acceptanceAggregate) systemv1.ProjectEvi
 			FilePath:     item.FilePath,
 			CapturedAt:   item.CapturedAt,
 		})
+		if fileIsMissing(item.FilePath) {
+			result.MissingFiles = append(result.MissingFiles, systemv1.ProjectEvidenceRef{
+				ID:           item.Id,
+				Surface:      item.Surface,
+				Journey:      item.Journey,
+				EvidenceType: item.EvidenceType,
+				FilePath:     item.FilePath,
+				CapturedAt:   item.CapturedAt,
+			})
+		}
 	}
 	verification := buildVerificationResultView(data)
 	result.MissingRequired = append([]string{}, verification.MissingEvidence...)
 	result.FailedChecks = append([]string{}, verification.FailedChecks...)
-	return result
+	return result, nil
+}
+
+func countProjectEvidenceItems(ctx context.Context, db *sql.DB, projectID string) (int, error) {
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(1) FROM `+dao.EvidenceItems.Table()+` WHERE project_id = ?`, projectID).Scan(&count); err != nil {
+		return 0, gerror.Wrap(err, "count project evidence items failed")
+	}
+	return count, nil
 }
 
 func buildProjectVerificationRead(data *acceptanceAggregate) systemv1.ProjectVerificationRead {

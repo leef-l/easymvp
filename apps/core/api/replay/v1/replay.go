@@ -19,6 +19,10 @@ type GetReplaySummaryRes struct {
 	ReplayCount           int                    `json:"replay_count"`
 	LogSegmentCount       int                    `json:"log_segment_count"`
 	ArtifactStatusSummary ReplayArtifactSummary  `json:"artifact_status_summary"`
+	MissingArtifacts      []ReplayArtifactIssue  `json:"missing_artifacts,omitempty"`
+	LatestEvent           *ReplayEventRef        `json:"latest_event,omitempty"`
+	LatestCheckpoint      *ReplayCheckpointRef   `json:"latest_checkpoint,omitempty"`
+	DiagnosticHints       []ReplayDiagnosticHint `json:"diagnostic_hints,omitempty"`
 	EntryPoints           []ReplayEntryPointItem `json:"entry_points"`
 }
 
@@ -45,20 +49,23 @@ type GetReplayDetailReq struct {
 }
 
 type GetReplayDetailRes struct {
-	ReplayID           string               `json:"replay_id"`
-	ReplayKind         string               `json:"replay_kind"`
-	Title              string               `json:"title"`
-	Summary            string               `json:"summary,omitempty"`
-	DomainTaskID       string               `json:"domain_task_id,omitempty"`
-	CompiledTaskID     string               `json:"compiled_task_id,omitempty"`
-	SourceObjectKind   string               `json:"source_object_kind,omitempty"`
-	SourceObjectID     string               `json:"source_object_id,omitempty"`
-	EventID            string               `json:"event_id,omitempty"`
-	TraceID            string               `json:"trace_id,omitempty"`
-	SpanID             string               `json:"span_id,omitempty"`
-	Status             string               `json:"status"`
-	RawPreview         ReplayRawPreview     `json:"raw_preview"`
-	RelatedLogSegments []LogSegmentListItem `json:"related_log_segments"`
+	ReplayID           string                 `json:"replay_id"`
+	ReplayKind         string                 `json:"replay_kind"`
+	Title              string                 `json:"title"`
+	Summary            string                 `json:"summary,omitempty"`
+	DomainTaskID       string                 `json:"domain_task_id,omitempty"`
+	CompiledTaskID     string                 `json:"compiled_task_id,omitempty"`
+	SourceObjectKind   string                 `json:"source_object_kind,omitempty"`
+	SourceObjectID     string                 `json:"source_object_id,omitempty"`
+	EventID            string                 `json:"event_id,omitempty"`
+	TraceID            string                 `json:"trace_id,omitempty"`
+	SpanID             string                 `json:"span_id,omitempty"`
+	Status             string                 `json:"status"`
+	RawPreview         ReplayRawPreview       `json:"raw_preview"`
+	ArtifactIssue      *ReplayArtifactIssue   `json:"artifact_issue,omitempty"`
+	RelatedEvent       *ReplayEventRef        `json:"related_event,omitempty"`
+	DiagnosticHints    []ReplayDiagnosticHint `json:"diagnostic_hints,omitempty"`
+	RelatedLogSegments []LogSegmentListItem   `json:"related_log_segments"`
 }
 
 type GetReplayRawReq struct {
@@ -117,25 +124,27 @@ type ReplayArtifactSummary struct {
 type ReplayEntryPointItem struct {
 	DomainTaskID   string `json:"domain_task_id,omitempty"`
 	CompiledTaskID string `json:"compiled_task_id,omitempty"`
-	ReplayID   string `json:"replay_id"`
-	ReplayType string `json:"replay_type"`
-	Summary    string `json:"summary,omitempty"`
-	FilePath   string `json:"file_path,omitempty"`
-	CreatedAt  string `json:"created_at"`
+	ReplayID       string `json:"replay_id"`
+	ReplayType     string `json:"replay_type"`
+	Summary        string `json:"summary,omitempty"`
+	FilePath       string `json:"file_path,omitempty"`
+	CreatedAt      string `json:"created_at"`
 }
 
 type ReplayTimelineItem struct {
-	ReplayID         string `json:"replay_id"`
-	DomainTaskID     string `json:"domain_task_id,omitempty"`
-	CompiledTaskID   string `json:"compiled_task_id,omitempty"`
-	SeqNo            int    `json:"seq_no"`
-	ReplayType       string `json:"replay_type"`
-	Title            string `json:"title"`
-	Summary          string `json:"summary,omitempty"`
-	Status           string `json:"status"`
-	PreviewAvailable bool   `json:"preview_available"`
-	RawTarget        string `json:"raw_target,omitempty"`
-	CreatedAt        string `json:"created_at"`
+	ReplayID         string                 `json:"replay_id"`
+	DomainTaskID     string                 `json:"domain_task_id,omitempty"`
+	CompiledTaskID   string                 `json:"compiled_task_id,omitempty"`
+	SeqNo            int                    `json:"seq_no"`
+	ReplayType       string                 `json:"replay_type"`
+	Title            string                 `json:"title"`
+	Summary          string                 `json:"summary,omitempty"`
+	Status           string                 `json:"status"`
+	PreviewAvailable bool                   `json:"preview_available"`
+	RawTarget        string                 `json:"raw_target,omitempty"`
+	ArtifactIssue    *ReplayArtifactIssue   `json:"artifact_issue,omitempty"`
+	DiagnosticHints  []ReplayDiagnosticHint `json:"diagnostic_hints,omitempty"`
+	CreatedAt        string                 `json:"created_at"`
 }
 
 type ReplayRawPreview struct {
@@ -153,4 +162,36 @@ type LogSegmentListItem struct {
 	Status     string `json:"status"`
 	Size       int64  `json:"size"`
 	RawTarget  string `json:"raw_target,omitempty"`
+}
+
+type ReplayArtifactIssue struct {
+	Kind              string `json:"kind"`
+	Source            string `json:"source"`
+	ID                string `json:"id"`
+	Status            string `json:"status"`
+	FilePath          string `json:"file_path,omitempty"`
+	Summary           string `json:"summary,omitempty"`
+	RecommendedAction string `json:"recommended_action,omitempty"`
+}
+
+type ReplayDiagnosticHint struct {
+	Code              string `json:"code"`
+	Severity          string `json:"severity"`
+	Summary           string `json:"summary"`
+	RecommendedAction string `json:"recommended_action"`
+}
+
+type ReplayEventRef struct {
+	EventID    string `json:"event_id"`
+	SequenceNo int    `json:"sequence_no"`
+	EventType  string `json:"event_type"`
+	EventLevel string `json:"event_level,omitempty"`
+	Summary    string `json:"summary"`
+	CreatedAt  string `json:"created_at"`
+}
+
+type ReplayCheckpointRef struct {
+	CheckpointID   string `json:"checkpoint_id"`
+	CheckpointType string `json:"checkpoint_type"`
+	CreatedAt      string `json:"created_at"`
 }
