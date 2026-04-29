@@ -398,6 +398,8 @@
 
 ## 8. 升级规则
 
+> ✅ **基础已实现**（2026-04-27）：统一状态枚举 `NormalizedStatus` 和升级类型枚举 `EscalationType` 已定义于 `contract_status.go`，包含 `IsValidNormalizedStatus` / `IsValidEscalationType` 校验函数。高级业务规则绑定待后续迭代。
+
 以下情况一律不能静默吞掉，必须产出 `RuntimeEscalation`。
 
 ## 8.1 `unsupported`

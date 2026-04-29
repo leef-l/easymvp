@@ -10,6 +10,7 @@ import (
 	workspacev1 "github.com/leef-l/easymvp/apps/core/api/workspace/v1"
 	"github.com/leef-l/easymvp/apps/core/internal/dao"
 	"github.com/leef-l/easymvp/apps/core/internal/model/entity"
+	"github.com/leef-l/easymvp/apps/core/internal/repo"
 )
 
 const (
@@ -168,43 +169,7 @@ LIMIT ?`
 }
 
 func getLatestAcceptanceRunByProjectID(ctx context.Context, db *sql.DB, projectID string) (*entity.AcceptanceRuns, error) {
-	query := `
-SELECT
-  id,
-  project_id,
-  COALESCE(task_id, ''),
-  profile_version,
-  status,
-  functional_status,
-  production_status,
-  manual_release_required,
-  created_at,
-  COALESCE(finished_at, '')
-FROM ` + dao.AcceptanceRuns.Table() + `
-WHERE project_id = ?
-ORDER BY created_at DESC
-LIMIT 1`
-
-	row := db.QueryRowContext(ctx, query, projectID)
-	var run entity.AcceptanceRuns
-	if err := row.Scan(
-		&run.Id,
-		&run.ProjectId,
-		&run.TaskId,
-		&run.ProfileVersion,
-		&run.Status,
-		&run.FunctionalStatus,
-		&run.ProductionStatus,
-		&run.ManualReleaseRequired,
-		&run.CreatedAt,
-		&run.FinishedAt,
-	); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, gerror.Wrap(err, "query latest acceptance run failed")
-	}
-	return &run, nil
+	return repo.GetLatestAcceptanceRunByProjectID(ctx, projectID)
 }
 
 func listWorkspaceNeedAttention(ctx context.Context, db *sql.DB, projects []projectHomeAggregate, limit int) ([]workspacev1.NeedAttentionItem, int, int, error) {

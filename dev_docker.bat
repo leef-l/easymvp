@@ -23,6 +23,20 @@ goto :start
 echo == EasyMVP Docker dev start ==
 echo Compose=%COMPOSE%
 echo Config=docker\dev\config.yaml
+
+:: Check Docker daemon is reachable before building
+docker info >nul 2>nul
+set "DOCKER_CHECK=%errorlevel%"
+if not "%DOCKER_CHECK%"=="0" (
+    echo.
+    echo Docker daemon is not running. Please start Docker Desktop first,
+    echo or use local development mode instead:
+    echo.
+    echo   dev_local.bat
+    echo.
+    goto :fail
+)
+
 call :build_core || goto :fail
 %COMPOSE% -f "%COMPOSE_FILE%" up --build -d || goto :fail
 %COMPOSE% -f "%COMPOSE_FILE%" ps

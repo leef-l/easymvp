@@ -1,0 +1,441 @@
+?   	github.com/leef-l/easymvp/apps/core	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/acceptance	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/acceptance/v1	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/audit	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/audit/v1	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/plan	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/plan/v1	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/projects	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/projects/v1	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/replay	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/replay/v1	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/runtime	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/runtime/v1	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/system	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/system/v1	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/workspace	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/workspace/v1	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/cmd	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/consts	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/controller/acceptance	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/controller/audit	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/controller/plan	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/controller/projects	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/controller/replay	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/controller/runtime	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/controller/system	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/controller/workspace	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/dao	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/dao/internal	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/model/braincontracts	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/model/do	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/model/entity	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/packed	[no test files]
+=== RUN   TestApplyManualReleasePersistsAllAffectedRows
+--- PASS: TestApplyManualReleasePersistsAllAffectedRows (0.03s)
+=== RUN   TestApplyManualReleaseReturnsExistingApprovalWithoutDuplicatingRows
+--- PASS: TestApplyManualReleaseReturnsExistingApprovalWithoutDuplicatingRows (0.03s)
+=== RUN   TestAdjudicateAcceptanceAggregatePersistsAwaitingManualReleaseState
+--- PASS: TestAdjudicateAcceptanceAggregatePersistsAwaitingManualReleaseState (0.02s)
+=== RUN   TestAdjudicateAcceptanceAggregatePersistsCompletedState
+--- PASS: TestAdjudicateAcceptanceAggregatePersistsCompletedState (0.02s)
+=== RUN   TestAdjudicateAcceptanceAggregatePersistsFailedStateAndTriggersRepairDraft
+--- PASS: TestAdjudicateAcceptanceAggregatePersistsFailedStateAndTriggersRepairDraft (0.03s)
+=== RUN   TestDeriveAcceptanceRunStatusFromAdjudication
+=== PAUSE TestDeriveAcceptanceRunStatusFromAdjudication
+=== RUN   TestShouldCreateRepairDraftAfterAdjudication
+=== PAUSE TestShouldCreateRepairDraftAfterAdjudication
+=== RUN   TestAcceptanceProfilesNeedRefresh
+=== PAUSE TestAcceptanceProfilesNeedRefresh
+=== RUN   TestNormalizeAcceptanceRunMode
+=== PAUSE TestNormalizeAcceptanceRunMode
+=== RUN   TestBuildVerificationResultViewMarksIncompleteWhenEvidenceMissing
+=== PAUSE TestBuildVerificationResultViewMarksIncompleteWhenEvidenceMissing
+=== RUN   TestBuildCompletionVerdictViewRequiresManualCheckpointOnRuntimeEscalation
+=== PAUSE TestBuildCompletionVerdictViewRequiresManualCheckpointOnRuntimeEscalation
+=== RUN   TestBuildCompletionVerdictViewCompletesWhenVerificationIsClean
+=== PAUSE TestBuildCompletionVerdictViewCompletesWhenVerificationIsClean
+=== RUN   TestEnsureDataRootLayoutCreatesExpectedDirectories
+=== PAUSE TestEnsureDataRootLayoutCreatesExpectedDirectories
+=== RUN   TestEnsureDataRootLayoutRejectsDot
+=== PAUSE TestEnsureDataRootLayoutRejectsDot
+=== RUN   TestLoadMigrationsSortsByVersion
+=== PAUSE TestLoadMigrationsSortsByVersion
+=== RUN   TestParseMigrationVersion
+=== PAUSE TestParseMigrationVersion
+=== RUN   TestAcceptanceCompletionVerdictStopsAtRuntimeEscalation
+=== PAUSE TestAcceptanceCompletionVerdictStopsAtRuntimeEscalation
+=== RUN   TestWorkspaceCompletionVerdictStopsAtRuntimeEscalation
+=== PAUSE TestWorkspaceCompletionVerdictStopsAtRuntimeEscalation
+=== RUN   TestValidateWorkspaceExplanationEnvelopeRejectsInvalidAction
+=== PAUSE TestValidateWorkspaceExplanationEnvelopeRejectsInvalidAction
+=== RUN   TestValidateWorkspaceExplanationEnvelopeAcceptsValidResult
+=== PAUSE TestValidateWorkspaceExplanationEnvelopeAcceptsValidResult
+=== RUN   TestExecuteTypedContractPreservesUnsupportedExecutionStatus
+=== PAUSE TestExecuteTypedContractPreservesUnsupportedExecutionStatus
+=== RUN   TestExecuteTypedContractPreservesDeniedExecutionStatus
+=== PAUSE TestExecuteTypedContractPreservesDeniedExecutionStatus
+=== RUN   TestCanonicalizeJSONObjectStringNormalizesObjectKeyOrder
+=== PAUSE TestCanonicalizeJSONObjectStringNormalizesObjectKeyOrder
+=== RUN   TestBuildRepairArtifactRefsJSONStableForEquivalentRefs
+=== PAUSE TestBuildRepairArtifactRefsJSONStableForEquivalentRefs
+=== RUN   TestBuildDeterministicWorkspaceExplanationMirrorsInboxItems
+=== PAUSE TestBuildDeterministicWorkspaceExplanationMirrorsInboxItems
+=== RUN   TestBuildDeterministicWorkspaceExplanationUsesDefaultActionWhenInboxEmpty
+=== PAUSE TestBuildDeterministicWorkspaceExplanationUsesDefaultActionWhenInboxEmpty
+=== RUN   TestBuildProjectStageProgressDefaultsUnknownStatusToDesign
+=== PAUSE TestBuildProjectStageProgressDefaultsUnknownStatusToDesign
+=== RUN   TestBuildProjectStageProgressBlocksAcceptanceStage
+=== PAUSE TestBuildProjectStageProgressBlocksAcceptanceStage
+=== RUN   TestBuildProjectAcceptanceCoverageFunctionalPassWithIssuesReducesEvidence
+=== PAUSE TestBuildProjectAcceptanceCoverageFunctionalPassWithIssuesReducesEvidence
+=== RUN   TestBuildProjectActionInboxPrioritizesRepairDraftAndRespectsLimit
+=== PAUSE TestBuildProjectActionInboxPrioritizesRepairDraftAndRespectsLimit
+=== RUN   TestBuildProjectActionInboxIncludesManualReleaseWhenNeeded
+=== PAUSE TestBuildProjectActionInboxIncludesManualReleaseWhenNeeded
+=== RUN   TestBuildProjectActionInboxIncludesUnsupportedAndDeniedBindings
+=== PAUSE TestBuildProjectActionInboxIncludesUnsupportedAndDeniedBindings
+=== RUN   TestBuildProjectLiveActivityRequiresActionForUnsupportedAndDeniedBindings
+=== PAUSE TestBuildProjectLiveActivityRequiresActionForUnsupportedAndDeniedBindings
+=== RUN   TestBuildProjectLiveActivityPrefersAuditLogsAndFallsBackToBindings
+=== PAUSE TestBuildProjectLiveActivityPrefersAuditLogsAndFallsBackToBindings
+=== RUN   TestBuildProjectWorkspaceExplanationUsesDeniedFallbackWhenRuntimePolicyBlocks
+--- PASS: TestBuildProjectWorkspaceExplanationUsesDeniedFallbackWhenRuntimePolicyBlocks (0.00s)
+=== RUN   TestBuildProjectWorkspaceExplanationUsesUnsupportedFallbackWhenCapabilityMissing
+--- PASS: TestBuildProjectWorkspaceExplanationUsesUnsupportedFallbackWhenCapabilityMissing (0.00s)
+=== RUN   TestMapProjectStatusToWorkspaceStageNormalizesCase
+=== PAUSE TestMapProjectStatusToWorkspaceStageNormalizesCase
+=== RUN   TestQueryPlanBaselineUsesExpectedIndexes
+--- PASS: TestQueryPlanBaselineUsesExpectedIndexes (0.02s)
+=== RUN   TestBuildArtifactIssueDetectsMissingAndStaleIndex
+=== PAUSE TestBuildArtifactIssueDetectsMissingAndStaleIndex
+=== RUN   TestBuildReplayDiagnosticHintsIncludesArtifactAndMarkerHints
+=== PAUSE TestBuildReplayDiagnosticHintsIncludesArtifactAndMarkerHints
+=== RUN   TestCollectRunArtifactCandidateRootsSkipsEmptyExecutionID
+=== PAUSE TestCollectRunArtifactCandidateRootsSkipsEmptyExecutionID
+=== RUN   TestClassifyReplayKindUsesFilenameHints
+=== PAUSE TestClassifyReplayKindUsesFilenameHints
+=== RUN   TestClassifyLogStreamKindUsesFilenameHints
+=== PAUSE TestClassifyLogStreamKindUsesFilenameHints
+=== RUN   TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles
+=== PAUSE TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles
+=== RUN   TestBuildReplayArtifactRecordsExtractsStructuredMetadata
+=== PAUSE TestBuildReplayArtifactRecordsExtractsStructuredMetadata
+=== RUN   TestBuildReplayArtifactRecordsFallsBackWhenMetadataCannotBeParsed
+=== PAUSE TestBuildReplayArtifactRecordsFallsBackWhenMetadataCannotBeParsed
+=== RUN   TestRuntimeResumeCommandUsesEnvironmentOverrides
+--- PASS: TestRuntimeResumeCommandUsesEnvironmentOverrides (0.00s)
+=== RUN   TestRuntimeResumeCommandFallsBackToBrainBinary
+--- PASS: TestRuntimeResumeCommandFallsBackToBrainBinary (0.00s)
+=== RUN   TestSplitCommandArgsPreservesQuotedSegments
+=== PAUSE TestSplitCommandArgsPreservesQuotedSegments
+=== RUN   TestStripWrappedCommandTrimsMatchingQuotes
+=== PAUSE TestStripWrappedCommandTrimsMatchingQuotes
+=== RUN   TestNormalizeExecutionViewLimit
+=== PAUSE TestNormalizeExecutionViewLimit
+=== RUN   TestPrioritizeExecutionBinding
+=== PAUSE TestPrioritizeExecutionBinding
+=== RUN   TestMapBrainRunStatusPreservesUnsupportedAndDenied
+=== PAUSE TestMapBrainRunStatusPreservesUnsupportedAndDenied
+=== RUN   TestFindReusableRunBindingForTaskReturnsActiveBinding
+--- PASS: TestFindReusableRunBindingForTaskReturnsActiveBinding (0.03s)
+=== RUN   TestAppendRunEventIndexDeduplicatesRepeatedPayload
+--- PASS: TestAppendRunEventIndexDeduplicatesRepeatedPayload (0.03s)
+=== RUN   TestAppendRunCheckpointForStateDeduplicatesUnchangedState
+--- PASS: TestAppendRunCheckpointForStateDeduplicatesUnchangedState (0.03s)
+=== RUN   TestRuntimeCheckHealthReturnsErrorInsteadOfPanickingBeforeInit
+=== PAUSE TestRuntimeCheckHealthReturnsErrorInsteadOfPanickingBeforeInit
+=== RUN   TestNormalizeServerAddress
+=== PAUSE TestNormalizeServerAddress
+=== RUN   TestParseBoolOption
+=== PAUSE TestParseBoolOption
+=== RUN   TestBuildStartupSnapshotSafeMode
+=== PAUSE TestBuildStartupSnapshotSafeMode
+=== RUN   TestBuildStartupSnapshotRuntimeFailure
+=== PAUSE TestBuildStartupSnapshotRuntimeFailure
+=== RUN   TestBuildProjectDiagnosticItemExtractsIDs
+=== PAUSE TestBuildProjectDiagnosticItemExtractsIDs
+=== RUN   TestDiagnosticMatchesProjectUsesStructuredAndRawFallback
+=== PAUSE TestDiagnosticMatchesProjectUsesStructuredAndRawFallback
+=== RUN   TestBuildProjectDiagnosticItemClassifiesStructuredDiagnostics
+=== PAUSE TestBuildProjectDiagnosticItemClassifiesStructuredDiagnostics
+=== RUN   TestMapProjectArtifactContextIncludesRunAndAction
+=== PAUSE TestMapProjectArtifactContextIncludesRunAndAction
+=== RUN   TestBuildProjectEvidenceOverviewCountsAndFlagsMissingFiles
+=== PAUSE TestBuildProjectEvidenceOverviewCountsAndFlagsMissingFiles
+=== RUN   TestDeriveVerificationCurrentChannel
+=== PAUSE TestDeriveVerificationCurrentChannel
+=== RUN   TestBuildVerificationContractJSONIncludesPreferredAndFallbackChannels
+=== PAUSE TestBuildVerificationContractJSONIncludesPreferredAndFallbackChannels
+=== RUN   TestIsSnapshotFresh
+=== PAUSE TestIsSnapshotFresh
+=== RUN   TestWorkersStatusIsSafeBeforeStart
+=== PAUSE TestWorkersStatusIsSafeBeforeStart
+=== RUN   TestWorkspaceGetProjectWorkspaceViewDelegatesToProjects
+=== PAUSE TestWorkspaceGetProjectWorkspaceViewDelegatesToProjects
+=== RUN   TestBuildWorkspaceVerificationResultPrefersRepairWhenBlockingIssuesExist
+=== PAUSE TestBuildWorkspaceVerificationResultPrefersRepairWhenBlockingIssuesExist
+=== RUN   TestBuildWorkspaceCompletionVerdictRequiresManualReviewForManualRelease
+=== PAUSE TestBuildWorkspaceCompletionVerdictRequiresManualReviewForManualRelease
+=== RUN   TestBuildWorkspaceCompletionVerdictCompletesCleanPass
+=== PAUSE TestBuildWorkspaceCompletionVerdictCompletesCleanPass
+=== CONT  TestDeriveAcceptanceRunStatusFromAdjudication
+=== RUN   TestDeriveAcceptanceRunStatusFromAdjudication/failed_result_stays_failed
+=== CONT  TestBuildReplayDiagnosticHintsIncludesArtifactAndMarkerHints
+=== CONT  TestBuildWorkspaceCompletionVerdictRequiresManualReviewForManualRelease
+=== CONT  TestBuildProjectAcceptanceCoverageFunctionalPassWithIssuesReducesEvidence
+--- PASS: TestBuildReplayDiagnosticHintsIncludesArtifactAndMarkerHints (0.00s)
+=== CONT  TestBuildProjectActionInboxPrioritizesRepairDraftAndRespectsLimit
+=== CONT  TestBuildDeterministicWorkspaceExplanationMirrorsInboxItems
+--- PASS: TestBuildWorkspaceCompletionVerdictRequiresManualReviewForManualRelease (0.00s)
+--- PASS: TestBuildProjectAcceptanceCoverageFunctionalPassWithIssuesReducesEvidence (0.00s)
+=== CONT  TestValidateWorkspaceExplanationEnvelopeAcceptsValidResult
+=== CONT  TestValidateWorkspaceExplanationEnvelopeRejectsInvalidAction
+=== CONT  TestStripWrappedCommandTrimsMatchingQuotes
+=== CONT  TestCanonicalizeJSONObjectStringNormalizesObjectKeyOrder
+=== CONT  TestWorkspaceCompletionVerdictStopsAtRuntimeEscalation
+=== CONT  TestAcceptanceCompletionVerdictStopsAtRuntimeEscalation
+=== CONT  TestExecuteTypedContractPreservesDeniedExecutionStatus
+=== CONT  TestParseMigrationVersion
+=== CONT  TestLoadMigrationsSortsByVersion
+=== CONT  TestBuildProjectStageProgressDefaultsUnknownStatusToDesign
+=== CONT  TestEnsureDataRootLayoutRejectsDot
+=== CONT  TestEnsureDataRootLayoutCreatesExpectedDirectories
+=== CONT  TestDiagnosticMatchesProjectUsesStructuredAndRawFallback
+=== CONT  TestBuildCompletionVerdictViewCompletesWhenVerificationIsClean
+=== CONT  TestBuildCompletionVerdictViewRequiresManualCheckpointOnRuntimeEscalation
+=== CONT  TestExecuteTypedContractPreservesUnsupportedExecutionStatus
+=== CONT  TestBuildStartupSnapshotRuntimeFailure
+=== CONT  TestBuildReplayArtifactRecordsExtractsStructuredMetadata
+=== CONT  TestBuildDeterministicWorkspaceExplanationUsesDefaultActionWhenInboxEmpty
+=== CONT  TestAcceptanceProfilesNeedRefresh
+=== CONT  TestMapProjectStatusToWorkspaceStageNormalizesCase
+=== CONT  TestClassifyLogStreamKindUsesFilenameHints
+=== RUN   TestClassifyLogStreamKindUsesFilenameHints/stderr
+=== CONT  TestBuildProjectLiveActivityPrefersAuditLogsAndFallsBackToBindings
+=== CONT  TestBuildProjectLiveActivityRequiresActionForUnsupportedAndDeniedBindings
+=== CONT  TestCollectRunArtifactCandidateRootsSkipsEmptyExecutionID
+=== CONT  TestClassifyReplayKindUsesFilenameHints
+=== RUN   TestClassifyReplayKindUsesFilenameHints/tool_call
+=== CONT  TestBuildProjectActionInboxIncludesUnsupportedAndDeniedBindings
+=== CONT  TestBuildStartupSnapshotSafeMode
+=== CONT  TestIsSnapshotFresh
+=== CONT  TestBuildWorkspaceCompletionVerdictCompletesCleanPass
+=== CONT  TestBuildProjectActionInboxIncludesManualReleaseWhenNeeded
+=== CONT  TestParseBoolOption
+=== CONT  TestNormalizeServerAddress
+=== CONT  TestDeriveVerificationCurrentChannel
+=== CONT  TestRuntimeCheckHealthReturnsErrorInsteadOfPanickingBeforeInit
+=== CONT  TestMapBrainRunStatusPreservesUnsupportedAndDenied
+=== CONT  TestPrioritizeExecutionBinding
+=== CONT  TestBuildRepairArtifactRefsJSONStableForEquivalentRefs
+=== CONT  TestNormalizeExecutionViewLimit
+=== CONT  TestBuildArtifactIssueDetectsMissingAndStaleIndex
+=== PAUSE TestDeriveAcceptanceRunStatusFromAdjudication/failed_result_stays_failed
+--- PASS: TestBuildProjectActionInboxPrioritizesRepairDraftAndRespectsLimit (0.00s)
+=== CONT  TestSplitCommandArgsPreservesQuotedSegments
+=== CONT  TestBuildReplayArtifactRecordsFallsBackWhenMetadataCannotBeParsed
+=== CONT  TestBuildProjectStageProgressBlocksAcceptanceStage
+=== CONT  TestBuildProjectEvidenceOverviewCountsAndFlagsMissingFiles
+=== CONT  TestMapProjectArtifactContextIncludesRunAndAction
+=== CONT  TestBuildProjectDiagnosticItemClassifiesStructuredDiagnostics
+=== CONT  TestBuildProjectDiagnosticItemExtractsIDs
+=== CONT  TestBuildVerificationResultViewMarksIncompleteWhenEvidenceMissing
+=== CONT  TestNormalizeAcceptanceRunMode
+=== RUN   TestAcceptanceProfilesNeedRefresh/missing_profiles_require_refresh
+=== CONT  TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles
+=== PAUSE TestClassifyLogStreamKindUsesFilenameHints/stderr
+=== PAUSE TestClassifyReplayKindUsesFilenameHints/tool_call
+=== CONT  TestShouldCreateRepairDraftAfterAdjudication
+=== CONT  TestWorkspaceGetProjectWorkspaceViewDelegatesToProjects
+=== CONT  TestWorkersStatusIsSafeBeforeStart
+=== RUN   TestNormalizeServerAddress/empty_uses_default
+--- PASS: TestPrioritizeExecutionBinding (0.00s)
+--- PASS: TestShouldCreateRepairDraftAfterAdjudication (0.00s)
+=== RUN   TestParseBoolOption/empty_means_true_flag
+--- PASS: TestBuildRepairArtifactRefsJSONStableForEquivalentRefs (0.00s)
+--- PASS: TestValidateWorkspaceExplanationEnvelopeRejectsInvalidAction (0.00s)
+=== CONT  TestBuildVerificationContractJSONIncludesPreferredAndFallbackChannels
+=== CONT  TestBuildWorkspaceVerificationResultPrefersRepairWhenBlockingIssuesExist
+=== RUN   TestDeriveAcceptanceRunStatusFromAdjudication/manual_release_pending_waits_for_approval
+=== RUN   TestClassifyLogStreamKindUsesFilenameHints/system
+--- PASS: TestBuildDeterministicWorkspaceExplanationMirrorsInboxItems (0.00s)
+=== RUN   TestClassifyReplayKindUsesFilenameHints/tool_result
+--- PASS: TestParseMigrationVersion (0.00s)
+=== PAUSE TestNormalizeServerAddress/empty_uses_default
+=== RUN   TestNormalizeServerAddress/plain_port_gets_colon
+--- PASS: TestCanonicalizeJSONObjectStringNormalizesObjectKeyOrder (0.00s)
+--- PASS: TestAcceptanceCompletionVerdictStopsAtRuntimeEscalation (0.00s)
+--- PASS: TestWorkspaceCompletionVerdictStopsAtRuntimeEscalation (0.00s)
+--- PASS: TestBuildProjectStageProgressDefaultsUnknownStatusToDesign (0.00s)
+--- PASS: TestExecuteTypedContractPreservesDeniedExecutionStatus (0.00s)
+--- PASS: TestEnsureDataRootLayoutRejectsDot (0.00s)
+--- PASS: TestDiagnosticMatchesProjectUsesStructuredAndRawFallback (0.00s)
+--- PASS: TestBuildCompletionVerdictViewCompletesWhenVerificationIsClean (0.00s)
+--- PASS: TestBuildCompletionVerdictViewRequiresManualCheckpointOnRuntimeEscalation (0.00s)
+--- PASS: TestExecuteTypedContractPreservesUnsupportedExecutionStatus (0.00s)
+--- PASS: TestBuildDeterministicWorkspaceExplanationUsesDefaultActionWhenInboxEmpty (0.00s)
+--- PASS: TestMapProjectStatusToWorkspaceStageNormalizesCase (0.00s)
+--- PASS: TestBuildProjectLiveActivityRequiresActionForUnsupportedAndDeniedBindings (0.00s)
+--- PASS: TestBuildProjectLiveActivityPrefersAuditLogsAndFallsBackToBindings (0.00s)
+--- PASS: TestBuildProjectActionInboxIncludesUnsupportedAndDeniedBindings (0.00s)
+--- PASS: TestIsSnapshotFresh (0.00s)
+--- PASS: TestBuildWorkspaceCompletionVerdictCompletesCleanPass (0.00s)
+=== RUN   TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles/checkpoint_json
+=== PAUSE TestAcceptanceProfilesNeedRefresh/missing_profiles_require_refresh
+=== PAUSE TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles/checkpoint_json
+=== RUN   TestAcceptanceProfilesNeedRefresh/matching_profiles_stay_fresh
+=== PAUSE TestNormalizeServerAddress/plain_port_gets_colon
+=== PAUSE TestClassifyReplayKindUsesFilenameHints/tool_result
+=== PAUSE TestParseBoolOption/empty_means_true_flag
+=== PAUSE TestClassifyLogStreamKindUsesFilenameHints/system
+=== PAUSE TestDeriveAcceptanceRunStatusFromAdjudication/manual_release_pending_waits_for_approval
+=== RUN   TestClassifyLogStreamKindUsesFilenameHints/tool
+=== RUN   TestNormalizeAcceptanceRunMode/blank_defaults_to_queued
+=== RUN   TestDeriveAcceptanceRunStatusFromAdjudication/production_passed_completes
+=== PAUSE TestNormalizeAcceptanceRunMode/blank_defaults_to_queued
+=== PAUSE TestClassifyLogStreamKindUsesFilenameHints/tool
+=== RUN   TestClassifyLogStreamKindUsesFilenameHints/stdout_default
+=== PAUSE TestClassifyLogStreamKindUsesFilenameHints/stdout_default
+=== CONT  TestClassifyLogStreamKindUsesFilenameHints/stderr
+--- PASS: TestBuildProjectActionInboxIncludesManualReleaseWhenNeeded (0.00s)
+--- PASS: TestDeriveVerificationCurrentChannel (0.00s)
+--- PASS: TestMapBrainRunStatusPreservesUnsupportedAndDenied (0.00s)
+--- PASS: TestNormalizeExecutionViewLimit (0.00s)
+=== RUN   TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles/meta_json
+=== PAUSE TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles/meta_json
+=== PAUSE TestAcceptanceProfilesNeedRefresh/matching_profiles_stay_fresh
+=== RUN   TestNormalizeServerAddress/trimmed_port_gets_colon
+=== RUN   TestParseBoolOption/true
+=== RUN   TestClassifyReplayKindUsesFilenameHints/browser_trace
+=== RUN   TestAcceptanceProfilesNeedRefresh/version_mismatch_refreshes
+=== PAUSE TestDeriveAcceptanceRunStatusFromAdjudication/production_passed_completes
+=== PAUSE TestClassifyReplayKindUsesFilenameHints/browser_trace
+=== PAUSE TestParseBoolOption/true
+=== RUN   TestParseBoolOption/yes
+=== PAUSE TestParseBoolOption/yes
+=== RUN   TestParseBoolOption/off
+=== PAUSE TestParseBoolOption/off
+=== RUN   TestClassifyReplayKindUsesFilenameHints/default
+=== CONT  TestClassifyLogStreamKindUsesFilenameHints/stdout_default
+=== CONT  TestClassifyLogStreamKindUsesFilenameHints/tool
+=== CONT  TestClassifyLogStreamKindUsesFilenameHints/system
+--- PASS: TestStripWrappedCommandTrimsMatchingQuotes (0.00s)
+--- PASS: TestWorkspaceGetProjectWorkspaceViewDelegatesToProjects (0.00s)
+=== PAUSE TestNormalizeServerAddress/trimmed_port_gets_colon
+=== RUN   TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles/replay_json
+=== PAUSE TestAcceptanceProfilesNeedRefresh/version_mismatch_refreshes
+=== PAUSE TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles/replay_json
+=== CONT  TestDeriveAcceptanceRunStatusFromAdjudication/failed_result_stays_failed
+=== RUN   TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles/stdout_log
+=== CONT  TestDeriveAcceptanceRunStatusFromAdjudication/production_passed_completes
+=== CONT  TestDeriveAcceptanceRunStatusFromAdjudication/manual_release_pending_waits_for_approval
+=== PAUSE TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles/stdout_log
+=== CONT  TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles/checkpoint_json
+=== CONT  TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles/stdout_log
+=== RUN   TestNormalizeAcceptanceRunMode/known_value_normalizes_case
+=== RUN   TestParseBoolOption/false
+=== PAUSE TestParseBoolOption/false
+=== PAUSE TestClassifyReplayKindUsesFilenameHints/default
+=== CONT  TestClassifyReplayKindUsesFilenameHints/tool_call
+=== RUN   TestParseBoolOption/zero
+=== CONT  TestClassifyReplayKindUsesFilenameHints/tool_result
+=== PAUSE TestParseBoolOption/zero
+=== RUN   TestParseBoolOption/unknown_defaults_true
+=== RUN   TestNormalizeServerAddress/host_and_port_kept
+=== PAUSE TestParseBoolOption/unknown_defaults_true
+=== PAUSE TestNormalizeServerAddress/host_and_port_kept
+=== CONT  TestParseBoolOption/empty_means_true_flag
+=== CONT  TestNormalizeServerAddress/plain_port_gets_colon
+=== CONT  TestParseBoolOption/off
+=== CONT  TestParseBoolOption/true
+=== CONT  TestNormalizeServerAddress/empty_uses_default
+=== CONT  TestParseBoolOption/false
+=== CONT  TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles/replay_json
+=== CONT  TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles/meta_json
+=== PAUSE TestNormalizeAcceptanceRunMode/known_value_normalizes_case
+=== RUN   TestNormalizeAcceptanceRunMode/manual_allowed
+=== CONT  TestClassifyReplayKindUsesFilenameHints/default
+--- PASS: TestWorkersStatusIsSafeBeforeStart (0.00s)
+--- PASS: TestSplitCommandArgsPreservesQuotedSegments (0.00s)
+=== CONT  TestClassifyReplayKindUsesFilenameHints/browser_trace
+--- PASS: TestBuildProjectStageProgressBlocksAcceptanceStage (0.00s)
+=== CONT  TestNormalizeServerAddress/host_and_port_kept
+=== CONT  TestNormalizeServerAddress/trimmed_port_gets_colon
+=== RUN   TestAcceptanceProfilesNeedRefresh/blank_requested_version_only_checks_presence
+=== PAUSE TestAcceptanceProfilesNeedRefresh/blank_requested_version_only_checks_presence
+=== CONT  TestParseBoolOption/unknown_defaults_true
+=== CONT  TestParseBoolOption/zero
+=== CONT  TestParseBoolOption/yes
+=== PAUSE TestNormalizeAcceptanceRunMode/manual_allowed
+=== RUN   TestNormalizeAcceptanceRunMode/unknown_value_falls_back
+=== PAUSE TestNormalizeAcceptanceRunMode/unknown_value_falls_back
+=== CONT  TestNormalizeAcceptanceRunMode/blank_defaults_to_queued
+--- PASS: TestBuildProjectDiagnosticItemClassifiesStructuredDiagnostics (0.00s)
+=== CONT  TestAcceptanceProfilesNeedRefresh/missing_profiles_require_refresh
+--- PASS: TestBuildWorkspaceVerificationResultPrefersRepairWhenBlockingIssuesExist (0.00s)
+=== CONT  TestAcceptanceProfilesNeedRefresh/blank_requested_version_only_checks_presence
+=== CONT  TestAcceptanceProfilesNeedRefresh/version_mismatch_refreshes
+=== CONT  TestAcceptanceProfilesNeedRefresh/matching_profiles_stay_fresh
+=== CONT  TestNormalizeAcceptanceRunMode/unknown_value_falls_back
+=== CONT  TestNormalizeAcceptanceRunMode/manual_allowed
+=== CONT  TestNormalizeAcceptanceRunMode/known_value_normalizes_case
+--- PASS: TestMapProjectArtifactContextIncludesRunAndAction (0.00s)
+--- PASS: TestBuildVerificationResultViewMarksIncompleteWhenEvidenceMissing (0.00s)
+--- PASS: TestBuildProjectDiagnosticItemExtractsIDs (0.00s)
+--- PASS: TestBuildVerificationContractJSONIncludesPreferredAndFallbackChannels (0.00s)
+--- PASS: TestValidateWorkspaceExplanationEnvelopeAcceptsValidResult (0.00s)
+--- PASS: TestClassifyLogStreamKindUsesFilenameHints (0.00s)
+    --- PASS: TestClassifyLogStreamKindUsesFilenameHints/stderr (0.00s)
+    --- PASS: TestClassifyLogStreamKindUsesFilenameHints/stdout_default (0.00s)
+    --- PASS: TestClassifyLogStreamKindUsesFilenameHints/tool (0.00s)
+    --- PASS: TestClassifyLogStreamKindUsesFilenameHints/system (0.00s)
+--- PASS: TestBuildArtifactIssueDetectsMissingAndStaleIndex (0.00s)
+--- PASS: TestDeriveAcceptanceRunStatusFromAdjudication (0.00s)
+    --- PASS: TestDeriveAcceptanceRunStatusFromAdjudication/failed_result_stays_failed (0.00s)
+    --- PASS: TestDeriveAcceptanceRunStatusFromAdjudication/production_passed_completes (0.00s)
+    --- PASS: TestDeriveAcceptanceRunStatusFromAdjudication/manual_release_pending_waits_for_approval (0.00s)
+--- PASS: TestCollectRunArtifactCandidateRootsSkipsEmptyExecutionID (0.00s)
+--- PASS: TestClassifyReplayKindUsesFilenameHints (0.00s)
+    --- PASS: TestClassifyReplayKindUsesFilenameHints/tool_call (0.00s)
+    --- PASS: TestClassifyReplayKindUsesFilenameHints/tool_result (0.00s)
+    --- PASS: TestClassifyReplayKindUsesFilenameHints/default (0.00s)
+    --- PASS: TestClassifyReplayKindUsesFilenameHints/browser_trace (0.00s)
+--- PASS: TestParseBoolOption (0.00s)
+    --- PASS: TestParseBoolOption/empty_means_true_flag (0.00s)
+    --- PASS: TestParseBoolOption/off (0.00s)
+    --- PASS: TestParseBoolOption/true (0.00s)
+    --- PASS: TestParseBoolOption/false (0.00s)
+    --- PASS: TestParseBoolOption/unknown_defaults_true (0.00s)
+    --- PASS: TestParseBoolOption/zero (0.00s)
+    --- PASS: TestParseBoolOption/yes (0.00s)
+--- PASS: TestAcceptanceProfilesNeedRefresh (0.00s)
+    --- PASS: TestAcceptanceProfilesNeedRefresh/missing_profiles_require_refresh (0.00s)
+    --- PASS: TestAcceptanceProfilesNeedRefresh/blank_requested_version_only_checks_presence (0.00s)
+    --- PASS: TestAcceptanceProfilesNeedRefresh/version_mismatch_refreshes (0.00s)
+    --- PASS: TestAcceptanceProfilesNeedRefresh/matching_profiles_stay_fresh (0.00s)
+--- PASS: TestNormalizeAcceptanceRunMode (0.00s)
+    --- PASS: TestNormalizeAcceptanceRunMode/blank_defaults_to_queued (0.00s)
+    --- PASS: TestNormalizeAcceptanceRunMode/unknown_value_falls_back (0.00s)
+    --- PASS: TestNormalizeAcceptanceRunMode/manual_allowed (0.00s)
+    --- PASS: TestNormalizeAcceptanceRunMode/known_value_normalizes_case (0.00s)
+--- PASS: TestBuildReplayArtifactRecordsExtractsStructuredMetadata (0.00s)
+--- PASS: TestNormalizeServerAddress (0.00s)
+    --- PASS: TestNormalizeServerAddress/plain_port_gets_colon (0.00s)
+    --- PASS: TestNormalizeServerAddress/empty_uses_default (0.00s)
+    --- PASS: TestNormalizeServerAddress/host_and_port_kept (0.00s)
+    --- PASS: TestNormalizeServerAddress/trimmed_port_gets_colon (0.00s)
+--- PASS: TestBuildReplayArtifactRecordsFallsBackWhenMetadataCannotBeParsed (0.00s)
+--- PASS: TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles (0.00s)
+    --- PASS: TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles/checkpoint_json (0.00s)
+    --- PASS: TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles/stdout_log (0.00s)
+    --- PASS: TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles/replay_json (0.00s)
+    --- PASS: TestClassifyRunArtifactPathIgnoresCheckpointAndMetaFiles/meta_json (0.00s)
+--- PASS: TestLoadMigrationsSortsByVersion (0.01s)
+--- PASS: TestBuildProjectEvidenceOverviewCountsAndFlagsMissingFiles (0.00s)
+--- PASS: TestEnsureDataRootLayoutCreatesExpectedDirectories (0.01s)
+--- PASS: TestBuildStartupSnapshotSafeMode (0.01s)
+--- PASS: TestBuildStartupSnapshotRuntimeFailure (0.01s)
+--- PASS: TestRuntimeCheckHealthReturnsErrorInsteadOfPanickingBeforeInit (0.01s)
+PASS
+ok  	github.com/leef-l/easymvp/apps/core/internal/service	0.345s

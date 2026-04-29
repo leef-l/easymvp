@@ -106,6 +106,8 @@ CompiledTask
 
 ## 4.2 高配验证环境
 
+> ✅ **已实现**（2026-04-27）：`high_spec_remote` 已作为 `preferred_channel` 在 `verification_contract_support.go` 中支持，含 fallback channels 和 channel availability 检测。
+
 角色：
 
 - 长期目标中的正式最终验证环境
@@ -133,6 +135,8 @@ CompiledTask
 ---
 
 ## 5. 统一对象设计
+
+> ✅ **已实现**（2026-04-27）：`VerificationContract` 结构化 DTO 已定义于 `verification_contract.go`，含 `ParseVerificationContract` 转换辅助函数。
 
 ## 5.1 `verification_contract_json` 建议字段
 

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 
 	projectsv1 "github.com/leef-l/easymvp/apps/core/api/projects/v1"
@@ -10,7 +11,7 @@ import (
 func TestBuildWorkspaceVerificationResultPrefersRepairWhenBlockingIssuesExist(t *testing.T) {
 	t.Parallel()
 
-	view := buildWorkspaceVerificationResult(&projectWorkspaceAggregate{
+	view := buildWorkspaceVerificationResult(context.Background(), &projectWorkspaceAggregate{
 		Project: entity.Projects{
 			Id:              "proj_workspace_failed",
 			ProjectCategory: "web",
@@ -19,6 +20,8 @@ func TestBuildWorkspaceVerificationResultPrefersRepairWhenBlockingIssuesExist(t 
 		AcceptanceIssues: []entity.AcceptanceIssues{
 			{Id: "issue_1", IssueKind: "api_regression", Blocking: 1, Summary: "API regression blocks release"},
 		},
+		ChannelAvailable:     true,
+		EnvironmentAvailable: true,
 	}, projectsv1.AcceptanceCoverage{
 		ProductionPassed: true,
 		EvidenceReady:    2,
@@ -38,7 +41,7 @@ func TestBuildWorkspaceVerificationResultPrefersRepairWhenBlockingIssuesExist(t 
 func TestBuildWorkspaceCompletionVerdictRequiresManualReviewForManualRelease(t *testing.T) {
 	t.Parallel()
 
-	verdict := buildWorkspaceCompletionVerdict(&projectWorkspaceAggregate{
+	verdict := buildWorkspaceCompletionVerdict(context.Background(), &projectWorkspaceAggregate{
 		Project: entity.Projects{
 			Id:              "proj_workspace_manual_release",
 			ProjectCategory: "web",
@@ -52,13 +55,15 @@ func TestBuildWorkspaceCompletionVerdictRequiresManualReviewForManualRelease(t *
 			ManualReleaseRequired: 1,
 			FinishedAt:            "2026-04-20T00:05:00Z",
 		},
+		ChannelAvailable:     true,
+		EnvironmentAvailable: true,
 	}, projectsv1.AcceptanceCoverage{
 		ProductionPassed: true,
 		EvidenceReady:    5,
 	})
 
-	if verdict.Decision != "manual_review" {
-		t.Fatalf("workspace completion decision = %q, want manual_review", verdict.Decision)
+	if verdict.Decision != "manual_checkpoint" {
+		t.Fatalf("workspace completion decision = %q, want manual_checkpoint", verdict.Decision)
 	}
 	if verdict.NextAction != "apply_manual_release" {
 		t.Fatalf("workspace completion next action = %q, want apply_manual_release", verdict.NextAction)
@@ -71,7 +76,7 @@ func TestBuildWorkspaceCompletionVerdictRequiresManualReviewForManualRelease(t *
 func TestBuildWorkspaceCompletionVerdictCompletesCleanPass(t *testing.T) {
 	t.Parallel()
 
-	verdict := buildWorkspaceCompletionVerdict(&projectWorkspaceAggregate{
+	verdict := buildWorkspaceCompletionVerdict(context.Background(), &projectWorkspaceAggregate{
 		Project: entity.Projects{
 			Id:              "proj_workspace_complete",
 			ProjectCategory: "web",
@@ -84,6 +89,8 @@ func TestBuildWorkspaceCompletionVerdictCompletesCleanPass(t *testing.T) {
 			ProductionStatus: "production_passed",
 			FinishedAt:       "2026-04-20T00:06:00Z",
 		},
+		ChannelAvailable:     true,
+		EnvironmentAvailable: true,
 	}, projectsv1.AcceptanceCoverage{
 		ProductionPassed: true,
 		EvidenceReady:    5,

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 
 	"github.com/leef-l/easymvp/apps/core/internal/model/entity"
@@ -9,7 +10,7 @@ import (
 func TestBuildVerificationResultViewMarksIncompleteWhenEvidenceMissing(t *testing.T) {
 	t.Parallel()
 
-	view := buildVerificationResultView(&acceptanceAggregate{
+	view := buildVerificationResultView(context.Background(), &acceptanceAggregate{
 		Project: entity.Projects{
 			Id:              "proj_acceptance_incomplete",
 			ProjectCategory: "web",
@@ -28,6 +29,8 @@ func TestBuildVerificationResultViewMarksIncompleteWhenEvidenceMissing(t *testin
 		EvidenceItems: []entity.EvidenceItems{
 			{Id: "evidence_1"},
 		},
+		ChannelAvailable:     true,
+		EnvironmentAvailable: true,
 	})
 
 	if view.Status != "incomplete" {
@@ -70,6 +73,8 @@ func TestBuildCompletionVerdictViewRequiresManualCheckpointOnRuntimeEscalation(t
 				LastSyncAt: "2026-04-20T00:03:00Z",
 			},
 		},
+		ChannelAvailable:     true,
+		EnvironmentAvailable: true,
 	})
 
 	if verdict.Decision != "manual_checkpoint" {
@@ -99,6 +104,8 @@ func TestBuildCompletionVerdictViewCompletesWhenVerificationIsClean(t *testing.T
 			ProductionStatus: "production_passed",
 			FinishedAt:       "2026-04-20T00:04:00Z",
 		},
+		ChannelAvailable:     true,
+		EnvironmentAvailable: true,
 	})
 
 	if verdict.Decision != "complete" {

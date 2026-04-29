@@ -1,0 +1,150 @@
+# EasyMVP V3 easymvp-brain 合同 JSON Schema 与 DTO 映射终稿
+
+> 更新时间：2026-04-24
+> 上游文档：[钱学森总纲设计/easymvp-brain-职责与边界定义](./钱学森总纲设计/easymvp-brain-职责与边界定义.md)
+> 关联文档：[钱学森总纲设计/easymvp-brain-输入输出契约](./钱学森总纲设计/easymvp-brain-输入输出契约.md)
+> 关联文档：[EasyMVP-V3计划数据模型与表结构设计](./EasyMVP-V3计划数据模型与表结构设计.md)
+> 目标：把 `easymvp-brain` 六类领域合同落成可直接实现的 JSON Schema 基线，并明确与 Go DTO / SQLite 字段的映射关系。
+
+## 1. 设计结论
+
+`easymvp-brain` 的所有合同都必须满足：
+
+1. 输入可跨进程序列化
+2. 输出可直接落库
+3. 输出可被工作台解释
+4. 输出不依赖本地隐式上下文
+
+统一约束：
+
+1. 顶层返回采用 envelope
+2. `result_json` 承载领域对象正文
+3. `source_refs` 负责版本回溯
+4. `decision_summary` 负责工作台与审计摘要
+5. 所有运行时、浏览器、验证、故障信息都必须先被 EasyMVP 归一化后才能进入领域合同
+
+## 1.1 与 `brain-v3` 最新工具协议的对齐要求
+
+合同设计必须承认 `brain-v3` 当前的工具协议与能力边界：
+
+1. 内置脑通过结构化 `tools/list` 暴露 `name / description / input_schema / output_schema`
+2. 内置脑通过结构化 `tools/call` 返回 `output`，兼容层 `content[]` 不作为领域落库主载荷
+3. 高风险工具可能显式返回 `unsupported` / `denied`
+4. `easymvp-brain` 输入合同只接受 EasyMVP 归一化后的 `success / failure / unsupported_or_denied`
+5. 合同 Schema 不得要求调用方传入具体内置脑工具名或原始工具 payload
+
+## 2. 统一 Envelope Schema
+
+```json
+{
+  "type": "object",
+  "required": [
+    "schema_version",
+    "result_kind",
+    "result_version",
+    "source_refs",
+    "decision_summary",
+    "result_json"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "minimum": 1},
+    "result_kind": {"type": "string", "minLength": 1},
+    "result_version": {"type": "integer", "minimum": 1},
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "id", "version"],
+        "properties": {
+          "kind": {"type": "string"},
+          "id": {"type": "string"},
+          "version": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "decision_summary": {"type": "string", "minLength": 1},
+    "trace_id": {"type": "string"},
+    "deployment_mode": {
+      "type": "string",
+      "enum": ["local-sidecar", "remote-service"]
+    },
+    "brain_endpoint": {"type": "string"},
+    "normalized_status": {
+      "type": "string",
+      "enum": ["success", "failure", "unsupported_or_denied"]
+    },
+    "result_json": {"type": "object"}
+  }
+}
+```
+
+建议 Go DTO：
+
+```go
+type BrainContractEnvelope struct {
+    SchemaVersion  int              `json:"schema_version"`
+    ResultKind     string           `json:"result_kind"`
+    ResultVersion  int              `json:"result_version"`
+    SourceRefs     []BrainSourceRef `json:"source_refs"`
+    DecisionSummary string          `json:"decision_summary"`
+    TraceID        string           `json:"trace_id,omitempty"`
+    DeploymentMode string           `json:"deployment_mode,omitempty"`
+    BrainEndpoint  string           `json:"brain_endpoint,omitempty"`
+    NormalizedStatus string         `json:"normalized_status,omitempty"`
+    ResultJSON     json.RawMessage  `json:"result_json"`
+}
+
+type BrainSourceRef struct {
+    Kind    string `json:"kind"`
+    ID      string `json:"id"`
+    Version int    `json:"version"`
+}
+```
+
+补充约束：
+
+1. `result_json` 是领域合同的 canonical payload
+2. 如果上游执行链只返回兼容层 `content[]`，必须先由 EasyMVP 适配层转成结构化 `result_json`
+3. `normalized_status=unsupported_or_denied` 时，不允许把该次结果伪装成正常成功输出
+
+## 3. `plan_review` 合同终稿
+
+### 输入 Schema
+
+```json
+{
+  "type": "object",
+  "required": [
+    "plan_draft_id",
+    "plan_draft_version",
+    "plan_draft_json",
+    "project_category",
+    "category_profile_version",
+    "category_profile_json"
+  ],
+  "properties": {
+    "plan_draft_id": {"type": "string"},
+    "plan_draft_version": {"type": "integer", "minimum": 1},
+    "plan_draft_json": {"type": "object"},
+    "project_category": {"type": "string"},
+    "category_profile_version": {"type": "integer", "minimum": 1},
+    "category_profile_json": {"type": "object"},
+    "project_context_json": {"type": "object"},
+    "artifact_refs": {"type": "array", "items": {"type": "object"}},
+    "normalized_inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["success", "failure", "unsupported_or_denied"]
+          },
+          "summary_json": {"type": "object"}
+        }
+      }
+    }
+  }
+}
+```

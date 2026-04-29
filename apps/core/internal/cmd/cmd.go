@@ -9,7 +9,10 @@ import (
 	"github.com/gogf/gf/v2/os/gcmd"
 
 	"github.com/leef-l/easymvp/apps/core/internal/controller/acceptance"
+	"github.com/leef-l/easymvp/apps/core/internal/controller/architect_chat"
 	"github.com/leef-l/easymvp/apps/core/internal/controller/audit"
+	"github.com/leef-l/easymvp/apps/core/internal/controller/decisions"
+	"github.com/leef-l/easymvp/apps/core/internal/controller/evidence"
 	"github.com/leef-l/easymvp/apps/core/internal/controller/plan"
 	"github.com/leef-l/easymvp/apps/core/internal/controller/projects"
 	"github.com/leef-l/easymvp/apps/core/internal/controller/replay"
@@ -18,6 +21,17 @@ import (
 	"github.com/leef-l/easymvp/apps/core/internal/controller/workspace"
 	"github.com/leef-l/easymvp/apps/core/internal/service"
 )
+
+func middlewareCORS(r *ghttp.Request) {
+	// Use permissive CORS for local dev; all API clients are first-party.
+	corsOptions := r.Response.DefaultCORSOptions()
+	corsOptions.AllowOrigin = "*"
+	corsOptions.AllowMethods = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+	corsOptions.AllowHeaders = "Origin,Content-Type,Accept,Authorization,X-Request-Id"
+	corsOptions.AllowCredentials = "true"
+	r.Response.CORS(corsOptions)
+	r.Middleware.Next()
+}
 
 var (
 	Main = gcmd.Command{
@@ -48,10 +62,14 @@ var (
 			s := g.Server()
 			s.SetAddr(startup.ServerAddress)
 			s.Group("/", func(group *ghttp.RouterGroup) {
+				group.Middleware(middlewareCORS)
 				group.Middleware(ghttp.MiddlewareHandlerResponse)
 				group.Bind(
 					acceptance.NewV1(),
+					architect_chat.NewV1(),
 					audit.NewV1(),
+					decisions.NewV1(),
+					evidence.NewV1(),
 					plan.NewV1(),
 					projects.NewV1(),
 					replay.NewV1(),
@@ -59,7 +77,12 @@ var (
 					system.NewV1(),
 					workspace.NewV1(),
 				)
+				// SSE streaming endpoint for architect chat (manually bound)
+				group.POST("/api/v3/projects/{id}/architect-chat/messages/stream", architect_chat.SendMessageStreamHandler)
 			})
+			// 启用 OpenAPI/Swagger 文档
+			s.SetOpenApiPath("/api.json")
+			s.SetSwaggerPath("/swagger")
 			s.Run()
 			return nil
 		},

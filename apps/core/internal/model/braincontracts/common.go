@@ -12,8 +12,9 @@ type BrainContractEnvelope struct {
 	DecisionSummary string           `json:"decision_summary"`
 	TraceID         string           `json:"trace_id,omitempty"`
 	DeploymentMode  string           `json:"deployment_mode,omitempty"`
-	BrainEndpoint   string           `json:"brain_endpoint,omitempty"`
-	ResultJSON      json.RawMessage  `json:"result_json"`
+	BrainEndpoint    string           `json:"brain_endpoint,omitempty"`
+	NormalizedStatus string           `json:"normalized_status,omitempty"`
+	ResultJSON       json.RawMessage  `json:"result_json"`
 }
 
 type BrainSourceRef struct {

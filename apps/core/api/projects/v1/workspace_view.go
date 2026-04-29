@@ -8,7 +8,7 @@ import (
 
 type ProjectWorkspaceViewReq struct {
 	g.Meta    `path:"/api/v3/projects/{id}/workspace-view" tags:"Projects" method:"get" summary:"Project workspace view"`
-	ProjectID string `json:"id" in:"path" v:"required"`
+	Id string `json:"id" in:"path" v:"required"`
 }
 
 type ProjectWorkspaceViewRes struct {
@@ -24,4 +24,15 @@ type ProjectWorkspaceViewRes struct {
 	RuntimeEscalation    acceptancev1.RuntimeEscalationView  `json:"runtime_escalation"`
 	FaultSummary         acceptancev1.FaultSummaryView       `json:"fault_summary"`
 	RepairPlanDraft      acceptancev1.RepairPlanDraftSummary `json:"repair_plan_draft"`
+	HealthMetrics        ProjectHealthMetrics                `json:"health_metrics"`
+}
+
+// ProjectHealthMetrics provides near-term run statistics for project health.
+type ProjectHealthMetrics struct {
+	RecentRunCount     int     `json:"recent_run_count"`
+	SuccessRate        float64 `json:"success_rate"`
+	AvgLatencyMs       int     `json:"avg_latency_ms"`
+	TopFailureMode     string  `json:"top_failure_mode,omitempty"`
+	TopFailureCount    int     `json:"top_failure_count"`
+	LastUpdated        string  `json:"last_updated,omitempty"`
 }

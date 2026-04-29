@@ -9,8 +9,10 @@ import (
 
 func (c *ControllerV1) CompilePlan(ctx context.Context, req *v1.CompilePlanReq) (res *v1.CompilePlanRes, err error) {
 	return service.Plan().CompilePlan(ctx, service.CompilePlanCommand{
-		ProjectID:      req.ProjectID,
-		PlanDraftID:    req.PlanDraftID,
-		ForceRecompile: req.ForceRecompile,
+		ProjectID:           req.ProjectID,
+		PlanDraftID:         req.PlanDraftID,
+		ForceRecompile:      req.ForceRecompile,
+		AutoRedesign:        req.AutoRedesign,
+		MaxRedesignAttempts: req.MaxRedesignAttempts,
 	})
 }

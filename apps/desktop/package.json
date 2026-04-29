@@ -7,24 +7,33 @@
   "type": "module",
   "main": "dist-electron/src/main/main.js",
   "scripts": {
-    "dev": "concurrently -k \"npm:dev:main\" \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev": "concurrently -k \"npm:dev:main\" \"npm:dev:preload\" \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:main": "tsc -w -p tsconfig.node.json",
+    "dev:preload": "tsc -w -p tsconfig.preload.json",
     "dev:renderer": "vite",
     "dev:electron": "wait-on tcp:5173 file:dist-electron/src/main/main.js file:dist-electron/src/preload/preload.js && electron .",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "build:core": "node ./scripts/build-core.mjs",
     "verify:package": "node ./scripts/verify-package.mjs",
     "typecheck": "tsc -p tsconfig.node.json && tsc -p tsconfig.json --noEmit",
-    "build": "tsc -p tsconfig.node.json && vite build && tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.node.json && tsc -p tsconfig.preload.json && vite build && tsc -p tsconfig.json",
     "preview": "vite preview",
     "package": "pnpm run build:core && pnpm run build && electron-builder --publish never",
     "package:dir": "pnpm run build:core && pnpm run build && electron-builder --dir --publish never"
   },
   "dependencies": {
+    "i18next": "^26.0.8",
+    "i18next-http-backend": "^3.0.6",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-i18next": "^17.0.4",
     "react-router-dom": "^6.30.1"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^14.3.1",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^24.0.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
@@ -32,8 +41,10 @@
     "concurrently": "^9.1.2",
     "electron": "^37.2.0",
     "electron-builder": "^25.1.8",
+    "jsdom": "^29.0.2",
     "typescript": "^5.8.3",
     "vite": "^7.0.0",
+    "vitest": "^4.1.5",
     "wait-on": "^8.0.3"
   },
   "build": {

@@ -13,9 +13,17 @@ type runSyncWorker struct {
 }
 
 func newRunSyncWorker() backgroundWorker {
+	cfgInterval := g.Cfg().MustGet(context.Background(), "easymvp.workers.runSyncInterval", "5s").Duration()
+	if cfgInterval <= 0 {
+		cfgInterval = 5 * time.Second
+	}
+	batchSize := g.Cfg().MustGet(context.Background(), "easymvp.workers.runSyncBatchSize", 20).Int()
+	if batchSize <= 0 {
+		batchSize = 20
+	}
 	return &runSyncWorker{
-		interval:  5 * time.Second,
-		batchSize: 20,
+		interval:  cfgInterval,
+		batchSize: batchSize,
 	}
 }
 

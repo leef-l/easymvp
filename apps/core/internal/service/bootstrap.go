@@ -12,10 +12,11 @@ import (
 	"strconv"
 	"strings"
 
+	_ "github.com/gogf/gf/contrib/drivers/sqlite/v2"
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
-
-	_ "modernc.org/sqlite"
 )
 
 type migrationFile struct {
@@ -57,6 +58,22 @@ func Bootstrap(ctx context.Context) error {
 	defer func() {
 		_ = db.Close()
 	}()
+
+	// Configure GoFrame gdb for DAO support (shares same sqlite file)
+	if err = gdb.SetConfig(gdb.Config{
+		"default": gdb.ConfigGroup{
+			gdb.ConfigNode{
+				Type: "sqlite",
+				Link: "sqlite:user:pass@file(" + dbPath + ")",
+			},
+		},
+	}); err != nil {
+		return gerror.Wrap(err, "configure gdb failed")
+	}
+	// Verify g.DB is usable
+	if g.DB("default") == nil {
+		return gerror.New("g.DB(default) is nil after configuration")
+	}
 
 	if err = applyPragmas(db); err != nil {
 		return gerror.Wrap(err, "apply sqlite pragmas failed")
@@ -220,6 +237,29 @@ func isMigrationApplied(db *sql.DB, version int, checksum string) (bool, error) 
 }
 
 func applyMigration(db *sql.DB, migration migrationFile) error {
+	// Some migrations (e.g. ALTER TABLE recreations) manage their own
+	// transactions internally and cannot run inside an outer transaction.
+	if strings.Contains(strings.ToUpper(migration.sqlBody), "BEGIN TRANSACTION") {
+		if _, err := db.Exec(migration.sqlBody); err != nil {
+			recordMigrationFailure(db, migration, err)
+			return gerror.Wrapf(err, "execute migration %d failed", migration.version)
+		}
+		if _, err := db.Exec(
+			`INSERT OR REPLACE INTO schema_migrations(version,name,checksum,applied_at,duration_ms,status,error_message) VALUES(?,?,?,?,?,?,?)`,
+			migration.version,
+			migration.name,
+			migration.checksum,
+			gtime.Now().String(),
+			0,
+			"applied",
+			"",
+		); err != nil {
+			recordMigrationFailure(db, migration, err)
+			return gerror.Wrapf(err, "record migration %d failed", migration.version)
+		}
+		return nil
+	}
+
 	tx, err := db.Begin()
 	if err != nil {
 		return gerror.Wrapf(err, "begin migration %d failed", migration.version)

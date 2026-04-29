@@ -7,13 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gogf/gf/v2/errors/gerror"
-
 	acceptancev1 "github.com/leef-l/easymvp/apps/core/api/acceptance/v1"
 	projectsv1 "github.com/leef-l/easymvp/apps/core/api/projects/v1"
-	"github.com/leef-l/easymvp/apps/core/internal/dao"
 	"github.com/leef-l/easymvp/apps/core/internal/model/braincontracts"
 	"github.com/leef-l/easymvp/apps/core/internal/model/entity"
+	"github.com/leef-l/easymvp/apps/core/internal/repo"
 )
 
 const (
@@ -34,20 +32,24 @@ type projectWorkspaceData struct {
 	RuntimeEscalation    acceptancev1.RuntimeEscalationView
 	FaultSummary         acceptancev1.FaultSummaryView
 	RepairPlanDraft      acceptancev1.RepairPlanDraftSummary
+	HealthMetrics        projectsv1.ProjectHealthMetrics
 }
 
 type projectWorkspaceAggregate struct {
-	Project             entity.Projects
-	AcceptanceProfile   *acceptanceProfileRecord
-	ProductionProfile   *productionAcceptanceProfileRecord
-	RepairDraft         *repairPlanDraftRecord
-	Tasks               []entity.DomainTasks
-	RunBindings         []entity.BrainRunBindings
-	AcceptanceRuns      []entity.AcceptanceRuns
-	AcceptanceIssues    []entity.AcceptanceIssues
-	AuditLogs           []entity.AuditLogs
-	LatestAcceptanceRun *entity.AcceptanceRuns
-	PersistedVerdict    *acceptancev1.CompletionVerdictView
+	Project                  entity.Projects
+	AcceptanceProfile        *acceptanceProfileRecord
+	ProductionProfile        *productionAcceptanceProfileRecord
+	RepairDraft              *repairPlanDraftRecord
+	Tasks                    []entity.DomainTasks
+	RunBindings              []entity.BrainRunBindings
+	AcceptanceRuns           []entity.AcceptanceRuns
+	AcceptanceIssues         []entity.AcceptanceIssues
+	AuditLogs                []entity.AuditLogs
+	LatestAcceptanceRun      *entity.AcceptanceRuns
+	PersistedVerdict         *acceptancev1.CompletionVerdictView
+	ChannelAvailable         bool
+	EnvironmentAvailable     bool
+	ChannelUnavailableReason string
 }
 
 func loadProjectWorkspaceData(ctx context.Context, projectID string) (*projectWorkspaceData, error) {
@@ -77,11 +79,12 @@ func loadProjectWorkspaceData(ctx context.Context, projectID string) (*projectWo
 		ActionInbox:          actionInbox,
 		AcceptanceCoverage:   acceptanceCoverage,
 		WorkspaceExplanation: workspaceExplanation,
-		VerificationResult:   buildWorkspaceVerificationResult(aggregate, acceptanceCoverage),
-		CompletionVerdict:    buildWorkspaceCompletionVerdict(aggregate, acceptanceCoverage),
+		VerificationResult:   buildWorkspaceVerificationResult(ctx, aggregate, acceptanceCoverage),
+		CompletionVerdict:    buildWorkspaceCompletionVerdict(ctx, aggregate, acceptanceCoverage),
 		RuntimeEscalation:    buildWorkspaceRuntimeEscalation(aggregate),
 		FaultSummary:         buildWorkspaceFaultSummary(aggregate),
 		RepairPlanDraft:      buildWorkspaceRepairPlanDraft(aggregate),
+		HealthMetrics:        buildProjectHealthMetrics(aggregate),
 	}, nil
 }
 
@@ -90,7 +93,7 @@ func buildProjectWorkspaceOverview(
 	projectSnapshot projectsv1.ProjectSnapshot,
 	actionInbox []projectsv1.ActionInboxItem,
 ) projectsv1.WorkspaceOverview {
-	completionVerdict := buildWorkspaceCompletionVerdict(data, buildProjectAcceptanceCoverage(data))
+	completionVerdict := buildWorkspaceCompletionVerdict(context.Background(), data, buildProjectAcceptanceCoverage(data))
 	nextAction := "open_project_plan"
 	if strings.TrimSpace(completionVerdict.NextAction) != "" {
 		nextAction = strings.TrimSpace(completionVerdict.NextAction)
@@ -137,7 +140,7 @@ func buildProjectWorkspaceExplanation(
 			"live_activity":        liveActivity,
 			"action_inbox":         actionInbox,
 			"acceptance_coverage":  acceptanceCoverage,
-			"completion_verdict":   buildWorkspaceCompletionVerdict(data, acceptanceCoverage),
+			"completion_verdict":   buildWorkspaceCompletionVerdict(context.Background(), data, acceptanceCoverage),
 			"task_count":           len(data.Tasks),
 			"run_binding_count":    len(data.RunBindings),
 			"acceptance_run_count": len(data.AcceptanceRuns),
@@ -296,7 +299,7 @@ func deriveDeterministicWorkspaceSummary(data *projectWorkspaceAggregate, action
 	productionStatus := deriveProjectProductionStatus(data)
 	blockingCount := countBlockingIssues(data.AcceptanceIssues)
 	nextAction := "review workspace signals"
-	verdict := buildWorkspaceCompletionVerdict(data, buildProjectAcceptanceCoverage(data))
+	verdict := buildWorkspaceCompletionVerdict(context.Background(), data, buildProjectAcceptanceCoverage(data))
 	if strings.TrimSpace(verdict.NextAction) != "" {
 		nextAction = strings.TrimSpace(verdict.NextAction)
 	} else if len(actionInbox) > 0 {
@@ -336,12 +339,14 @@ func loadProjectWorkspaceAggregate(ctx context.Context, db *sql.DB, projectID st
 	}
 
 	aggregate := &projectWorkspaceAggregate{
-		Project:          *project,
-		Tasks:            tasks,
-		RunBindings:      runBindings,
-		AcceptanceRuns:   acceptanceRuns,
-		AcceptanceIssues: acceptanceIssues,
-		AuditLogs:        auditLogs,
+		Project:              *project,
+		Tasks:                tasks,
+		RunBindings:          runBindings,
+		AcceptanceRuns:       acceptanceRuns,
+		AcceptanceIssues:     acceptanceIssues,
+		AuditLogs:            auditLogs,
+		ChannelAvailable:     true,
+		EnvironmentAvailable: true,
 	}
 	aggregate.AcceptanceProfile, err = getLatestAcceptanceProfile(ctx, db, projectID)
 	if err != nil {
@@ -351,14 +356,14 @@ func loadProjectWorkspaceAggregate(ctx context.Context, db *sql.DB, projectID st
 	if err != nil {
 		return nil, err
 	}
-	aggregate.RepairDraft, err = getLatestRepairDraftForProject(ctx, db, projectID)
+	aggregate.RepairDraft, err = getLatestRepairDraftForProject(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
 	if len(acceptanceRuns) > 0 {
 		aggregate.LatestAcceptanceRun = &acceptanceRuns[0]
 	}
-	aggregate.PersistedVerdict, err = loadPersistedCompletionVerdict(ctx, db, projectID, latestWorkspaceRunID(aggregate))
+	aggregate.PersistedVerdict, err = loadPersistedCompletionVerdict(ctx, projectID, latestWorkspaceRunID(aggregate))
 	if err != nil {
 		return nil, err
 	}
@@ -366,331 +371,27 @@ func loadProjectWorkspaceAggregate(ctx context.Context, db *sql.DB, projectID st
 }
 
 func getProjectByID(ctx context.Context, db *sql.DB, projectID string) (*entity.Projects, error) {
-	query := `
-SELECT
-  id,
-  name,
-  project_category,
-  goal_summary,
-  status,
-  production_status,
-  workspace_root,
-  COALESCE(repo_root, ''),
-  COALESCE(current_plan_draft_id, ''),
-  COALESCE(current_compiled_plan_id, ''),
-  created_at,
-  updated_at
-FROM ` + dao.Projects.Table() + `
-WHERE id = ?
-LIMIT 1`
-
-	row := db.QueryRowContext(ctx, query, projectID)
-	var project entity.Projects
-	if err := row.Scan(
-		&project.Id,
-		&project.Name,
-		&project.ProjectCategory,
-		&project.GoalSummary,
-		&project.Status,
-		&project.ProductionStatus,
-		&project.WorkspaceRoot,
-		&project.RepoRoot,
-		&project.CurrentPlanDraftId,
-		&project.CurrentCompiledPlanId,
-		&project.CreatedAt,
-		&project.UpdatedAt,
-	); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, gerror.Newf("project not found: %s", projectID)
-		}
-		return nil, gerror.Wrap(err, "query project by id failed")
-	}
-	return &project, nil
+	return repo.GetProjectByID(ctx, projectID)
 }
 
 func listProjectDomainTasks(ctx context.Context, db *sql.DB, projectID string) ([]entity.DomainTasks, error) {
-	project, err := getProjectByID(ctx, db, projectID)
-	if err != nil {
-		return nil, err
-	}
-
-	var (
-		query string
-		args  []any
-	)
-	if strings.TrimSpace(project.CurrentCompiledPlanId) != "" {
-		query = `
-SELECT
-  id,
-  project_id,
-  COALESCE(source_compiled_plan_id, ''),
-  COALESCE(source_compiled_task_id, ''),
-  COALESCE(source_task_key, ''),
-  compiled_version,
-  name,
-  phase,
-  task_kind,
-  role_type,
-  brain_kind,
-  risk_level,
-  status,
-  manual_review_required,
-  created_at,
-  updated_at
-FROM ` + dao.DomainTasks.Table() + `
-WHERE project_id = ? AND source_compiled_plan_id = ?
-ORDER BY updated_at DESC, created_at DESC`
-		args = []any{projectID, project.CurrentCompiledPlanId}
-	} else {
-		query = `
-SELECT
-  id,
-  project_id,
-  COALESCE(source_compiled_plan_id, ''),
-  COALESCE(source_compiled_task_id, ''),
-  COALESCE(source_task_key, ''),
-  compiled_version,
-  name,
-  phase,
-  task_kind,
-  role_type,
-  brain_kind,
-  risk_level,
-  status,
-  manual_review_required,
-  created_at,
-  updated_at
-FROM ` + dao.DomainTasks.Table() + `
-WHERE project_id = ?
-ORDER BY updated_at DESC, created_at DESC`
-		args = []any{projectID}
-	}
-
-	rows, err := db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, gerror.Wrap(err, "query project domain tasks failed")
-	}
-	defer rows.Close()
-
-	items := make([]entity.DomainTasks, 0)
-	for rows.Next() {
-		var item entity.DomainTasks
-		if err = rows.Scan(
-			&item.Id,
-			&item.ProjectId,
-			&item.SourceCompiledPlanId,
-			&item.SourceCompiledTaskId,
-			&item.SourceTaskKey,
-			&item.CompiledVersion,
-			&item.Name,
-			&item.Phase,
-			&item.TaskKind,
-			&item.RoleType,
-			&item.BrainKind,
-			&item.RiskLevel,
-			&item.Status,
-			&item.ManualReviewRequired,
-			&item.CreatedAt,
-			&item.UpdatedAt,
-		); err != nil {
-			return nil, gerror.Wrap(err, "scan project domain task failed")
-		}
-		items = append(items, item)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, gerror.Wrap(err, "iterate project domain tasks failed")
-	}
-	return items, nil
+	return repo.ListProjectDomainTasks(ctx, projectID)
 }
 
 func listProjectBrainRunBindings(ctx context.Context, db *sql.DB, projectID string, limit int) ([]entity.BrainRunBindings, error) {
-	query := `
-SELECT
-  id,
-  project_id,
-  COALESCE(task_id, ''),
-  brain_kind,
-  brain_run_id,
-  run_status,
-  COALESCE(started_at, ''),
-  COALESCE(finished_at, ''),
-  COALESCE(last_sync_at, ''),
-  created_at,
-  updated_at
-FROM ` + dao.BrainRunBindings.Table() + `
-WHERE project_id = ?
-ORDER BY COALESCE(last_sync_at, updated_at, started_at, created_at) DESC
-LIMIT ?`
-
-	rows, err := db.QueryContext(ctx, query, projectID, limit)
-	if err != nil {
-		return nil, gerror.Wrap(err, "query project brain run bindings failed")
-	}
-	defer rows.Close()
-
-	items := make([]entity.BrainRunBindings, 0, limit)
-	for rows.Next() {
-		var item entity.BrainRunBindings
-		if err = rows.Scan(
-			&item.Id,
-			&item.ProjectId,
-			&item.TaskId,
-			&item.BrainKind,
-			&item.BrainRunId,
-			&item.RunStatus,
-			&item.StartedAt,
-			&item.FinishedAt,
-			&item.LastSyncAt,
-			&item.CreatedAt,
-			&item.UpdatedAt,
-		); err != nil {
-			return nil, gerror.Wrap(err, "scan project brain run binding failed")
-		}
-		items = append(items, item)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, gerror.Wrap(err, "iterate project brain run bindings failed")
-	}
-	return items, nil
+	return repo.ListProjectBrainRunBindings(ctx, projectID, limit)
 }
 
 func listProjectAcceptanceRuns(ctx context.Context, db *sql.DB, projectID string, limit int) ([]entity.AcceptanceRuns, error) {
-	query := `
-SELECT
-  id,
-  project_id,
-  COALESCE(task_id, ''),
-  profile_version,
-  status,
-  functional_status,
-  production_status,
-  manual_release_required,
-  created_at,
-  COALESCE(finished_at, '')
-FROM ` + dao.AcceptanceRuns.Table() + `
-WHERE project_id = ?
-ORDER BY created_at DESC
-LIMIT ?`
-
-	rows, err := db.QueryContext(ctx, query, projectID, limit)
-	if err != nil {
-		return nil, gerror.Wrap(err, "query project acceptance runs failed")
-	}
-	defer rows.Close()
-
-	items := make([]entity.AcceptanceRuns, 0, limit)
-	for rows.Next() {
-		var item entity.AcceptanceRuns
-		if err = rows.Scan(
-			&item.Id,
-			&item.ProjectId,
-			&item.TaskId,
-			&item.ProfileVersion,
-			&item.Status,
-			&item.FunctionalStatus,
-			&item.ProductionStatus,
-			&item.ManualReleaseRequired,
-			&item.CreatedAt,
-			&item.FinishedAt,
-		); err != nil {
-			return nil, gerror.Wrap(err, "scan project acceptance run failed")
-		}
-		items = append(items, item)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, gerror.Wrap(err, "iterate project acceptance runs failed")
-	}
-	return items, nil
+	return repo.ListProjectAcceptanceRuns(ctx, projectID, limit)
 }
 
 func listProjectAcceptanceIssues(ctx context.Context, db *sql.DB, projectID string, limit int) ([]entity.AcceptanceIssues, error) {
-	query := `
-SELECT
-  id,
-  project_id,
-  acceptance_run_id,
-  severity,
-  issue_kind,
-  blocking,
-  summary,
-  COALESCE(detail_json, ''),
-  created_at
-FROM ` + dao.AcceptanceIssues.Table() + `
-WHERE project_id = ?
-ORDER BY created_at DESC
-LIMIT ?`
-
-	rows, err := db.QueryContext(ctx, query, projectID, limit)
-	if err != nil {
-		return nil, gerror.Wrap(err, "query project acceptance issues failed")
-	}
-	defer rows.Close()
-
-	items := make([]entity.AcceptanceIssues, 0, limit)
-	for rows.Next() {
-		var item entity.AcceptanceIssues
-		if err = rows.Scan(
-			&item.Id,
-			&item.ProjectId,
-			&item.AcceptanceRunId,
-			&item.Severity,
-			&item.IssueKind,
-			&item.Blocking,
-			&item.Summary,
-			&item.DetailJson,
-			&item.CreatedAt,
-		); err != nil {
-			return nil, gerror.Wrap(err, "scan project acceptance issue failed")
-		}
-		items = append(items, item)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, gerror.Wrap(err, "iterate project acceptance issues failed")
-	}
-	return items, nil
+	return repo.ListProjectAcceptanceIssues(ctx, projectID, limit)
 }
 
 func listProjectAuditLogs(ctx context.Context, db *sql.DB, projectID string, limit int) ([]entity.AuditLogs, error) {
-	query := `
-SELECT
-  id,
-  project_id,
-  event_type,
-  actor_kind,
-  summary,
-  COALESCE(payload_json, ''),
-  created_at
-FROM ` + dao.AuditLogs.Table() + `
-WHERE project_id = ?
-ORDER BY created_at DESC
-LIMIT ?`
-
-	rows, err := db.QueryContext(ctx, query, projectID, limit)
-	if err != nil {
-		return nil, gerror.Wrap(err, "query project audit logs failed")
-	}
-	defer rows.Close()
-
-	items := make([]entity.AuditLogs, 0, limit)
-	for rows.Next() {
-		var item entity.AuditLogs
-		if err = rows.Scan(
-			&item.Id,
-			&item.ProjectId,
-			&item.EventType,
-			&item.ActorKind,
-			&item.Summary,
-			&item.PayloadJson,
-			&item.CreatedAt,
-		); err != nil {
-			return nil, gerror.Wrap(err, "scan project audit log failed")
-		}
-		items = append(items, item)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, gerror.Wrap(err, "iterate project audit logs failed")
-	}
-	return items, nil
+	return repo.ListProjectAuditLogs(ctx, projectID, limit)
 }
 
 func buildProjectSnapshot(data *projectWorkspaceAggregate) projectsv1.ProjectSnapshot {
@@ -986,6 +687,7 @@ func buildProjectAcceptanceCoverage(data *projectWorkspaceAggregate) projectsv1.
 }
 
 func buildWorkspaceVerificationResult(
+	ctx context.Context,
 	data *projectWorkspaceAggregate,
 	coverage projectsv1.AcceptanceCoverage,
 ) acceptancev1.VerificationResultView {
@@ -1031,6 +733,10 @@ func buildWorkspaceVerificationResult(
 		summary = "Verification requirements are currently satisfied."
 	}
 
+	// P1+P2: look up latest browser/verifier run results from RunBindings.
+	browserResult := findLatestBrowserCheckResult(data.RunBindings)
+	verifierResult := findLatestVerifierCheckResult(data.RunBindings)
+
 	return acceptancev1.VerificationResultView{
 		Status:           status,
 		Decision:         decision,
@@ -1041,27 +747,35 @@ func buildWorkspaceVerificationResult(
 		RequiredEvidence: requiredEvidence,
 		MissingEvidence:  missingEvidence,
 		FailedChecks:     failedChecks,
-		VerificationContractJSON: buildVerificationContractJSON(verificationContractParams{
-			ProjectCategory:      strings.TrimSpace(data.Project.ProjectCategory),
-			ProfileVersion:       firstNonEmpty(profileVersionForVerification(data.AcceptanceProfile, data.ProductionProfile), strings.TrimSpace(data.Project.Id)),
-			RequiredChecks:       requiredChecks,
-			RequiredEvidence:     requiredEvidence,
-			ManualReviewRequired: manualReviewRequired,
-			ManualReviewSummary:  summary,
+		VerificationContractJSON: buildVerificationContractJSON(ctx, verificationContractParams{
+			ProjectCategory:          strings.TrimSpace(data.Project.ProjectCategory),
+			ProfileVersion:           firstNonEmpty(profileVersionForVerification(data.AcceptanceProfile, data.ProductionProfile), strings.TrimSpace(data.Project.Id)),
+			RequiredChecks:           requiredChecks,
+			RequiredEvidence:         requiredEvidence,
+			ManualReviewRequired:     manualReviewRequired,
+			ManualReviewSummary:      summary,
+			ChannelUnavailable:       !data.ChannelAvailable,
+			EnvironmentUnavailable:   !data.EnvironmentAvailable,
+			ChannelUnavailableReason: data.ChannelUnavailableReason,
 		}),
-		SourceRunID: firstNonEmpty(latestWorkspaceRunID(data), data.Project.Id),
-		UpdatedAt:   firstNonEmpty(latestWorkspaceUpdateAt(data), data.Project.UpdatedAt),
+		SourceRunID:          firstNonEmpty(latestWorkspaceRunID(data), data.Project.Id),
+		UpdatedAt:            firstNonEmpty(latestWorkspaceUpdateAt(data), data.Project.UpdatedAt),
+		ChannelAvailable:     data.ChannelAvailable,
+		EnvironmentAvailable: data.EnvironmentAvailable,
+		BrowserCheckResult:   browserResult,
+		VerifierCheckResult:  verifierResult,
 	}
 }
 
 func buildWorkspaceCompletionVerdict(
+	ctx context.Context,
 	data *projectWorkspaceAggregate,
 	coverage projectsv1.AcceptanceCoverage,
 ) acceptancev1.CompletionVerdictView {
 	if data != nil && data.PersistedVerdict != nil {
 		return *data.PersistedVerdict
 	}
-	verification := buildWorkspaceVerificationResult(data, coverage)
+	verification := buildWorkspaceVerificationResult(context.Background(), data, coverage)
 	runtimeEscalation := buildWorkspaceRuntimeEscalation(data)
 	faultSummary := buildWorkspaceFaultSummary(data)
 	verificationConflict := projectHasVerificationConflict(data)
@@ -1081,6 +795,29 @@ func buildWorkspaceCompletionVerdict(
 }
 
 func buildWorkspaceRuntimeEscalation(data *projectWorkspaceAggregate) acceptancev1.RuntimeEscalationView {
+	if !data.ChannelAvailable {
+		reason := data.ChannelUnavailableReason
+		if reason == "" {
+			reason = "Preferred verification channel (high_spec_remote) is unavailable."
+		}
+		return acceptancev1.RuntimeEscalationView{
+			Status:      "escalated",
+			ReasonClass: "channel_unavailable",
+			Severity:    "blocking",
+			Action:      "switch_verification_channel",
+			Summary:     reason,
+		}
+	}
+	if !data.EnvironmentAvailable {
+		return acceptancev1.RuntimeEscalationView{
+			Status:      "escalated",
+			ReasonClass: "environment_unavailable",
+			Severity:    "blocking",
+			Action:      "restore_environment",
+			Summary:     "Execution environment is unavailable. Cannot proceed with verification.",
+		}
+	}
+
 	for _, binding := range data.RunBindings {
 		status := normalizeBindingStatus(binding.RunStatus)
 		if !bindingNeedsAttention(status) {
@@ -1624,4 +1361,123 @@ func maxInt64(a, b int64) int64 {
 		return a
 	}
 	return b
+}
+
+// findLatestBrowserCheckResult scans RunBindings for the most recent browser run.
+func findLatestBrowserCheckResult(bindings []entity.BrainRunBindings) *acceptancev1.BrowserCheckResultView {
+	for _, b := range bindings {
+		if strings.ToLower(strings.TrimSpace(b.BrainKind)) != "browser" {
+			continue
+		}
+		status := normalizeBindingStatus(b.RunStatus)
+		resultStatus := "skipped"
+		switch status {
+		case "run_success", "run_completed":
+			resultStatus = "passed"
+		case "run_failed", "run_error":
+			resultStatus = "failed"
+		case "run_denied", "run_unsupported":
+			resultStatus = "error"
+		default:
+			continue
+		}
+		return &acceptancev1.BrowserCheckResultView{
+			URL:     "",
+			Status:  resultStatus,
+			Summary: "Browser check run status: " + status,
+		}
+	}
+	return nil
+}
+
+// findLatestVerifierCheckResult scans RunBindings for the most recent verifier run.
+func findLatestVerifierCheckResult(bindings []entity.BrainRunBindings) *acceptancev1.VerifierCheckResultView {
+	for _, b := range bindings {
+		if strings.ToLower(strings.TrimSpace(b.BrainKind)) != "verifier" {
+			continue
+		}
+		status := normalizeBindingStatus(b.RunStatus)
+		resultStatus := "skipped"
+		switch status {
+		case "run_success", "run_completed":
+			resultStatus = "passed"
+		case "run_failed", "run_error":
+			resultStatus = "failed"
+		case "run_denied", "run_unsupported":
+			resultStatus = "error"
+		default:
+			continue
+		}
+		return &acceptancev1.VerifierCheckResultView{
+			Status:  resultStatus,
+			Summary: "Verifier check run status: " + status,
+		}
+	}
+	return nil
+}
+
+// buildProjectHealthMetrics computes near-term run statistics from brain_run_bindings.
+func buildProjectHealthMetrics(data *projectWorkspaceAggregate) projectsv1.ProjectHealthMetrics {
+	bindings := data.RunBindings
+	if len(bindings) == 0 {
+		return projectsv1.ProjectHealthMetrics{}
+	}
+
+	total := 0
+	success := 0
+	var totalLatencyMs int64
+	failureModes := make(map[string]int)
+	var latestUpdate string
+
+	for _, b := range bindings {
+		status := normalizeBindingStatus(b.RunStatus)
+		if status == "" {
+			continue
+		}
+		total++
+
+		if status == "run_success" || status == "run_completed" || status == "run_succeeded" {
+			success++
+		} else if status == "run_failed" || status == "run_error" || status == "run_denied" || status == "run_unsupported" {
+			failureModes[status]++
+		}
+
+		latency := timestampDeltaSeconds(b.StartedAt, b.FinishedAt) * 1000
+		if latency > 0 {
+			totalLatencyMs += latency
+		}
+
+		cand := firstNonEmpty(b.LastSyncAt, b.UpdatedAt, b.FinishedAt, b.StartedAt)
+		if cand > latestUpdate {
+			latestUpdate = cand
+		}
+	}
+
+	topFailureMode := ""
+	topFailureCount := 0
+	for mode, count := range failureModes {
+		if count > topFailureCount {
+			topFailureCount = count
+			topFailureMode = mode
+		}
+	}
+
+	avgLatency := 0
+	if total > 0 {
+		avgLatency = int(totalLatencyMs / int64(total))
+	}
+
+	successRate := 0.0
+	if total > 0 {
+		successRate = float64(success) / float64(total)
+	}
+
+	return projectsv1.ProjectHealthMetrics{
+		RecentRunCount:  total,
+		SuccessRate:     successRate,
+		AvgLatencyMs:    avgLatency,
+		TopFailureMode:  topFailureMode,
+		TopFailureCount: topFailureCount,
+		LastUpdated:     latestUpdate,
+	}
 }

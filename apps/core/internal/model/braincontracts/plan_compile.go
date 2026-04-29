@@ -25,4 +25,9 @@ type CompiledTaskItem struct {
 	DeliveryContract     json.RawMessage `json:"delivery_contract"`
 	VerificationContract json.RawMessage `json:"verification_contract"`
 	RiskLevel            string          `json:"risk_level"`
+	DependsOnTaskKeys    []string        `json:"depends_on_task_keys,omitempty"`
+	// PermissionMode 是任务级权限声明。
+	// 支持: restricted, default, accept-edits, auto, bypass-permissions
+	// 为空时由 task scheduler 根据 brain_kind 和 role_type 自动推断。
+	PermissionMode string `json:"permission_mode,omitempty"`
 }

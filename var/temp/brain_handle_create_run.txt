@@ -1,0 +1,156 @@
+func handleCreateRun(w http.ResponseWriter, r *http.Request, mgr *runManager, runtime *cliRuntime, cfg *brainConfig, maxConcurrent int, mode permissionMode, defaultWorkdir string, workdirPolicy serveWorkdirPolicy) {
+	var req createRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+		return
+	}
+	if req.Prompt == "" {
+		http.Error(w, `{"error":"prompt is required"}`, http.StatusBadRequest)
+		return
+	}
+	if req.Brain == "" {
+		req.Brain = "central"
+	}
+	if req.MaxTurns <= 0 {
+		req.MaxTurns = 20
+	}
+	effectiveWorkdir, err := resolveServeRunWorkdir(defaultWorkdir, req.Workdir, workdirPolicy)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), http.StatusBadRequest)
+		return
+	}
+	req.Workdir = effectiveWorkdir
+	req.timeoutDuration, err = resolveRunTimeoutWithConfig(cfg, req.Timeout, 5*time.Minute)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), http.StatusBadRequest)
+		return
+	}
+
+	// Resolve provider config.
+	cfgFile, cfgErr := loadConfig()
+	explicitProviderInput := hasModelConfigOverrides(req.ModelConfig)
+	if cfgFile == nil && !wantsMockProvider("", req.ModelConfig) && !explicitProviderInput && os.Getenv("ANTHROPIC_API_KEY") == "" {
+		msg := "no config available"
+		if cfgErr != nil {
+			msg = cfgErr.Error()
+		}
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, msg), http.StatusInternalServerError)
+		return
+	}
+	providerSession := openMockProvider("hello from mock provider")
+	if !wantsMockProvider("", req.ModelConfig) {
+		providerSession, err = openConfiguredProvider(cfgFile, req.Brain, req.ModelConfig, "", "", "", "")
+	}
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), http.StatusInternalServerError)
+		return
+	}
+
+	// Validate execution environment BEFORE creating the run record,
+	// so failed validation doesn't leave orphan "running" records.
+	env := newExecutionEnvironment(req.Workdir, mode, cfg, nil, false)
+	req.FilePolicy = resolveFilePolicyInput(cfg, req.FilePolicy)
+	if err := applyFilePolicy(env, req.FilePolicy); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), http.StatusBadRequest)
+		return
+	}
+	if mode == modeRestricted && env.FilePolicy == nil {
+		http.Error(w, `{"error":"restricted mode requires file_policy (config or request body)"}`, http.StatusBadRequest)
+		return
+	}
+
+	// 组织级策略检查
+	if mgr.orgEnforcer != nil {
+		orgAction := kernel.OrgAction{
+			Type:      "start_run",
+			BrainKind: req.Brain,
+		}
+		if err := mgr.orgEnforcer.Check(r.Context(), orgAction); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), http.StatusForbidden)
+			return
+		}
+		// 如果组织策略指定了 MaxConcurrent 且小于服务端限制，使用组织限制
+		if p := mgr.orgEnforcer.Policy(); p != nil && p.MaxConcurrent > 0 && p.MaxConcurrent < maxConcurrent {
+			maxConcurrent = p.MaxConcurrent
+		}
+	}
+
+	if !mgr.reserveSlot(maxConcurrent) {
+		http.Error(w, `{"error":"max concurrent runs reached"}`, http.StatusTooManyRequests)
+		return
+	}
+
+	runRec, err := runtime.RunStore.Create(req.Brain, req.Prompt, string(mode), req.Workdir)
+	if err != nil {
+		mgr.releaseSlot()
+		http.Error(w, fmt.Sprintf(`{"error":"create run record: %s"}`, err), http.StatusInternalServerError)
+		return
+	}
+
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if req.timeoutDuration > 0 {
+		ctx, cancel = context.WithTimeout(mgr.rootCtx, req.timeoutDuration)
+	} else {
+		ctx, cancel = context.WithCancel(mgr.rootCtx)
+	}
+
+	// 设置 v3 execution 默认值
+	if req.Mode == "" {
+		req.Mode = "interactive"
+	}
+	if req.Lifecycle == "" {
+		req.Lifecycle = "oneshot"
+	}
+	if req.Restart == "" {
+		req.Restart = "never"
+	}
+
+	// 解析 watch 模式的执行间隔
+	if req.Lifecycle == "watch" {
+		if req.WatchInterval == "" {
+			req.watchIntervalDuration = 60 * time.Second
+		} else {
+			dur, err := time.ParseDuration(req.WatchInterval)
+			if err != nil {
+				cancel() // 释放 context，避免泄漏
+				http.Error(w, fmt.Sprintf(`{"error":"invalid watch_interval: %s"}`, err), http.StatusBadRequest)
+				return
+			}
+			if dur < 5*time.Second {
+				dur = 5 * time.Second // 最小 5 秒间隔
+			}
+			req.watchIntervalDuration = dur
+		}
+	}
+
+	te := kernel.NewTaskExecution(kernel.TaskExecutionConfig{
+		BrainID:   req.Brain,
+		Mode:      kernel.ExecutionMode(req.Mode),
+		Lifecycle: kernel.LifecyclePolicy(req.Lifecycle),
+		Restart:   kernel.RestartPolicy(req.Restart),
+		Bus:       mgr.eventBus, // Task #19: 让 Transition 发事件到外部 hooks
+	})
+	entry := &runEntry{
+		ID:          runRec.ID,
+		ExecutionID: runRec.ID,
+		Status:      "running",
+		Brain:       req.Brain,
+		Prompt:      req.Prompt,
+		CreatedAt:   time.Now().UTC(),
+		Mode:        req.Mode,
+		Lifecycle:   req.Lifecycle,
+		Restart:     req.Restart,
+		taskExec:    te,
+		cancel:      cancel,
+	}
+	_ = runtime.RunStore.AppendEvent(runRec.ID, "run.accepted", "run accepted by serve API", nil)
+	mgr.launchReserved(entry, func() {
+		executeRun(ctx, entry, mgr, runtime, providerSession, req, runRec, cfg, mode)
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	// 响应中同时返回 run_id 和 execution_id（值相同）
+	json.NewEncoder(w).Encode(map[string]string{"run_id": runRec.ID, "execution_id": runRec.ID, "status": "running"})
+}

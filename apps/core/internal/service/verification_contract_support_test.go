@@ -1,6 +1,9 @@
 package service
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestDeriveVerificationCurrentChannel(t *testing.T) {
 	t.Parallel()
@@ -16,7 +19,7 @@ func TestDeriveVerificationCurrentChannel(t *testing.T) {
 func TestBuildVerificationContractJSONIncludesPreferredAndFallbackChannels(t *testing.T) {
 	t.Parallel()
 
-	raw := buildVerificationContractJSON(verificationContractParams{
+	raw := buildVerificationContractJSON(context.Background(), verificationContractParams{
 		ProjectCategory:      "web",
 		ProfileVersion:       "v3",
 		RequiredChecks:       []string{"coverage_matrix"},

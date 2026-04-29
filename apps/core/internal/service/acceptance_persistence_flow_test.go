@@ -43,6 +43,12 @@ func (s *completionAdjudicationBrainStub) ExecuteContract(ctx context.Context, c
 	return nil, nil
 }
 
+func (s *completionAdjudicationBrainStub) ExecuteContractStream(ctx context.Context, cmd EasyMVPBrainExecuteCommand) (<-chan EasyMVPBrainStreamEvent, error) {
+	_ = ctx
+	_ = cmd
+	return nil, nil
+}
+
 func (s *completionAdjudicationBrainStub) CallPlanReview(ctx context.Context, input braincontracts.PlanReviewInput) (*braincontracts.BrainContractEnvelope, *braincontracts.PlanReviewResult, error) {
 	_ = ctx
 	_ = input
@@ -50,6 +56,12 @@ func (s *completionAdjudicationBrainStub) CallPlanReview(ctx context.Context, in
 }
 
 func (s *completionAdjudicationBrainStub) CallPlanCompile(ctx context.Context, input braincontracts.PlanCompileInput) (*braincontracts.BrainContractEnvelope, *braincontracts.PlanCompileResult, error) {
+	_ = ctx
+	_ = input
+	return nil, nil, nil
+}
+
+func (s *completionAdjudicationBrainStub) CallPlanRedesign(ctx context.Context, input braincontracts.PlanRedesignInput) (*braincontracts.BrainContractEnvelope, *braincontracts.PlanRedesignResult, error) {
 	_ = ctx
 	_ = input
 	return nil, nil, nil
@@ -99,6 +111,13 @@ func (s *completionAdjudicationBrainStub) ValidatePlanCompileEnvelope(ctx contex
 	return nil
 }
 
+func (s *completionAdjudicationBrainStub) ValidatePlanRedesignEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.PlanRedesignResult) error {
+	_ = ctx
+	_ = envelope
+	_ = result
+	return nil
+}
+
 func (s *completionAdjudicationBrainStub) ValidateAcceptanceMappingEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.AcceptanceMappingResult) error {
 	_ = ctx
 	_ = envelope
@@ -121,6 +140,19 @@ func (s *completionAdjudicationBrainStub) ValidateRepairDesignEnvelope(ctx conte
 }
 
 func (s *completionAdjudicationBrainStub) ValidateWorkspaceExplanationEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.WorkspaceExplanationResult) error {
+	_ = ctx
+	_ = envelope
+	_ = result
+	return nil
+}
+
+func (s *completionAdjudicationBrainStub) CallArchitectChat(ctx context.Context, input braincontracts.ArchitectChatInput) (*braincontracts.BrainContractEnvelope, *braincontracts.ArchitectChatResult, error) {
+	_ = ctx
+	_ = input
+	return nil, nil, nil
+}
+
+func (s *completionAdjudicationBrainStub) ValidateArchitectChatEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.ArchitectChatResult) error {
 	_ = ctx
 	_ = envelope
 	_ = result
@@ -154,6 +186,13 @@ func (s *repairDraftPlanStub) CreateRepairDraft(ctx context.Context, req CreateR
 func (s *repairDraftPlanStub) CompilePlan(ctx context.Context, req CompilePlanCommand) (res *planv1.CompilePlanRes, err error) {
 	_ = ctx
 	_ = req
+	return nil, nil
+}
+
+func (s *repairDraftPlanStub) RedesignPlan(ctx context.Context, projectID string, feedback string) (res *planv1.RedesignPlanRes, err error) {
+	_ = ctx
+	_ = projectID
+	_ = feedback
 	return nil, nil
 }
 
@@ -356,7 +395,7 @@ func TestAdjudicateAcceptanceAggregatePersistsAwaitingManualReleaseState(t *test
 		if totalJudgements != 4 || releaseGateJudgementCount != 1 {
 			t.Fatalf("unexpected judgement counts: total=%d release_gate=%d", totalJudgements, releaseGateJudgementCount)
 		}
-		if verdictDecision != "manual_review" || verdictNextAction != "apply_manual_release" || verdictManualRelease != 1 {
+		if verdictDecision != "manual_checkpoint" || verdictNextAction != "apply_manual_release" || verdictManualRelease != 1 {
 			t.Fatalf("unexpected persisted awaiting manual release verdict: decision=%q next_action=%q manual_release=%d", verdictDecision, verdictNextAction, verdictManualRelease)
 		}
 	})
@@ -508,7 +547,7 @@ func TestAdjudicateAcceptanceAggregatePersistsFailedStateAndTriggersRepairDraft(
 		if runStatus != "failed" || runFunctionalStatus != "failed" || runProductionStatus != "failed" || !runFinishedAt.Valid {
 			t.Fatalf("unexpected failed acceptance run state: status=%q functional=%q production=%q finished_at=%#v", runStatus, runFunctionalStatus, runProductionStatus, runFinishedAt)
 		}
-		if projectStatus != "acceptance" || projectProduction != "failed" {
+		if projectStatus != "reworking" || projectProduction != "failed" {
 			t.Fatalf("unexpected failed project state: status=%q production=%q", projectStatus, projectProduction)
 		}
 		if totalJudgements != 3 {
@@ -586,6 +625,9 @@ func withAcceptanceFlowDB(t *testing.T, fn func(ctx context.Context, db *sql.DB)
 		SafeMode:          true,
 	})
 	t.Cleanup(func() {
+		if db := g.DB(); db != nil {
+			_ = db.Close(ctx)
+		}
 		g.Cfg().SetAdapter(previousAdapter)
 		startupConfigStore.mu.Lock()
 		startupConfigStore.value = previousStartup
@@ -609,7 +651,7 @@ func seedAcceptanceFlowProject(t *testing.T, ctx context.Context, db *sql.DB, se
 	t.Helper()
 
 	now := "2026-04-20T10:00:00Z"
-	tx, err := db.BeginTx(ctx, nil)
+	tx, err := g.DB().Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin seed transaction failed: %v", err)
 	}

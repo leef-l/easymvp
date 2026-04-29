@@ -21,6 +21,13 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   });
 }
 
+export async function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  return apiRequest<T>(path, {
+    method: "PUT",
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
 export async function apiDelete<T>(path: string): Promise<T> {
   return apiRequest<T>(path, { method: "DELETE" });
 }
@@ -28,7 +35,7 @@ export async function apiDelete<T>(path: string): Promise<T> {
 async function apiRequest<T>(
   path: string,
   options: {
-    method: "GET" | "POST" | "DELETE";
+    method: "GET" | "POST" | "PUT" | "DELETE";
     body?: string;
   },
 ): Promise<T> {
@@ -50,6 +57,15 @@ async function apiRequest<T>(
   if (!response.ok) {
     const message = extractErrorMessage(payload, response.statusText);
     throw new Error(message);
+  }
+
+  // GoFrame returns business errors as HTTP 200 with code != 0 and data == null
+  if (payload && typeof payload === "object" && "code" in payload) {
+    const code = (payload as ApiEnvelope<T>).code;
+    if (code !== undefined && code !== 0) {
+      const message = extractErrorMessage(payload, response.statusText);
+      throw new Error(message);
+    }
   }
 
   return unwrapPayload<T>(payload);

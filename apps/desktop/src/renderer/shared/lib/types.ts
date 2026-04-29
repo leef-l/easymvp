@@ -11,6 +11,8 @@ export type VerificationResultSummary = {
   verification_contract_json?: string;
   source_run_id?: string;
   updated_at?: string;
+  channel_available?: boolean;
+  environment_available?: boolean;
 };
 
 export type CompletionVerdictSummary = {
@@ -27,6 +29,33 @@ export type CompletionVerdictSummary = {
   next_action?: string;
   source_run_id?: string;
   updated_at?: string;
+  // Four-layer completion state (Engineering Cybernetics ch.4)
+  executor_succeeded?: boolean;
+  delivery_verified?: boolean;
+  acceptance_passed?: boolean;
+};
+
+export type RunResult = {
+  run_id: string;
+  task_id?: string;
+  brain_kind?: string;
+  executor_brain?: string;
+  status: string; // completed | failed | unsupported | denied | cancelled | timeout
+  started_at?: string;
+  ended_at?: string;
+  summary?: string;
+  artifact_refs?: Array<{ kind: string; uri: string }>;
+  runtime_flags?: Record<string, unknown>;
+  raw_event_refs?: string[];
+};
+
+export type DeliveryResult = {
+  task_id: string;
+  delivery_status: string; // delivered | partially_delivered | not_delivered
+  delivered_artifacts?: string[];
+  changed_resources?: string[];
+  contract_satisfied: boolean;
+  delivery_gaps?: Record<string, unknown>;
 };
 
 export type RuntimeEscalationSummary = {
@@ -186,6 +215,7 @@ export type PlanView = {
     decision: string;
     blocking_issue_count: number;
     advisory_issue_count: number;
+    split_suggestions_json?: string;
   };
   compiled: {
     id: string;
@@ -240,7 +270,10 @@ export type CommandResponse = {
   accepted: boolean;
   resource_id: string;
   next_action: string;
+  inserted_count?: number;
 };
+
+export type RedesignPlanResponse = CommandResponse;
 
 export type CreateProjectResponse = CommandResponse;
 
@@ -403,6 +436,13 @@ export type CreateProjectPayload = {
   project_category: string;
   goal_summary: string;
   workspace_root: string;
+  repo_root?: string;
+};
+
+export type UpdateProjectPayload = {
+  name?: string;
+  goal_summary?: string;
+  workspace_root?: string;
   repo_root?: string;
 };
 

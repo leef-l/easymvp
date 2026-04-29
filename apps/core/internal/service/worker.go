@@ -5,7 +5,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+
+	"github.com/leef-l/easymvp/apps/core/internal/events"
 )
 
 type IWorkerManager interface {
@@ -28,11 +31,12 @@ type backgroundWorker interface {
 var localWorkerManager IWorkerManager
 
 type sWorkerManager struct {
-	mu      sync.Mutex
-	started bool
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	workers []backgroundWorker
+	mu        sync.Mutex
+	started   bool
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	workers   []backgroundWorker
+	loadGuard *SystemLoadGuard
 }
 
 func Workers() IWorkerManager {
@@ -41,7 +45,12 @@ func Workers() IWorkerManager {
 			workers: []backgroundWorker{
 				newRunSyncWorker(),
 				newWorkspaceSnapshotRefreshWorker(),
+				newEvidenceScanWorker(),
+				newAutoReexecutionWorker(),
+				newWorkflowEventWorker(),
+				newTaskSchedulerWorker(),
 			},
+			loadGuard: NewSystemLoadGuard(),
 		}
 	}
 	return localWorkerManager
@@ -53,6 +62,15 @@ func (m *sWorkerManager) Start(ctx context.Context) error {
 
 	if m.started {
 		return nil
+	}
+
+	if m.loadGuard != nil {
+		status := m.loadGuard.Check(ctx)
+		if status == LoadGuardStopped {
+			g.Log().Warningf(ctx, "worker manager Start blocked: system load guard status=%s CPU=%.1f%%", status, m.loadGuard.LastCPUPercent())
+			return gerror.Newf("worker start blocked by system load guard: status=%s", status)
+		}
+		g.Log().Infof(ctx, "worker manager load guard check passed: status=%s CPU=%.1f%%", status, m.loadGuard.LastCPUPercent())
 	}
 
 	runCtx, cancel := context.WithCancel(context.Background())
@@ -67,6 +85,16 @@ func (m *sWorkerManager) Start(ctx context.Context) error {
 			m.runWorkerLoop(runCtx, currentWorker)
 		}()
 	}
+
+	// Subscribe event-driven workers to the global event bus.
+	for _, worker := range m.workers {
+		if sub, ok := worker.(*taskSchedulerWorker); ok {
+			sub.SubscribeToEvents()
+		}
+	}
+
+	// Start the event bus dispatcher so published events reach subscribers.
+	events.Bus().StartDispatcher(runCtx)
 
 	g.Log().Infof(ctx, "worker manager started with %d workers", len(m.workers))
 	return nil
@@ -120,10 +148,14 @@ func (m *sWorkerManager) Status() WorkerManagerStatus {
 	for _, worker := range m.workers {
 		names = append(names, worker.Name())
 	}
-	return WorkerManagerStatus{
+	status := WorkerManagerStatus{
 		Started: m.started,
 		Workers: names,
 	}
+	if m.loadGuard != nil {
+		status.Workers = append(status.Workers, "load_guard:"+string(m.loadGuard.Status()))
+	}
+	return status
 }
 
 func (m *sWorkerManager) runWorkerLoop(ctx context.Context, worker backgroundWorker) {
@@ -137,6 +169,13 @@ func (m *sWorkerManager) runWorkerLoop(ctx context.Context, worker backgroundWor
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if m.loadGuard != nil {
+				status := m.loadGuard.Check(ctx)
+				if status == LoadGuardStopped {
+					g.Log().Warningf(ctx, "worker %s skipped: load guard status=%s CPU=%.1f%%", worker.Name(), status, m.loadGuard.LastCPUPercent())
+					continue
+				}
+			}
 			m.runWorkerSafely(ctx, worker)
 		}
 	}

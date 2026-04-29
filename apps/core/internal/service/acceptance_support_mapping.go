@@ -4,11 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 
+	acceptancev1 "github.com/leef-l/easymvp/apps/core/api/acceptance/v1"
 	"github.com/leef-l/easymvp/apps/core/internal/dao"
+	"github.com/leef-l/easymvp/apps/core/internal/events"
 	"github.com/leef-l/easymvp/apps/core/internal/model/braincontracts"
 	"github.com/leef-l/easymvp/apps/core/internal/model/entity"
 )
@@ -62,7 +68,7 @@ func mapAcceptanceProfiles(ctx context.Context, projectID string) (*braincontrac
 		return nil, err
 	}
 
-	evidenceItems, err := listProjectEvidenceItems(ctx, db, projectID, 200)
+	evidenceItems, err := listProjectEvidenceItems(ctx, projectID, 200)
 	if err != nil {
 		return nil, err
 	}
@@ -76,11 +82,11 @@ func mapAcceptanceProfiles(ctx context.Context, projectID string) (*braincontrac
 		journeyCoverage []entity.AcceptanceJourneyCoverage
 	)
 	if len(runs) > 0 {
-		surfaceCoverage, err = listAcceptanceSurfaceCoverageByRun(ctx, db, runs[0].Id)
+		surfaceCoverage, err = listAcceptanceSurfaceCoverageByRun(ctx, runs[0].Id)
 		if err != nil {
 			return nil, err
 		}
-		journeyCoverage, err = listAcceptanceJourneyCoverageByRun(ctx, db, runs[0].Id)
+		journeyCoverage, err = listAcceptanceJourneyCoverageByRun(ctx, runs[0].Id)
 		if err != nil {
 			return nil, err
 		}
@@ -152,9 +158,20 @@ func startAcceptanceRun(ctx context.Context, req StartAcceptanceCommand) (string
 	if err != nil {
 		return "", err
 	}
+	if err = validateProjectStatusTransition(project.Status, []string{"executing", "running", "acceptance", "completed"}); err != nil {
+		return "", err
+	}
 	resolved, err := resolveAcceptanceProfilesForRun(ctx, db, req)
 	if err != nil {
 		return "", err
+	}
+
+	// P1-04: channel_unavailable automatic downgrade.
+	channel := newHighSpecVerificationChannelFromConfig(ctx)
+	channelAvailable := channel.Available(ctx)
+	fallbackChannel := "github_actions"
+	if strings.ToLower(strings.TrimSpace(req.Mode)) == "manual" {
+		fallbackChannel = "manual_review"
 	}
 
 	now := nowText()
@@ -163,6 +180,37 @@ func startAcceptanceRun(ctx context.Context, req StartAcceptanceCommand) (string
 	if err != nil {
 		return "", gerror.Wrap(err, "begin start acceptance transaction failed")
 	}
+
+	// If preferred channel is unavailable, record a runtime escalation and proceed with fallback.
+	if !channelAvailable {
+		escalation := acceptancev1.RuntimeEscalationView{
+			Status:           "escalated",
+			ReasonClass:      "channel_unavailable",
+			Severity:         "blocking",
+			Action:           "switch_verification_channel",
+			Summary:          "Preferred verification channel (high_spec_remote) is unavailable. Switched to fallback channel: " + fallbackChannel + ".",
+			ResolverKind:     "system",
+			ResolutionStatus: "downgraded",
+		}
+		if err = insertRuntimeEscalationRecord(ctx, tx, entity.RuntimeEscalations{
+			Id:               newResourceID("escal"),
+			ProjectId:        project.Id,
+			AcceptanceRunId:  runID,
+			Status:           escalation.Status,
+			ReasonClass:      escalation.ReasonClass,
+			Severity:         escalation.Severity,
+			Action:           escalation.Action,
+			Summary:          escalation.Summary,
+			ResolverKind:     escalation.ResolverKind,
+			ResolutionStatus: escalation.ResolutionStatus,
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		}); err != nil {
+			_ = tx.Rollback()
+			return "", gerror.Wrap(err, "persist channel_unavailable escalation failed")
+		}
+	}
+
 	if err = insertAcceptanceRunRecord(ctx, tx, entity.AcceptanceRuns{
 		Id:                    runID,
 		ProjectId:             project.Id,
@@ -211,10 +259,115 @@ func startAcceptanceRun(ctx context.Context, req StartAcceptanceCommand) (string
 		_ = tx.Rollback()
 		return "", err
 	}
+	if auditErr := insertAuditLogSqlTx(ctx, tx, project.Id, "acceptance.run.started", "user:local_operator", "Acceptance run started", map[string]any{"acceptance_run_id": runID}); auditErr != nil {
+		g.Log().Errorf(ctx, "insert audit log failed: %v", auditErr)
+	}
 	if err = tx.Commit(); err != nil {
 		return "", gerror.Wrap(err, "commit start acceptance transaction failed")
 	}
+
+	// P1+P2: launch browser/verifier runs in parallel using ExecuteMultiBrain,
+	// then save their run IDs back to the acceptance run record.
+	go launchValidationBrainsAndSaveRunIDs(ctx, project.Id, req.TaskID, runID)
+
 	return runID, nil
+}
+
+func launchValidationBrainsAndSaveRunIDs(ctx context.Context, projectID, taskID, acceptanceRunID string) {
+	browserURL := strings.TrimSpace(g.Cfg().MustGet(ctx, "easymvp.acceptance.browserValidationURL", "").String())
+	enabled := g.Cfg().MustGet(ctx, "easymvp.acceptance.verifierEnabled", false).Bool()
+
+	var brains []string
+	var prompts []string
+	if browserURL != "" {
+		brains = append(brains, "browser")
+		prompts = append(prompts, fmt.Sprintf("Check URL %s for anomalies. Report DOM issues, HTTP errors, missing elements, and form problems.", browserURL))
+	}
+	if enabled {
+		brains = append(brains, "verifier")
+		prompts = append(prompts, "Run project verification checks: unit tests, output assertions, and file validations. Report pass/fail for each check.")
+	}
+	if len(brains) == 0 {
+		return
+	}
+
+	// Use a composite prompt when multiple brains are launched.
+	prompt := strings.Join(prompts, "; ")
+	baseURL, err := runtimeBaseURL(ctx)
+	if err != nil {
+		g.Log().Errorf(ctx, "resolve brain serve base url for multi-brain validation failed: %v", err)
+		return
+	}
+
+	multiReq := &MultiBrainRunRequest{
+		ProjectID: projectID,
+		TaskID:    taskID,
+		Prompt:    prompt,
+		MaxTurns:  6,
+		Brains:    brains,
+	}
+	multiRes := ExecuteMultiBrain(ctx, &http.Client{Timeout: 15 * time.Second}, baseURL, multiReq)
+
+	// Save run IDs back to acceptance_runs.
+	db, closeFn, err := openProjectDatabase(ctx)
+	if err != nil {
+		g.Log().Errorf(ctx, "open db for saving validation run ids failed: %v", err)
+		return
+	}
+	defer closeFn()
+
+	browserRunID := ""
+	verifierRunID := ""
+	validationResults := map[string]interface{}{}
+	for kind, res := range multiRes.Results {
+		if res != nil && res.RunID != "" {
+			validationResults[kind+"_run_id"] = res.RunID
+			validationResults[kind+"_status"] = res.Status
+			if kind == "browser" {
+				browserRunID = res.RunID
+			}
+			if kind == "verifier" {
+				verifierRunID = res.RunID
+			}
+		}
+	}
+	for kind, err := range multiRes.Errors {
+		if err != nil {
+			validationResults[kind+"_error"] = err.Error()
+		}
+	}
+	validationJSON, _ := json.Marshal(validationResults)
+
+	_, dbErr := db.ExecContext(ctx,
+		`UPDATE acceptance_runs SET browser_run_id = ?, verifier_run_id = ?, validation_results_json = ? WHERE id = ?`,
+		nullIfEmpty(browserRunID), nullIfEmpty(verifierRunID), string(validationJSON), acceptanceRunID)
+	if dbErr != nil {
+		g.Log().Errorf(ctx, "save validation run ids failed: %v", dbErr)
+	}
+
+	// Publish validation completion events for workflow downstream processing.
+	if browserRunID != "" {
+		events.Publish(ctx, &events.WorkflowEvent{
+			ProjectID: projectID,
+			EventType: events.BrowserCheckCompleted,
+			Payload: map[string]interface{}{
+				"acceptance_run_id": acceptanceRunID,
+				"browser_run_id":    browserRunID,
+				"status":            "completed",
+			},
+		})
+	}
+	if verifierRunID != "" {
+		events.Publish(ctx, &events.WorkflowEvent{
+			ProjectID: projectID,
+			EventType: events.VerifierCheckCompleted,
+			Payload: map[string]interface{}{
+				"acceptance_run_id": acceptanceRunID,
+				"verifier_run_id":   verifierRunID,
+				"status":            "completed",
+			},
+		})
+	}
 }
 
 func getLatestAcceptanceProfile(ctx context.Context, db *sql.DB, projectID string) (*acceptanceProfileRecord, error) {
@@ -499,6 +652,9 @@ id, project_id, task_id, profile_version, status, functional_status, production_
 		row.FunctionalStatus,
 		row.ProductionStatus,
 		row.ManualReleaseRequired,
+		nullIfEmpty(row.BrowserRunID),
+		nullIfEmpty(row.VerifierRunID),
+		nullIfEmpty(row.ValidationResultsJSON),
 		row.CreatedAt,
 		nullIfEmpty(row.FinishedAt),
 	)
@@ -507,6 +663,47 @@ id, project_id, task_id, profile_version, status, functional_status, production_
 	}
 	if affected, _ := result.RowsAffected(); affected != 1 {
 		return gerror.New("insert acceptance run affected unexpected rows")
+	}
+	return nil
+}
+
+func insertRuntimeEscalationRecord(ctx context.Context, tx *sql.Tx, row entity.RuntimeEscalations) error {
+	result, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO runtime_escalations (
+	id, project_id, acceptance_run_id, status, reason_class, source_brain, source_task_id,
+	run_binding_id, run_status, severity, action, task_id, run_id, summary, policy_denied,
+	evidence_refs_json, resolved_at, resolution_status, resolver_kind, linked_fault_id,
+	created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		row.Id,
+		row.ProjectId,
+		row.AcceptanceRunId,
+		row.Status,
+		row.ReasonClass,
+		nullIfEmpty(row.SourceBrain),
+		nullIfEmpty(row.SourceTaskID),
+		nullIfEmpty(row.RunBindingID),
+		nullIfEmpty(row.RunStatus),
+		nullIfEmpty(row.Severity),
+		nullIfEmpty(row.Action),
+		nullIfEmpty(row.TaskID),
+		nullIfEmpty(row.RunID),
+		nullIfEmpty(row.Summary),
+		row.PolicyDenied,
+		nullIfEmpty(row.EvidenceRefsJSON),
+		nullIfEmpty(row.ResolvedAt),
+		nullIfEmpty(row.ResolutionStatus),
+		nullIfEmpty(row.ResolverKind),
+		nullIfEmpty(row.LinkedFaultID),
+		row.CreatedAt,
+		row.UpdatedAt,
+	)
+	if err != nil {
+		return gerror.Wrap(err, "insert runtime escalation failed")
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return gerror.New("insert runtime escalation affected unexpected rows")
 	}
 	return nil
 }

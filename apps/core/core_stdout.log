@@ -1,0 +1,390 @@
+2026-04-28T12:06:44.750+08:00 [WARN] {dcb5ee52af69aa1800237f2fe8ac0adb} load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:06:44.751+08:00 [INFO] {dcb5ee52af69aa1800237f2fe8ac0adb} worker manager load guard check passed: status=healthy CPU=0.0%
+2026-04-28T12:06:44.751+08:00 [INFO] {dcb5ee52af69aa1800237f2fe8ac0adb} worker manager started with 3 workers
+2026-04-28T12:06:44.758+08:00 [INFO] pid[20784]: http server started listening on [:8000]
+2026-04-28T12:06:44.758+08:00 [INFO] swagger ui is serving at address: http://127.0.0.1:8000/swagger/
+2026-04-28T12:06:44.759+08:00 [INFO] openapi specification is serving at address: http://127.0.0.1:8000/api.json
+2026-04-28T12:06:44.761+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| ADDRESS | METHOD |                                   ROUTE                                   |                                                   HANDLER                                                    |           MIDDLEWARE            |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | ALL    | /api.json                                                                 | github.com/gogf/gf/v2/net/ghttp.(*Server).openapiSpec                                                        |                                 |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | POST   | /api/v3/manual-decisions                                                  | github.com/leef-l/easymvp/apps/core/internal/controller/decisions.(*ControllerV1).Apply                      | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | POST   | /api/v3/projects                                                          | github.com/leef-l/easymvp/apps/core/internal/controller/projects.(*ControllerV1).Create                      | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | DELETE | /api/v3/projects/{id}                                                     | github.com/leef-l/easymvp/apps/core/internal/controller/projects.(*ControllerV1).Delete                      | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | PUT    | /api/v3/projects/{id}                                                     | github.com/leef-l/easymvp/apps/core/internal/controller/projects.(*ControllerV1).Update                      | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | POST   | /api/v3/projects/{id}/acceptance-profiles/refresh                         | github.com/leef-l/easymvp/apps/core/internal/controller/acceptance.(*ControllerV1).RefreshAcceptanceProfiles | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | POST   | /api/v3/projects/{id}/acceptance-runs                                     | github.com/leef-l/easymvp/apps/core/internal/controller/acceptance.(*ControllerV1).StartAcceptance           | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | POST   | /api/v3/projects/{id}/acceptance-runs/adjudicate                          | github.com/leef-l/easymvp/apps/core/internal/controller/acceptance.(*ControllerV1).AdjudicateAcceptance      | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | POST   | /api/v3/projects/{id}/acceptance-runs/manual-release                      | github.com/leef-l/easymvp/apps/core/internal/controller/acceptance.(*ControllerV1).ApplyManualRelease        | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/projects/{id}/acceptance-view                                     | github.com/leef-l/easymvp/apps/core/internal/controller/acceptance.(*ControllerV1).AcceptanceView            | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/projects/{id}/architect-chat                                      | github.com/leef-l/easymvp/apps/core/internal/controller/architect_chat.(*ControllerV1).GetConversation       | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | POST   | /api/v3/projects/{id}/architect-chat/confirm-plan                         | github.com/leef-l/easymvp/apps/core/internal/controller/architect_chat.(*ControllerV1).ConfirmPlan           | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/projects/{id}/architect-chat/messages                             | github.com/leef-l/easymvp/apps/core/internal/controller/architect_chat.(*ControllerV1).ListMessages          | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | POST   | /api/v3/projects/{id}/architect-chat/messages                             | github.com/leef-l/easymvp/apps/core/internal/controller/architect_chat.(*ControllerV1).SendMessage           | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | POST   | /api/v3/projects/{id}/architect-chat/messages/stream                      | github.com/leef-l/easymvp/apps/core/internal/controller/architect_chat.SendMessageStreamHandler              | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | POST   | /api/v3/projects/{id}/evidence/collect                                    | github.com/leef-l/easymvp/apps/core/internal/controller/evidence.(*ControllerV1).CollectProjectEvidence      | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/projects/{id}/execution-view                                      | github.com/leef-l/easymvp/apps/core/internal/controller/runtime.(*ControllerV1).ExecutionView                | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/projects/{id}/plan-view                                           | github.com/leef-l/easymvp/apps/core/internal/controller/plan.(*ControllerV1).PlanView                        | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | POST   | /api/v3/projects/{id}/plan/compile                                        | github.com/leef-l/easymvp/apps/core/internal/controller/plan.(*ControllerV1).CompilePlan                     | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | POST   | /api/v3/projects/{id}/plan/redesign                                       | github.com/leef-l/easymvp/apps/core/internal/controller/plan.(*ControllerV1).RedesignPlan                    | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/projects/{id}/repair-draft                                        | github.com/leef-l/easymvp/apps/core/internal/controller/plan.(*ControllerV1).RepairDraft                     | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | POST   | /api/v3/projects/{id}/repair-draft                                        | github.com/leef-l/easymvp/apps/core/internal/controller/plan.(*ControllerV1).CreateRepairDraft               | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | POST   | /api/v3/projects/{id}/runtime-runs                                        | github.com/leef-l/easymvp/apps/core/internal/controller/runtime.(*ControllerV1).StartRun                     | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/projects/{id}/workspace-view                                      | github.com/leef-l/easymvp/apps/core/internal/controller/projects.(*ControllerV1).WorkspaceView               | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/projects/{project_id}/audit-logs                                  | github.com/leef-l/easymvp/apps/core/internal/controller/audit.(*ControllerV1).ListProjectAuditLogs           | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/projects/{project_id}/diagnostic-records                          | github.com/leef-l/easymvp/apps/core/internal/controller/system.(*ControllerV1).ListProjectDiagnostics        | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/projects/{project_id}/runs/{run_id}/log-segments                  | github.com/leef-l/easymvp/apps/core/internal/controller/replay.(*ControllerV1).ListLogSegments               | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/projects/{project_id}/runs/{run_id}/log-segments/{segment_id}/raw | github.com/leef-l/easymvp/apps/core/internal/controller/replay.(*ControllerV1).GetLogSegmentRaw              | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/projects/{project_id}/runs/{run_id}/replay-items/{replay_id}      | github.com/leef-l/easymvp/apps/core/internal/controller/replay.(*ControllerV1).GetReplayDetail               | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/projects/{project_id}/runs/{run_id}/replay-items/{replay_id}/raw  | github.com/leef-l/easymvp/apps/core/internal/controller/replay.(*ControllerV1).GetReplayRaw                  | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/projects/{project_id}/runs/{run_id}/replay-summary                | github.com/leef-l/easymvp/apps/core/internal/controller/replay.(*ControllerV1).GetReplaySummary              | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/projects/{project_id}/runs/{run_id}/replay-timeline               | github.com/leef-l/easymvp/apps/core/internal/controller/replay.(*ControllerV1).GetReplayTimeline             | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | DELETE | /api/v3/runtime-runs/{binding_id}                                         | github.com/leef-l/easymvp/apps/core/internal/controller/runtime.(*ControllerV1).CancelRunBinding             | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/runtime-runs/{binding_id}                                         | github.com/leef-l/easymvp/apps/core/internal/controller/runtime.(*ControllerV1).GetRunBinding                | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/runtime-runs/{binding_id}/detail                                  | github.com/leef-l/easymvp/apps/core/internal/controller/runtime.(*ControllerV1).GetRunBindingDetail          | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/runtime-runs/{binding_id}/events                                  | github.com/leef-l/easymvp/apps/core/internal/controller/runtime.(*ControllerV1).ListRunBindingEvents         | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | POST   | /api/v3/runtime-runs/{binding_id}/resume                                  | github.com/leef-l/easymvp/apps/core/internal/controller/runtime.(*ControllerV1).ResumeRunBinding             | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | POST   | /api/v3/runtime-runs/{binding_id}/sync                                    | github.com/leef-l/easymvp/apps/core/internal/controller/runtime.(*ControllerV1).SyncRunBinding               | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/runtime/healthz                                                   | github.com/leef-l/easymvp/apps/core/internal/controller/runtime.(*ControllerV1).Healthz                      | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/system/healthz                                                    | github.com/leef-l/easymvp/apps/core/internal/controller/system.(*ControllerV1).Health                        | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/workspace/home-view                                               | github.com/leef-l/easymvp/apps/core/internal/controller/workspace.(*ControllerV1).HomeView                   | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | GET    | /api/v3/workspace/projects/{id}/events                                    | github.com/leef-l/easymvp/apps/core/internal/controller/workspace.(*ControllerV1).ProjectEventsStream        | cmd.middlewareCORS              |
+|         |        |                                                                           |                                                                                                              | ghttp.MiddlewareHandlerResponse |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+| :8000   | ALL    | /swagger/*                                                                | github.com/gogf/gf/v2/net/ghttp.(*Server).swaggerUI                                                          | HOOK_BEFORE_SERVE               |
+----------|--------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|----------------------------------
+
+2026-04-28T12:06:49.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:06:54.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:06:59.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:07:04.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:07:09.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:07:14.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:07:14.764+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:07:14.768+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:07:19.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:07:24.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:07:29.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:07:34.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:07:39.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:07:44.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:07:44.764+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:07:44.769+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:07:49.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:07:50.343+08:00 [DEBU] [worker:workspace_snapshot_refresh_worker] refreshed 2 project snapshots
+2026-04-28T12:07:54.758+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:07:59.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:08:04.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:08:05.346+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:08:09.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:08:14.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:08:14.764+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:08:14.770+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:08:19.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:08:24.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:08:29.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:08:34.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:08:39.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:08:44.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:08:44.763+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:08:44.767+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:08:49.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:08:54.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:08:59.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:09:04.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:09:09.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:09:14.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:09:14.765+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:09:14.769+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:09:19.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:09:24.759+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:09:24.946+08:00 [DEBU] [worker:workspace_snapshot_refresh_worker] refreshed 2 project snapshots
+2026-04-28T12:09:24.948+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:09:29.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:09:34.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:09:39.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:09:44.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:09:44.764+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:09:44.767+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:09:49.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:09:54.759+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:09:59.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:10:04.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:10:09.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:10:14.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:10:14.763+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:10:14.766+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:10:19.759+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:10:24.053+08:00 [DEBU] [worker:workspace_snapshot_refresh_worker] refreshed 2 project snapshots
+2026-04-28T12:10:24.056+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:10:24.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:10:29.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:10:34.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:10:39.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:10:44.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:10:44.764+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:10:44.769+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:10:49.759+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:10:54.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:10:59.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:11:04.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:11:09.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:11:14.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:11:14.763+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:11:14.767+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:11:19.759+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:11:23.373+08:00 [DEBU] [worker:workspace_snapshot_refresh_worker] refreshed 2 project snapshots
+2026-04-28T12:11:23.376+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:11:24.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:11:29.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:11:34.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:11:39.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:11:44.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:11:44.764+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:11:44.768+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:11:49.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:11:54.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:11:59.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:12:04.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:12:09.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:12:13.557+08:00 [DEBU] [worker:workspace_snapshot_refresh_worker] refreshed 2 project snapshots
+2026-04-28T12:12:13.559+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:12:14.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:12:14.764+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:12:14.767+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:12:19.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:12:24.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:12:29.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:12:34.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:12:39.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:12:44.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:12:44.763+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:12:44.767+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:12:49.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:12:54.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:12:59.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:13:04.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:13:09.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:13:14.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:13:14.764+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:13:14.770+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:13:19.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:13:24.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:13:29.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:13:34.759+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:13:39.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:13:44.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:13:44.764+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:13:44.770+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:13:49.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:13:54.705+08:00 [DEBU] [worker:workspace_snapshot_refresh_worker] refreshed 2 project snapshots
+2026-04-28T12:13:54.707+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:13:54.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:13:59.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:14:04.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:14:09.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:14:14.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:14:14.763+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:14:14.767+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:14:19.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:14:24.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:14:29.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:14:34.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:14:35.045+08:00 [WARN] {b8ffec451a6aaa18eb247f2fb6d9762a} architect chat brain call failed: BRN_001: decode contract result failed: json: cannot unmarshal array into Go value of type braincontracts.ArchitectChatResult
+2026-04-28T12:14:39.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:14:44.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:14:44.763+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:14:44.767+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:14:49.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:14:51.067+08:00 [DEBU] [worker:workspace_snapshot_refresh_worker] refreshed 2 project snapshots
+2026-04-28T12:14:51.069+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:14:54.759+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:14:59.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:15:04.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:15:09.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:15:14.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:15:14.764+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:15:14.767+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:15:19.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:15:24.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:15:29.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:15:34.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:15:39.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:15:44.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:15:44.763+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:15:44.766+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:15:49.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:15:54.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:15:59.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:16:04.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:16:09.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:16:14.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:16:14.763+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:16:14.767+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:16:19.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:16:20.096+08:00 [DEBU] [worker:workspace_snapshot_refresh_worker] refreshed 2 project snapshots
+2026-04-28T12:16:20.099+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:16:24.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:16:29.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:16:34.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:16:39.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:16:44.759+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:16:44.763+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:16:44.766+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:16:49.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:16:54.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:16:59.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:17:04.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:17:09.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:17:14.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:17:14.764+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:17:14.768+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:17:19.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:17:24.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:17:29.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:17:34.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:17:39.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:17:42.065+08:00 [DEBU] [worker:workspace_snapshot_refresh_worker] refreshed 2 project snapshots
+2026-04-28T12:17:42.068+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:17:44.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:17:44.764+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:17:44.767+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:17:49.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:17:54.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:17:59.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:18:04.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:18:09.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:18:14.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:18:14.763+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:18:14.766+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:18:19.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:18:24.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:18:29.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:18:34.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:18:39.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:18:44.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:18:44.763+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:18:44.766+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:18:47.658+08:00 [DEBU] [worker:workspace_snapshot_refresh_worker] refreshed 2 project snapshots
+2026-04-28T12:18:47.661+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:18:49.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:18:54.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:18:59.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:19:04.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:19:09.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:19:14.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:19:14.763+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:19:14.767+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:19:19.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:19:24.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:19:29.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:19:34.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:19:39.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:19:44.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:19:44.764+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:19:44.768+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:19:49.763+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:19:54.376+08:00 [DEBU] [worker:workspace_snapshot_refresh_worker] refreshed 2 project snapshots
+2026-04-28T12:19:54.378+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:19:54.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:19:59.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:20:04.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:20:09.761+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:20:14.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:20:14.763+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:20:14.766+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:20:19.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:20:24.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:20:29.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:20:34.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:20:39.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:20:44.762+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:20:44.764+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:20:44.768+08:00 [DEBU] [worker:evidence_scan_worker] scanned 2 projects
+2026-04-28T12:20:49.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:20:50.213+08:00 [DEBU] [worker:workspace_snapshot_refresh_worker] refreshed 2 project snapshots
+2026-04-28T12:20:50.215+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock
+2026-04-28T12:20:54.760+08:00 [WARN] load guard CPU check failed: exec: "wmic": executable file not found in %PATH%; assuming healthy to avoid deadlock

@@ -1,4 +1,5 @@
-import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { Link, useNavigate } from "react-router-dom";
 import { apiGet } from "@/shared/lib/api";
 import { useProjectState } from "@/shared/lib/project";
 import { useQuery } from "@/shared/lib/query";
@@ -14,7 +15,28 @@ const jsonSections = [
 ] as const;
 
 export function RepairDraftPage() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
   const { projectId, routes, buildRoute } = useProjectState();
+
+  if (!projectId) {
+    return (
+      <section className="placeholder-page">
+        <div className="empty-state-panel">
+          <h4>{t("repair.noProjectTitle")}</h4>
+          <p>{t("repair.noProjectDescription")}</p>
+          <div className="action-row">
+            <button className="primary-button" onClick={() => navigate("/projects")}>
+              {t("repair.goToProjects")}
+            </button>
+            <button className="secondary-button" onClick={() => navigate("/settings")}>
+              {t("settings.createProject")}
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
   const state = useQuery(
     () => apiGet<RepairDraftView>(`/api/v3/projects/${encodeURIComponent(projectId)}/repair-draft`),
     [projectId],
@@ -29,14 +51,14 @@ export function RepairDraftPage() {
   const replayID = readStringField(runtimeSummary, failureReason, "replay_id", "latest_replay_id");
 
   return (
-    <QueryPanel loading={state.loading} error={state.error} title="Repair draft">
+    <QueryPanel loading={state.loading} error={state.error} title={t("repair.title")}>
       {repairDraft ? (
         <section className="dashboard-page">
           <div className="dashboard-intro">
             <div>
-              <p className="placeholder-section">Repair Draft</p>
-              <h3 className="placeholder-title">{repairDraft.id || "No repair draft yet"}</h3>
-              <p className="placeholder-description">{repairDraft.reasoning_summary || "The latest failed acceptance run has not produced a repair draft."}</p>
+              <p className="placeholder-section">{t("repair.title")}</p>
+              <h3 className="placeholder-title">{repairDraft.id || t("repair.noRepairDraftYet")}</h3>
+              <p className="placeholder-description">{repairDraft.reasoning_summary || t("repair.noRepairDraftDescription")}</p>
             </div>
             <div className="summary-stack">
               <span className="status-pill">{repairDraft.status}</span>
@@ -49,19 +71,19 @@ export function RepairDraftPage() {
           <div className="content-grid repair-grid">
             <section className="data-panel">
               <div className="panel-header">
-                <h3>Linked Actions</h3>
+                <h3>{t("repair.linkedActions")}</h3>
               </div>
               <div className="action-row">
                 <Link className="secondary-button" to={routes.plan}>
-                  Open Plan
+                  {t("repair.openPlan")}
                 </Link>
                 <Link className="secondary-button" to={routes.diagnostics}>
-                  Open Diagnostics
+                  {t("repair.openDiagnostics")}
                 </Link>
                 {taskID ? (
                   <>
                     <Link className="secondary-button" to={buildRoute("/acceptance", { task: taskID })}>
-                      Open Acceptance
+                      {t("repair.openAcceptance")}
                     </Link>
                     <Link
                       className="secondary-button"
@@ -71,7 +93,7 @@ export function RepairDraftPage() {
                         task: taskID,
                       })}
                     >
-                      Open Execution
+                      {t("repair.openExecution")}
                     </Link>
                   </>
                 ) : null}
@@ -84,7 +106,7 @@ export function RepairDraftPage() {
                     task: taskID || undefined,
                   })}
                 >
-                  Open Replay
+                  {t("repair.openReplay")}
                 </Link>
                 <Link
                   className="secondary-button"
@@ -93,27 +115,27 @@ export function RepairDraftPage() {
                     task: taskID || undefined,
                   })}
                 >
-                  Open Audit
+                  {t("repair.openAudit")}
                 </Link>
               </div>
             </section>
 
             <section className="data-panel">
               <div className="panel-header">
-                <h3>Repair Context</h3>
-                <span className="status-pill">{runID || taskID ? "linked" : "unlinked"}</span>
+                <h3>{t("repair.repairContext")}</h3>
+                <span className="status-pill">{runID || taskID ? t("repair.linked") : t("repair.unlinked")}</span>
               </div>
               <div className="stack-list">
                 <article className="list-card">
                   <div className="list-card-head">
-                    <strong>{taskID || "No task context"}</strong>
+                    <strong>{taskID || t("repair.noTaskContext")}</strong>
                     <span className="status-pill">{runID || "no run"}</span>
                   </div>
                   <p>
                     binding {bindingID || "n/a"} · replay {replayID || "n/a"}
                   </p>
                   <p>
-                    Use the linked pages to compare failed verification evidence, replay artifacts, audit facts, and the repair draft.
+                    {t("repair.contextDescription")}
                   </p>
                 </article>
               </div>
@@ -121,7 +143,7 @@ export function RepairDraftPage() {
 
             <section className="data-panel">
               <div className="panel-header">
-                <h3>Replaced Constraints</h3>
+                <h3>{t("repair.replacedConstraints")}</h3>
               </div>
               <div className="stack-list">
                 {(repairDraft.replaced_constraints ?? []).map((item) => (
@@ -131,7 +153,7 @@ export function RepairDraftPage() {
                 ))}
                 {(repairDraft.replaced_constraints ?? []).length === 0 ? (
                   <article className="list-card">
-                    <p>No replaced constraints recorded.</p>
+                    <p>{t("repair.noReplacedConstraints")}</p>
                   </article>
                 ) : null}
               </div>
@@ -151,18 +173,18 @@ export function RepairDraftPage() {
         <section className="dashboard-page">
           <div className="dashboard-intro">
             <div>
-              <p className="placeholder-section">Repair Draft</p>
-              <h3 className="placeholder-title">No repair draft available</h3>
+              <p className="placeholder-section">{t("repair.title")}</p>
+              <h3 className="placeholder-title">{t("repair.noRepairDraftAvailable")}</h3>
               <p className="placeholder-description">
-                The latest acceptance flow has not produced a repair draft for this project.
+                {t("repair.noRepairDraftAvailableDescription")}
               </p>
             </div>
             <div className="summary-stack">
               <Link className="secondary-button" to={routes.plan}>
-                Open Plan
+                {t("repair.openPlan")}
               </Link>
               <Link className="secondary-button" to={routes.workspace}>
-                Back to Workspace
+                {t("repair.backToWorkspace")}
               </Link>
             </div>
           </div>

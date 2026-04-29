@@ -1,0 +1,53 @@
+=== discovery.go ===
+STRUCTS:
+type RemoteEndpoint struct {
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+	Weight int    `json:"weight,omitempty"`
+}
+type DNSDiscovery struct {
+	Domain   string
+	resolver *net.Resolver
+}
+type StaticDiscovery struct {
+	endpoints map[string][]RemoteEndpoint
+}
+type CircuitBreaker struct {
+	failureThreshold int
+	successThreshold int
+	timeout          time.Duration
+
+	mu               sync.Mutex
+	state            CircuitState
+	failureCount     int
+	successCount     int
+	lastFailureTime  time.Time
+}
+type DiscoverableBrainPool struct {
+	discovery ServiceDiscovery
+	scheme    string
+	apiKey    string
+	timeout   time.Duration
+
+	mu       sync.Mutex
+	pools    map[agent.Kind]*RemoteBrainPool
+	breakers map[agent.Kind]*CircuitBreaker
+}
+
+FUNCS:
+func (e RemoteEndpoint) Address() string {
+func NewDNSDiscovery(domain string) *DNSDiscovery {
+func (d *DNSDiscovery) Resolve(ctx context.Context, serviceName string) ([]RemoteEndpoint, error) {
+func NewStaticDiscovery(m map[string][]RemoteEndpoint) *StaticDiscovery {
+func (s *StaticDiscovery) Resolve(_ context.Context, serviceName string) ([]RemoteEndpoint, error) {
+func NewCircuitBreaker(failureThreshold, successThreshold int, timeout time.Duration) *CircuitBreaker {
+func (cb *CircuitBreaker) Allow() bool {
+func (cb *CircuitBreaker) RecordSuccess() {
+func (cb *CircuitBreaker) RecordFailure() {
+func (cb *CircuitBreaker) State() CircuitState {
+func NewDiscoverableBrainPool(discovery ServiceDiscovery, scheme, apiKey string, timeout time.Duration) *DiscoverableBrainPool {
+func (p *DiscoverableBrainPool) GetBrain(ctx context.Context, kind agent.Kind) (agent.Agent, error) {
+func (p *DiscoverableBrainPool) Status() map[agent.Kind]BrainStatus {
+func (p *DiscoverableBrainPool) AutoStart(ctx context.Context) {
+func (p *DiscoverableBrainPool) Shutdown(ctx context.Context) error {
+

@@ -1,0 +1,46 @@
+=== pool.go ===
+STRUCTS:
+type BrainEvent struct {
+	Kind   agent.Kind
+	Action string // "start" | "stop" | "restart"
+	Agent  agent.Agent
+	Error  error
+	Time   time.Time
+}
+type ProcessBrainPool struct {
+	runner      BrainRunner
+	binResolver func(kind agent.Kind) (string, error)
+
+	// available 记录哪些 sidecar 二进制文件在磁盘上可用。
+	available map[agent.Kind]bool
+
+	// registrations 存储配置驱动的 brain 注册信息。
+	registrations map[agent.Kind]*BrainRegistration
+
+	mu     sync.Mutex
+	active map[agent.Kind]agent.Agent // 运行中的 sidecar 池（可复用）
+
+	// notifyCh 接收 sidecar 生命周期事件（可选，外部可订阅）。
+	notifyCh chan<- BrainEvent
+
+	// warmKinds 是需要在后台预热的 brain 种类。
+	warmKinds []agent.Kind
+}
+
+FUNCS:
+func NewProcessBrainPool(runner BrainRunner, binResolver func(agent.Kind) (string, error), cfg OrchestratorConfig) *ProcessBrainPool {
+func (p *ProcessBrainPool) probeRegistration(reg *BrainRegistration, binResolver func(agent.Kind) (string, error)) {
+func (p *ProcessBrainPool) probeBinResolver(kind agent.Kind, binResolver func(agent.Kind) (string, error)) {
+func (p *ProcessBrainPool) GetBrain(ctx context.Context, kind agent.Kind) (agent.Agent, error) {
+func (p *ProcessBrainPool) startWithRegistration(ctx context.Context, kind agent.Kind, desc agent.Descriptor) (agent.Agent, error) {
+func mergeProcessEnv(base []string, extra []string) []string {
+func envKey(entry string) (string, bool) {
+func (p *ProcessBrainPool) Status() map[agent.Kind]BrainStatus {
+func (p *ProcessBrainPool) AutoStart(ctx context.Context) {
+func (p *ProcessBrainPool) Shutdown(ctx context.Context) error {
+func (p *ProcessBrainPool) Available(kind agent.Kind) bool {
+func (p *ProcessBrainPool) AvailableKinds() []agent.Kind {
+func (p *ProcessBrainPool) Registrations() []BrainRegistration {
+func (p *ProcessBrainPool) RemoveBrain(kind agent.Kind) {
+func (p *ProcessBrainPool) waitForSidecar(ctx context.Context, kind agent.Kind) (bool, agent.Agent, error) {
+

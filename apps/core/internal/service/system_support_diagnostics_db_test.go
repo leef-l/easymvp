@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/gogf/gf/contrib/drivers/sqlite/v2"
 
 	replayv1 "github.com/leef-l/easymvp/apps/core/api/replay/v1"
 	systemv1 "github.com/leef-l/easymvp/apps/core/api/system/v1"

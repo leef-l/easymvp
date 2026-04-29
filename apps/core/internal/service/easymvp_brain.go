@@ -20,17 +20,22 @@ type IEasyMVPBrain interface {
 	ExecuteContract(ctx context.Context, cmd EasyMVPBrainExecuteCommand) (*EasyMVPBrainExecuteResult, error)
 	CallPlanReview(ctx context.Context, input braincontracts.PlanReviewInput) (*braincontracts.BrainContractEnvelope, *braincontracts.PlanReviewResult, error)
 	CallPlanCompile(ctx context.Context, input braincontracts.PlanCompileInput) (*braincontracts.BrainContractEnvelope, *braincontracts.PlanCompileResult, error)
+	CallPlanRedesign(ctx context.Context, input braincontracts.PlanRedesignInput) (*braincontracts.BrainContractEnvelope, *braincontracts.PlanRedesignResult, error)
 	CallAcceptanceMapping(ctx context.Context, input braincontracts.AcceptanceMappingInput) (*braincontracts.BrainContractEnvelope, *braincontracts.AcceptanceMappingResult, error)
 	CallCompletionAdjudication(ctx context.Context, input braincontracts.CompletionAdjudicationInput) (*braincontracts.BrainContractEnvelope, *braincontracts.CompletionAdjudicationResult, error)
 	CallRepairDesign(ctx context.Context, input braincontracts.RepairDesignInput) (*braincontracts.BrainContractEnvelope, *braincontracts.RepairDesignResult, error)
 	CallWorkspaceExplanation(ctx context.Context, input braincontracts.WorkspaceExplanationInput) (*braincontracts.BrainContractEnvelope, *braincontracts.WorkspaceExplanationResult, error)
+	CallArchitectChat(ctx context.Context, input braincontracts.ArchitectChatInput) (*braincontracts.BrainContractEnvelope, *braincontracts.ArchitectChatResult, error)
+	ExecuteContractStream(ctx context.Context, cmd EasyMVPBrainExecuteCommand) (<-chan EasyMVPBrainStreamEvent, error)
 	ValidateEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope) error
 	ValidatePlanReviewEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.PlanReviewResult) error
 	ValidatePlanCompileEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.PlanCompileResult) error
+	ValidatePlanRedesignEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.PlanRedesignResult) error
 	ValidateAcceptanceMappingEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.AcceptanceMappingResult) error
 	ValidateCompletionAdjudicationEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.CompletionAdjudicationResult) error
 	ValidateRepairDesignEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.RepairDesignResult) error
 	ValidateWorkspaceExplanationEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.WorkspaceExplanationResult) error
+	ValidateArchitectChatEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.ArchitectChatResult) error
 }
 
 var localEasyMVPBrain IEasyMVPBrain = (*sEasyMVPBrain)(nil)
@@ -52,6 +57,10 @@ func (s *sEasyMVPBrain) CallPlanCompile(ctx context.Context, input braincontract
 	return executeTypedContract(ctx, s, "plan_compile", input, s.ValidatePlanCompileEnvelope)
 }
 
+func (s *sEasyMVPBrain) CallPlanRedesign(ctx context.Context, input braincontracts.PlanRedesignInput) (*braincontracts.BrainContractEnvelope, *braincontracts.PlanRedesignResult, error) {
+	return executeTypedContract(ctx, s, "plan_redesign", input, s.ValidatePlanRedesignEnvelope)
+}
+
 func (s *sEasyMVPBrain) CallAcceptanceMapping(ctx context.Context, input braincontracts.AcceptanceMappingInput) (*braincontracts.BrainContractEnvelope, *braincontracts.AcceptanceMappingResult, error) {
 	return executeTypedContract(ctx, s, "acceptance_mapping", input, s.ValidateAcceptanceMappingEnvelope)
 }
@@ -66,6 +75,22 @@ func (s *sEasyMVPBrain) CallRepairDesign(ctx context.Context, input braincontrac
 
 func (s *sEasyMVPBrain) CallWorkspaceExplanation(ctx context.Context, input braincontracts.WorkspaceExplanationInput) (*braincontracts.BrainContractEnvelope, *braincontracts.WorkspaceExplanationResult, error) {
 	return executeTypedContract(ctx, s, "workspace_explanation", input, s.ValidateWorkspaceExplanationEnvelope)
+}
+
+func (s *sEasyMVPBrain) CallArchitectChat(ctx context.Context, input braincontracts.ArchitectChatInput) (*braincontracts.BrainContractEnvelope, *braincontracts.ArchitectChatResult, error) {
+	return executeTypedContract(ctx, s, "architect_chat", input, s.ValidateArchitectChatEnvelope)
+}
+
+func (s *sEasyMVPBrain) ExecuteContractStream(ctx context.Context, cmd EasyMVPBrainExecuteCommand) (<-chan EasyMVPBrainStreamEvent, error) {
+	cfg, err := s.ResolveClientConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	baseURL := strings.TrimRight(strings.TrimSpace(CurrentStartupConfig(ctx).BrainServeBaseURL), "/")
+	if baseURL == "" {
+		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeConfigInvalid, "brain serve base URL is empty", nil)
+	}
+	return callEasyMVPBrainExecuteStream(ctx, cfg, baseURL, cmd)
 }
 
 func (s *sEasyMVPBrain) ValidateEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope) error {
@@ -145,6 +170,22 @@ func (s *sEasyMVPBrain) ValidatePlanCompileEnvelope(ctx context.Context, envelop
 	return nil
 }
 
+func (s *sEasyMVPBrain) ValidatePlanRedesignEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.PlanRedesignResult) error {
+	if err := s.validateTypedEnvelope(ctx, envelope, "redesigned_plan_draft"); err != nil {
+		return err
+	}
+	if result == nil {
+		return wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "plan redesign result is required", nil)
+	}
+	if strings.TrimSpace(result.RedesignedPlanDraftID) == "" || len(result.RedesignedPlanJSON) == 0 {
+		return wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "plan redesign result is invalid", nil)
+	}
+	if strings.TrimSpace(result.ChangesSummary) == "" {
+		return wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "plan redesign changes summary is required", nil)
+	}
+	return nil
+}
+
 func (s *sEasyMVPBrain) ValidateAcceptanceMappingEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.AcceptanceMappingResult) error {
 	if err := s.validateTypedEnvelope(ctx, envelope, "acceptance_mapping_result"); err != nil {
 		return err
@@ -173,6 +214,10 @@ func (s *sEasyMVPBrain) ValidateCompletionAdjudicationEnvelope(ctx context.Conte
 	}
 	if strings.TrimSpace(result.DecisionReason) == "" {
 		return wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "completion decision_reason is required", nil)
+	}
+	// Validate four-layer decision enum (Engineering Cybernetics ch.4 feedback loop)
+	if result.Decision != "" && !isAllowedValue(result.Decision, "complete", "rework", "blocked", "manual_checkpoint") {
+		return wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "completion decision is invalid", nil)
 	}
 	return nil
 }
@@ -207,6 +252,19 @@ func (s *sEasyMVPBrain) ValidateWorkspaceExplanationEnvelope(ctx context.Context
 		if strings.TrimSpace(item.ActionKey) == "" || strings.TrimSpace(item.Label) == "" || strings.TrimSpace(item.Reason) == "" {
 			return wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "workspace explanation contains invalid recommended action", nil)
 		}
+	}
+	return nil
+}
+
+func (s *sEasyMVPBrain) ValidateArchitectChatEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.ArchitectChatResult) error {
+	if err := s.validateTypedEnvelope(ctx, envelope, "architect_chat"); err != nil {
+		return err
+	}
+	if result == nil {
+		return wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "architect chat result is required", nil)
+	}
+	if strings.TrimSpace(result.Reply) == "" {
+		return wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "architect chat reply is required", nil)
 	}
 	return nil
 }
@@ -275,9 +333,50 @@ func executeTypedContract[T any](
 	if execResult.Envelope == nil {
 		return nil, nil, deriveEasyMVPBrainExecutionError(execResult)
 	}
+	// P0-01: normalized_status hard validation — never swallow unsupported_or_denied as success.
+	normalizedStatus := braincontracts.NormalizedStatus(strings.TrimSpace(execResult.Envelope.NormalizedStatus))
+	switch normalizedStatus {
+	case braincontracts.StatusUnsupportedOrDenied:
+		return nil, nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "brain contract returned unsupported_or_denied: capability unavailable or policy denied", gerror.New(execResult.Envelope.DecisionSummary))
+	case braincontracts.StatusFailure:
+		// failure is a valid domain outcome; let the validator decide.
+	case braincontracts.StatusSuccess:
+		// expected path.
+	default:
+		if execResult.Envelope.NormalizedStatus != "" {
+			return nil, nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "brain contract returned unrecognized normalized_status: "+string(normalizedStatus), nil)
+		}
+		// empty normalized_status: tolerate for backward compatibility during transition.
+	}
 	var typedResult T
 	if err := json.Unmarshal(execResult.Envelope.ResultJSON, &typedResult); err != nil {
-		return nil, nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "decode contract result failed", err)
+		// Fallback 1: Brain may return natural language text instead of strict JSON.
+		// Try wrapping it as {"reply": <text>} so chat contracts can still display.
+		var rawText string
+		if err2 := json.Unmarshal(execResult.Envelope.ResultJSON, &rawText); err2 == nil && rawText != "" {
+			wrapped := map[string]interface{}{"reply": rawText}
+			wrappedJSON, _ := json.Marshal(wrapped)
+			if err3 := json.Unmarshal(wrappedJSON, &typedResult); err3 == nil {
+				// success after wrapping
+			} else {
+				return nil, nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "decode contract result failed", err)
+			}
+		} else {
+			// Fallback 2: Brain may return a JSON array (e.g. ["text1", "text2"]).
+			// Wrap array elements as a single reply string.
+			var rawArray []string
+			if err2 := json.Unmarshal(execResult.Envelope.ResultJSON, &rawArray); err2 == nil {
+				wrapped := map[string]interface{}{"reply": strings.Join(rawArray, "\n")}
+				wrappedJSON, _ := json.Marshal(wrapped)
+				if err3 := json.Unmarshal(wrappedJSON, &typedResult); err3 == nil {
+					// success after wrapping
+				} else {
+					return nil, nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "decode contract result failed", err)
+				}
+			} else {
+				return nil, nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "decode contract result failed", err)
+			}
+		}
 	}
 	if err := validate(ctx, execResult.Envelope, &typedResult); err != nil {
 		return nil, nil, err

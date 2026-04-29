@@ -1,10 +1,12 @@
 package service
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -19,9 +21,9 @@ const (
 	easyMVPBrainErrorCodeConfigInvalid  = "BRN_003"
 	easyMVPBrainErrorCodeExecuteFailed  = "BRN_004"
 	easyMVPBrainErrorCodeDecodeFailed   = "BRN_005"
-	easyMVPBrainDefaultTimeout          = 30 * time.Second
+	easyMVPBrainDefaultTimeout          = 120 * time.Second
 	easyMVPBrainDefaultMaxTurns         = 6
-	easyMVPBrainInstructionPrefixReview = "Return only a valid easymvp-brain contract envelope JSON."
+
 )
 
 type EasyMVPBrainClientConfig struct {
@@ -48,30 +50,7 @@ type EasyMVPBrainExecuteResult struct {
 	Envelope *braincontracts.BrainContractEnvelope `json:"envelope,omitempty"`
 }
 
-type easyMVPBrainJSONRPCRequest struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      int64  `json:"id"`
-	Method  string `json:"method"`
-	Params  any    `json:"params,omitempty"`
-}
 
-type easyMVPBrainJSONRPCResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      any             `json:"id,omitempty"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   any             `json:"error,omitempty"`
-}
-
-type easyMVPBrainExecuteRequest struct {
-	TaskID      string                     `json:"task_id,omitempty"`
-	Instruction string                     `json:"instruction"`
-	Context     json.RawMessage            `json:"context,omitempty"`
-	Budget      *easyMVPBrainExecuteBudget `json:"budget,omitempty"`
-}
-
-type easyMVPBrainExecuteBudget struct {
-	MaxTurns int `json:"max_turns,omitempty"`
-}
 
 type easyMVPBrainExecuteResponse struct {
 	Status  string `json:"status"`
@@ -125,47 +104,43 @@ func (s *sEasyMVPBrain) ExecuteContract(ctx context.Context, cmd EasyMVPBrainExe
 	if err != nil {
 		return nil, err
 	}
-	endpoint := cfg.LocalEndpoint
-	if cfg.Mode == "remote-service" {
-		endpoint = cfg.RemoteEndpoint
+	baseURL := strings.TrimRight(strings.TrimSpace(CurrentStartupConfig(ctx).BrainServeBaseURL), "/")
+	if baseURL == "" {
+		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeConfigInvalid, "brain serve base URL is empty", nil)
 	}
-	return callEasyMVPBrainExecute(ctx, cfg, endpoint, cmd)
+	return callEasyMVPBrainExecute(ctx, cfg, baseURL, cmd)
 }
 
-func callEasyMVPBrainExecute(ctx context.Context, cfg *EasyMVPBrainClientConfig, endpoint string, cmd EasyMVPBrainExecuteCommand) (*EasyMVPBrainExecuteResult, error) {
+func callEasyMVPBrainExecute(ctx context.Context, cfg *EasyMVPBrainClientConfig, baseURL string, cmd EasyMVPBrainExecuteCommand) (*EasyMVPBrainExecuteResult, error) {
 	if cfg == nil {
 		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeConfigInvalid, "easymvp brain config is required", nil)
 	}
-	endpoint = strings.TrimRight(strings.TrimSpace(endpoint), "/")
-	if endpoint == "" {
-		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeConfigInvalid, "easymvp brain endpoint is empty", nil)
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeConfigInvalid, "brain serve base URL is empty", nil)
 	}
 	if strings.TrimSpace(cmd.Instruction) == "" {
 		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeConfigInvalid, "instruction is required", nil)
 	}
 
-	payload := easyMVPBrainExecuteRequest{
-		TaskID:      strings.TrimSpace(cmd.TaskID),
-		Instruction: buildEasyMVPBrainInstruction(cmd.ContractKind, cmd.Instruction),
-		Context:     json.RawMessage(cmd.ContextJSON),
-		Budget:      &easyMVPBrainExecuteBudget{MaxTurns: cfg.MaxTurns},
+	payload := map[string]interface{}{
+		"brain_kind":    "easymvp",
+		"contract_kind": cmd.ContractKind,
+		"context_json":  json.RawMessage(cmd.ContextJSON),
+		"instruction":   buildEasyMVPBrainInstruction(cmd.ContractKind, cmd.Instruction),
+		"max_turns":     cfg.MaxTurns,
+		"timeout":       cfg.Timeout.String(),
 	}
 
-	body := easyMVPBrainJSONRPCRequest{
-		JSONRPC: "2.0",
-		ID:      time.Now().UnixNano(),
-		Method:  "brain/execute",
-		Params:  payload,
-	}
-	rawRequest, err := json.Marshal(body)
+	rawRequest, err := json.Marshal(payload)
 	if err != nil {
-		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "marshal easymvp-brain request failed", err)
+		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "marshal contract request failed", err)
 	}
 
 	client := &http.Client{Timeout: cfg.Timeout}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/rpc", bytes.NewReader(rawRequest))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/contracts/execute", bytes.NewReader(rawRequest))
 	if err != nil {
-		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "build easymvp-brain request failed", err)
+		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "build contract request failed", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if cfg.APIKey != "" {
@@ -174,60 +149,57 @@ func callEasyMVPBrainExecute(ctx context.Context, cfg *EasyMVPBrainClientConfig,
 
 	resp, err := client.Do(req)
 	if err != nil {
-		recordDiagnostic(ctx, "easymvp_brain.execute", "warning", easyMVPBrainErrorCodeExecuteFailed, "call easymvp-brain failed", map[string]any{
-			"contract_kind": cmd.ContractKind,
-			"endpoint":      endpoint,
-			"task_id":       strings.TrimSpace(cmd.TaskID),
-			"error":         err.Error(),
-		})
-		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "call easymvp-brain failed", err)
+		// Retry once on transient network errors (EOF, timeout, connection issues).
+		if isRetryableBrainError(err) {
+			g.Log().Infof(ctx, "brain-v3 contract execution failed with retryable error, retrying once: %v", err)
+			select {
+			case <-time.After(2 * time.Second):
+				req2, _ := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/contracts/execute", bytes.NewReader(rawRequest))
+				req2.Header.Set("Content-Type", "application/json")
+				if cfg.APIKey != "" {
+					req2.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+				}
+				resp, err = client.Do(req2)
+			case <-ctx.Done():
+				return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "call brain-v3 contract execution failed (context cancelled during retry)", ctx.Err())
+			}
+		}
+		if err != nil {
+			recordDiagnostic(ctx, "easymvp_brain.execute", "warning", easyMVPBrainErrorCodeExecuteFailed, "call brain-v3 contract execution failed", map[string]any{
+				"contract_kind": cmd.ContractKind,
+				"base_url":      baseURL,
+				"task_id":       strings.TrimSpace(cmd.TaskID),
+				"error":         err.Error(),
+			})
+			return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "call brain-v3 contract execution failed", err)
+		}
 	}
 	defer resp.Body.Close()
 
 	rawResponse, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "read easymvp-brain response failed", err)
+		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "read contract response failed", err)
 	}
 	if resp.StatusCode >= 300 {
-		recordDiagnostic(ctx, "easymvp_brain.execute", "warning", easyMVPBrainErrorCodeExecuteFailed, "easymvp-brain returned non-success status", map[string]any{
+		recordDiagnostic(ctx, "easymvp_brain.execute", "warning", easyMVPBrainErrorCodeExecuteFailed, "brain-v3 returned non-success status", map[string]any{
 			"contract_kind": cmd.ContractKind,
-			"endpoint":      endpoint,
+			"base_url":      baseURL,
 			"task_id":       strings.TrimSpace(cmd.TaskID),
 			"status_code":   resp.StatusCode,
 			"body":          strings.TrimSpace(string(rawResponse)),
 		})
-		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "easymvp-brain returned non-success status", gerror.Newf("status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(rawResponse))))
-	}
-
-	var rpcResp easyMVPBrainJSONRPCResponse
-	if err = json.Unmarshal(rawResponse, &rpcResp); err != nil {
-		recordDiagnostic(ctx, "easymvp_brain.decode", "warning", easyMVPBrainErrorCodeDecodeFailed, "decode easymvp-brain rpc response failed", map[string]any{
-			"contract_kind": cmd.ContractKind,
-			"endpoint":      endpoint,
-			"task_id":       strings.TrimSpace(cmd.TaskID),
-			"error":         err.Error(),
-		})
-		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeDecodeFailed, "decode easymvp-brain rpc response failed", err)
-	}
-	if rpcResp.Error != nil {
-		recordDiagnostic(ctx, "easymvp_brain.execute", "warning", easyMVPBrainErrorCodeExecuteFailed, "easymvp-brain rpc returned error", map[string]any{
-			"contract_kind": cmd.ContractKind,
-			"endpoint":      endpoint,
-			"task_id":       strings.TrimSpace(cmd.TaskID),
-			"rpc_error":     rpcResp.Error,
-		})
-		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "easymvp-brain rpc returned error", gerror.Newf("%v", rpcResp.Error))
+		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "brain-v3 returned non-success status", gerror.Newf("status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(rawResponse))))
 	}
 
 	var execResp easyMVPBrainExecuteResponse
-	if err = json.Unmarshal(rpcResp.Result, &execResp); err != nil {
-		recordDiagnostic(ctx, "easymvp_brain.decode", "warning", easyMVPBrainErrorCodeDecodeFailed, "decode easymvp-brain execute result failed", map[string]any{
+	if err = json.Unmarshal(rawResponse, &execResp); err != nil {
+		recordDiagnostic(ctx, "easymvp_brain.decode", "warning", easyMVPBrainErrorCodeDecodeFailed, "decode contract response failed", map[string]any{
 			"contract_kind": cmd.ContractKind,
-			"endpoint":      endpoint,
+			"base_url":      baseURL,
 			"task_id":       strings.TrimSpace(cmd.TaskID),
 			"error":         err.Error(),
 		})
-		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeDecodeFailed, "decode easymvp-brain execute result failed", err)
+		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeDecodeFailed, "decode contract response failed", err)
 	}
 
 	result := &EasyMVPBrainExecuteResult{
@@ -239,9 +211,9 @@ func callEasyMVPBrainExecute(ctx context.Context, cfg *EasyMVPBrainClientConfig,
 	if strings.TrimSpace(execResp.Summary) != "" {
 		envelope, err := decodeEasyMVPBrainEnvelope(execResp.Summary)
 		if err != nil {
-			recordDiagnostic(ctx, "easymvp_brain.decode", "warning", easyMVPBrainErrorCodeDecodeFailed, "decode easymvp-brain envelope from summary failed", map[string]any{
+			recordDiagnostic(ctx, "easymvp_brain.decode", "warning", easyMVPBrainErrorCodeDecodeFailed, "decode contract envelope from summary failed", map[string]any{
 				"contract_kind": cmd.ContractKind,
-				"endpoint":      endpoint,
+				"base_url":      baseURL,
 				"task_id":       strings.TrimSpace(cmd.TaskID),
 				"error":         err.Error(),
 			})
@@ -277,16 +249,6 @@ func validateEasyMVPBrainClientConfig(cfg *EasyMVPBrainClientConfig) error {
 	if cfg.MaxTurns <= 0 {
 		return wrapEasyMVPBrainError(easyMVPBrainErrorCodeConfigInvalid, "easymvp brain client max turns must be positive", nil)
 	}
-	switch cfg.Mode {
-	case "local-sidecar":
-		if cfg.LocalEndpoint == "" {
-			return wrapEasyMVPBrainError(easyMVPBrainErrorCodeConfigInvalid, "local-sidecar mode requires localEndpoint", nil)
-		}
-	case "remote-service":
-		if cfg.RemoteEndpoint == "" {
-			return wrapEasyMVPBrainError(easyMVPBrainErrorCodeConfigInvalid, "remote-service mode requires remoteEndpoint", nil)
-		}
-	}
 	return nil
 }
 
@@ -294,7 +256,170 @@ func buildEasyMVPBrainInstruction(contractKind, instruction string) string {
 	instruction = strings.TrimSpace(instruction)
 	contractKind = strings.TrimSpace(contractKind)
 	if contractKind == "" {
-		return easyMVPBrainInstructionPrefixReview + "\n" + instruction
+		return instruction
 	}
-	return easyMVPBrainInstructionPrefixReview + "\nContract Kind: " + contractKind + "\n" + instruction
+	// brain-v3 /v1/contracts/execute will prepend [contract:xxx]; keep instruction clean.
+	return instruction
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage 0: Browser + Verifier run helpers (reuse existing Runtime().StartBrainRun)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// BrowserCheckResult holds the outcome of a browser anomaly/understand check.
+type BrowserCheckResult struct {
+	URL       string   `json:"url"`
+	Status    string   `json:"status"`     // passed / failed / skipped / error
+	Anomalies []string `json:"anomalies,omitempty"`
+	Summary   string   `json:"summary,omitempty"`
+}
+
+// VerifierCheck defines a single verification check for the verifier brain.
+type VerifierCheck struct {
+	Name       string `json:"name"`                 // e.g. "unit_test"
+	Type       string `json:"type"`                 // "shell" | "browser" | "file_assert"
+	Command    string `json:"command,omitempty"`    // shell command or assertion
+	ExpectExit int    `json:"expect_exit,omitempty"`
+	ExpectOut  string `json:"expect_output,omitempty"`
+}
+
+// VerifierCheckResult holds the outcome of a verifier run.
+type VerifierCheckResult struct {
+	Status   string            `json:"status"`   // passed / failed / skipped / error
+	Checks   []VerifierCheck   `json:"checks,omitempty"`
+	Summary  string            `json:"summary,omitempty"`
+	Details  map[string]string `json:"details,omitempty"`
+}
+
+// isRetryableBrainError returns true for transient network errors that warrant a retry.
+func isRetryableBrainError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	if strings.Contains(errStr, "eof") ||
+		strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "connection reset") ||
+		strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "no such host") {
+		return true
+	}
+	if netErr, ok := err.(net.Error); ok {
+		return netErr.Timeout() || netErr.Temporary()
+	}
+	return false
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SSE streaming client for brain-v3 /v1/contracts/execute?stream=true
+// ─────────────────────────────────────────────────────────────────────────────
+
+// EasyMVPBrainStreamEvent represents a single SSE event from brain-v3.
+type EasyMVPBrainStreamEvent struct {
+	ExecutionID string          `json:"execution_id"`
+	Type        string          `json:"type"`
+	Data        json.RawMessage `json:"data"`
+}
+
+// callEasyMVPBrainExecuteStream calls brain-v3 contracts/execute in SSE streaming mode.
+// It returns a channel that yields events until the stream ends or an error occurs.
+// The channel is closed when the stream is done. Callers should drain the channel.
+func callEasyMVPBrainExecuteStream(ctx context.Context, cfg *EasyMVPBrainClientConfig, baseURL string, cmd EasyMVPBrainExecuteCommand) (<-chan EasyMVPBrainStreamEvent, error) {
+	if cfg == nil {
+		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeConfigInvalid, "easymvp brain config is required", nil)
+	}
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeConfigInvalid, "brain serve base URL is empty", nil)
+	}
+	if strings.TrimSpace(cmd.Instruction) == "" {
+		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeConfigInvalid, "instruction is required", nil)
+	}
+
+	payload := map[string]interface{}{
+		"brain_kind":    "easymvp",
+		"contract_kind": cmd.ContractKind,
+		"context_json":  json.RawMessage(cmd.ContextJSON),
+		"instruction":   buildEasyMVPBrainInstruction(cmd.ContractKind, cmd.Instruction),
+		"max_turns":     cfg.MaxTurns,
+		"timeout":       cfg.Timeout.String(),
+		"stream":        true,
+	}
+
+	rawRequest, err := json.Marshal(payload)
+	if err != nil {
+		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "marshal contract request failed", err)
+	}
+
+	client := &http.Client{Timeout: cfg.Timeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/contracts/execute?stream=true", bytes.NewReader(rawRequest))
+	if err != nil {
+		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "build contract request failed", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	if cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		if isRetryableBrainError(err) {
+			g.Log().Infof(ctx, "brain-v3 contract stream failed with retryable error, retrying once: %v", err)
+			select {
+			case <-time.After(2 * time.Second):
+				req2, _ := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/contracts/execute?stream=true", bytes.NewReader(rawRequest))
+				req2.Header.Set("Content-Type", "application/json")
+				req2.Header.Set("Accept", "text/event-stream")
+				if cfg.APIKey != "" {
+					req2.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+				}
+				resp, err = client.Do(req2)
+			case <-ctx.Done():
+				return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "call brain-v3 contract stream failed (context cancelled during retry)", ctx.Err())
+			}
+		}
+		if err != nil {
+			return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "call brain-v3 contract stream failed", err)
+		}
+	}
+
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, wrapEasyMVPBrainError(easyMVPBrainErrorCodeExecuteFailed, "brain-v3 returned non-success status", gerror.Newf("status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body))))
+	}
+
+	outCh := make(chan EasyMVPBrainStreamEvent, 16)
+	go func() {
+		defer close(outCh)
+		defer resp.Body.Close()
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "" {
+				continue
+			}
+			var ev EasyMVPBrainStreamEvent
+			if err := json.Unmarshal([]byte(data), &ev); err != nil {
+				g.Log().Warningf(ctx, "brain-v3 stream event decode failed: %v | raw: %s", err, data)
+				continue
+			}
+			select {
+			case outCh <- ev:
+			case <-ctx.Done():
+				return
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			g.Log().Warningf(ctx, "brain-v3 stream scanner error: %v", err)
+		}
+	}()
+
+	return outCh, nil
 }

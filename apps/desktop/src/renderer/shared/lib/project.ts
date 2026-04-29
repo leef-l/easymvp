@@ -6,7 +6,7 @@ type RouteQueryValue = string | number | boolean | null | undefined;
 
 export function useProjectState() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const projectId = searchParams.get("project")?.trim() || getStoredProjectId();
+  const projectId = searchParams.get("project")?.trim() ?? getStoredProjectId() ?? "";
 
   function buildRoute(
     pathname: string,
@@ -26,6 +26,7 @@ export function useProjectState() {
   const routes = useMemo(
     () => ({
       workspace: buildRoute("/workspace"),
+      architectChat: buildRoute("/architect-chat"),
       plan: buildRoute("/plan"),
       execution: buildRoute("/execution"),
       replay: buildRoute("/replay"),
@@ -40,11 +41,20 @@ export function useProjectState() {
   );
 
   function updateProjectId(nextProjectId: string) {
-    const normalized = nextProjectId.trim() || getStoredProjectId();
-    setStoredProjectId(normalized);
+    const trimmed = nextProjectId.trim();
+    if (trimmed === "") {
+      setStoredProjectId("");
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current);
+        next.delete("project");
+        return next;
+      });
+      return;
+    }
+    setStoredProjectId(trimmed);
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
-      next.set("project", normalized);
+      next.set("project", trimmed);
       return next;
     });
   }

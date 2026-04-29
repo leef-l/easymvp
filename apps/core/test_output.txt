@@ -1,0 +1,52 @@
+go: downloading github.com/gogf/gf/v2 v2.7.1
+go: downloading modernc.org/sqlite v1.39.1
+go: downloading github.com/fatih/color v1.16.0
+go: downloading go.opentelemetry.io/otel/trace v1.14.0
+go: downloading go.opentelemetry.io/otel v1.14.0
+go: downloading github.com/magiconair/properties v1.8.7
+go: downloading github.com/fsnotify/fsnotify v1.7.0
+go: downloading github.com/BurntSushi/toml v1.3.2
+go: downloading golang.org/x/net v0.24.0
+go: downloading go.opentelemetry.io/otel/sdk v1.14.0
+go: downloading github.com/olekukonko/tablewriter v0.0.5
+go: downloading golang.org/x/text v0.14.0
+go: downloading golang.org/x/sys v0.36.0
+go: downloading github.com/mattn/go-runewidth v0.0.9
+go: downloading github.com/go-logr/logr v1.2.3
+go: downloading modernc.org/libc v1.66.10
+go: downloading github.com/ncruces/go-strftime v0.1.9
+go: downloading golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b
+?   	github.com/leef-l/easymvp/apps/core	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/acceptance	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/acceptance/v1	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/audit	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/audit/v1	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/plan	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/plan/v1	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/projects	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/projects/v1	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/replay	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/replay/v1	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/runtime	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/runtime/v1	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/system	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/system/v1	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/workspace	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/api/workspace/v1	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/cmd	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/consts	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/controller/acceptance	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/controller/audit	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/controller/plan	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/controller/projects	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/controller/replay	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/controller/runtime	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/controller/system	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/controller/workspace	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/dao	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/dao/internal	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/model/braincontracts	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/model/do	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/model/entity	[no test files]
+?   	github.com/leef-l/easymvp/apps/core/internal/packed	[no test files]
+ok  	github.com/leef-l/easymvp/apps/core/internal/service	0.399s

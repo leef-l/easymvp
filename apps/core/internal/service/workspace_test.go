@@ -18,10 +18,22 @@ func (s *workspaceTestProjectsStub) CreateProject(ctx context.Context, req Creat
 	return nil, nil
 }
 
+func (s *workspaceTestProjectsStub) UpdateProject(ctx context.Context, req UpdateProjectCommand) (*projectsv1.UpdateProjectRes, error) {
+	_ = ctx
+	_ = req
+	return nil, nil
+}
+
 func (s *workspaceTestProjectsStub) GetProjectWorkspaceView(ctx context.Context, projectID string) (*projectsv1.ProjectWorkspaceViewRes, error) {
 	_ = ctx
 	s.lastProjectID = projectID
 	return s.result, nil
+}
+
+func (s *workspaceTestProjectsStub) DeleteProject(ctx context.Context, projectID string) (*projectsv1.DeleteProjectRes, error) {
+	_ = ctx
+	_ = projectID
+	return nil, nil
 }
 
 func TestWorkspaceGetProjectWorkspaceViewDelegatesToProjects(t *testing.T) {

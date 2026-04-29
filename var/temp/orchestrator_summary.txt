@@ -1,0 +1,88 @@
+=== orchestrator.go ===
+STRUCTS:
+type BrainRegistration struct {
+	// Kind is the brain role identifier (e.g. "code", "quant", "data").
+	Kind agent.Kind `json:"kind"`
+
+	// Binary is an explicit path to the sidecar binary. When non-empty it
+	// takes precedence over the BinResolver. This allows third-party brains
+	// to be registered purely through configuration.
+	Binary string `json:"binary,omitempty"`
+
+	// Args are optional extra argv entries passed to the sidecar process.
+	Args []string `json:"args,omitempty"`
+
+	// Env are optional KEY=VALUE pairs appended to the sidecar environment.
+	Env []string `json:"env,omitempty"`
+
+	// Model is the LLM model ID to use for this brain via LLMProxy.
+	// An empty string means the brain does not use LLM proxying.
+	Model string `json:"model,omitempty"`
+
+	// AutoStart launches the sidecar immediately on Orchestrator creation
+	// rather than lazily on first delegation.
+	AutoStart bool `json:"auto_start,omitempty"`
+}
+type OrchestratorConfig struct {
+	Brains []BrainRegistration `json:"brains,omitempty"`
+}
+type Orchestrator struct {
+	runner      BrainRunner
+	llmProxy    *LLMProxy
+	binResolver func(kind agent.Kind) (string, error)
+	toolCalls   SpecialistToolCallAuthorizer
+
+	// contextEngine 是可选的上下文装配引擎。当非 nil 时，Delegate 在
+	// 发送消息给下游 brain 之前会调用 Assemble() 装配和压缩上下文。
+	contextEngine ContextEngine
+
+	// capMatcher 是可选的能力匹配器。当非 nil 且 TargetKind 为空时，
+	// Delegate 会通过三阶段匹配算法自动选择最佳 brain。
+	capMatcher *CapabilityMatcher
+
+	// learner 是可选的自适应学习引擎。当非 nil 时，
+	// Delegate 在任务完成后记录结果用于 L1 能力画像更新。
+	learner *LearningEngine
+
+	// approver 是可选的语义审批器。当非 nil 时，HandleSpecialistCallToolFrom
+	// 优先使用它代替 toolCalls（静态白名单），实现基于操作语义的授权决策。
+	approver SemanticApprover
+
+	// pool 是可选的共享进程池。当非 nil 时，getOrStartSidecar 会
+	// 委托给 pool.GetBrain，使多个 Run 共享同一个全局池。
+	pool BrainPool
+
+	// available records which sidecar binaries exist on disk.
+	available map[agent.Kind]bool
+
+	// registrations stores BrainRegistration for config-driven brains.
+	registrations map[agent.Kind]*BrainRegistration
+
+	// reverseHandlersRegistered tracks which RPC sessions have already had
+	// reverse-RPC handlers installed. BrainPool may return the same live
+	// sidecar process on repeated delegation, so registration must be
+	// per-session and idempotent.
+	reverseHandlersRegistered map[protocol.BidirRPC]struct{}
+type BrainStatus struct {
+	Kind    agent.Kind `json:"kind"`
+	Running bool       `json:"running"`
+	Binary  string     `json:"binary,omitempty"`
+}
+
+FUNCS:
+func NewOrchestrator(runner BrainRunner, llmProxy *LLMProxy, binResolver func(agent.Kind) (string, error)) *Orchestrator {
+func NewOrchestratorWithConfig(runner BrainRunner, llmProxy *LLMProxy, binResolver func(agent.Kind) (string, error), cfg OrchestratorConfig) *Orchestrator {
+func WithContextEngine(ce ContextEngine) OrchestratorOption {
+func WithCapabilityMatcher(cm *CapabilityMatcher) OrchestratorOption {
+func WithLearningEngine(le *LearningEngine) OrchestratorOption {
+func WithSemanticApprover(sa SemanticApprover) OrchestratorOption {
+func NewOrchestratorWithPool(pool BrainPool, runner BrainRunner, llmProxy *LLMProxy, binResolver func(agent.Kind) (string, error), cfg OrchestratorConfig, opts ...OrchestratorOption) *Orchestrator {
+func (o *Orchestrator) syncFromPoolCatalog() {
+func (o *Orchestrator) probeRegistration(reg *BrainRegistration, binResolver func(agent.Kind) (string, error)) {
+func (o *Orchestrator) probeBinResolver(kind agent.Kind, binResolver func(agent.Kind) (string, error)) {
+func (o *Orchestrator) syncLLMModels() {
+func (o *Orchestrator) AutoStartBrains(ctx context.Context) {
+func (o *Orchestrator) StartBrain(ctx context.Context, kind agent.Kind) error {
+func (o *Orchestrator) StopBrain(ctx context.Context, kind agent.Kind) error {
+func (o *Orchestrator) ListBrains() []BrainStatus {
+

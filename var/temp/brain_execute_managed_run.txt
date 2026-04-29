@@ -1,0 +1,143 @@
+func executeManagedRun(ctx context.Context, req managedRunExecution) (*managedRunOutcome, error) {
+	parentRunID := ""
+	if req.Record != nil {
+		parentRunID = req.Record.ID
+	}
+	ctx = kernel.WithSubtaskContext(ctx, &protocol.SubtaskContext{
+		UserUtterance: req.Prompt,
+		ParentRunID:   parentRunID,
+	})
+	ctx = runtimeaudit.WithSink(ctx, runtimeaudit.SinkFunc(func(sinkCtx context.Context, ev runtimeaudit.Event) {
+		if req.Runtime == nil || req.Runtime.RunStore == nil || req.Record == nil {
+			return
+		}
+		_ = req.Runtime.RunStore.AppendEvent(req.Record.ID, ev.Type, ev.Message, append(json.RawMessage(nil), ev.Data...))
+		if req.EventBus != nil {
+			req.EventBus.Publish(sinkCtx, events.Event{
+				ExecutionID: req.Record.ID,
+				Type:        ev.Type,
+				Data:        append(json.RawMessage(nil), ev.Data...),
+			})
+		}
+	}))
+	_ = req.Runtime.RunStore.AppendEvent(req.Record.ID, "run.started", "run started", json.RawMessage(fmtJSON(map[string]interface{}{
+		"brain":          req.BrainID,
+		"provider":       req.ProviderName,
+		"provider_model": req.ProviderModel,
+	})))
+
+	run := loop.NewRun(
+		req.Record.ID,
+		req.BrainID,
+		managedRunBudget(req.MaxTurns, req.MaxDuration),
+	)
+
+	runner := &loop.Runner{
+		Provider:     req.Provider,
+		ToolRegistry: req.Registry,
+		ToolObserver: &runtimeToolObserver{
+			runtime: req.Runtime,
+			runID:   req.Record.ID,
+		},
+		Sanitizer:         loop.NewMemSanitizer(),
+		LoopDetector:      loop.NewMemLoopDetector(),
+		CacheBuilder:      loop.NewMemCacheBuilder(),
+		BatchPlanner:      req.BatchPlanner,
+		MessageCompressor: req.MessageCompressor,
+		TokenBudget:       req.TokenBudget,
+	}
+
+	opts := loop.RunOptions{
+		System:     []llm.SystemBlock{{Text: req.SystemPrompt, Cache: true}},
+		Tools:      buildToolSchemas(req.Registry),
+		ToolChoice: "auto",
+		MaxTokens:  4096,
+		Stream:     req.Stream,
+	}
+
+	if err := saveRunCheckpoint(ctx, req.Runtime, req.Record, "running", 0, req.Record.ID+"-start"); err != nil {
+		return nil, err
+	}
+
+	result, err := runner.Execute(ctx, run, []llm.Message{
+		{Role: "user", Content: []llm.ContentBlock{{Type: "text", Text: req.Prompt}}},
+	}, opts)
+	if err != nil {
+		errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
+		status := "failed"
+		if ctx.Err() == context.Canceled {
+			status = "cancelled"
+		}
+		_, _ = req.Runtime.RunStore.Finish(req.Record.ID, status, errJSON, err.Error())
+		return nil, err
+	}
+
+	finalTurnIndex := 0
+	finalTurnUUID := req.Record.ID + "-completed"
+	if n := len(result.Turns); n > 0 && result.Turns[n-1] != nil && result.Turns[n-1].Turn != nil {
+		finalTurnIndex = result.Turns[n-1].Turn.Index
+		if result.Turns[n-1].Turn.UUID != "" {
+			finalTurnUUID = result.Turns[n-1].Turn.UUID
+		}
+	}
+
+	finalStatus := string(result.Run.State)
+	if err := saveRunCheckpointWithMessages(ctx, req.Runtime, req.Record, finalStatus, finalTurnIndex, finalTurnUUID, result.FinalMessages, opts.System); err != nil {
+		return nil, err
+	}
+	if err := saveRunUsage(ctx, req.Runtime, req.Record, req.ProviderName, req.ProviderModel, result); err != nil {
+		return nil, err
+	}
+
+	replyText := ""
+	for i := len(result.FinalMessages) - 1; i >= 0; i-- {
+		msg := result.FinalMessages[i]
+		if msg.Role == "assistant" {
+			replyText = extractText(msg.Content)
+			break
+		}
+	}
+
+	planID, err := saveRunPlan(ctx, req.Runtime, req.Record, map[string]interface{}{
+		"run_id":         result.Run.ID,
+		"store_run_id":   req.Record.StoreRunID,
+		"brain_id":       result.Run.BrainID,
+		"prompt":         req.Prompt,
+		"state":          finalStatus,
+		"turns":          result.Run.Budget.UsedTurns,
+		"llm_calls":      result.Run.Budget.UsedLLMCalls,
+		"tool_calls":     result.Run.Budget.UsedToolCalls,
+		"provider":       req.ProviderName,
+		"provider_model": req.ProviderModel,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	summary := map[string]interface{}{
+		"run_id":       result.Run.ID,
+		"store_run_id": req.Record.StoreRunID,
+		"brain_id":     result.Run.BrainID,
+		"state":        finalStatus,
+		"turns":        result.Run.Budget.UsedTurns,
+		"llm_calls":    result.Run.Budget.UsedLLMCalls,
+		"tool_calls":   result.Run.Budget.UsedToolCalls,
+		"elapsed_ms":   result.Run.Budget.ElapsedTime.Milliseconds(),
+		"reply":        replyText,
+		"provider":     req.ProviderName,
+		"plan_id":      planID,
+	}
+	summaryJSON, _ := json.Marshal(summary)
+	if _, err := req.Runtime.RunStore.Finish(req.Record.ID, finalStatus, summaryJSON, ""); err != nil {
+		return nil, err
+	}
+
+	return &managedRunOutcome{
+		Result:      result,
+		ReplyText:   replyText,
+		Summary:     summary,
+		SummaryJSON: summaryJSON,
+		PlanID:      planID,
+		FinalStatus: finalStatus,
+	}, nil
+}

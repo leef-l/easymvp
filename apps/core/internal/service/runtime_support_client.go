@@ -17,6 +17,7 @@ import (
 
 	runtimev1 "github.com/leef-l/easymvp/apps/core/api/runtime/v1"
 	"github.com/leef-l/easymvp/apps/core/internal/dao"
+	"github.com/leef-l/easymvp/apps/core/internal/model/braincontracts"
 	"github.com/leef-l/easymvp/apps/core/internal/model/do"
 	"github.com/leef-l/easymvp/apps/core/internal/model/entity"
 )
@@ -27,21 +28,23 @@ const (
 )
 
 type normalizedStartBrainRunCommand struct {
-	ProjectID string
-	TaskID    string
-	BrainKind string
-	Prompt    string
-	Workdir   string
-	MaxTurns  int
-	Provider  string
+	ProjectID      string
+	TaskID         string
+	BrainKind      string
+	Prompt         string
+	Workdir        string
+	MaxTurns       int
+	Provider       string
+	PermissionMode string // 任务级权限: restricted/default/accept-edits/auto/bypass-permissions
 }
 
 type runtimeCreateRunRequest struct {
-	Prompt      string                  `json:"prompt"`
-	Brain       string                  `json:"brain"`
-	MaxTurns    int                     `json:"max_turns"`
-	Workdir     string                  `json:"workdir,omitempty"`
-	ModelConfig *runtimeModelConfigItem `json:"model_config,omitempty"`
+	Prompt         string                  `json:"prompt"`
+	Brain          string                  `json:"brain"`
+	MaxTurns       int                     `json:"max_turns"`
+	Workdir        string                  `json:"workdir,omitempty"`
+	ModelConfig    *runtimeModelConfigItem `json:"model_config,omitempty"`
+	PermissionMode string                  `json:"permission_mode,omitempty"` // 任务级权限覆盖
 }
 
 type runtimeModelConfigItem struct {
@@ -65,13 +68,14 @@ type runtimeResumeRunResponse struct {
 
 func normalizeStartBrainRunCommand(req StartBrainRunCommand) (*normalizedStartBrainRunCommand, error) {
 	normalized := &normalizedStartBrainRunCommand{
-		ProjectID: strings.TrimSpace(req.ProjectID),
-		TaskID:    strings.TrimSpace(req.TaskID),
-		BrainKind: strings.TrimSpace(req.BrainKind),
-		Prompt:    strings.TrimSpace(req.Prompt),
-		Workdir:   cleanProjectPath(req.Workdir),
-		MaxTurns:  req.MaxTurns,
-		Provider:  strings.TrimSpace(req.Provider),
+		ProjectID:      strings.TrimSpace(req.ProjectID),
+		TaskID:         strings.TrimSpace(req.TaskID),
+		BrainKind:      strings.TrimSpace(req.BrainKind),
+		Prompt:         strings.TrimSpace(req.Prompt),
+		Workdir:        cleanProjectPath(req.Workdir),
+		MaxTurns:       req.MaxTurns,
+		Provider:       strings.TrimSpace(req.Provider),
+		PermissionMode: strings.TrimSpace(req.PermissionMode),
 	}
 	if normalized.ProjectID == "" {
 		return nil, gerror.New("project id is required")
@@ -128,14 +132,36 @@ func runtimeHealthCheck(ctx context.Context, client *http.Client, baseURL string
 	return nil
 }
 
+// mapEasyMVPBrainKindToBrainV3 translates EasyMVP internal brain kind names
+// to brain-v3 recognized kind names. This is the adapter layer for P1-07.
+func mapEasyMVPBrainKindToBrainV3(kind string) string {
+	switch strings.TrimSpace(strings.ToLower(kind)) {
+	case "easymvp-brain", "easymvp":
+		return "easymvp"
+	case "central":
+		return "central"
+	case "code":
+		return "code"
+	case "browser":
+		return "browser"
+	case "verifier":
+		return "verifier"
+	case "fault":
+		return "fault"
+	default:
+		return kind
+	}
+}
+
 func runtimeCreateRun(ctx context.Context, client *http.Client, baseURL string, reqData *normalizedStartBrainRunCommand) (*runtimeCreateRunResponse, error) {
 	body := &runtimeCreateRunRequest{
-		Prompt:   reqData.Prompt,
-		Brain:    reqData.BrainKind,
-		MaxTurns: reqData.MaxTurns,
-		Workdir:  reqData.Workdir,
+		Prompt:         reqData.Prompt,
+		Brain:          mapEasyMVPBrainKindToBrainV3(reqData.BrainKind),
+		MaxTurns:       reqData.MaxTurns,
+		Workdir:        reqData.Workdir,
+		PermissionMode: reqData.PermissionMode,
 	}
-	if reqData.Provider != "" {
+	if reqData.Provider != "" && reqData.Provider != "default" {
 		body.ModelConfig = &runtimeModelConfigItem{Provider: reqData.Provider}
 	}
 
@@ -842,6 +868,33 @@ func updateProjectTaskRuntimeStatus(ctx context.Context, taskID string, runStatu
 	return nil
 }
 
+func maybeUpdateProjectStatusForExecution(ctx context.Context, projectID string) error {
+	if strings.TrimSpace(projectID) == "" {
+		return nil
+	}
+	db, closeFn, err := openProjectDatabase(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+
+	var currentStatus string
+	if err := db.QueryRowContext(ctx, "SELECT status FROM "+dao.Projects.Table()+" WHERE id = ?", projectID).Scan(&currentStatus); err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return gerror.Wrap(err, "query project status for execution transition failed")
+	}
+
+	switch currentStatus {
+	case "created", "planning", "plan_draft", "plan_review", "review", "compiled", "execution_ready":
+		if err = updateProjectStatus(ctx, projectID, "executing"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func mapBrainRunStatus(status string) string {
 	switch normalizeRuntimeStatus(status) {
 	case "queued", "waiting", "pending", "accepted", "created":
@@ -873,6 +926,50 @@ func isTerminalBrainRunStatus(status string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// buildRunResultFromBrainState normalizes BrainRunState into the formal RunResult DTO.
+// This is the adapter boundary where raw brain-v3 output becomes a structured domain object.
+func buildRunResultFromBrainState(state *BrainRunState, taskID, brainKind string) braincontracts.RunResult {
+	if state == nil {
+		return braincontracts.RunResult{}
+	}
+	mappedStatus := mapBrainRunStatus(state.Status)
+	return braincontracts.RunResult{
+		RunID:     state.RunID,
+		TaskID:    taskID,
+		BrainKind: brainKind,
+		Status:    mappedStatus,
+		StartedAt: state.CreatedAt,
+		Summary:   "",
+	}
+}
+
+// buildDeliveryResultFromBrainState attempts to derive a DeliveryResult from brain run output.
+// If the run result contains artifact/delivery information, it is extracted here.
+func buildDeliveryResultFromBrainState(state *BrainRunState, taskID string) braincontracts.DeliveryResult {
+	if state == nil {
+		return braincontracts.DeliveryResult{TaskID: taskID, DeliveryStatus: "not_delivered", ContractSatisfied: false}
+	}
+	mappedStatus := mapBrainRunStatus(state.Status)
+	deliveryStatus := "not_delivered"
+	contractSatisfied := false
+	switch mappedStatus {
+	case "run_succeeded":
+		deliveryStatus = "delivered"
+		contractSatisfied = true
+	case "run_failed", "run_unsupported", "run_denied":
+		deliveryStatus = "not_delivered"
+		contractSatisfied = false
+	case "run_cancelled":
+		deliveryStatus = "not_delivered"
+		contractSatisfied = false
+	}
+	return braincontracts.DeliveryResult{
+		TaskID:            taskID,
+		DeliveryStatus:    deliveryStatus,
+		ContractSatisfied: contractSatisfied,
 	}
 }
 

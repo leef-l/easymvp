@@ -28,3 +28,7 @@ docker/dev/bin/
 # Claude Code
 .claude/
 .aider*
+
+# Legacy directories (removed from active codebase, kept in git history)
+admin-go/
+vue-vben-admin/

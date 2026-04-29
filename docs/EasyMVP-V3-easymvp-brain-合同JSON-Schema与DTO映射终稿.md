@@ -25,6 +25,8 @@
 
 ## 1.1 与 `brain-v3` 最新工具协议的对齐要求
 
+> ✅ **已实现**（2026-04-27）：`BrainContractEnvelope` 已补齐 `normalized_status` 字段；所有 handler 返回标准 envelope；`unsupported_or_denied` 在 `executeTypedContract` 中做硬校验，禁止伪装成成功。
+
 合同设计必须承认 `brain-v3` 当前的工具协议与能力边界：
 
 1. 内置脑通过结构化 `tools/list` 暴露 `name / description / input_schema / output_schema`
@@ -34,6 +36,8 @@
 5. 合同 Schema 不得要求调用方传入具体内置脑工具名或原始工具 payload
 
 ## 2. 统一 Envelope Schema
+
+> ✅ **已实现**（2026-04-27）：Go DTO `BrainContractEnvelope` 已包含 `normalized_status`；所有 8 个 handler 及 fallback 均返回标准 envelope 格式。
 
 ```json
 {

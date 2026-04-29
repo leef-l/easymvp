@@ -11,4 +11,5 @@ type IPlanV1 interface {
 	RepairDraft(ctx context.Context, req *v1.RepairDraftReq) (res *v1.RepairDraftRes, err error)
 	CreateRepairDraft(ctx context.Context, req *v1.CreateRepairDraftReq) (res *v1.CreateRepairDraftRes, err error)
 	CompilePlan(ctx context.Context, req *v1.CompilePlanReq) (res *v1.CompilePlanRes, err error)
+	RedesignPlan(ctx context.Context, req *v1.RedesignPlanReq) (res *v1.RedesignPlanRes, err error)
 }

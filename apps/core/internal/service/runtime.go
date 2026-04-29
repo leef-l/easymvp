@@ -2,26 +2,30 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 
 	runtimev1 "github.com/leef-l/easymvp/apps/core/api/runtime/v1"
+	"github.com/leef-l/easymvp/apps/core/internal/model/braincontracts"
 	"github.com/leef-l/easymvp/apps/core/internal/model/do"
 	"github.com/leef-l/easymvp/apps/core/internal/model/entity"
 )
 
 type StartBrainRunCommand struct {
-	ProjectID string
-	TaskID    string
-	BrainKind string
-	Prompt    string
-	Workdir   string
-	MaxTurns  int
-	Provider  string
+	ProjectID      string
+	TaskID         string
+	BrainKind      string
+	Prompt         string
+	Workdir        string
+	MaxTurns       int
+	Provider       string
+	PermissionMode string // 任务级权限: restricted/default/accept-edits/auto/bypass-permissions
 }
 
 type BrainRunStartResult struct {
@@ -38,6 +42,17 @@ type BrainRunState struct {
 	Prompt      string          `json:"prompt,omitempty"`
 	Result      json.RawMessage `json:"result,omitempty"`
 	CreatedAt   string          `json:"created_at,omitempty"`
+}
+
+// ToRunResult normalizes BrainRunState into the formal RunResult DTO.
+// This is the adapter boundary: raw brain-v3 output → structured domain object.
+func (s *BrainRunState) ToRunResult(taskID string) braincontracts.RunResult {
+	return buildRunResultFromBrainState(s, taskID, s.Brain)
+}
+
+// ToDeliveryResult attempts to derive a DeliveryResult from the brain run state.
+func (s *BrainRunState) ToDeliveryResult(taskID string) braincontracts.DeliveryResult {
+	return buildDeliveryResultFromBrainState(s, taskID)
 }
 
 type BrainRunResumeResult struct {
@@ -71,12 +86,14 @@ var localRuntime IRuntime
 
 type sRuntime struct {
 	httpClient *http.Client
+	loadGuard  *SystemLoadGuard
 }
 
 func Runtime() IRuntime {
 	if localRuntime == nil {
 		localRuntime = &sRuntime{
 			httpClient: &http.Client{Timeout: 15 * time.Second},
+			loadGuard:  NewSystemLoadGuard(),
 		}
 	}
 	return localRuntime
@@ -89,6 +106,27 @@ func (s *sRuntime) CheckHealth(ctx context.Context) error {
 	}
 	if err = runtimeHealthCheck(ctx, s.httpClient, baseURL); err != nil {
 		return wrapRuntimeError(runtimeErrorCodeUnavailable, "brain serve is unavailable", err)
+	}
+	return nil
+}
+
+// validateReworkReadyForExecution checks whether a project in "reworking" status
+// is ready to return to "executing". Maps Engineering Cybernetics ch.4 / ch.11:
+// reworking → executing requires RepairPlanDraft to be ready.
+func validateReworkReadyForExecution(ctx context.Context, db *sql.DB, projectID string) error {
+	draft, err := getLatestRepairDraftForProject(ctx, projectID)
+	if err != nil {
+		return gerror.Wrap(err, "load repair draft for rework validation failed")
+	}
+	if draft == nil {
+		return gerror.New("project is in reworking status but no RepairPlanDraft exists; cannot continue to execution")
+	}
+	if strings.TrimSpace(draft.RepairPlanJSON) == "" || draft.RepairPlanJSON == "{}" {
+		return gerror.New("RepairPlanDraft exists but updated_tasks are not yet defined; cannot continue to execution")
+	}
+	// P0-03: hard rule — human checkpoint must be cleared before re-execution.
+	if draft.HumanCheckpointRequired {
+		return gerror.New("RepairPlanDraft requires human_checkpoint; cannot auto-continue to execution")
 	}
 	return nil
 }
@@ -108,6 +146,11 @@ func (s *sRuntime) Healthz(ctx context.Context) (*runtimev1.HealthzRes, error) {
 }
 
 func (s *sRuntime) StartBrainRun(ctx context.Context, req StartBrainRunCommand) (*BrainRunStartResult, error) {
+	// P1-08: load guard check before starting any new resource-intensive run.
+	if s.loadGuard != nil && !s.loadGuard.AllowRun() {
+		return nil, wrapRuntimeError(runtimeErrorCodeUnavailable, "system load too high: new run start throttled by load guard", nil)
+	}
+
 	normalized, err := normalizeStartBrainRunCommand(req)
 	if err != nil {
 		return nil, err
@@ -122,6 +165,25 @@ func (s *sRuntime) StartBrainRun(ctx context.Context, req StartBrainRunCommand) 
 			RunID:     reusable.BrainRunId,
 			Status:    reusable.RunStatus,
 		}, nil
+	}
+
+	db, closeFn, err := openProjectDatabase(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer closeFn()
+	project, err := getProjectByID(ctx, db, normalized.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if err = validateProjectStatusTransition(project.Status, []string{"compiled", "execution_ready", "executing", "running", "acceptance", "reworking"}); err != nil {
+		return nil, err
+	}
+	// Engineering Cybernetics ch.4: reworking → executing requires RepairPlanDraft to be ready
+	if project.Status == "reworking" {
+		if err = validateReworkReadyForExecution(ctx, db, project.Id); err != nil {
+			return nil, err
+		}
 	}
 
 	baseURL, err := runtimeBaseURL(ctx)
@@ -182,6 +244,9 @@ func (s *sRuntime) StartBrainRun(ctx context.Context, req StartBrainRunCommand) 
 	if err = updateProjectTaskRuntimeStatus(ctx, normalized.TaskID, mappedStatus); err != nil {
 		return nil, err
 	}
+	if err = maybeUpdateProjectStatusForExecution(ctx, normalized.ProjectID); err != nil {
+		return nil, err
+	}
 
 	return &BrainRunStartResult{
 		BindingID: bindingID,
@@ -194,6 +259,13 @@ func (s *sRuntime) StartRunCommand(ctx context.Context, req StartBrainRunCommand
 	started, err := s.StartBrainRun(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	if auditErr := insertAuditLog(ctx, req.ProjectID, "runtime.run.started", "user:local_operator", "Brain run started", map[string]any{
+		"binding_id": started.BindingID,
+		"task_id":    req.TaskID,
+		"brain_kind": req.BrainKind,
+	}); auditErr != nil {
+		g.Log().Errorf(ctx, "insert audit log failed: %v", auditErr)
 	}
 	bindingView, err := s.GetRunBindingView(ctx, started.BindingID)
 	if err != nil {
@@ -344,6 +416,9 @@ func (s *sRuntime) CancelRunBindingCommand(ctx context.Context, bindingID string
 	if err != nil {
 		return nil, err
 	}
+	if auditErr := insertAuditLog(ctx, binding.ProjectId, "runtime.run.cancelled", "user:local_operator", "Brain run cancelled", map[string]any{"binding_id": bindingID}); auditErr != nil {
+		g.Log().Errorf(ctx, "insert audit log failed: %v", auditErr)
+	}
 	return &runtimev1.CancelRunBindingRes{
 		CommandID:  newResourceID("cmd"),
 		Accepted:   true,
@@ -371,6 +446,9 @@ func (s *sRuntime) SyncBrainRunBinding(ctx context.Context, bindingID string) (*
 		return nil, wrapRuntimeError(runtimeErrorCodeSyncRun, "update brain run binding status failed", err)
 	}
 	if nextStatus != binding.RunStatus {
+		// Build formal RunResult and DeliveryResult DTOs at the adapter boundary
+		runResult := runState.ToRunResult(binding.TaskId)
+		deliveryResult := runState.ToDeliveryResult(binding.TaskId)
 		if err = appendRunEventIndex(
 			ctx,
 			binding.ProjectId,
@@ -384,6 +462,8 @@ func (s *sRuntime) SyncBrainRunBinding(ctx context.Context, bindingID string) (*
 				"runtime_status":  runState.Status,
 				"mapped_status":   nextStatus,
 				"previous_status": binding.RunStatus,
+				"run_result":      runResult,
+				"delivery_result": deliveryResult,
 			},
 		); err != nil {
 			return nil, wrapRuntimeError(runtimeErrorCodeSyncRun, "append run status event failed", err)
@@ -441,6 +521,9 @@ func (s *sRuntime) SyncRunBindingCommand(ctx context.Context, bindingID string) 
 		return nil, err
 	}
 	after := &bindingView.RunBinding
+	if auditErr := insertAuditLog(ctx, before.ProjectId, "runtime.run.synced", "user:local_operator", "Brain run synced", map[string]any{"binding_id": bindingID}); auditErr != nil {
+		g.Log().Errorf(ctx, "insert audit log failed: %v", auditErr)
+	}
 	handleAutomaticRunTerminalActions(ctx, before, after)
 	return &runtimev1.SyncRunBindingRes{
 		RunBinding: bindingView.RunBinding,
@@ -598,6 +681,9 @@ func (s *sRuntime) ResumeRunBindingCommand(ctx context.Context, bindingID string
 	bindingView, err := s.GetRunBindingView(ctx, bindingID)
 	if err != nil {
 		return nil, err
+	}
+	if auditErr := insertAuditLog(ctx, binding.ProjectId, "runtime.run.resumed", "user:local_operator", "Brain run resumed", map[string]any{"binding_id": bindingID}); auditErr != nil {
+		g.Log().Errorf(ctx, "insert audit log failed: %v", auditErr)
 	}
 	return &runtimev1.ResumeRunBindingRes{
 		CommandID:  newResourceID("cmd"),

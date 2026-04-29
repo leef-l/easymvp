@@ -14,6 +14,9 @@ type AcceptanceRuns struct {
 	FunctionalStatus      string `json:"functionalStatus"      orm:"functional_status"       ` //
 	ProductionStatus      string `json:"productionStatus"      orm:"production_status"       ` //
 	ManualReleaseRequired int    `json:"manualReleaseRequired" orm:"manual_release_required" ` //
+	BrowserRunID          string `json:"browserRunId"          orm:"browser_run_id"          ` //
+	VerifierRunID         string `json:"verifierRunId"         orm:"verifier_run_id"         ` //
+	ValidationResultsJSON string `json:"validationResultsJson" orm:"validation_results_json" ` //
 	CreatedAt             string `json:"createdAt"             orm:"created_at"              ` //
 	FinishedAt            string `json:"finishedAt"            orm:"finished_at"             ` //
 }

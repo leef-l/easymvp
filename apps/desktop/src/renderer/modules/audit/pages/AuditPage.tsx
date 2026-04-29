@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { Link, useNavigate } from "react-router-dom";
 import { apiGet } from "@/shared/lib/api";
 import { useProjectState } from "@/shared/lib/project";
 import { useQuery } from "@/shared/lib/query";
@@ -7,15 +8,37 @@ import type { AuditLogsView } from "@/shared/lib/types";
 import { QueryPanel } from "@/shared/ui/QueryPanel";
 
 export function AuditPage() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
   const { projectId, routes, searchParams, buildRoute } = useProjectState();
+
+  if (!projectId) {
+    return (
+      <section className="placeholder-page">
+        <div className="empty-state-panel">
+          <h4>{t("audit.noProjectTitle")}</h4>
+          <p>{t("audit.noProjectDescription")}</p>
+          <div className="action-row">
+            <button className="primary-button" onClick={() => navigate("/projects")}>
+              {t("audit.goToProjects")}
+            </button>
+            <button className="secondary-button" onClick={() => navigate("/settings")}>
+              {t("settings.createProject")}
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
   const runFromUrl = searchParams.get("run")?.trim() || "";
   const taskFromUrl = searchParams.get("task")?.trim() || "";
   const [eventTypeFilter, setEventTypeFilter] = useState("all");
   const [actorFilter, setActorFilter] = useState("all");
   const [searchTerm, setSearchTerm] = useState(runFromUrl || taskFromUrl);
+  const [retryTick, setRetryTick] = useState(0);
   const state = useQuery(
     () => apiGet<AuditLogsView>(`/api/v3/projects/${encodeURIComponent(projectId)}/audit-logs?limit=50`),
-    [projectId],
+    [projectId, retryTick],
   );
   const eventTypeOptions = useMemo(() => buildOptions(state.data?.items.map((item) => item.event_type) ?? []), [state.data?.items]);
   const actorOptions = useMemo(() => buildOptions(state.data?.items.map((item) => item.actor_kind) ?? []), [state.data?.items]);
@@ -42,20 +65,20 @@ export function AuditPage() {
       refreshing={state.refreshing}
       stale={state.stale}
       error={state.error}
-      title="Audit"
-      onRetry={() => window.location.reload()}
-      secondaryActionLabel="Open Diagnostics"
-      onSecondaryAction={() => window.location.assign(routes.diagnostics)}
-      recoveryMessage="Audit exposes the persisted project log stream backed by current audit facts."
+      title={t("audit.title")}
+      onRetry={() => setRetryTick((v) => v + 1)}
+      secondaryActionLabel={t("audit.openDiagnostics")}
+      onSecondaryAction={() => navigate(routes.diagnostics)}
+      recoveryMessage={t("audit.recovery")}
     >
       {state.data ? (
         <section className="dashboard-page">
           <div className="dashboard-intro">
             <div>
-              <p className="placeholder-section">Audit</p>
-              <h3 className="placeholder-title">Project audit log</h3>
+              <p className="placeholder-section">{t("audit.title")}</p>
+              <h3 className="placeholder-title">{t("audit.subtitle")}</h3>
               <p className="placeholder-description">
-                Showing the latest persisted project audit records for {projectId}.
+                {t("audit.description", { projectId })}
               </p>
             </div>
             <div className="summary-stack">
@@ -72,7 +95,7 @@ export function AuditPage() {
             </div>
             <div className="toolbar-filters">
               <label className="filter-field">
-                <span>Event Type</span>
+                <span>{t("audit.eventType")}</span>
                 <select className="project-input" value={eventTypeFilter} onChange={(event) => setEventTypeFilter(event.target.value)}>
                   <option value="all">all</option>
                   {eventTypeOptions.map((item) => (
@@ -83,7 +106,7 @@ export function AuditPage() {
                 </select>
               </label>
               <label className="filter-field">
-                <span>Actor</span>
+                <span>{t("audit.actor")}</span>
                 <select className="project-input" value={actorFilter} onChange={(event) => setActorFilter(event.target.value)}>
                   <option value="all">all</option>
                   {actorOptions.map((item) => (
@@ -99,7 +122,7 @@ export function AuditPage() {
                   className="project-input"
                   value={searchTerm}
                   onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder="summary or payload"
+                  placeholder={t("audit.filterPlaceholder")}
                 />
               </label>
             </div>

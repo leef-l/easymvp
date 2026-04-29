@@ -9,8 +9,8 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 
 	acceptancev1 "github.com/leef-l/easymvp/apps/core/api/acceptance/v1"
-	"github.com/leef-l/easymvp/apps/core/internal/dao"
 	"github.com/leef-l/easymvp/apps/core/internal/model/entity"
+	"github.com/leef-l/easymvp/apps/core/internal/repo"
 )
 
 const (
@@ -35,20 +35,23 @@ type acceptanceViewData struct {
 }
 
 type acceptanceAggregate struct {
-	Project             entity.Projects
-	AcceptanceProfile   *acceptanceProfileRecord
-	ProductionProfile   *productionAcceptanceProfileRecord
-	AcceptanceRuns      []entity.AcceptanceRuns
-	LatestAcceptanceRun *entity.AcceptanceRuns
-	PersistedVerdict    *acceptancev1.CompletionVerdictView
-	SurfaceCoverage     []entity.AcceptanceSurfaceCoverage
-	JourneyCoverage     []entity.AcceptanceJourneyCoverage
-	Issues              []entity.AcceptanceIssues
-	EvidenceItems       []entity.EvidenceItems
-	AuditLogs           []entity.AuditLogs
-	Judgements          []entity.AcceptanceJudgements
-	RepairDraft         *repairPlanDraftRecord
-	RunBindings         []entity.BrainRunBindings
+	Project                entity.Projects
+	AcceptanceProfile      *acceptanceProfileRecord
+	ProductionProfile      *productionAcceptanceProfileRecord
+	AcceptanceRuns         []entity.AcceptanceRuns
+	LatestAcceptanceRun    *entity.AcceptanceRuns
+	PersistedVerdict       *acceptancev1.CompletionVerdictView
+	SurfaceCoverage        []entity.AcceptanceSurfaceCoverage
+	JourneyCoverage        []entity.AcceptanceJourneyCoverage
+	Issues                 []entity.AcceptanceIssues
+	EvidenceItems          []entity.EvidenceItems
+	AuditLogs              []entity.AuditLogs
+	Judgements             []entity.AcceptanceJudgements
+	RepairDraft            *repairPlanDraftRecord
+	RunBindings            []entity.BrainRunBindings
+	ChannelAvailable       bool
+	EnvironmentAvailable   bool
+	ChannelUnavailableReason string
 }
 
 func loadAcceptanceViewData(ctx context.Context, projectID string) (*acceptanceViewData, error) {
@@ -70,7 +73,7 @@ func loadAcceptanceViewData(ctx context.Context, projectID string) (*acceptanceV
 		Issues:             buildAcceptanceIssues(aggregate),
 		EvidenceCards:      buildAcceptanceEvidenceCards(aggregate),
 		ReleaseGate:        buildAcceptanceReleaseGate(aggregate),
-		VerificationResult: buildVerificationResultView(aggregate),
+		VerificationResult: buildVerificationResultView(ctx, aggregate),
 		CompletionVerdict:  buildCompletionVerdictView(aggregate),
 		RuntimeEscalation:  buildRuntimeEscalationView(aggregate),
 		FaultSummary:       buildFaultSummaryView(aggregate),
@@ -92,7 +95,7 @@ func loadAcceptanceAggregate(ctx context.Context, db *sql.DB, projectID string) 
 	if err != nil {
 		return nil, err
 	}
-	evidenceItems, err := listProjectEvidenceItems(ctx, db, projectID, acceptanceEvidenceLimit)
+	evidenceItems, err := listProjectEvidenceItems(ctx, projectID, acceptanceEvidenceLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -102,11 +105,13 @@ func loadAcceptanceAggregate(ctx context.Context, db *sql.DB, projectID string) 
 	}
 
 	aggregate := &acceptanceAggregate{
-		Project:        *project,
-		AcceptanceRuns: runs,
-		EvidenceItems:  evidenceItems,
-		AuditLogs:      auditLogs,
-		RunBindings:    runBindings,
+		Project:              *project,
+		AcceptanceRuns:       runs,
+		EvidenceItems:        evidenceItems,
+		AuditLogs:            auditLogs,
+		RunBindings:          runBindings,
+		ChannelAvailable:     true,
+		EnvironmentAvailable: true,
 	}
 	aggregate.AcceptanceProfile, err = getLatestAcceptanceProfile(ctx, db, projectID)
 	if err != nil {
@@ -116,25 +121,25 @@ func loadAcceptanceAggregate(ctx context.Context, db *sql.DB, projectID string) 
 	if err != nil {
 		return nil, err
 	}
-	aggregate.RepairDraft, err = getLatestRepairDraftForProject(ctx, db, projectID)
+	aggregate.RepairDraft, err = getLatestRepairDraftForProject(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
 	if len(runs) > 0 {
 		aggregate.LatestAcceptanceRun = &runs[0]
-		aggregate.SurfaceCoverage, err = listAcceptanceSurfaceCoverageByRun(ctx, db, runs[0].Id)
+		aggregate.SurfaceCoverage, err = listAcceptanceSurfaceCoverageByRun(ctx, runs[0].Id)
 		if err != nil {
 			return nil, err
 		}
-		aggregate.JourneyCoverage, err = listAcceptanceJourneyCoverageByRun(ctx, db, runs[0].Id)
+		aggregate.JourneyCoverage, err = listAcceptanceJourneyCoverageByRun(ctx, runs[0].Id)
 		if err != nil {
 			return nil, err
 		}
-		aggregate.Issues, err = listAcceptanceIssuesByRun(ctx, db, runs[0].Id, acceptanceIssuesLimit)
+		aggregate.Issues, err = listAcceptanceIssuesByRun(ctx, runs[0].Id, acceptanceIssuesLimit)
 		if err != nil {
 			return nil, err
 		}
-		aggregate.Judgements, err = listAcceptanceJudgementsByRun(ctx, db, runs[0].Id)
+		aggregate.Judgements, err = listAcceptanceJudgementsByRun(ctx, runs[0].Id)
 		if err != nil {
 			return nil, err
 		}
@@ -145,7 +150,7 @@ func loadAcceptanceAggregate(ctx context.Context, db *sql.DB, projectID string) 
 			return nil, err
 		}
 	}
-	aggregate.PersistedVerdict, err = loadPersistedCompletionVerdict(ctx, db, projectID, acceptanceRunID(aggregate))
+	aggregate.PersistedVerdict, err = loadPersistedCompletionVerdict(ctx, projectID, acceptanceRunID(aggregate))
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +172,7 @@ func loadAcceptanceAggregateByRunID(ctx context.Context, db *sql.DB, projectID s
 		return aggregate, nil
 	}
 
-	run, err := getAcceptanceRunByID(ctx, db, acceptanceRunID)
+	run, err := getAcceptanceRunByID(ctx, acceptanceRunID)
 	if err != nil {
 		return nil, err
 	}
@@ -176,23 +181,23 @@ func loadAcceptanceAggregateByRunID(ctx context.Context, db *sql.DB, projectID s
 	}
 
 	aggregate.LatestAcceptanceRun = run
-	aggregate.SurfaceCoverage, err = listAcceptanceSurfaceCoverageByRun(ctx, db, run.Id)
+	aggregate.SurfaceCoverage, err = listAcceptanceSurfaceCoverageByRun(ctx, run.Id)
 	if err != nil {
 		return nil, err
 	}
-	aggregate.JourneyCoverage, err = listAcceptanceJourneyCoverageByRun(ctx, db, run.Id)
+	aggregate.JourneyCoverage, err = listAcceptanceJourneyCoverageByRun(ctx, run.Id)
 	if err != nil {
 		return nil, err
 	}
-	aggregate.Issues, err = listAcceptanceIssuesByRun(ctx, db, run.Id, acceptanceIssuesLimit)
+	aggregate.Issues, err = listAcceptanceIssuesByRun(ctx, run.Id, acceptanceIssuesLimit)
 	if err != nil {
 		return nil, err
 	}
-	aggregate.Judgements, err = listAcceptanceJudgementsByRun(ctx, db, run.Id)
+	aggregate.Judgements, err = listAcceptanceJudgementsByRun(ctx, run.Id)
 	if err != nil {
 		return nil, err
 	}
-	aggregate.PersistedVerdict, err = loadPersistedCompletionVerdict(ctx, db, projectID, run.Id)
+	aggregate.PersistedVerdict, err = loadPersistedCompletionVerdict(ctx, projectID, run.Id)
 	if err != nil {
 		return nil, err
 	}
@@ -201,340 +206,34 @@ func loadAcceptanceAggregateByRunID(ctx context.Context, db *sql.DB, projectID s
 
 func loadPersistedCompletionVerdict(
 	ctx context.Context,
-	db *sql.DB,
 	projectID string,
 	acceptanceRunID string,
 ) (*acceptancev1.CompletionVerdictView, error) {
-	query := `
-SELECT
-  decision,
-  final_status,
-  reason,
-  manual_review_required,
-  manual_release_required,
-  manual_release_completed,
-  release_ready,
-  blocker_count,
-  next_action,
-  source_run_id,
-  updated_at,
-  completed,
-  summary
-FROM completion_verdicts
-WHERE project_id = ?`
-
-	args := []any{projectID}
-	if strings.TrimSpace(acceptanceRunID) != "" {
-		query += ` AND acceptance_run_id = ?`
-		args = append(args, acceptanceRunID)
-	}
-	query += `
-ORDER BY updated_at DESC
-LIMIT 1`
-
-	var (
-		view                  acceptancev1.CompletionVerdictView
-		manualReviewRequired  int
-		manualReleaseRequired int
-		manualReleaseDone     int
-		releaseReady          int
-		completed             int
-	)
-	row := db.QueryRowContext(ctx, query, args...)
-	if err := row.Scan(
-		&view.Decision,
-		&view.FinalStatus,
-		&view.Reason,
-		&manualReviewRequired,
-		&manualReleaseRequired,
-		&manualReleaseDone,
-		&releaseReady,
-		&view.BlockerCount,
-		&view.NextAction,
-		&view.SourceRunID,
-		&view.UpdatedAt,
-		&completed,
-		&view.Summary,
-	); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, gerror.Wrap(err, "query persisted completion verdict failed")
-	}
-	view.ManualReviewRequired = manualReviewRequired == 1
-	view.ManualReleaseRequired = manualReleaseRequired == 1
-	view.ManualReleaseCompleted = manualReleaseDone == 1
-	view.ReleaseReady = releaseReady == 1
-	view.Completed = completed == 1
-	return &view, nil
+	return repo.LoadPersistedCompletionVerdict(ctx, projectID, acceptanceRunID)
 }
 
-func getAcceptanceRunByID(ctx context.Context, db *sql.DB, acceptanceRunID string) (*entity.AcceptanceRuns, error) {
-	row := db.QueryRowContext(ctx, `
-SELECT
-  id,
-  project_id,
-  COALESCE(task_id, ''),
-  profile_version,
-  status,
-  functional_status,
-  production_status,
-  manual_release_required,
-  created_at,
-  COALESCE(finished_at, '')
-FROM `+dao.AcceptanceRuns.Table()+`
-WHERE id = ?
-LIMIT 1`, acceptanceRunID)
-
-	var run entity.AcceptanceRuns
-	if err := row.Scan(
-		&run.Id,
-		&run.ProjectId,
-		&run.TaskId,
-		&run.ProfileVersion,
-		&run.Status,
-		&run.FunctionalStatus,
-		&run.ProductionStatus,
-		&run.ManualReleaseRequired,
-		&run.CreatedAt,
-		&run.FinishedAt,
-	); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, gerror.Wrap(err, "query acceptance run by id failed")
-	}
-	return &run, nil
+func getAcceptanceRunByID(ctx context.Context, acceptanceRunID string) (*entity.AcceptanceRuns, error) {
+	return repo.GetAcceptanceRunByID(ctx, acceptanceRunID)
 }
 
-func listAcceptanceIssuesByRun(ctx context.Context, db *sql.DB, acceptanceRunID string, limit int) ([]entity.AcceptanceIssues, error) {
-	query := `
-SELECT
-  id,
-  project_id,
-  acceptance_run_id,
-  severity,
-  issue_kind,
-  blocking,
-  summary,
-  COALESCE(detail_json, ''),
-  created_at
-FROM ` + dao.AcceptanceIssues.Table() + `
-WHERE acceptance_run_id = ?
-ORDER BY created_at DESC
-LIMIT ?`
-
-	rows, err := db.QueryContext(ctx, query, acceptanceRunID, limit)
-	if err != nil {
-		return nil, gerror.Wrap(err, "query acceptance issues by run failed")
-	}
-	defer rows.Close()
-
-	items := make([]entity.AcceptanceIssues, 0, limit)
-	for rows.Next() {
-		var item entity.AcceptanceIssues
-		if err = rows.Scan(
-			&item.Id,
-			&item.ProjectId,
-			&item.AcceptanceRunId,
-			&item.Severity,
-			&item.IssueKind,
-			&item.Blocking,
-			&item.Summary,
-			&item.DetailJson,
-			&item.CreatedAt,
-		); err != nil {
-			return nil, gerror.Wrap(err, "scan acceptance issue by run failed")
-		}
-		items = append(items, item)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, gerror.Wrap(err, "iterate acceptance issues by run failed")
-	}
-	return items, nil
+func listAcceptanceIssuesByRun(ctx context.Context, acceptanceRunID string, limit int) ([]entity.AcceptanceIssues, error) {
+	return repo.ListAcceptanceIssuesByRun(ctx, acceptanceRunID, limit)
 }
 
-func listAcceptanceSurfaceCoverageByRun(ctx context.Context, db *sql.DB, acceptanceRunID string) ([]entity.AcceptanceSurfaceCoverage, error) {
-	query := `
-SELECT
-  id,
-  project_id,
-  acceptance_run_id,
-  surface,
-  coverage_status,
-  evidence_count,
-  created_at,
-  updated_at
-FROM ` + dao.AcceptanceSurfaceCoverage.Table() + `
-WHERE acceptance_run_id = ?
-ORDER BY surface ASC`
-
-	rows, err := db.QueryContext(ctx, query, acceptanceRunID)
-	if err != nil {
-		return nil, gerror.Wrap(err, "query acceptance surface coverage failed")
-	}
-	defer rows.Close()
-
-	items := make([]entity.AcceptanceSurfaceCoverage, 0)
-	for rows.Next() {
-		var item entity.AcceptanceSurfaceCoverage
-		if err = rows.Scan(
-			&item.Id,
-			&item.ProjectId,
-			&item.AcceptanceRunId,
-			&item.Surface,
-			&item.CoverageStatus,
-			&item.EvidenceCount,
-			&item.CreatedAt,
-			&item.UpdatedAt,
-		); err != nil {
-			return nil, gerror.Wrap(err, "scan acceptance surface coverage failed")
-		}
-		items = append(items, item)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, gerror.Wrap(err, "iterate acceptance surface coverage failed")
-	}
-	return items, nil
+func listAcceptanceSurfaceCoverageByRun(ctx context.Context, acceptanceRunID string) ([]entity.AcceptanceSurfaceCoverage, error) {
+	return repo.ListAcceptanceSurfaceCoverageByRun(ctx, acceptanceRunID)
 }
 
-func listAcceptanceJourneyCoverageByRun(ctx context.Context, db *sql.DB, acceptanceRunID string) ([]entity.AcceptanceJourneyCoverage, error) {
-	query := `
-SELECT
-  id,
-  project_id,
-  acceptance_run_id,
-  journey,
-  coverage_status,
-  evidence_count,
-  created_at,
-  updated_at
-FROM ` + dao.AcceptanceJourneyCoverage.Table() + `
-WHERE acceptance_run_id = ?
-ORDER BY journey ASC`
-
-	rows, err := db.QueryContext(ctx, query, acceptanceRunID)
-	if err != nil {
-		return nil, gerror.Wrap(err, "query acceptance journey coverage failed")
-	}
-	defer rows.Close()
-
-	items := make([]entity.AcceptanceJourneyCoverage, 0)
-	for rows.Next() {
-		var item entity.AcceptanceJourneyCoverage
-		if err = rows.Scan(
-			&item.Id,
-			&item.ProjectId,
-			&item.AcceptanceRunId,
-			&item.Journey,
-			&item.CoverageStatus,
-			&item.EvidenceCount,
-			&item.CreatedAt,
-			&item.UpdatedAt,
-		); err != nil {
-			return nil, gerror.Wrap(err, "scan acceptance journey coverage failed")
-		}
-		items = append(items, item)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, gerror.Wrap(err, "iterate acceptance journey coverage failed")
-	}
-	return items, nil
+func listAcceptanceJourneyCoverageByRun(ctx context.Context, acceptanceRunID string) ([]entity.AcceptanceJourneyCoverage, error) {
+	return repo.ListAcceptanceJourneyCoverageByRun(ctx, acceptanceRunID)
 }
 
-func listAcceptanceJudgementsByRun(ctx context.Context, db *sql.DB, acceptanceRunID string) ([]entity.AcceptanceJudgements, error) {
-	query := `
-SELECT
-  id,
-  project_id,
-  acceptance_run_id,
-  judgement_kind,
-  judgement_result,
-  summary,
-  COALESCE(detail_json, ''),
-  created_at
-FROM ` + dao.AcceptanceJudgements.Table() + `
-WHERE acceptance_run_id = ?
-ORDER BY created_at DESC`
-
-	rows, err := db.QueryContext(ctx, query, acceptanceRunID)
-	if err != nil {
-		return nil, gerror.Wrap(err, "query acceptance judgements failed")
-	}
-	defer rows.Close()
-
-	items := make([]entity.AcceptanceJudgements, 0)
-	for rows.Next() {
-		var item entity.AcceptanceJudgements
-		if err = rows.Scan(
-			&item.Id,
-			&item.ProjectId,
-			&item.AcceptanceRunId,
-			&item.JudgementKind,
-			&item.JudgementResult,
-			&item.Summary,
-			&item.DetailJson,
-			&item.CreatedAt,
-		); err != nil {
-			return nil, gerror.Wrap(err, "scan acceptance judgement failed")
-		}
-		items = append(items, item)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, gerror.Wrap(err, "iterate acceptance judgements failed")
-	}
-	return items, nil
+func listAcceptanceJudgementsByRun(ctx context.Context, acceptanceRunID string) ([]entity.AcceptanceJudgements, error) {
+	return repo.ListAcceptanceJudgementsByRun(ctx, acceptanceRunID)
 }
 
-func listProjectEvidenceItems(ctx context.Context, db *sql.DB, projectID string, limit int) ([]entity.EvidenceItems, error) {
-	query := `
-SELECT
-  id,
-  project_id,
-  COALESCE(run_id, ''),
-  COALESCE(surface, ''),
-  COALESCE(journey, ''),
-  evidence_type,
-  file_path,
-  content_hash,
-  file_size,
-  COALESCE(captured_at, ''),
-  created_at
-FROM ` + dao.EvidenceItems.Table() + `
-WHERE project_id = ?
-ORDER BY COALESCE(captured_at, created_at) DESC, created_at DESC
-LIMIT ?`
-
-	rows, err := db.QueryContext(ctx, query, projectID, limit)
-	if err != nil {
-		return nil, gerror.Wrap(err, "query project evidence items failed")
-	}
-	defer rows.Close()
-
-	items := make([]entity.EvidenceItems, 0, limit)
-	for rows.Next() {
-		var item entity.EvidenceItems
-		if err = rows.Scan(
-			&item.Id,
-			&item.ProjectId,
-			&item.RunId,
-			&item.Surface,
-			&item.Journey,
-			&item.EvidenceType,
-			&item.FilePath,
-			&item.ContentHash,
-			&item.FileSize,
-			&item.CapturedAt,
-			&item.CreatedAt,
-		); err != nil {
-			return nil, gerror.Wrap(err, "scan project evidence item failed")
-		}
-		items = append(items, item)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, gerror.Wrap(err, "iterate project evidence items failed")
-	}
-	return items, nil
+func listProjectEvidenceItems(ctx context.Context, projectID string, limit int) ([]entity.EvidenceItems, error) {
+	return repo.ListProjectEvidenceItems(ctx, projectID, limit)
 }
 
 func buildAcceptanceRunView(data *acceptanceAggregate) acceptancev1.AcceptanceRunView {
@@ -627,7 +326,7 @@ func normalizeAcceptanceOverviewStatus(verdict acceptancev1.CompletionVerdictVie
 	}
 }
 
-func buildVerificationResultView(data *acceptanceAggregate) acceptancev1.VerificationResultView {
+func buildVerificationResultView(ctx context.Context, data *acceptanceAggregate) acceptancev1.VerificationResultView {
 	requiredChecks := []string{"acceptance_profile", "coverage_matrix", "evidence_artifacts"}
 	requiredEvidence := []string(nil)
 	if data.ProductionProfile != nil {
@@ -687,19 +386,24 @@ func buildVerificationResultView(data *acceptanceAggregate) acceptancev1.Verific
 		RequiredEvidence: requiredEvidence,
 		MissingEvidence:  missingEvidence,
 		FailedChecks:     failedChecks,
-		VerificationContractJSON: buildVerificationContractJSON(verificationContractParams{
-			ProjectCategory:      strings.TrimSpace(data.Project.ProjectCategory),
-			ProfileVersion:       firstNonEmpty(profileVersionForVerification(data.AcceptanceProfile, data.ProductionProfile), strings.TrimSpace(data.Project.Id)),
-			RequiredChecks:       requiredChecks,
-			RequiredEvidence:     requiredEvidence,
-			ManualReviewRequired: manualReviewRequired,
-			ManualReviewSummary:  summary,
+		VerificationContractJSON: buildVerificationContractJSON(ctx, verificationContractParams{
+			ProjectCategory:          strings.TrimSpace(data.Project.ProjectCategory),
+			ProfileVersion:           firstNonEmpty(profileVersionForVerification(data.AcceptanceProfile, data.ProductionProfile), strings.TrimSpace(data.Project.Id)),
+			RequiredChecks:           requiredChecks,
+			RequiredEvidence:         requiredEvidence,
+			ManualReviewRequired:     manualReviewRequired,
+			ManualReviewSummary:      summary,
+			ChannelUnavailable:       !data.ChannelAvailable,
+			EnvironmentUnavailable:   !data.EnvironmentAvailable,
+			ChannelUnavailableReason: data.ChannelUnavailableReason,
 		}),
-		SourceRunID: firstNonEmpty(strings.TrimSpace(acceptanceRunID(data)), strings.TrimSpace(data.Project.Id)),
-		UpdatedAt:   firstNonEmpty(latestAcceptanceUpdatedAt(data), strings.TrimSpace(data.Project.UpdatedAt)),
-		Decision:    decision,
-		Completed:   completed,
-		Summary:     summary,
+		SourceRunID:          firstNonEmpty(strings.TrimSpace(acceptanceRunID(data)), strings.TrimSpace(data.Project.Id)),
+		UpdatedAt:            firstNonEmpty(latestAcceptanceUpdatedAt(data), strings.TrimSpace(data.Project.UpdatedAt)),
+		Decision:             decision,
+		Completed:            completed,
+		Summary:              summary,
+		ChannelAvailable:     data.ChannelAvailable,
+		EnvironmentAvailable: data.EnvironmentAvailable,
 	}
 }
 
@@ -721,7 +425,7 @@ func buildCompletionVerdictView(data *acceptanceAggregate) acceptancev1.Completi
 		return *data.PersistedVerdict
 	}
 	return deriveCompletionVerdictView(
-		deriveVerificationResultForCompletion(data),
+		deriveVerificationResultForCompletion(context.Background(), data),
 		buildRuntimeEscalationView(data),
 		buildFaultSummaryView(data),
 		acceptanceHasVerificationConflict(data),
@@ -742,8 +446,8 @@ func projectHasBlockingManualReview(items []entity.AcceptanceIssues) bool {
 	return false
 }
 
-func deriveVerificationResultForCompletion(data *acceptanceAggregate) acceptancev1.VerificationResultView {
-	verification := buildVerificationResultView(data)
+func deriveVerificationResultForCompletion(ctx context.Context, data *acceptanceAggregate) acceptancev1.VerificationResultView {
+	verification := buildVerificationResultView(ctx, data)
 	return verification
 }
 
@@ -759,12 +463,15 @@ func deriveCompletionVerdictView(
 	sourceRunID string,
 ) acceptancev1.CompletionVerdictView {
 	manualReviewRequired = manualReviewRequired || manualReleaseRequired
-	decision := "pending"
+	decision := "blocked"
 	finalStatus := ""
 	reason := "Awaiting acceptance adjudication."
 	completed := false
 	manualReleaseCompleted := false
 	nextAction := verification.Decision
+	executorSucceeded := false
+	deliveryVerified := false
+	acceptancePassed := false
 
 	switch verification.Status {
 	case "failed":
@@ -772,18 +479,36 @@ func deriveCompletionVerdictView(
 		finalStatus = "reworking"
 		reason = verification.Summary
 		nextAction = "prepare_rework"
+		executorSucceeded = false
+		deliveryVerified = false
+		acceptancePassed = false
 	case "incomplete":
-		decision = "collect_evidence"
+		decision = "blocked"
 		finalStatus = "accepting"
 		reason = verification.Summary
 		nextAction = "collect_evidence"
+		executorSucceeded = true
+		deliveryVerified = false
+		acceptancePassed = false
 	case "passed":
+		acceptancePassed = true
+		executorSucceeded = true
+		deliveryVerified = true
 		switch {
 		case runtimeEscalation.Status != "none":
 			decision = "manual_checkpoint"
 			finalStatus = "accepting"
-			reason = "Verification passed, but runtime escalation must be resolved before completion."
-			nextAction = "resolve_runtime_escalation"
+			switch runtimeEscalation.ReasonClass {
+			case "channel_unavailable":
+				reason = "Verification passed, but verification channel is unavailable. Switch to fallback channel."
+				nextAction = "switch_verification_channel"
+			case "environment_unavailable":
+				reason = "Verification passed, but execution environment is unavailable. Restore environment before completion."
+				nextAction = "restore_environment"
+			default:
+				reason = "Verification passed, but runtime escalation must be resolved before completion."
+				nextAction = "resolve_runtime_escalation"
+			}
 		case faultSummary.FaultLoopDetected:
 			decision = "manual_checkpoint"
 			finalStatus = "reworking"
@@ -795,7 +520,7 @@ func deriveCompletionVerdictView(
 			reason = "Verification passed, but conflicting blocking signals require manual review before completion."
 			nextAction = "resolve_verification_conflict"
 		case manualReleaseRequired:
-			decision = "manual_review"
+			decision = "manual_checkpoint"
 			finalStatus = "accepting"
 			reason = "Verification passed, but manual release confirmation is still required."
 			nextAction = "apply_manual_release"
@@ -828,10 +553,37 @@ func deriveCompletionVerdictView(
 		UpdatedAt:              updatedAt,
 		Completed:              completed,
 		Summary:                reason,
+		ExecutorSucceeded:      executorSucceeded,
+		DeliveryVerified:       deliveryVerified,
+		AcceptancePassed:       acceptancePassed,
 	}
 }
 
 func buildRuntimeEscalationView(data *acceptanceAggregate) acceptancev1.RuntimeEscalationView {
+	// Check aggregate-level channel/environment unavailability before run bindings.
+	if !data.ChannelAvailable {
+		reason := data.ChannelUnavailableReason
+		if reason == "" {
+			reason = "Preferred verification channel (high_spec_remote) is unavailable."
+		}
+		return acceptancev1.RuntimeEscalationView{
+			Status:      "escalated",
+			ReasonClass: "channel_unavailable",
+			Severity:    "blocking",
+			Action:      "switch_verification_channel",
+			Summary:     reason,
+		}
+	}
+	if !data.EnvironmentAvailable {
+		return acceptancev1.RuntimeEscalationView{
+			Status:      "escalated",
+			ReasonClass: "environment_unavailable",
+			Severity:    "blocking",
+			Action:      "restore_environment",
+			Summary:     "Execution environment is unavailable. Cannot proceed with verification.",
+		}
+	}
+
 	for _, binding := range data.RunBindings {
 		status := normalizeBindingStatus(binding.RunStatus)
 		if !bindingNeedsAttention(status) {
@@ -891,7 +643,7 @@ func buildFaultSummaryView(data *acceptanceAggregate) acceptancev1.FaultSummaryV
 			failedRuns++
 		}
 	}
-	if failedRuns >= 2 && data.RepairDraft != nil {
+	if failedRuns >= 2 {
 		faultLoopDetected = true
 	}
 
@@ -950,6 +702,22 @@ func acceptanceHasVerificationConflict(data *acceptanceAggregate) bool {
 	return isFunctionalPassed(data.LatestAcceptanceRun.FunctionalStatus) ||
 		isProductionReady(data.LatestAcceptanceRun.ProductionStatus) ||
 		data.LatestAcceptanceRun.ManualReleaseRequired == 1
+}
+
+// acceptanceHasFaultLoop detects if the project has entered a rework oscillation
+// (failed acceptance runs >= 2). This maps Engineering Cybernetics ch.11
+// "nonlinear system / limit cycle" into the EasyMVP fault loop concept.
+func acceptanceHasFaultLoop(data *acceptanceAggregate) bool {
+	if data == nil {
+		return false
+	}
+	failedRuns := 0
+	for _, run := range data.AcceptanceRuns {
+		if normalizeAcceptanceRunStatus(run.Status) == "failed" {
+			failedRuns++
+		}
+	}
+	return failedRuns >= 2
 }
 
 func latestAcceptanceUpdatedAt(data *acceptanceAggregate) string {

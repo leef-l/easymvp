@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { apiGet, apiPost } from "@/shared/lib/api";
 import { useProjectState } from "@/shared/lib/project";
 import { useQuery } from "@/shared/lib/query";
@@ -22,6 +23,7 @@ import type {
 import { QueryPanel } from "@/shared/ui/QueryPanel";
 
 export function SettingsPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { projectId, updateProjectId, buildRoute, routes } = useProjectState();
   const [draftProjectId, setDraftProjectId] = useState(projectId);
@@ -33,7 +35,7 @@ export function SettingsPage() {
   const [createdProjectId, setCreatedProjectId] = useState("");
   const [createPayload, setCreatePayload] = useState<CreateProjectPayload>({
     name: "",
-    project_category: "web_app",
+    project_category: "software_dev",
     goal_summary: "",
     workspace_root: "",
     repo_root: "",
@@ -50,8 +52,8 @@ export function SettingsPage() {
   const desktopRuntimeState = useQuery(() => getDesktopRuntimeInfo(), []);
 
   const saveSummary = useMemo(() => {
-    return `Stored project ${projectId} and core ${getStoredCoreBaseUrl()}`;
-  }, [projectId, saveTick]);
+    return t("settings.runtimeNote", { url: getStoredCoreBaseUrl() });
+  }, [projectId, saveTick, t]);
 
   function handleSave() {
     setStoredCoreBaseUrl(draftBaseUrl);
@@ -74,7 +76,7 @@ export function SettingsPage() {
   async function handleOpenDataDirectory(mode: "open" | "show") {
     const targetPath = desktopRuntimeState.data?.dataDirectory?.trim() || "";
     if (!targetPath) {
-      setCreateError("Desktop runtime data directory is unavailable");
+      setCreateError(t("settings.dataDirUnavailable"));
       return;
     }
     const result =
@@ -82,13 +84,18 @@ export function SettingsPage() {
         ? await showDesktopItemInFolder(targetPath)
         : await openDesktopPath(targetPath);
     if (!result.ok) {
-      setCreateError(result.error || "Desktop shell path action failed");
+      setCreateError(result.error || t("settings.pathActionFailed"));
       return;
     }
     setCreateError("");
   }
 
+  const createFormValid = createPayload.name.trim() !== "" && createPayload.goal_summary.trim() !== "";
+
   async function handleCreateProject() {
+    if (!createFormValid) {
+      return;
+    }
     setCreateBusy(true);
     setCreateError("");
     setCreateMessage("");
@@ -107,7 +114,7 @@ export function SettingsPage() {
         navigate(buildRoute("/workspace", { project: nextProjectId }));
       }
       setCreateMessage(
-        `${result.next_action} · ${nextProjectId || "project created"}`,
+        `${result.next_action} · ${nextProjectId || t("settings.projectCreated")}`,
       );
       setCreatePayload({
         name: "",
@@ -119,7 +126,7 @@ export function SettingsPage() {
       setSaveTick((value) => value + 1);
     } catch (error) {
       setCreateError(
-        error instanceof Error ? error.message : "Create project failed",
+        error instanceof Error ? error.message : t("settings.createFailed"),
       );
     } finally {
       setCreateBusy(false);
@@ -130,33 +137,33 @@ export function SettingsPage() {
     <QueryPanel
       loading={systemState.loading || runtimeState.loading}
       error={systemState.error || runtimeState.error}
-      title="Settings"
+      title={t("settings.title")}
       onRetry={() => setSaveTick((value) => value + 1)}
-      secondaryActionLabel="Open Diagnostics"
+      secondaryActionLabel={t("settings.openDiagnostics")}
       onSecondaryAction={() => navigate(routes.diagnostics)}
-      recoveryMessage="If health checks fail, verify the core base URL and use diagnostics to inspect runtime connectivity."
+      recoveryMessage={t("settings.recovery")}
     >
       {systemState.data && runtimeState.data ? (
         <section className="dashboard-page">
           <div className="dashboard-intro">
             <div>
-              <p className="placeholder-section">Settings</p>
-              <h3 className="placeholder-title">Local workbench preferences</h3>
+              <p className="placeholder-section">{t("settings.section")}</p>
+              <h3 className="placeholder-title">{t("settings.subtitle")}</h3>
               <p className="placeholder-description">{saveSummary}</p>
             </div>
             <button className="primary-button" onClick={handleSave}>
-              Save and refresh
+              {t("settings.save")}
             </button>
           </div>
 
           <div className="content-grid">
             <section className="data-panel">
               <div className="panel-header">
-                <h3>Workbench Defaults</h3>
+                <h3>{t("settings.defaults")}</h3>
               </div>
               <div className="form-grid">
                 <label className="form-field">
-                  <span>Project ID</span>
+                  <span>{t("settings.projectId")}</span>
                   <input
                     className="project-input"
                     value={draftProjectId}
@@ -164,7 +171,7 @@ export function SettingsPage() {
                   />
                 </label>
                 <label className="form-field">
-                  <span>Core Base URL</span>
+                  <span>{t("settings.coreUrl")}</span>
                   <input
                     className="project-input"
                     value={draftBaseUrl}
@@ -175,54 +182,53 @@ export function SettingsPage() {
               {desktopRuntimeState.data ? (
                 <div className="runtime-note">
                   <div className="runtime-note-header">
-                    <strong>Desktop runtime</strong>
+                    <strong>{t("settings.runtime")}</strong>
                     <span className="status-pill">
                       {desktopRuntimeState.data.source}
                     </span>
                   </div>
                   <div className="runtime-grid">
                     <div className="runtime-field">
-                      <span>Launch mode</span>
+                      <span>{t("settings.launchMode")}</span>
                       <strong>{desktopRuntimeState.data.launchMode}</strong>
                     </div>
                     <div className="runtime-field">
-                      <span>Packaged</span>
+                      <span>{t("settings.packaged")}</span>
                       <strong>
-                        {desktopRuntimeState.data.packaged ? "yes" : "no"}
+                        {desktopRuntimeState.data.packaged ? t("yes") : t("no")}
                       </strong>
                     </div>
                     <div className="runtime-field runtime-field-wide">
-                      <span>Runtime core base URL</span>
+                      <span>{t("settings.runtimeCoreUrl")}</span>
                       <strong>{desktopRuntimeState.data.coreBaseUrl}</strong>
                     </div>
                     <div className="runtime-field">
-                      <span>Core probe</span>
+                      <span>{t("settings.coreProbe")}</span>
                       <strong>{desktopRuntimeState.data.coreStatus}</strong>
                     </div>
                     <div className="runtime-field">
-                      <span>HTTP status</span>
+                      <span>{t("settings.httpStatus")}</span>
                       <strong>
                         {desktopRuntimeState.data.coreHttpStatus || "n/a"}
                       </strong>
                     </div>
                     <div className="runtime-field">
-                      <span>Platform</span>
+                      <span>{t("settings.platform")}</span>
                       <strong>{desktopRuntimeState.data.platform}</strong>
                     </div>
                     <div className="runtime-field">
-                      <span>Version</span>
+                      <span>{t("settings.version")}</span>
                       <strong>{desktopRuntimeState.data.version}</strong>
                     </div>
                     <div className="runtime-field">
-                      <span>Core manager</span>
+                      <span>{t("settings.coreManager")}</span>
                       <strong>
                         {desktopRuntimeState.data.coreManagerStatus}
                       </strong>
                     </div>
                   </div>
                   <p className="muted-copy">
-                    Renderer override currently resolves to{" "}
-                    {getStoredCoreBaseUrl()}.
+                    {t("settings.runtimeNote", { url: getStoredCoreBaseUrl() })}
                   </p>
                   {desktopRuntimeState.data.coreError ? (
                     <p className="error-copy">
@@ -245,18 +251,18 @@ export function SettingsPage() {
 
             <section className="data-panel">
               <div className="panel-header">
-                <h3>Create Project</h3>
+                <h3>{t("settings.createProject")}</h3>
                 <span className="status-pill">
                   {createBusy
-                    ? "creating"
+                    ? t("settings.creating")
                     : createdProjectId
-                      ? "created"
-                      : "ready"}
+                      ? t("settings.created")
+                      : t("settings.ready")}
                 </span>
               </div>
               <div className="form-grid">
                 <label className="form-field">
-                  <span>Name</span>
+                  <span>{t("settings.name")}</span>
                   <input
                     className="project-input"
                     disabled={createBusy}
@@ -270,8 +276,8 @@ export function SettingsPage() {
                   />
                 </label>
                 <label className="form-field">
-                  <span>Project Category</span>
-                  <input
+                  <span>{t("settings.projectCategory")}</span>
+                  <select
                     className="project-input"
                     disabled={createBusy}
                     value={createPayload.project_category}
@@ -281,10 +287,28 @@ export function SettingsPage() {
                         project_category: event.target.value,
                       }))
                     }
-                  />
+                  >
+                    <option value="software_dev">{t("category.softwareDev")}</option>
+                    <option value="game_dev">{t("category.gameDev")}</option>
+                    <option value="novel_writing">{t("category.novelWriting")}</option>
+                    <option value="anime_creation">{t("category.animeCreation")}</option>
+                    <option value="short_drama">{t("category.shortDrama")}</option>
+                    <option value="short_video">{t("category.shortVideo")}</option>
+                    <option value="film_production">{t("category.filmProduction")}</option>
+                    <option value="music_production">{t("category.musicProduction")}</option>
+                    <option value="social_media_ops">{t("category.socialMediaOps")}</option>
+                    <option value="marketing_campaign">{t("category.marketingCampaign")}</option>
+                    <option value="ecommerce_launch">{t("category.ecommerceLaunch")}</option>
+                    <option value="product_ops">{t("category.productOps")}</option>
+                    <option value="website_ops">{t("category.websiteOps")}</option>
+                    <option value="web_app">{t("category.webApp")}</option>
+                    <option value="mobile_app">{t("category.mobileApp")}</option>
+                    <option value="api_service">{t("category.apiService")}</option>
+                    <option value="data_pipeline">{t("category.dataPipeline")}</option>
+                  </select>
                 </label>
                 <label className="form-field">
-                  <span>Goal Summary</span>
+                  <span>{t("settings.goalSummary")}</span>
                   <textarea
                     className="project-input project-textarea"
                     disabled={createBusy}
@@ -298,7 +322,7 @@ export function SettingsPage() {
                   />
                 </label>
                 <label className="form-field">
-                  <span>Workspace Root</span>
+                  <span>{t("settings.workspaceRoot")}</span>
                   <input
                     className="project-input"
                     disabled={createBusy}
@@ -316,12 +340,12 @@ export function SettingsPage() {
                       disabled={createBusy}
                       onClick={() => void handlePickDirectory("workspace_root")}
                     >
-                      Choose Folder
+                      {t("settings.chooseFolder")}
                     </button>
                   </div>
                 </label>
                 <label className="form-field">
-                  <span>Repo Root</span>
+                  <span>{t("settings.repoRoot")}</span>
                   <input
                     className="project-input"
                     disabled={createBusy}
@@ -339,17 +363,17 @@ export function SettingsPage() {
                       disabled={createBusy}
                       onClick={() => void handlePickDirectory("repo_root")}
                     >
-                      Choose Folder
+                      {t("settings.chooseFolder")}
                     </button>
                   </div>
                 </label>
                 <div className="action-row">
                   <button
                     className="primary-button"
-                    disabled={createBusy}
+                    disabled={createBusy || !createFormValid}
                     onClick={() => void handleCreateProject()}
                   >
-                    {createBusy ? "Creating..." : "Create Project"}
+                    {createBusy ? t("settings.creating") : t("settings.create")}
                   </button>
                   {createdProjectId ? (
                     <>
@@ -363,7 +387,7 @@ export function SettingsPage() {
                           )
                         }
                       >
-                        Open Workspace
+                        {t("settings.openWorkspace")}
                       </button>
                       <button
                         className="secondary-button"
@@ -373,7 +397,7 @@ export function SettingsPage() {
                           )
                         }
                       >
-                        Open Plan
+                        {t("settings.openPlan")}
                       </button>
                       <button
                         className="secondary-button"
@@ -385,7 +409,7 @@ export function SettingsPage() {
                           )
                         }
                       >
-                        Open Execution
+                        {t("settings.openExecution")}
                       </button>
                     </>
                   ) : null}
@@ -398,8 +422,7 @@ export function SettingsPage() {
                 ) : null}
                 {!createError && !createMessage ? (
                   <p className="muted-copy">
-                    Create a project, then jump directly into workspace, plan,
-                    or execution triage from here.
+                    {t("settings.createHint")}
                   </p>
                 ) : null}
               </div>
@@ -407,12 +430,12 @@ export function SettingsPage() {
 
             <section className="data-panel">
               <div className="panel-header">
-                <h3>Health Checks</h3>
+                <h3>{t("settings.healthChecks")}</h3>
               </div>
               <div className="stack-list">
                 <article className="list-card">
                   <div className="list-card-head">
-                    <strong>System</strong>
+                    <strong>{t("settings.system")}</strong>
                     <span className="status-pill">
                       {systemState.data.status}
                     </span>
@@ -424,7 +447,7 @@ export function SettingsPage() {
                 </article>
                 <article className="list-card">
                   <div className="list-card-head">
-                    <strong>Runtime</strong>
+                    <strong>{t("settings.runtimeHealth")}</strong>
                     <span className="status-pill">
                       {runtimeState.data.status}
                     </span>
@@ -438,13 +461,13 @@ export function SettingsPage() {
                     className="secondary-button"
                     onClick={() => void handleOpenDataDirectory("show")}
                   >
-                    Show Data Folder
+                    {t("settings.showDataFolder")}
                   </button>
                   <button
                     className="secondary-button"
                     onClick={() => void handleOpenDataDirectory("open")}
                   >
-                    Open Data Path
+                    {t("settings.openDataPath")}
                   </button>
                 </div>
               ) : null}

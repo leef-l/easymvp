@@ -25,6 +25,12 @@ func (s *workspaceExplanationBrainStub) ExecuteContract(ctx context.Context, cmd
 	return s.executeResult, s.executeErr
 }
 
+func (s *workspaceExplanationBrainStub) ExecuteContractStream(ctx context.Context, cmd EasyMVPBrainExecuteCommand) (<-chan EasyMVPBrainStreamEvent, error) {
+	_ = ctx
+	_ = cmd
+	return nil, nil
+}
+
 func (s *workspaceExplanationBrainStub) CallPlanReview(ctx context.Context, input braincontracts.PlanReviewInput) (*braincontracts.BrainContractEnvelope, *braincontracts.PlanReviewResult, error) {
 	_ = ctx
 	_ = input
@@ -32,6 +38,12 @@ func (s *workspaceExplanationBrainStub) CallPlanReview(ctx context.Context, inpu
 }
 
 func (s *workspaceExplanationBrainStub) CallPlanCompile(ctx context.Context, input braincontracts.PlanCompileInput) (*braincontracts.BrainContractEnvelope, *braincontracts.PlanCompileResult, error) {
+	_ = ctx
+	_ = input
+	return nil, nil, nil
+}
+
+func (s *workspaceExplanationBrainStub) CallPlanRedesign(ctx context.Context, input braincontracts.PlanRedesignInput) (*braincontracts.BrainContractEnvelope, *braincontracts.PlanRedesignResult, error) {
 	_ = ctx
 	_ = input
 	return nil, nil, nil
@@ -81,6 +93,13 @@ func (s *workspaceExplanationBrainStub) ValidatePlanCompileEnvelope(ctx context.
 	return nil
 }
 
+func (s *workspaceExplanationBrainStub) ValidatePlanRedesignEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.PlanRedesignResult) error {
+	_ = ctx
+	_ = envelope
+	_ = result
+	return nil
+}
+
 func (s *workspaceExplanationBrainStub) ValidateAcceptanceMappingEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.AcceptanceMappingResult) error {
 	_ = ctx
 	_ = envelope
@@ -103,6 +122,19 @@ func (s *workspaceExplanationBrainStub) ValidateRepairDesignEnvelope(ctx context
 }
 
 func (s *workspaceExplanationBrainStub) ValidateWorkspaceExplanationEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.WorkspaceExplanationResult) error {
+	_ = ctx
+	_ = envelope
+	_ = result
+	return nil
+}
+
+func (s *workspaceExplanationBrainStub) CallArchitectChat(ctx context.Context, input braincontracts.ArchitectChatInput) (*braincontracts.BrainContractEnvelope, *braincontracts.ArchitectChatResult, error) {
+	_ = ctx
+	_ = input
+	return nil, nil, nil
+}
+
+func (s *workspaceExplanationBrainStub) ValidateArchitectChatEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.ArchitectChatResult) error {
 	_ = ctx
 	_ = envelope
 	_ = result

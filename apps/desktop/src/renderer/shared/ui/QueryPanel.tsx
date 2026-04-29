@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
 type QueryPanelProps = {
   loading: boolean;
@@ -14,6 +15,7 @@ type QueryPanelProps = {
 };
 
 export function QueryPanel(props: QueryPanelProps) {
+  const { t } = useTranslation();
   const {
     loading,
     refreshing,
@@ -32,9 +34,9 @@ export function QueryPanel(props: QueryPanelProps) {
       <section className="data-panel">
         <div className="panel-header">
           <h3>{title}</h3>
-          <span className="status-pill">Loading</span>
+          <span className="status-pill">{t("query.loading")}</span>
         </div>
-        <p className="muted-copy">Fetching latest data from local core service.</p>
+        <p className="muted-copy">{t("query.loadingDesc")}</p>
       </section>
     );
   }
@@ -44,7 +46,7 @@ export function QueryPanel(props: QueryPanelProps) {
       <section className="data-panel is-error">
         <div className="panel-header">
           <h3>{title}</h3>
-          <span className="status-pill">Error</span>
+          <span className="status-pill">{t("query.error")}</span>
         </div>
         <p className="error-copy">{error}</p>
         {recoveryMessage ? <p className="muted-copy">{recoveryMessage}</p> : null}
@@ -52,7 +54,7 @@ export function QueryPanel(props: QueryPanelProps) {
           <div className="action-row">
             {onRetry ? (
               <button className="secondary-button" onClick={onRetry}>
-                Retry
+                {t("query.retry")}
               </button>
             ) : null}
             {secondaryActionLabel && onSecondaryAction ? (
@@ -62,7 +64,7 @@ export function QueryPanel(props: QueryPanelProps) {
             ) : null}
           </div>
         ) : null}
-        {stale ? <p className="muted-copy">Showing the last successful result while the latest refresh failed.</p> : null}
+        {stale ? <p className="muted-copy">{t("query.staleDesc")}</p> : null}
         {children}
       </section>
     );
@@ -74,9 +76,9 @@ export function QueryPanel(props: QueryPanelProps) {
         <section className="data-panel">
           <div className="panel-header">
             <h3>{title}</h3>
-            <span className="status-pill">Refreshing</span>
+            <span className="status-pill">{t("query.refreshing")}</span>
           </div>
-          <p className="muted-copy">Keeping the last successful result while fetching a newer snapshot.</p>
+          <p className="muted-copy">{t("query.refreshingDesc")}</p>
         </section>
       ) : null}
       {children}

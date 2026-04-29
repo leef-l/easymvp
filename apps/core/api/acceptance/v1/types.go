@@ -80,6 +80,25 @@ type VerificationResultView struct {
 	Decision                 string   `json:"decision,omitempty"`
 	Completed                bool     `json:"completed"`
 	Summary                  string   `json:"summary,omitempty"`
+	ChannelAvailable         bool     `json:"channel_available"`
+	EnvironmentAvailable     bool     `json:"environment_available"`
+	BrowserCheckResult       *BrowserCheckResultView `json:"browser_check_result,omitempty"`
+	VerifierCheckResult      *VerifierCheckResultView `json:"verifier_check_result,omitempty"`
+}
+
+// BrowserCheckResultView holds browser anomaly/understand output for acceptance.
+type BrowserCheckResultView struct {
+	URL       string   `json:"url"`
+	Status    string   `json:"status"` // passed / failed / skipped / error
+	Anomalies []string `json:"anomalies,omitempty"`
+	Summary   string   `json:"summary,omitempty"`
+}
+
+// VerifierCheckResultView holds verifier run output for acceptance.
+type VerifierCheckResultView struct {
+	Status  string            `json:"status"` // passed / failed / skipped / error
+	Summary string            `json:"summary,omitempty"`
+	Details map[string]string `json:"details,omitempty"`
 }
 
 type CompletionVerdictView struct {
@@ -96,22 +115,31 @@ type CompletionVerdictView struct {
 	UpdatedAt              string `json:"updated_at,omitempty"`
 	Completed              bool   `json:"completed"`
 	Summary                string `json:"summary,omitempty"`
+	// Four-layer completion state (Engineering Cybernetics ch.4)
+	ExecutorSucceeded bool `json:"executor_succeeded"`
+	DeliveryVerified  bool `json:"delivery_verified"`
+	AcceptancePassed  bool `json:"acceptance_passed"`
 }
 
 type RuntimeEscalationView struct {
-	Status       string `json:"status"`
-	ReasonClass  string `json:"reason_class,omitempty"`
-	SourceBrain  string `json:"source_brain,omitempty"`
-	SourceTaskID string `json:"source_task_id,omitempty"`
-	RunBindingID string `json:"run_binding_id,omitempty"`
-	RunStatus    string `json:"run_status,omitempty"`
-	Severity     string `json:"severity,omitempty"`
-	Action       string `json:"action,omitempty"`
-	TaskID       string `json:"task_id,omitempty"`
-	RunID        string `json:"run_id,omitempty"`
-	UpdatedAt    string `json:"updated_at,omitempty"`
-	Summary      string `json:"summary,omitempty"`
-	PolicyDenied bool   `json:"policy_denied"`
+	Status            string `json:"status"`
+	ReasonClass       string `json:"reason_class,omitempty"`
+	SourceBrain       string `json:"source_brain,omitempty"`
+	SourceTaskID      string `json:"source_task_id,omitempty"`
+	RunBindingID      string `json:"run_binding_id,omitempty"`
+	RunStatus         string `json:"run_status,omitempty"`
+	Severity          string `json:"severity,omitempty"`
+	Action            string `json:"action,omitempty"`
+	TaskID            string `json:"task_id,omitempty"`
+	RunID             string `json:"run_id,omitempty"`
+	UpdatedAt         string `json:"updated_at,omitempty"`
+	Summary           string `json:"summary,omitempty"`
+	PolicyDenied      bool   `json:"policy_denied"`
+	EvidenceRefsJSON  string `json:"evidence_refs_json,omitempty"`
+	ResolvedAt        string `json:"resolved_at,omitempty"`
+	ResolutionStatus  string `json:"resolution_status,omitempty"`
+	ResolverKind      string `json:"resolver_kind,omitempty"`
+	LinkedFaultID     string `json:"linked_fault_id,omitempty"`
 }
 
 type FaultSummaryView struct {

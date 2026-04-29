@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 
 	projectsv1 "github.com/leef-l/easymvp/apps/core/api/projects/v1"
@@ -28,6 +29,8 @@ func TestAcceptanceCompletionVerdictStopsAtRuntimeEscalation(t *testing.T) {
 				UpdatedAt:  "2026-04-20 10:04:00",
 			},
 		},
+		ChannelAvailable:     true,
+		EnvironmentAvailable: true,
 	}
 
 	got := buildCompletionVerdictView(data)
@@ -69,9 +72,12 @@ func TestWorkspaceCompletionVerdictStopsAtRuntimeEscalation(t *testing.T) {
 				UpdatedAt:  "2026-04-20 10:04:00",
 			},
 		},
+		ChannelAvailable:     true,
+		EnvironmentAvailable: true,
 	}
 
 	got := buildWorkspaceCompletionVerdict(
+		context.Background(),
 		data,
 		projectsv1.AcceptanceCoverage{
 			EvidenceReady:    3,

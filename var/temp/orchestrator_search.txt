@@ -1,0 +1,300 @@
+// Package kernel — Orchestrator manages specialist brain lifecycle and
+// subtask delegation.
+//
+// When the central brain calls subtask.delegate via reverse RPC, the
+// Orchestrator starts the target specialist sidecar (or reuses an already
+---
+// subtask delegation.
+//
+// When the central brain calls subtask.delegate via reverse RPC, the
+// Orchestrator starts the target specialist sidecar (or reuses an already
+// running one), registers LLM proxy handlers, sends brain/execute, and
+// returns the result.
+//
+---
+//
+// When the central brain calls subtask.delegate via reverse RPC, the
+// Orchestrator starts the target specialist sidecar (or reuses an already
+// running one), registers LLM proxy handlers, sends brain/execute, and
+// returns the result.
+//
+// See 02-BrainKernel设计.md §12.5 and 20-协议规格.md §10.1.
+---
+// When the central brain calls subtask.delegate via reverse RPC, the
+// Orchestrator starts the target specialist sidecar (or reuses an already
+// running one), registers LLM proxy handlers, sends brain/execute, and
+// returns the result.
+//
+// See 02-BrainKernel设计.md §12.5 and 20-协议规格.md §10.1.
+package kernel
+---
+// returns the result.
+//
+// See 02-BrainKernel设计.md §12.5 and 20-协议规格.md §10.1.
+package kernel
+
+import (
+	"context"
+---
+	"time"
+
+	"github.com/leef-l/brain/sdk/agent"
+	"github.com/leef-l/brain/sdk/diaglog"
+	"github.com/leef-l/brain/sdk/llm"
+	"github.com/leef-l/brain/sdk/protocol"
+)
+---
+
+	"github.com/leef-l/brain/sdk/agent"
+	"github.com/leef-l/brain/sdk/diaglog"
+	"github.com/leef-l/brain/sdk/llm"
+	"github.com/leef-l/brain/sdk/protocol"
+)
+
+---
+	"github.com/leef-l/brain/sdk/agent"
+	"github.com/leef-l/brain/sdk/diaglog"
+	"github.com/leef-l/brain/sdk/llm"
+	"github.com/leef-l/brain/sdk/protocol"
+)
+
+// BrainRegistration describes a specialist brain that the Orchestrator can
+---
+	"github.com/leef-l/brain/sdk/diaglog"
+	"github.com/leef-l/brain/sdk/llm"
+	"github.com/leef-l/brain/sdk/protocol"
+)
+
+// BrainRegistration describes a specialist brain that the Orchestrator can
+// delegate to. When provided via OrchestratorConfig.Brains, the Orchestrator
+---
+)
+
+// BrainRegistration describes a specialist brain that the Orchestrator can
+// delegate to. When provided via OrchestratorConfig.Brains, the Orchestrator
+// becomes fully configuration-driven — no brain kinds are hard-coded.
+type BrainRegistration struct {
+	// Kind is the brain role identifier (e.g. "code", "quant", "data").
+---
+
+// BrainRegistration describes a specialist brain that the Orchestrator can
+// delegate to. When provided via OrchestratorConfig.Brains, the Orchestrator
+// becomes fully configuration-driven — no brain kinds are hard-coded.
+type BrainRegistration struct {
+	// Kind is the brain role identifier (e.g. "code", "quant", "data").
+	Kind agent.Kind `json:"kind"`
+---
+// BrainRegistration describes a specialist brain that the Orchestrator can
+// delegate to. When provided via OrchestratorConfig.Brains, the Orchestrator
+// becomes fully configuration-driven — no brain kinds are hard-coded.
+type BrainRegistration struct {
+	// Kind is the brain role identifier (e.g. "code", "quant", "data").
+	Kind agent.Kind `json:"kind"`
+
+---
+// delegate to. When provided via OrchestratorConfig.Brains, the Orchestrator
+// becomes fully configuration-driven — no brain kinds are hard-coded.
+type BrainRegistration struct {
+	// Kind is the brain role identifier (e.g. "code", "quant", "data").
+	Kind agent.Kind `json:"kind"`
+
+	// Binary is an explicit path to the sidecar binary. When non-empty it
+---
+// becomes fully configuration-driven — no brain kinds are hard-coded.
+type BrainRegistration struct {
+	// Kind is the brain role identifier (e.g. "code", "quant", "data").
+	Kind agent.Kind `json:"kind"`
+
+	// Binary is an explicit path to the sidecar binary. When non-empty it
+	// takes precedence over the BinResolver. This allows third-party brains
+---
+type BrainRegistration struct {
+	// Kind is the brain role identifier (e.g. "code", "quant", "data").
+	Kind agent.Kind `json:"kind"`
+
+	// Binary is an explicit path to the sidecar binary. When non-empty it
+	// takes precedence over the BinResolver. This allows third-party brains
+	// to be registered purely through configuration.
+---
+
+	// Binary is an explicit path to the sidecar binary. When non-empty it
+	// takes precedence over the BinResolver. This allows third-party brains
+	// to be registered purely through configuration.
+	Binary string `json:"binary,omitempty"`
+
+	// Args are optional extra argv entries passed to the sidecar process.
+---
+	// Binary is an explicit path to the sidecar binary. When non-empty it
+	// takes precedence over the BinResolver. This allows third-party brains
+	// to be registered purely through configuration.
+	Binary string `json:"binary,omitempty"`
+
+	// Args are optional extra argv entries passed to the sidecar process.
+	Args []string `json:"args,omitempty"`
+---
+	Env []string `json:"env,omitempty"`
+
+	// Model is the LLM model ID to use for this brain via LLMProxy.
+	// An empty string means the brain does not use LLM proxying.
+	Model string `json:"model,omitempty"`
+
+	// AutoStart launches the sidecar immediately on Orchestrator creation
+---
+
+	// Model is the LLM model ID to use for this brain via LLMProxy.
+	// An empty string means the brain does not use LLM proxying.
+	Model string `json:"model,omitempty"`
+
+	// AutoStart launches the sidecar immediately on Orchestrator creation
+	// rather than lazily on first delegation.
+---
+	Model string `json:"model,omitempty"`
+
+	// AutoStart launches the sidecar immediately on Orchestrator creation
+	// rather than lazily on first delegation.
+	AutoStart bool `json:"auto_start,omitempty"`
+}
+
+---
+}
+
+// OrchestratorConfig configures the Orchestrator. When Brains is non-empty,
+// only those brains are probed — the built-in kind list is not used. When
+// Brains is empty, the Orchestrator falls back to probing agent.BuiltinKinds()
+// via the BinResolver for backward compatibility.
+type OrchestratorConfig struct {
+---
+
+// OrchestratorConfig configures the Orchestrator. When Brains is non-empty,
+// only those brains are probed — the built-in kind list is not used. When
+// Brains is empty, the Orchestrator falls back to probing agent.BuiltinKinds()
+// via the BinResolver for backward compatibility.
+type OrchestratorConfig struct {
+	Brains []BrainRegistration `json:"brains,omitempty"`
+---
+// OrchestratorConfig configures the Orchestrator. When Brains is non-empty,
+// only those brains are probed — the built-in kind list is not used. When
+// Brains is empty, the Orchestrator falls back to probing agent.BuiltinKinds()
+// via the BinResolver for backward compatibility.
+type OrchestratorConfig struct {
+	Brains []BrainRegistration `json:"brains,omitempty"`
+}
+---
+// Brains is empty, the Orchestrator falls back to probing agent.BuiltinKinds()
+// via the BinResolver for backward compatibility.
+type OrchestratorConfig struct {
+	Brains []BrainRegistration `json:"brains,omitempty"`
+}
+
+// Orchestrator manages specialist brain lifecycle and subtask delegation.
+---
+// via the BinResolver for backward compatibility.
+type OrchestratorConfig struct {
+	Brains []BrainRegistration `json:"brains,omitempty"`
+}
+
+// Orchestrator manages specialist brain lifecycle and subtask delegation.
+type Orchestrator struct {
+---
+}
+
+// Orchestrator manages specialist brain lifecycle and subtask delegation.
+type Orchestrator struct {
+	runner      BrainRunner
+	llmProxy    *LLMProxy
+	binResolver func(kind agent.Kind) (string, error)
+---
+
+// Orchestrator manages specialist brain lifecycle and subtask delegation.
+type Orchestrator struct {
+	runner      BrainRunner
+	llmProxy    *LLMProxy
+	binResolver func(kind agent.Kind) (string, error)
+	toolCalls   SpecialistToolCallAuthorizer
+---
+// Orchestrator manages specialist brain lifecycle and subtask delegation.
+type Orchestrator struct {
+	runner      BrainRunner
+	llmProxy    *LLMProxy
+	binResolver func(kind agent.Kind) (string, error)
+	toolCalls   SpecialistToolCallAuthorizer
+
+---
+	runner      BrainRunner
+	llmProxy    *LLMProxy
+	binResolver func(kind agent.Kind) (string, error)
+	toolCalls   SpecialistToolCallAuthorizer
+
+	// contextEngine 是可选的上下文装配引擎。当非 nil 时，Delegate 在
+	// 发送消息给下游 brain 之前会调用 Assemble() 装配和压缩上下文。
+---
+
+	// contextEngine 是可选的上下文装配引擎。当非 nil 时，Delegate 在
+	// 发送消息给下游 brain 之前会调用 Assemble() 装配和压缩上下文。
+	contextEngine ContextEngine
+
+	// capMatcher 是可选的能力匹配器。当非 nil 且 TargetKind 为空时，
+	// Delegate 会通过三阶段匹配算法自动选择最佳 brain。
+---
+	contextEngine ContextEngine
+
+	// capMatcher 是可选的能力匹配器。当非 nil 且 TargetKind 为空时，
+	// Delegate 会通过三阶段匹配算法自动选择最佳 brain。
+	capMatcher *CapabilityMatcher
+
+	// learner 是可选的自适应学习引擎。当非 nil 时，
+---
+
+	// capMatcher 是可选的能力匹配器。当非 nil 且 TargetKind 为空时，
+	// Delegate 会通过三阶段匹配算法自动选择最佳 brain。
+	capMatcher *CapabilityMatcher
+
+	// learner 是可选的自适应学习引擎。当非 nil 时，
+	// Delegate 在任务完成后记录结果用于 L1 能力画像更新。
+---
+	approver SemanticApprover
+
+	// pool 是可选的共享进程池。当非 nil 时，getOrStartSidecar 会
+	// 委托给 pool.GetBrain，使多个 Run 共享同一个全局池。
+	pool BrainPool
+
+	// available records which sidecar binaries exist on disk.
+---
+
+	// pool 是可选的共享进程池。当非 nil 时，getOrStartSidecar 会
+	// 委托给 pool.GetBrain，使多个 Run 共享同一个全局池。
+	pool BrainPool
+
+	// available records which sidecar binaries exist on disk.
+	available map[agent.Kind]bool
+---
+	// pool 是可选的共享进程池。当非 nil 时，getOrStartSidecar 会
+	// 委托给 pool.GetBrain，使多个 Run 共享同一个全局池。
+	pool BrainPool
+
+	// available records which sidecar binaries exist on disk.
+	available map[agent.Kind]bool
+
+---
+
+	// available records which sidecar binaries exist on disk.
+	available map[agent.Kind]bool
+
+	// registrations stores BrainRegistration for config-driven brains.
+	registrations map[agent.Kind]*BrainRegistration
+
+---
+	available map[agent.Kind]bool
+
+	// registrations stores BrainRegistration for config-driven brains.
+	registrations map[agent.Kind]*BrainRegistration
+
+	// reverseHandlersRegistered tracks which RPC sessions have already had
+	// reverse-RPC handlers installed. BrainPool may return the same live
+---
+
+	// registrations stores BrainRegistration for config-driven brains.
+	registrations map[agent.Kind]*BrainRegistration
+
+	// reverseHandlersRegistered tracks which RPC sessions have already had
+	// reverse-RPC handlers installed. BrainPool may return the same live

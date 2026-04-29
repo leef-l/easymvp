@@ -7,11 +7,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gogf/gf/v2/errors/gerror"
-
 	planv1 "github.com/leef-l/easymvp/apps/core/api/plan/v1"
-	"github.com/leef-l/easymvp/apps/core/internal/dao"
 	"github.com/leef-l/easymvp/apps/core/internal/model/entity"
+	"github.com/leef-l/easymvp/apps/core/internal/repo"
 )
 
 const planTaskProjectionLimit = 64
@@ -50,6 +48,7 @@ type repairPlanDraftRecord struct {
 	CreatedBy               string
 	CreatedAt               string
 	UpdatedAt               string
+	HumanCheckpointRequired bool
 }
 
 func loadPlanViewData(ctx context.Context, projectID string) (*planViewData, error) {
@@ -85,27 +84,27 @@ func loadPlanAggregate(ctx context.Context, db *sql.DB, projectID string) (*plan
 		Project: *project,
 	}
 
-	aggregate.Draft, err = getPlanDraftForProject(ctx, db, *project)
+	aggregate.Draft, err = getPlanDraftForProject(ctx, *project)
 	if err != nil {
 		return nil, err
 	}
-	aggregate.Review, err = getPlanReviewForProject(ctx, db, *project, aggregate.Draft)
+	aggregate.Review, err = getPlanReviewForProject(ctx, *project, aggregate.Draft)
 	if err != nil {
 		return nil, err
 	}
-	aggregate.Compiled, err = getCompiledPlanForProject(ctx, db, *project, aggregate.Draft, aggregate.Review)
+	aggregate.Compiled, err = getCompiledPlanForProject(ctx, *project, aggregate.Draft, aggregate.Review)
 	if err != nil {
 		return nil, err
 	}
-	aggregate.RepairDraft, err = getLatestRepairDraftForProject(ctx, db, projectID)
+	aggregate.RepairDraft, err = getLatestRepairDraftForProject(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	aggregate.CompiledTasks, err = listCompiledTasksForProject(ctx, db, *project, aggregate.Compiled)
+	aggregate.CompiledTasks, err = listCompiledTasksForProject(ctx, *project, aggregate.Compiled)
 	if err != nil {
 		return nil, err
 	}
-	aggregate.DomainTasks, err = listDomainTasksForPlan(ctx, db, *project, aggregate.Compiled)
+	aggregate.DomainTasks, err = listDomainTasksForPlan(ctx, *project, aggregate.Compiled)
 	if err != nil {
 		return nil, err
 	}
@@ -113,402 +112,29 @@ func loadPlanAggregate(ctx context.Context, db *sql.DB, projectID string) (*plan
 	return aggregate, nil
 }
 
-func getPlanDraftForProject(ctx context.Context, db *sql.DB, project entity.Projects) (*entity.WorkflowPlanDrafts, error) {
-	var (
-		query string
-		args  []any
-	)
-
-	if project.CurrentPlanDraftId != "" {
-		query = `
-SELECT
-  id,
-  project_id,
-  version,
-  source_kind,
-  COALESCE(source_run_id, ''),
-  project_category,
-  goal_summary,
-  input_requirements_json,
-  draft_tasks_json,
-  status,
-  created_by,
-  created_at,
-  updated_at
-FROM ` + dao.WorkflowPlanDrafts.Table() + `
-WHERE id = ?
-LIMIT 1`
-		args = []any{project.CurrentPlanDraftId}
-	} else {
-		query = `
-SELECT
-  id,
-  project_id,
-  version,
-  source_kind,
-  COALESCE(source_run_id, ''),
-  project_category,
-  goal_summary,
-  input_requirements_json,
-  draft_tasks_json,
-  status,
-  created_by,
-  created_at,
-  updated_at
-FROM ` + dao.WorkflowPlanDrafts.Table() + `
-WHERE project_id = ?
-ORDER BY version DESC
-LIMIT 1`
-		args = []any{project.Id}
-	}
-
-	row := db.QueryRowContext(ctx, query, args...)
-	item, err := scanPlanDraftRow(row)
-	if err == nil {
-		return item, nil
-	}
-	if isSchemaMissingError(err) || err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return nil, err
+func getPlanDraftForProject(ctx context.Context, project entity.Projects) (*entity.WorkflowPlanDrafts, error) {
+	return repo.GetPlanDraftForProject(ctx, project)
 }
 
-func getPlanReviewForProject(ctx context.Context, db *sql.DB, project entity.Projects, draft *entity.WorkflowPlanDrafts) (*entity.WorkflowPlanReviewResults, error) {
-	if draft == nil && project.CurrentPlanDraftId == "" {
-		return nil, nil
-	}
-
-	var (
-		query string
-		args  []any
-	)
-
-	if draft != nil {
-		query = `
-SELECT
-  id,
-  project_id,
-  plan_draft_id,
-  review_version,
-  COALESCE(review_run_id, ''),
-  decision,
-  blocking_issue_count,
-  advisory_issue_count,
-  issues_json,
-  COALESCE(split_suggestions_json, ''),
-  COALESCE(override_suggestions_json, ''),
-  status,
-  reviewed_at
-FROM ` + dao.WorkflowPlanReviewResults.Table() + `
-WHERE plan_draft_id = ?
-ORDER BY review_version DESC
-LIMIT 1`
-		args = []any{draft.Id}
-	} else {
-		query = `
-SELECT
-  id,
-  project_id,
-  plan_draft_id,
-  review_version,
-  COALESCE(review_run_id, ''),
-  decision,
-  blocking_issue_count,
-  advisory_issue_count,
-  issues_json,
-  COALESCE(split_suggestions_json, ''),
-  COALESCE(override_suggestions_json, ''),
-  status,
-  reviewed_at
-FROM ` + dao.WorkflowPlanReviewResults.Table() + `
-WHERE project_id = ?
-ORDER BY reviewed_at DESC, review_version DESC
-LIMIT 1`
-		args = []any{project.Id}
-	}
-
-	row := db.QueryRowContext(ctx, query, args...)
-	item, err := scanPlanReviewRow(row)
-	if err == nil {
-		return item, nil
-	}
-	if isSchemaMissingError(err) || err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return nil, err
+func getPlanReviewForProject(ctx context.Context, project entity.Projects, draft *entity.WorkflowPlanDrafts) (*entity.WorkflowPlanReviewResults, error) {
+	return repo.GetPlanReviewForProject(ctx, project, draft)
 }
 
 func getCompiledPlanForProject(
 	ctx context.Context,
-	db *sql.DB,
 	project entity.Projects,
 	draft *entity.WorkflowPlanDrafts,
 	review *entity.WorkflowPlanReviewResults,
 ) (*entity.WorkflowCompiledPlans, error) {
-	var (
-		query string
-		args  []any
-	)
-
-	switch {
-	case project.CurrentCompiledPlanId != "":
-		query = `
-SELECT
-  id,
-  project_id,
-  plan_draft_id,
-  plan_review_result_id,
-  compiled_version,
-  COALESCE(compile_run_id, ''),
-  project_category,
-  status,
-  COALESCE(risk_summary_json, ''),
-  COALESCE(compile_diff_json, ''),
-  generated_at,
-  COALESCE(activated_at, '')
-FROM ` + dao.WorkflowCompiledPlans.Table() + `
-WHERE id = ?
-LIMIT 1`
-		args = []any{project.CurrentCompiledPlanId}
-	case review != nil:
-		query = `
-SELECT
-  id,
-  project_id,
-  plan_draft_id,
-  plan_review_result_id,
-  compiled_version,
-  COALESCE(compile_run_id, ''),
-  project_category,
-  status,
-  COALESCE(risk_summary_json, ''),
-  COALESCE(compile_diff_json, ''),
-  generated_at,
-  COALESCE(activated_at, '')
-FROM ` + dao.WorkflowCompiledPlans.Table() + `
-WHERE plan_review_result_id = ?
-ORDER BY compiled_version DESC
-LIMIT 1`
-		args = []any{review.Id}
-	case draft != nil:
-		query = `
-SELECT
-  id,
-  project_id,
-  plan_draft_id,
-  plan_review_result_id,
-  compiled_version,
-  COALESCE(compile_run_id, ''),
-  project_category,
-  status,
-  COALESCE(risk_summary_json, ''),
-  COALESCE(compile_diff_json, ''),
-  generated_at,
-  COALESCE(activated_at, '')
-FROM ` + dao.WorkflowCompiledPlans.Table() + `
-WHERE plan_draft_id = ?
-ORDER BY compiled_version DESC
-LIMIT 1`
-		args = []any{draft.Id}
-	default:
-		query = `
-SELECT
-  id,
-  project_id,
-  plan_draft_id,
-  plan_review_result_id,
-  compiled_version,
-  COALESCE(compile_run_id, ''),
-  project_category,
-  status,
-  COALESCE(risk_summary_json, ''),
-  COALESCE(compile_diff_json, ''),
-  generated_at,
-  COALESCE(activated_at, '')
-FROM ` + dao.WorkflowCompiledPlans.Table() + `
-WHERE project_id = ?
-ORDER BY compiled_version DESC
-LIMIT 1`
-		args = []any{project.Id}
-	}
-
-	row := db.QueryRowContext(ctx, query, args...)
-	item, err := scanCompiledPlanRow(row)
-	if err == nil {
-		return item, nil
-	}
-	if isSchemaMissingError(err) || err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return nil, err
+	return repo.GetCompiledPlanForProject(ctx, project, draft, review)
 }
 
-func listCompiledTasksForProject(ctx context.Context, db *sql.DB, project entity.Projects, compiled *entity.WorkflowCompiledPlans) ([]entity.WorkflowCompiledTasks, error) {
-	if compiled == nil {
-		return nil, nil
-	}
-
-	query := `
-SELECT
-  id,
-  compiled_plan_id,
-  task_key,
-  name,
-  COALESCE(description, ''),
-  phase,
-  task_kind,
-  role_type,
-  brain_kind,
-  risk_level,
-  affected_resources_json,
-  delivery_contract_json,
-  verification_contract_json,
-  manual_review_required,
-  COALESCE(depends_on_task_keys_json, ''),
-  status,
-  created_at,
-  updated_at
-FROM ` + dao.WorkflowCompiledTasks.Table() + `
-WHERE compiled_plan_id = ?
-ORDER BY created_at ASC, task_key ASC
-LIMIT ?`
-
-	rows, err := db.QueryContext(ctx, query, compiled.Id, planTaskProjectionLimit)
-	if err != nil {
-		if isSchemaMissingError(err) {
-			return nil, nil
-		}
-		return nil, gerror.Wrap(err, "query compiled tasks failed")
-	}
-	defer rows.Close()
-
-	items := make([]entity.WorkflowCompiledTasks, 0)
-	for rows.Next() {
-		var item entity.WorkflowCompiledTasks
-		if err = rows.Scan(
-			&item.Id,
-			&item.CompiledPlanId,
-			&item.TaskKey,
-			&item.Name,
-			&item.Description,
-			&item.Phase,
-			&item.TaskKind,
-			&item.RoleType,
-			&item.BrainKind,
-			&item.RiskLevel,
-			&item.AffectedResourcesJson,
-			&item.DeliveryContractJson,
-			&item.VerificationContractJson,
-			&item.ManualReviewRequired,
-			&item.DependsOnTaskKeysJson,
-			&item.Status,
-			&item.CreatedAt,
-			&item.UpdatedAt,
-		); err != nil {
-			return nil, gerror.Wrap(err, "scan compiled task failed")
-		}
-		items = append(items, item)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, gerror.Wrap(err, "iterate compiled tasks failed")
-	}
-	return items, nil
+func listCompiledTasksForProject(ctx context.Context, project entity.Projects, compiled *entity.WorkflowCompiledPlans) ([]entity.WorkflowCompiledTasks, error) {
+	return repo.ListCompiledTasksForProject(ctx, project, compiled)
 }
 
-func listDomainTasksForPlan(ctx context.Context, db *sql.DB, project entity.Projects, compiled *entity.WorkflowCompiledPlans) ([]entity.DomainTasks, error) {
-	var (
-		query string
-		args  []any
-	)
-
-	if compiled != nil {
-		query = `
-SELECT
-  id,
-  project_id,
-  COALESCE(source_compiled_plan_id, ''),
-  COALESCE(source_compiled_task_id, ''),
-  COALESCE(source_task_key, ''),
-  compiled_version,
-  name,
-  phase,
-  task_kind,
-  role_type,
-  brain_kind,
-  risk_level,
-  status,
-  manual_review_required,
-  created_at,
-  updated_at
-FROM ` + dao.DomainTasks.Table() + `
-WHERE project_id = ? AND source_compiled_plan_id = ?
-ORDER BY updated_at DESC, created_at DESC
-LIMIT ?`
-		args = []any{project.Id, compiled.Id, planTaskProjectionLimit}
-	} else {
-		query = `
-SELECT
-  id,
-  project_id,
-  COALESCE(source_compiled_plan_id, ''),
-  COALESCE(source_compiled_task_id, ''),
-  COALESCE(source_task_key, ''),
-  compiled_version,
-  name,
-  phase,
-  task_kind,
-  role_type,
-  brain_kind,
-  risk_level,
-  status,
-  manual_review_required,
-  created_at,
-  updated_at
-FROM ` + dao.DomainTasks.Table() + `
-WHERE project_id = ?
-ORDER BY updated_at DESC, created_at DESC
-LIMIT ?`
-		args = []any{project.Id, planTaskProjectionLimit}
-	}
-
-	rows, err := db.QueryContext(ctx, query, args...)
-	if err != nil {
-		if isSchemaMissingError(err) {
-			return nil, nil
-		}
-		return nil, gerror.Wrap(err, "query domain tasks for plan failed")
-	}
-	defer rows.Close()
-
-	items := make([]entity.DomainTasks, 0)
-	for rows.Next() {
-		var item entity.DomainTasks
-		if err = rows.Scan(
-			&item.Id,
-			&item.ProjectId,
-			&item.SourceCompiledPlanId,
-			&item.SourceCompiledTaskId,
-			&item.SourceTaskKey,
-			&item.CompiledVersion,
-			&item.Name,
-			&item.Phase,
-			&item.TaskKind,
-			&item.RoleType,
-			&item.BrainKind,
-			&item.RiskLevel,
-			&item.Status,
-			&item.ManualReviewRequired,
-			&item.CreatedAt,
-			&item.UpdatedAt,
-		); err != nil {
-			return nil, gerror.Wrap(err, "scan domain task for plan failed")
-		}
-		items = append(items, item)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, gerror.Wrap(err, "iterate domain tasks for plan failed")
-	}
-	return items, nil
+func listDomainTasksForPlan(ctx context.Context, project entity.Projects, compiled *entity.WorkflowCompiledPlans) ([]entity.DomainTasks, error) {
+	return repo.ListDomainTasksForPlan(ctx, project, compiled)
 }
 
 func buildPlanDraftView(aggregate *planAggregate) planv1.PlanDraftView {
@@ -742,88 +368,40 @@ func buildPlanOverview(aggregate *planAggregate) planv1.PlanOverview {
 	}
 }
 
-func scanPlanDraftRow(row *sql.Row) (*entity.WorkflowPlanDrafts, error) {
-	var item entity.WorkflowPlanDrafts
-	if err := row.Scan(
-		&item.Id,
-		&item.ProjectId,
-		&item.Version,
-		&item.SourceKind,
-		&item.SourceRunId,
-		&item.ProjectCategory,
-		&item.GoalSummary,
-		&item.InputRequirementsJson,
-		&item.DraftTasksJson,
-		&item.Status,
-		&item.CreatedBy,
-		&item.CreatedAt,
-		&item.UpdatedAt,
-	); err != nil {
-		if isSchemaMissingError(err) {
-			return nil, err
-		}
-		if err == sql.ErrNoRows {
-			return nil, err
-		}
-		return nil, gerror.Wrap(err, "query plan draft failed")
-	}
-	return &item, nil
-}
-
-func getLatestRepairDraftForProject(ctx context.Context, db *sql.DB, projectID string) (*repairPlanDraftRecord, error) {
-	query := `
-SELECT
-  id,
-  project_id,
-  COALESCE(failed_task_context_json, ''),
-  COALESCE(failure_reason_json, ''),
-  COALESCE(original_contracts_json, ''),
-  COALESCE(runtime_summary_json, ''),
-  COALESCE(repair_plan_json, ''),
-  repair_reasoning_summary,
-  COALESCE(replaced_constraints_json, ''),
-  status,
-  COALESCE(created_by, ''),
-  COALESCE(created_at, ''),
-  updated_at
-FROM ` + repairPlanDraftsTable + `
-WHERE project_id = ?
-ORDER BY updated_at DESC, created_at DESC
-LIMIT 1`
-
-	row := db.QueryRowContext(ctx, query, projectID)
-	var item repairPlanDraftRecord
-	if err := row.Scan(
-		&item.ID,
-		&item.ProjectID,
-		&item.FailedTaskContextJSON,
-		&item.FailureReasonJSON,
-		&item.OriginalContractsJSON,
-		&item.RuntimeSummaryJSON,
-		&item.RepairPlanJSON,
-		&item.RepairReasoningSummary,
-		&item.ReplacedConstraintsJSON,
-		&item.Status,
-		&item.CreatedBy,
-		&item.CreatedAt,
-		&item.UpdatedAt,
-	); err != nil {
-		if isSchemaMissingError(err) || err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, gerror.Wrap(err, "query latest repair draft failed")
-	}
-	return &item, nil
-}
-
-func loadRepairDraftView(ctx context.Context, projectID string) (*planv1.RepairDraftDetailView, error) {
-	db, closeFn, err := openProjectDatabase(ctx)
+func getLatestRepairDraftForProject(ctx context.Context, projectID string) (*repairPlanDraftRecord, error) {
+	res, err := repo.GetLatestRepairDraftForProject(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	defer closeFn()
+	if res == nil {
+		return nil, nil
+	}
+	record := &repairPlanDraftRecord{
+		ID:                      res.ID,
+		ProjectID:               res.ProjectID,
+		FailedTaskContextJSON:   res.FailedTaskContextJSON,
+		FailureReasonJSON:       res.FailureReasonJSON,
+		OriginalContractsJSON:   res.OriginalContractsJSON,
+		RuntimeSummaryJSON:      res.RuntimeSummaryJSON,
+		RepairPlanJSON:          res.RepairPlanJSON,
+		RepairReasoningSummary:  res.RepairReasoningSummary,
+		ReplacedConstraintsJSON: res.ReplacedConstraintsJSON,
+		Status:                  res.Status,
+		CreatedBy:               res.CreatedBy,
+		CreatedAt:               res.CreatedAt,
+		UpdatedAt:               res.UpdatedAt,
+	}
+	// P0-03: parse human_checkpoint_required from RepairPlanJSON if not in schema yet.
+	var parsedPlan struct {
+		HumanCheckpointRequired bool `json:"human_checkpoint_required"`
+	}
+	_ = json.Unmarshal([]byte(res.RepairPlanJSON), &parsedPlan)
+	record.HumanCheckpointRequired = parsedPlan.HumanCheckpointRequired
+	return record, nil
+}
 
-	item, err := getLatestRepairDraftForProject(ctx, db, projectID)
+func loadRepairDraftView(ctx context.Context, projectID string) (*planv1.RepairDraftDetailView, error) {
+	item, err := getLatestRepairDraftForProject(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -849,60 +427,7 @@ func loadRepairDraftView(ctx context.Context, projectID string) (*planv1.RepairD
 	}, nil
 }
 
-func scanPlanReviewRow(row *sql.Row) (*entity.WorkflowPlanReviewResults, error) {
-	var item entity.WorkflowPlanReviewResults
-	if err := row.Scan(
-		&item.Id,
-		&item.ProjectId,
-		&item.PlanDraftId,
-		&item.ReviewVersion,
-		&item.ReviewRunId,
-		&item.Decision,
-		&item.BlockingIssueCount,
-		&item.AdvisoryIssueCount,
-		&item.IssuesJson,
-		&item.SplitSuggestionsJson,
-		&item.OverrideSuggestionsJson,
-		&item.Status,
-		&item.ReviewedAt,
-	); err != nil {
-		if isSchemaMissingError(err) {
-			return nil, err
-		}
-		if err == sql.ErrNoRows {
-			return nil, err
-		}
-		return nil, gerror.Wrap(err, "query plan review failed")
-	}
-	return &item, nil
-}
 
-func scanCompiledPlanRow(row *sql.Row) (*entity.WorkflowCompiledPlans, error) {
-	var item entity.WorkflowCompiledPlans
-	if err := row.Scan(
-		&item.Id,
-		&item.ProjectId,
-		&item.PlanDraftId,
-		&item.PlanReviewResultId,
-		&item.CompiledVersion,
-		&item.CompileRunId,
-		&item.ProjectCategory,
-		&item.Status,
-		&item.RiskSummaryJson,
-		&item.CompileDiffJson,
-		&item.GeneratedAt,
-		&item.ActivatedAt,
-	); err != nil {
-		if isSchemaMissingError(err) {
-			return nil, err
-		}
-		if err == sql.ErrNoRows {
-			return nil, err
-		}
-		return nil, gerror.Wrap(err, "query compiled plan failed")
-	}
-	return &item, nil
-}
 
 func summarizeRiskJSON(raw string, compiledTasks []entity.WorkflowCompiledTasks, domainTasks []entity.DomainTasks) string {
 	raw = strings.TrimSpace(raw)

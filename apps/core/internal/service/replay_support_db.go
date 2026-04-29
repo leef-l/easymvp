@@ -9,6 +9,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 
 	replayv1 "github.com/leef-l/easymvp/apps/core/api/replay/v1"
+	"github.com/leef-l/easymvp/apps/core/internal/repo"
 )
 
 const (
@@ -303,42 +304,26 @@ type runCheckpointRow struct {
 }
 
 func getBrainRunBindingByRunID(ctx context.Context, projectID string, runID string) (*brainRunBindingViewRow, error) {
-	db, closeFn, err := openProjectDatabase(ctx)
+	res, err := repo.GetBrainRunBindingByRunID(ctx, projectID, runID)
 	if err != nil {
 		return nil, err
 	}
-	defer closeFn()
-
-	row := db.QueryRowContext(
-		ctx,
-		`SELECT id, project_id, task_id, brain_kind, brain_run_id, run_status, started_at, COALESCE(finished_at, ''), COALESCE(last_sync_at, ''), created_at, updated_at
-FROM brain_run_bindings
-WHERE project_id = ? AND brain_run_id = ?
-LIMIT 1`,
-		projectID,
-		runID,
-	)
-
-	var binding brainRunBindingViewRow
-	if err = row.Scan(
-		&binding.ID,
-		&binding.ProjectID,
-		&binding.TaskID,
-		&binding.BrainKind,
-		&binding.RunID,
-		&binding.RunStatus,
-		&binding.StartedAt,
-		&binding.FinishedAt,
-		&binding.LastSyncAt,
-		&binding.CreatedAt,
-		&binding.UpdatedAt,
-	); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, gerror.New("brain run binding not found")
-		}
-		return nil, gerror.Wrap(err, "query brain run binding by run id failed")
+	if res == nil {
+		return nil, nil
 	}
-	return &binding, nil
+	return &brainRunBindingViewRow{
+		ID:         res.ID,
+		ProjectID:  res.ProjectID,
+		TaskID:     res.TaskID,
+		BrainKind:  res.BrainKind,
+		RunID:      res.RunID,
+		RunStatus:  res.RunStatus,
+		StartedAt:  res.StartedAt,
+		FinishedAt: res.FinishedAt,
+		LastSyncAt: res.LastSyncAt,
+		CreatedAt:  res.CreatedAt,
+		UpdatedAt:  res.UpdatedAt,
+	}, nil
 }
 
 type brainRunBindingViewRow struct {
@@ -356,160 +341,31 @@ type brainRunBindingViewRow struct {
 }
 
 func countRunEventsByBindingID(ctx context.Context, bindingID string) (int, error) {
-	db, closeFn, err := openProjectDatabase(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer closeFn()
-
-	var count int
-	if err = db.QueryRowContext(ctx, `SELECT COUNT(1) FROM run_event_index WHERE run_binding_id = ?`, bindingID).Scan(&count); err != nil {
-		return 0, gerror.Wrap(err, "count run events failed")
-	}
-	return count, nil
+	return repo.CountRunEventsByBindingID(ctx, bindingID)
 }
 
 func countReplayIndexByRunID(ctx context.Context, projectID string, runID string) (int, error) {
-	return countByQuery(ctx, `SELECT COUNT(1) FROM workflow_replay_index WHERE project_id = ? AND run_id = ?`, projectID, runID)
+	return repo.CountReplayIndexByRunID(ctx, projectID, runID)
 }
 
 func countLogSegmentsByRunID(ctx context.Context, projectID string, runID string) (int, error) {
-	return countByQuery(ctx, `SELECT COUNT(1) FROM workflow_run_log_segments WHERE project_id = ? AND run_id = ?`, projectID, runID)
-}
-
-func countByQuery(ctx context.Context, query string, args ...any) (int, error) {
-	db, closeFn, err := openProjectDatabase(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer closeFn()
-
-	var count int
-	if err = db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
-		return 0, gerror.Wrap(err, "count query failed")
-	}
-	return count, nil
+	return repo.CountLogSegmentsByRunID(ctx, projectID, runID)
 }
 
 func getLatestRunEvent(ctx context.Context, bindingID string) (*replayv1.ReplayEventRef, error) {
-	if strings.TrimSpace(bindingID) == "" {
-		return nil, nil
-	}
-	db, closeFn, err := openProjectDatabase(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer closeFn()
-
-	row := db.QueryRowContext(ctx, `SELECT id, sequence_no, event_type, COALESCE(event_level, ''), summary, created_at
-FROM run_event_index
-WHERE run_binding_id = ?
-ORDER BY sequence_no DESC, created_at DESC
-LIMIT 1`, bindingID)
-	return scanRunEventRef(row, "query latest run event failed")
+	return repo.GetLatestRunEvent(ctx, bindingID)
 }
 
 func getRunEventByEventID(ctx context.Context, eventID string) (*replayv1.ReplayEventRef, error) {
-	eventID = strings.TrimSpace(eventID)
-	if eventID == "" {
-		return nil, nil
-	}
-	db, closeFn, err := openProjectDatabase(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer closeFn()
-
-	row := db.QueryRowContext(ctx, `SELECT id, sequence_no, event_type, COALESCE(event_level, ''), summary, created_at
-FROM run_event_index
-WHERE id = ?
-LIMIT 1`, eventID)
-	return scanRunEventRef(row, "query run event by id failed")
-}
-
-func scanRunEventRef(row *sql.Row, wrapMessage string) (*replayv1.ReplayEventRef, error) {
-	var item runEventRow
-	if err := row.Scan(&item.ID, &item.SequenceNo, &item.EventType, &item.EventLevel, &item.Summary, &item.CreatedAt); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, gerror.Wrap(err, wrapMessage)
-	}
-	return &replayv1.ReplayEventRef{
-		EventID:    item.ID,
-		SequenceNo: item.SequenceNo,
-		EventType:  item.EventType,
-		EventLevel: item.EventLevel,
-		Summary:    item.Summary,
-		CreatedAt:  item.CreatedAt,
-	}, nil
+	return repo.GetRunEventByEventID(ctx, eventID)
 }
 
 func getLatestRunCheckpoint(ctx context.Context, bindingID string) (*replayv1.ReplayCheckpointRef, error) {
-	if strings.TrimSpace(bindingID) == "" {
-		return nil, nil
-	}
-	db, closeFn, err := openProjectDatabase(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer closeFn()
-
-	row := db.QueryRowContext(ctx, `SELECT id, checkpoint_type, created_at
-FROM run_checkpoints
-WHERE run_binding_id = ?
-ORDER BY created_at DESC, id DESC
-LIMIT 1`, bindingID)
-
-	var item runCheckpointRow
-	if err = row.Scan(&item.ID, &item.CheckpointType, &item.CreatedAt); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, gerror.Wrap(err, "query latest run checkpoint failed")
-	}
-	return &replayv1.ReplayCheckpointRef{
-		CheckpointID:   item.ID,
-		CheckpointType: item.CheckpointType,
-		CreatedAt:      item.CreatedAt,
-	}, nil
+	return repo.GetLatestRunCheckpoint(ctx, bindingID)
 }
 
 func summarizeReplayArtifactStatus(ctx context.Context, projectID string, runID string) (replayv1.ReplayArtifactSummary, error) {
-	db, closeFn, err := openProjectDatabase(ctx)
-	if err != nil {
-		return replayv1.ReplayArtifactSummary{}, err
-	}
-	defer closeFn()
-
-	rows, err := db.QueryContext(ctx, `SELECT status, COUNT(1) FROM workflow_replay_index WHERE project_id = ? AND run_id = ? GROUP BY status`, projectID, runID)
-	if err != nil {
-		return replayv1.ReplayArtifactSummary{}, gerror.Wrap(err, "summarize replay artifact status failed")
-	}
-	defer rows.Close()
-
-	summary := replayv1.ReplayArtifactSummary{}
-	for rows.Next() {
-		var (
-			status string
-			count  int
-		)
-		if err = rows.Scan(&status, &count); err != nil {
-			return replayv1.ReplayArtifactSummary{}, gerror.Wrap(err, "scan replay artifact status failed")
-		}
-		switch status {
-		case "artifact_missing":
-			summary.Missing = count
-		case "artifact_pruned":
-			summary.Pruned = count
-		default:
-			summary.Available += count
-		}
-	}
-	if err = rows.Err(); err != nil {
-		return replayv1.ReplayArtifactSummary{}, gerror.Wrap(err, "iterate replay artifact status failed")
-	}
-	return summary, nil
+	return repo.SummarizeReplayArtifactStatus(ctx, projectID, runID)
 }
 
 func listReplayEntryPoints(ctx context.Context, projectID string, runID string, limit int) ([]replayv1.ReplayEntryPointItem, error) {
@@ -563,152 +419,125 @@ func listRunArtifactIssues(ctx context.Context, projectID string, runID string, 
 }
 
 func listReplayTimelineRows(ctx context.Context, projectID string, runID string, replayKind string, limit int) ([]replayIndexRow, error) {
-	db, closeFn, err := openProjectDatabase(ctx)
+	rows, err := repo.ListReplayTimelineRows(ctx, projectID, runID, replayKind, limit)
 	if err != nil {
 		return nil, err
 	}
-	defer closeFn()
-
-	query := `SELECT
-  id, replay_id, project_id, run_id,
-  COALESCE(domain_task_id, ''), COALESCE(compiled_task_id, ''),
-  COALESCE(event_id, ''), COALESCE(trace_id, ''), COALESCE(span_id, ''),
-  replay_kind, seq_no, title, COALESCE(summary, ''),
-  file_path, COALESCE(file_ext, ''), COALESCE(mime_type, ''), COALESCE(file_size, 0), COALESCE(sha256, ''),
-  COALESCE(source_object_kind, ''), COALESCE(source_object_id, ''), status, created_at, updated_at
-FROM workflow_replay_index
-WHERE project_id = ? AND run_id = ?`
-	args := []any{projectID, runID}
-	if replayKind != "" {
-		query += ` AND replay_kind = ?`
-		args = append(args, replayKind)
-	}
-	query += ` ORDER BY seq_no ASC, created_at ASC, id ASC LIMIT ?`
-	args = append(args, limit)
-
-	rows, err := db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, gerror.Wrap(err, "query replay timeline rows failed")
-	}
-	defer rows.Close()
-
-	items := make([]replayIndexRow, 0, limit)
-	for rows.Next() {
-		var item replayIndexRow
-		if err = rows.Scan(
-			&item.ID, &item.ReplayID, &item.ProjectID, &item.RunID,
-			&item.DomainTaskID, &item.CompiledTaskID,
-			&item.EventID, &item.TraceID, &item.SpanID,
-			&item.ReplayKind, &item.SeqNo, &item.Title, &item.Summary,
-			&item.FilePath, &item.FileExt, &item.MimeType, &item.FileSize, &item.SHA256,
-			&item.SourceObjectKind, &item.SourceObjectID, &item.Status, &item.CreatedAt, &item.UpdatedAt,
-		); err != nil {
-			return nil, gerror.Wrap(err, "scan replay timeline row failed")
+	result := make([]replayIndexRow, len(rows))
+	for i, r := range rows {
+		result[i] = replayIndexRow{
+			ID:               r.ID,
+			ReplayID:         r.ReplayID,
+			ProjectID:        r.ProjectID,
+			RunID:            r.RunID,
+			DomainTaskID:     r.DomainTaskID,
+			CompiledTaskID:   r.CompiledTaskID,
+			EventID:          r.EventID,
+			TraceID:          r.TraceID,
+			SpanID:           r.SpanID,
+			ReplayKind:       r.ReplayKind,
+			SeqNo:            r.SeqNo,
+			Title:            r.Title,
+			Summary:          r.Summary,
+			FilePath:         r.FilePath,
+			FileExt:          r.FileExt,
+			MimeType:         r.MimeType,
+			FileSize:         r.FileSize,
+			SHA256:           r.SHA256,
+			SourceObjectKind: r.SourceObjectKind,
+			SourceObjectID:   r.SourceObjectID,
+			Status:           r.Status,
+			CreatedAt:        r.CreatedAt,
+			UpdatedAt:        r.UpdatedAt,
 		}
-		items = append(items, item)
 	}
-	if err = rows.Err(); err != nil {
-		return nil, gerror.Wrap(err, "iterate replay timeline rows failed")
-	}
-	return items, nil
+	return result, nil
 }
 
 func getReplayIndexItem(ctx context.Context, projectID string, runID string, replayID string) (*replayIndexRow, error) {
-	db, closeFn, err := openProjectDatabase(ctx)
+	res, err := repo.GetReplayIndexItem(ctx, projectID, runID, replayID)
 	if err != nil {
 		return nil, err
 	}
-	defer closeFn()
-
-	row := db.QueryRowContext(ctx, `SELECT
-  id, replay_id, project_id, run_id,
-  COALESCE(domain_task_id, ''), COALESCE(compiled_task_id, ''),
-  COALESCE(event_id, ''), COALESCE(trace_id, ''), COALESCE(span_id, ''),
-  replay_kind, seq_no, title, COALESCE(summary, ''),
-  file_path, COALESCE(file_ext, ''), COALESCE(mime_type, ''), COALESCE(file_size, 0), COALESCE(sha256, ''),
-  COALESCE(source_object_kind, ''), COALESCE(source_object_id, ''), status, created_at, updated_at
-FROM workflow_replay_index
-WHERE project_id = ? AND run_id = ? AND replay_id = ?
-LIMIT 1`, projectID, runID, replayID)
-
-	var item replayIndexRow
-	if err = row.Scan(
-		&item.ID, &item.ReplayID, &item.ProjectID, &item.RunID,
-		&item.DomainTaskID, &item.CompiledTaskID,
-		&item.EventID, &item.TraceID, &item.SpanID,
-		&item.ReplayKind, &item.SeqNo, &item.Title, &item.Summary,
-		&item.FilePath, &item.FileExt, &item.MimeType, &item.FileSize, &item.SHA256,
-		&item.SourceObjectKind, &item.SourceObjectID, &item.Status, &item.CreatedAt, &item.UpdatedAt,
-	); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, gerror.New("replay item not found")
-		}
-		return nil, gerror.Wrap(err, "query replay item failed")
+	if res == nil {
+		return nil, nil
 	}
-	return &item, nil
+	return &replayIndexRow{
+		ID:               res.ID,
+		ReplayID:         res.ReplayID,
+		ProjectID:        res.ProjectID,
+		RunID:            res.RunID,
+		DomainTaskID:     res.DomainTaskID,
+		CompiledTaskID:   res.CompiledTaskID,
+		EventID:          res.EventID,
+		TraceID:          res.TraceID,
+		SpanID:           res.SpanID,
+		ReplayKind:       res.ReplayKind,
+		SeqNo:            res.SeqNo,
+		Title:            res.Title,
+		Summary:          res.Summary,
+		FilePath:         res.FilePath,
+		FileExt:          res.FileExt,
+		MimeType:         res.MimeType,
+		FileSize:         res.FileSize,
+		SHA256:           res.SHA256,
+		SourceObjectKind: res.SourceObjectKind,
+		SourceObjectID:   res.SourceObjectID,
+		Status:           res.Status,
+		CreatedAt:        res.CreatedAt,
+		UpdatedAt:        res.UpdatedAt,
+	}, nil
 }
 
 func listLogSegmentRows(ctx context.Context, projectID string, runID string, limit int) ([]logSegmentRow, error) {
-	db, closeFn, err := openProjectDatabase(ctx)
+	rows, err := repo.ListLogSegmentRows(ctx, projectID, runID, limit)
 	if err != nil {
 		return nil, err
 	}
-	defer closeFn()
-
-	rows, err := db.QueryContext(ctx, `SELECT
-  id, project_id, run_id, segment_id, stream_kind, seq_no, file_path,
-  COALESCE(file_size, 0), COALESCE(sha256, ''), COALESCE(started_at, ''), COALESCE(ended_at, ''), status, created_at
-FROM workflow_run_log_segments
-WHERE project_id = ? AND run_id = ?
-ORDER BY seq_no ASC, created_at ASC, id ASC
-LIMIT ?`, projectID, runID, limit)
-	if err != nil {
-		return nil, gerror.Wrap(err, "query log segment rows failed")
-	}
-	defer rows.Close()
-
-	items := make([]logSegmentRow, 0, limit)
-	for rows.Next() {
-		var item logSegmentRow
-		if err = rows.Scan(
-			&item.ID, &item.ProjectID, &item.RunID, &item.SegmentID, &item.StreamKind, &item.SeqNo, &item.FilePath,
-			&item.FileSize, &item.SHA256, &item.StartedAt, &item.EndedAt, &item.Status, &item.CreatedAt,
-		); err != nil {
-			return nil, gerror.Wrap(err, "scan log segment row failed")
+	result := make([]logSegmentRow, len(rows))
+	for i, r := range rows {
+		result[i] = logSegmentRow{
+			ID:         r.ID,
+			ProjectID:  r.ProjectID,
+			RunID:      r.RunID,
+			SegmentID:  r.SegmentID,
+			StreamKind: r.StreamKind,
+			SeqNo:      r.SeqNo,
+			FilePath:   r.FilePath,
+			FileSize:   r.FileSize,
+			SHA256:     r.SHA256,
+			StartedAt:  r.StartedAt,
+			EndedAt:    r.EndedAt,
+			Status:     r.Status,
+			CreatedAt:  r.CreatedAt,
 		}
-		items = append(items, item)
 	}
-	if err = rows.Err(); err != nil {
-		return nil, gerror.Wrap(err, "iterate log segment rows failed")
-	}
-	return items, nil
+	return result, nil
 }
 
 func getLogSegmentItem(ctx context.Context, projectID string, runID string, segmentID string) (*logSegmentRow, error) {
-	db, closeFn, err := openProjectDatabase(ctx)
+	res, err := repo.GetLogSegmentItem(ctx, projectID, runID, segmentID)
 	if err != nil {
 		return nil, err
 	}
-	defer closeFn()
-
-	row := db.QueryRowContext(ctx, `SELECT
-  id, project_id, run_id, segment_id, stream_kind, seq_no, file_path,
-  COALESCE(file_size, 0), COALESCE(sha256, ''), COALESCE(started_at, ''), COALESCE(ended_at, ''), status, created_at
-FROM workflow_run_log_segments
-WHERE project_id = ? AND run_id = ? AND segment_id = ?
-LIMIT 1`, projectID, runID, segmentID)
-
-	var item logSegmentRow
-	if err = row.Scan(
-		&item.ID, &item.ProjectID, &item.RunID, &item.SegmentID, &item.StreamKind, &item.SeqNo, &item.FilePath,
-		&item.FileSize, &item.SHA256, &item.StartedAt, &item.EndedAt, &item.Status, &item.CreatedAt,
-	); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, gerror.New("log segment not found")
-		}
-		return nil, gerror.Wrap(err, "query log segment failed")
+	if res == nil {
+		return nil, nil
 	}
-	return &item, nil
+	return &logSegmentRow{
+		ID:         res.ID,
+		ProjectID:  res.ProjectID,
+		RunID:      res.RunID,
+		SegmentID:  res.SegmentID,
+		StreamKind: res.StreamKind,
+		SeqNo:      res.SeqNo,
+		FilePath:   res.FilePath,
+		FileSize:   res.FileSize,
+		SHA256:     res.SHA256,
+		StartedAt:  res.StartedAt,
+		EndedAt:    res.EndedAt,
+		Status:     res.Status,
+		CreatedAt:  res.CreatedAt,
+	}, nil
 }
 
 func mapLogSegments(rows []logSegmentRow) []replayv1.LogSegmentListItem {

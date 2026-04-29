@@ -8,12 +8,8 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gcmd"
-)
 
-const (
-	startupConfigSourceCLI     = "cli"
-	startupConfigSourceConfig  = "config"
-	startupConfigSourceDefault = "default"
+	"github.com/leef-l/easymvp/apps/core/internal/consts"
 )
 
 type StartupConfig struct {
@@ -137,14 +133,15 @@ func loadStartupStringOption(ctx context.Context, key string, def string, normal
 	value := def
 	option := StartupOption{
 		Key:          key,
-		Source:       startupConfigSourceDefault,
+		Source:       consts.StartupConfigSourceDefault,
 		DefaultValue: def,
 		Configured:   false,
 		UsingDefault: true,
 	}
-	if g.Cfg().Available(ctx, key) {
-		value = g.Cfg().MustGet(ctx, key).String()
-		option.Source = startupConfigSourceConfig
+	cfgValue := g.Cfg().MustGet(ctx, key).String()
+	if strings.TrimSpace(cfgValue) != "" {
+		value = cfgValue
+		option.Source = consts.StartupConfigSourceConfig
 		option.Configured = true
 		option.UsingDefault = false
 	}
@@ -160,14 +157,14 @@ func loadStartupBoolOption(ctx context.Context, key string, def bool) (bool, Sta
 	value := def
 	option := StartupOption{
 		Key:          key,
-		Source:       startupConfigSourceDefault,
+		Source:       consts.StartupConfigSourceDefault,
 		DefaultValue: formatStartupBool(def),
 		Configured:   false,
 		UsingDefault: true,
 	}
 	if g.Cfg().Available(ctx, key) {
 		value = g.Cfg().MustGet(ctx, key).Bool()
-		option.Source = startupConfigSourceConfig
+		option.Source = consts.StartupConfigSourceConfig
 		option.Configured = true
 		option.UsingDefault = false
 	}
@@ -176,7 +173,7 @@ func loadStartupBoolOption(ctx context.Context, key string, def bool) (bool, Sta
 }
 
 func overrideStartupStringOption(option StartupOption, value string, normalize func(string) string) StartupOption {
-	option.Source = startupConfigSourceCLI
+	option.Source = consts.StartupConfigSourceCLI
 	option.Configured = true
 	option.UsingDefault = false
 	if normalize != nil {
@@ -187,7 +184,7 @@ func overrideStartupStringOption(option StartupOption, value string, normalize f
 }
 
 func overrideStartupBoolOption(option StartupOption, value bool) StartupOption {
-	option.Source = startupConfigSourceCLI
+	option.Source = consts.StartupConfigSourceCLI
 	option.Configured = true
 	option.UsingDefault = false
 	option.Value = formatStartupBool(value)

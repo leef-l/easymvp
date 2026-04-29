@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 
 	acceptancev1 "github.com/leef-l/easymvp/apps/core/api/acceptance/v1"
 	"github.com/leef-l/easymvp/apps/core/internal/model/braincontracts"
@@ -61,6 +62,9 @@ func (s *sAcceptance) RefreshAcceptanceProfiles(ctx context.Context, projectID s
 	result, err := mapAcceptanceProfiles(ctx, projectID)
 	if err != nil {
 		return nil, err
+	}
+	if auditErr := insertAuditLog(ctx, projectID, "acceptance.profiles.refreshed", "user:local_operator", "Acceptance profiles refreshed", nil); auditErr != nil {
+		g.Log().Errorf(ctx, "insert audit log failed: %v", auditErr)
 	}
 	return &acceptancev1.RefreshAcceptanceProfilesRes{
 		CommandID:  newResourceID("cmd"),

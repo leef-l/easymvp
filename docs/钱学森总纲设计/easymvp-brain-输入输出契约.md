@@ -20,6 +20,8 @@
 
 ## 2. 契约总览
 
+> ✅ **已收敛**（2026-04-27）：`architect_chat` 保留为内部辅助能力，已从 `brain.json` capabilities 移除，handler 中标注为 `INTERNAL AUXILIARY`。
+
 第一版收敛为 5 类核心契约：
 
 1. `plan_review`
@@ -137,6 +139,8 @@ FailureContext
 
 ## 6. 契约三：`repair_design`
 
+> ✅ **已实现**（2026-04-27）：`RepairDesignResult` 已补齐文档要求的全部字段：`reason_class`、`repair_strategy`、`updated_tasks`、`verification_adjustments`、`delivery_adjustments`、`human_checkpoint_required`。
+
 ## 6.1 输入
 
 - `failure_context_json`
@@ -252,6 +256,8 @@ FailureContext
 ---
 
 ## 9. 推荐对象关系
+
+> ✅ **已实现**（2026-04-27）：运行时 DTO 族已补齐——`VerificationResult`、`FaultSummary`、`RuntimeEscalation`、`EvidenceSummary` 及 `EvidenceItem` 已定义于 `braincontracts/`。
 
 推荐的对象关系如下：
 

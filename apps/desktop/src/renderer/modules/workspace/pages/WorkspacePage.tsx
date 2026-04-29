@@ -1,17 +1,41 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiGet, getCoreBaseUrl } from "@/shared/lib/api";
+import { useTranslation } from "react-i18next";
+import { apiDelete, apiGet, getCoreBaseUrl } from "@/shared/lib/api";
 import { useProjectState } from "@/shared/lib/project";
 import { useQuery } from "@/shared/lib/query";
 import type { WorkspaceHomeView, WorkspaceView } from "@/shared/lib/types";
 import { QueryPanel } from "@/shared/ui/QueryPanel";
 
 export function WorkspacePage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { projectId, updateProjectId, routes } = useProjectState();
+
+  if (!projectId) {
+    return (
+      <section className="placeholder-page">
+        <div className="empty-state-panel">
+          <h4>{t("workspace.noProjectTitle")}</h4>
+          <p>{t("workspace.noProjectDescription")}</p>
+          <div className="action-row">
+            <button className="primary-button" onClick={() => navigate("/projects")}>
+              {t("workspace.goToProjects")}
+            </button>
+            <button className="secondary-button" onClick={() => navigate("/settings")}>
+              {t("settings.createProject")}
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
   const [refreshTick, setRefreshTick] = useState(0);
   const [streamState, setStreamState] = useState<"idle" | "connecting" | "live" | "disconnected">("idle");
   const [streamEvents, setStreamEvents] = useState<Array<{ id: string; type: string; summary: string }>>([]);
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+  const toggleSection = (key: string) => setExpandedSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const state = useQuery(
     () => apiGet<WorkspaceView>(`/api/v3/projects/${encodeURIComponent(projectId)}/workspace-view`),
     [projectId, refreshTick],
@@ -24,6 +48,12 @@ export function WorkspacePage() {
   const runtimeEscalation = state.data?.runtime_escalation;
   const faultSummary = state.data?.fault_summary;
   const repairPlanDraft = state.data?.repair_plan_draft;
+  const isOnboarded = window.localStorage.getItem(`easymvp.project.onboarded.${projectId}`) === "true";
+  const isEarlyStage =
+    projectSnapshot?.current_stage === "created" ||
+    projectSnapshot?.production_status === "pending" ||
+    (projectSnapshot?.progress_percent ?? 0) === 0;
+  const showOnboarding = Boolean(state.data) && !isOnboarded && !onboardingDismissed && isEarlyStage;
   const workspaceNextAction = firstText(completionVerdict?.next_action);
   const workspaceFlags = [
     workspaceOverview?.manual_review_required || projectSnapshot?.manual_review_required ? "manual review required" : undefined,
@@ -36,7 +66,7 @@ export function WorkspacePage() {
     setStreamState("connecting");
     const lastEventIdKey = `easymvp.workspace.events.${projectId}`;
     const lastEventID = window.sessionStorage.getItem(lastEventIdKey)?.trim();
-    const base = getCoreBaseUrl();
+    const base = getCoreBaseUrl() || window.location.origin;
     const url = new URL(`/api/v3/workspace/projects/${encodeURIComponent(projectId)}/events`, base);
     if (lastEventID) {
       url.searchParams.set("last_event_id", lastEventID);
@@ -78,6 +108,10 @@ export function WorkspacePage() {
     return () => {
       source.close();
     };
+  }, [projectId]);
+
+  useEffect(() => {
+    setOnboardingDismissed(false);
   }, [projectId]);
 
   function handleAction(actionKey: string, options?: { deepLink?: string; targetId?: string }) {
@@ -131,51 +165,222 @@ export function WorkspacePage() {
       refreshing={state.refreshing}
       stale={state.stale}
       error={state.error}
-      title="Workspace overview"
+      title={t("workspace.title")}
       onRetry={() => setRefreshTick((value) => value + 1)}
-      secondaryActionLabel="Open Diagnostics"
+      secondaryActionLabel={t("workspace.openDiagnostics")}
       onSecondaryAction={() => navigate(routes.diagnostics)}
-      recoveryMessage="Workspace keeps the last successful snapshot when realtime refresh fails."
+      recoveryMessage={t("workspace.recovery")}
     >
       {state.data ? (
-        <section className="dashboard-page">
-          <div className="dashboard-intro">
-            <div>
-              <p className="placeholder-section">Workspace</p>
-              <h3 className="placeholder-title">{firstText(state.data.workspace_explanation.headline, projectSnapshot?.name, projectId)}</h3>
-              <p className="placeholder-description">
-                {firstText(completionVerdict?.summary, state.data.workspace_explanation.summary)}
-              </p>
+        showOnboarding ? (
+          <OnboardingPanel
+            projectName={firstText(state.data.workspace_explanation.headline, projectSnapshot?.name, projectId)}
+            projectId={projectId}
+            currentStage={projectSnapshot?.current_stage ?? ""}
+            progressPercent={projectSnapshot?.progress_percent ?? 0}
+            onDismiss={() => setOnboardingDismissed(true)}
+            t={t}
+            navigate={navigate}
+          />
+        ) : (
+          <section className="dashboard-page">
+          {/* Top Status Bar */}
+          <div className="workspace-top-bar">
+            <div style={{ minWidth: 0 }}>
+              <p className="placeholder-section">{t("workspace.section")}</p>
+              <h3 className="placeholder-title" style={{ fontSize: "20px", marginTop: "4px" }}>
+                {firstText(state.data.workspace_explanation.headline, projectSnapshot?.name, projectId)}
+              </h3>
             </div>
-            <div className="summary-stack action-stack">
-              <span className="status-pill">{firstText(workspaceOverview?.current_stage, projectSnapshot?.current_stage, "unknown")}</span>
-              {firstText(completionVerdict?.decision, completionVerdict?.final_status) ? (
-                <span className="status-pill">{firstText(completionVerdict?.decision, completionVerdict?.final_status)}</span>
+            <div className="action-row" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <span className="status-pill">
+                {firstText(workspaceOverview?.current_stage, projectSnapshot?.current_stage, t("unknown"))}
+              </span>
+              <span className="status-pill">
+                {t("workspace.progress")} {projectSnapshot?.progress_percent ?? 0}%
+              </span>
+              <span className="status-pill">
+                {t("workspace.risk")}{" "}
+                {firstText(workspaceOverview?.risk_level, projectSnapshot?.risk_level, t("unknown"))}
+              </span>
+              {workspaceNextAction ? (
+                <span className="status-pill">
+                  {t("next")} {workspaceNextAction}
+                </span>
               ) : null}
-              {verificationResult?.preferred_verification_channel ? (
-                <span className="status-pill">verify {verificationResult.preferred_verification_channel}</span>
-              ) : null}
-              {workspaceNextAction ? <span className="status-pill">next {workspaceNextAction}</span> : null}
-              <span className="status-pill">core {getCoreBaseUrl()}</span>
-              <span className="status-pill">stream {streamState}</span>
+              <span className="status-pill">
+                {t("stream")} {streamState}
+              </span>
               {workspaceNextAction ? (
                 <button
                   className="secondary-button"
-                  onClick={() => handleAction(workspaceNextAction, { targetId: runtimeEscalation?.task_id || runtimeEscalation?.source_task_id || projectId })}
+                  onClick={() =>
+                    handleAction(workspaceNextAction, {
+                      targetId: runtimeEscalation?.task_id || runtimeEscalation?.source_task_id || projectId,
+                    })
+                  }
                 >
-                  Follow Next Action
+                  {t("workspace.followNextAction")}
                 </button>
               ) : null}
               <button className="secondary-button" onClick={() => setRefreshTick((value) => value + 1)}>
-                Refresh View
+                {t("workspace.refreshView")}
               </button>
             </div>
           </div>
 
+          {/* Three-column cockpit */}
+          <div className="workspace-cockpit">
+            {/* Left: Stage Rail */}
+            <div className="workspace-column">
+              <h4>{t("workspace.stageProgress")}</h4>
+              <div className="stack-list">
+                {state.data.stage_progress.map((item) => (
+                  <article key={item.stage_key} className="list-card">
+                    <div className="list-card-head">
+                      <strong>{item.stage_name}</strong>
+                      <span className="status-pill">{item.status}</span>
+                    </div>
+                    <p>{item.active_item_title || t("noActiveItem")}</p>
+                  </article>
+                ))}
+                {state.data.stage_progress.length === 0 ? (
+                  <article className="list-card">
+                    <p>{t("workspace.noStageProgress")}</p>
+                  </article>
+                ) : null}
+              </div>
+            </div>
+
+            {/* Center: Live Activity */}
+            <div className="workspace-column">
+              <h4>{t("workspace.liveActivity")}</h4>
+              <div className="stack-list">
+                {streamEvents.map((item) => (
+                  <article key={item.id} className="list-card">
+                    <div className="list-card-head">
+                      <strong>{item.type}</strong>
+                      <span className="status-pill">{item.id}</span>
+                    </div>
+                    <p>{item.summary}</p>
+                  </article>
+                ))}
+                {state.data.live_activity
+                  .slice(0, expandedSections.activity ? undefined : 6)
+                  .map((item) => (
+                    <button
+                      key={item.event_id}
+                      className="action-card"
+                      onClick={() =>
+                        navigate(
+                          item.source_task_id
+                            ? buildProjectRoute(projectId, "execution", { task: item.source_task_id })
+                            : buildProjectRoute(projectId, "execution"),
+                        )
+                      }
+                    >
+                      <div className="list-card-head">
+                        <strong>{item.title}</strong>
+                        <span
+                          className={
+                            item.requires_action ? "severity-badge severity-warning" : "status-pill"
+                          }
+                        >
+                          {item.requires_action ? t("needsAction") : item.event_type}
+                        </span>
+                      </div>
+                      <p>
+                        {item.source_brain} · {item.occurred_at}
+                        {item.source_task_id ? ` · ${t("task")} ${item.source_task_id}` : ""}
+                      </p>
+                    </button>
+                  ))}
+                {streamEvents.length === 0 && state.data.live_activity.length === 0 ? (
+                  <article className="list-card">
+                    <p>{t("workspace.noLiveActivity")}</p>
+                  </article>
+                ) : null}
+                {state.data.live_activity.length > 6 && !expandedSections.activity ? (
+                  <button className="show-more-btn" onClick={() => toggleSection("activity")}>
+                    +{state.data.live_activity.length - 6} more
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            {/* Right: Action Inbox */}
+            <div className="workspace-column">
+              <h4>{t("workspace.actionInbox")}</h4>
+              <div className="stack-list">
+                {[...state.data.action_inbox]
+                  .sort((a, b) => (a.is_blocking === b.is_blocking ? 0 : a.is_blocking ? -1 : 1))
+                  .map((item) => (
+                    <button
+                      key={item.item_id}
+                      className="action-card"
+                      onClick={() => handleAction(item.recommended_action, { targetId: item.target_id })}
+                    >
+                      <div className="action-card-head">
+                        <strong>{item.title}</strong>
+                        <span className={`severity-badge severity-${item.severity}`}>
+                          {formatInboxBadge(item)}
+                        </span>
+                      </div>
+                      <p>
+                        {describeInboxAction(item)} · {item.recommended_action}
+                      </p>
+                    </button>
+                  ))}
+                {state.data.action_inbox.length === 0 ? (
+                  <article className="list-card">
+                    <p>{t("workspace.noBlockingActions")}</p>
+                  </article>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom summary metrics */}
+          <div className="metrics-grid" style={{ marginTop: "6px" }}>
+            <MetricCard
+              label={t("workspace.verification")}
+              value={firstText(
+                verificationResult?.decision,
+                verificationResult?.status,
+                workspaceOverview?.stage_status,
+                projectSnapshot?.production_status,
+                t("pending"),
+              )}
+              tone="neutral"
+            />
+            <MetricCard
+              label={t("workspace.evidence")}
+              value={`${state.data.acceptance_coverage.evidence_ready}/${state.data.acceptance_coverage.evidence_required}`}
+              tone="calm"
+            />
+            <MetricCard
+              label={t("workspace.completion")}
+              value={firstText(
+                completionVerdict?.decision,
+                completionVerdict?.final_status,
+                workspaceOverview?.production_status,
+                projectSnapshot?.production_status,
+                t("pending"),
+              )}
+              tone="neutral"
+            />
+            <MetricCard
+              label={t("next")}
+              value={workspaceNextAction || t("none")}
+              tone={workspaceNextAction ? "warn" : "neutral"}
+            />
+          </div>
+
+          {/* Workspace flags */}
           {workspaceFlags.length > 0 ? (
             <section className="data-panel">
               <div className="panel-header">
-                <h3>Workspace Guards</h3>
+                <h3>{t("workspace.guards")}</h3>
                 <span className="status-pill">{workspaceFlags.length}</span>
               </div>
               <div className="inline-metrics">
@@ -188,165 +393,123 @@ export function WorkspacePage() {
             </section>
           ) : null}
 
-          <section className="data-panel">
-            <div className="panel-header">
-              <h3>Workspace Stream</h3>
-              <span className="status-pill">{streamEvents.length}</span>
-            </div>
-            <div className="stack-list">
-              {streamEvents.map((item) => (
-                <article key={item.id} className="list-card">
-                  <div className="list-card-head">
-                    <strong>{item.type}</strong>
-                    <span className="status-pill">{item.id}</span>
-                  </div>
-                  <p>{item.summary}</p>
-                </article>
-              ))}
-              {streamEvents.length === 0 ? (
-                <article className="list-card">
-                  <p>No streamed workspace events have been observed in this session yet.</p>
-                </article>
-              ) : null}
-            </div>
-          </section>
-
-          <div className="metrics-grid">
-            <MetricCard label="Progress" value={`${projectSnapshot?.progress_percent ?? 0}%`} tone="calm" />
-            <MetricCard label="Risk" value={firstText(workspaceOverview?.risk_level, projectSnapshot?.risk_level, "unknown")} tone="warn" />
-            <MetricCard
-              label="Verification"
-              value={firstText(verificationResult?.decision, verificationResult?.status, workspaceOverview?.stage_status, projectSnapshot?.production_status, "pending")}
-              tone="neutral"
-            />
-            <MetricCard
-              label="Completion"
-              value={firstText(completionVerdict?.decision, completionVerdict?.final_status, workspaceOverview?.production_status, projectSnapshot?.production_status, "pending")}
-              tone="neutral"
-            />
-            <MetricCard
-              label="Evidence"
-              value={`${state.data.acceptance_coverage.evidence_ready}/${state.data.acceptance_coverage.evidence_required}`}
-              tone="calm"
-            />
-          </div>
-
+          {/* Snapshot + Recommended Actions + Top Blockers + Explain Links */}
           <div className="content-grid">
             <section className="data-panel">
               <div className="panel-header">
-                <h3>Total-Outline Snapshot</h3>
+                <h3>{t("workspace.snapshot")}</h3>
                 <span className="status-pill">{countOutlineArtifacts(state.data)}</span>
               </div>
               <div className="stack-list">
                 <SummaryCard
-                  title="Workspace Overview"
-                  primary={firstText(workspaceOverview?.stage_status, workspaceOverview?.production_status, projectSnapshot?.production_status, "not ready")}
+                  title={t("workspace.overview")}
+                  primary={firstText(workspaceOverview?.stage_status, workspaceOverview?.production_status, projectSnapshot?.production_status, t("notReady"))}
                   secondary={firstText(
                     state.data.workspace_explanation.summary,
                     "Structured workspace overview becomes primary when the backend emits overview fields.",
                   )}
                   pills={[
-                    workspaceOverview?.current_stage ? `stage ${workspaceOverview.current_stage}` : undefined,
-                    workspaceOverview?.risk_level ? `risk ${workspaceOverview.risk_level}` : undefined,
-                    workspaceOverview?.acceptance_run_status ? `acceptance ${workspaceOverview.acceptance_run_status}` : undefined,
-                    workspaceOverview?.next_action ? `next ${workspaceOverview.next_action}` : undefined,
-                    workspaceOverview ? `actions ${workspaceOverview.action_required_count}` : undefined,
+                    workspaceOverview?.current_stage ? `${t("stage")} ${workspaceOverview.current_stage}` : undefined,
+                    workspaceOverview?.risk_level ? `${t("risk")} ${workspaceOverview.risk_level}` : undefined,
+                    workspaceOverview?.acceptance_run_status ? `${t("acceptance")} ${workspaceOverview.acceptance_run_status}` : undefined,
+                    workspaceOverview?.next_action ? `${t("next")} ${workspaceOverview.next_action}` : undefined,
+                    workspaceOverview ? `${t("actions")} ${workspaceOverview.action_required_count}` : undefined,
                     workspaceOverview?.manual_release_required !== undefined
-                      ? `manual release ${String(workspaceOverview.manual_release_required)}`
+                      ? `${t("manualRelease")} ${String(workspaceOverview.manual_release_required)}`
                       : undefined,
                   ]}
                   lines={[
-                    workspaceOverview ? `Blocking issues: ${workspaceOverview.blocking_issue_count}` : undefined,
-                    formatBooleanLine("Manual review required", workspaceOverview?.manual_review_required),
-                    formatBooleanLine("Verification conflict", workspaceOverview?.verification_conflict),
-                    formatBooleanLine("Fault loop detected", workspaceOverview?.fault_loop_detected),
-                    formatBooleanLine("Policy denied", workspaceOverview?.policy_denied),
+                    workspaceOverview ? `${t("blockingIssues")}: ${workspaceOverview.blocking_issue_count}` : undefined,
+                    formatBooleanLine(t("manualReviewRequired"), workspaceOverview?.manual_review_required),
+                    formatBooleanLine(t("verificationConflict"), workspaceOverview?.verification_conflict),
+                    formatBooleanLine(t("faultLoop"), workspaceOverview?.fault_loop_detected),
+                    formatBooleanLine(t("policyDenied"), workspaceOverview?.policy_denied),
                   ]}
                 />
                 <SummaryCard
-                  title="Verification Result"
-                  primary={firstText(verificationResult?.decision, verificationResult?.status, "not ready")}
+                  title={t("workspace.verificationResult")}
+                  primary={firstText(verificationResult?.decision, verificationResult?.status, t("notReady"))}
                   secondary={
                     verificationResult?.summary ||
                     "Workspace is currently using production_status because no structured verification result is attached."
                   }
                   pills={[
                     verificationResult?.completed !== undefined
-                      ? `completed ${String(verificationResult.completed)}`
+                      ? `${t("completed")} ${String(verificationResult.completed)}`
                       : undefined,
                     verificationResult?.preferred_verification_channel
-                      ? `channel ${verificationResult.preferred_verification_channel}`
+                      ? `${t("channel")} ${verificationResult.preferred_verification_channel}`
                       : undefined,
                     verificationResult?.updated_at || undefined,
                   ]}
                   lines={[
-                    formatChecklistLine("Required checks", verificationResult?.required_checks),
-                    formatChecklistLine("Missing evidence", verificationResult?.missing_evidence),
-                    formatChecklistLine("Failed checks", verificationResult?.failed_checks),
+                    formatChecklistLine(t("requiredChecks"), verificationResult?.required_checks),
+                    formatChecklistLine(t("missingEvidence"), verificationResult?.missing_evidence),
+                    formatChecklistLine(t("failedChecks"), verificationResult?.failed_checks),
                   ]}
                 />
                 <SummaryCard
-                  title="Completion Verdict"
+                  title={t("workspace.completionVerdict")}
                   primary={firstText(completionVerdict?.decision, completionVerdict?.final_status, "not emitted")}
                   secondary={firstText(completionVerdict?.summary, completionVerdict?.reason, "Workspace explanation is currently using the latest available summary.")}
                   pills={[
                     completionVerdict?.completed !== undefined
-                      ? `completed ${String(completionVerdict.completed)}`
+                      ? `${t("completed")} ${String(completionVerdict.completed)}`
                       : undefined,
                     completionVerdict?.release_ready !== undefined
-                      ? `release ${String(completionVerdict.release_ready)}`
+                      ? `${t("releaseReady")} ${String(completionVerdict.release_ready)}`
                       : undefined,
                     completionVerdict?.manual_review_required !== undefined
-                      ? `manual review ${String(completionVerdict.manual_review_required)}`
+                      ? `${t("manualReviewRequired")} ${String(completionVerdict.manual_review_required)}`
                       : undefined,
                     completionVerdict?.manual_release_required !== undefined
-                      ? `manual release ${String(completionVerdict.manual_release_required)}`
+                      ? `${t("manualRelease")} ${String(completionVerdict.manual_release_required)}`
                       : undefined,
                     completionVerdict?.manual_release_completed !== undefined
-                      ? `release done ${String(completionVerdict.manual_release_completed)}`
+                      ? `${t("releaseReady")} ${String(completionVerdict.manual_release_completed)}`
                       : undefined,
                     completionVerdict?.blocker_count !== undefined
-                      ? `blockers ${completionVerdict.blocker_count}`
+                      ? `${t("blockers")} ${completionVerdict.blocker_count}`
                       : undefined,
-                    completionVerdict?.next_action ? `next ${completionVerdict.next_action}` : undefined,
+                    completionVerdict?.next_action ? `${t("next")} ${completionVerdict.next_action}` : undefined,
                     completionVerdict?.updated_at || undefined,
                   ]}
                 />
                 <SummaryCard
-                  title="Runtime Escalation"
-                  primary={firstText(runtimeEscalation?.reason_class, runtimeEscalation?.status, "none")}
+                  title={t("workspace.runtimeEscalation")}
+                  primary={firstText(runtimeEscalation?.reason_class, runtimeEscalation?.status, t("none"))}
                   secondary={firstText(runtimeEscalation?.summary, "No structured runtime escalation is attached to this workspace snapshot.")}
                   pills={[
                     runtimeEscalation?.severity || undefined,
-                    runtimeEscalation?.source_brain ? `brain ${runtimeEscalation.source_brain}` : undefined,
-                    runtimeEscalation?.source_task_id ? `source task ${runtimeEscalation.source_task_id}` : undefined,
-                    runtimeEscalation?.run_binding_id ? `binding ${runtimeEscalation.run_binding_id}` : undefined,
-                    runtimeEscalation?.run_status ? `run status ${runtimeEscalation.run_status}` : undefined,
-                    runtimeEscalation?.action ? `action ${runtimeEscalation.action}` : undefined,
-                    runtimeEscalation?.task_id ? `task ${runtimeEscalation.task_id}` : undefined,
-                    runtimeEscalation?.run_id ? `run ${runtimeEscalation.run_id}` : undefined,
-                    runtimeEscalation?.policy_denied !== undefined ? `policy denied ${String(runtimeEscalation.policy_denied)}` : undefined,
+                    runtimeEscalation?.source_brain ? `${t("brain")} ${runtimeEscalation.source_brain}` : undefined,
+                    runtimeEscalation?.source_task_id ? `${t("sourceTask")} ${runtimeEscalation.source_task_id}` : undefined,
+                    runtimeEscalation?.run_binding_id ? `${t("binding")} ${runtimeEscalation.run_binding_id}` : undefined,
+                    runtimeEscalation?.run_status ? `${t("runStatus")} ${runtimeEscalation.run_status}` : undefined,
+                    runtimeEscalation?.action ? `${t("actions")} ${runtimeEscalation.action}` : undefined,
+                    runtimeEscalation?.task_id ? `${t("task")} ${runtimeEscalation.task_id}` : undefined,
+                    runtimeEscalation?.run_id ? `${t("run")} ${runtimeEscalation.run_id}` : undefined,
+                    runtimeEscalation?.policy_denied !== undefined ? `${t("policyDenied")} ${String(runtimeEscalation.policy_denied)}` : undefined,
                     runtimeEscalation?.updated_at || undefined,
                   ]}
                 />
                 <SummaryCard
-                  title="Fault Summary"
-                  primary={firstText(faultSummary?.fault_kind, faultSummary?.status, "none")}
+                  title={t("workspace.faultSummary")}
+                  primary={firstText(faultSummary?.fault_kind, faultSummary?.status, t("none"))}
                   secondary={firstText(faultSummary?.summary, faultSummary?.top_issue, "No aggregated fault summary is attached to the current workspace view.")}
                   pills={[
                     faultSummary?.severity || undefined,
-                    faultSummary?.fault_loop_detected !== undefined ? `fault loop ${String(faultSummary.fault_loop_detected)}` : undefined,
-                    faultSummary?.blocking_issue_count !== undefined ? `blocking ${faultSummary.blocking_issue_count}` : undefined,
-                    faultSummary?.advisory_issue_count !== undefined ? `advisory ${faultSummary.advisory_issue_count}` : undefined,
+                    faultSummary?.fault_loop_detected !== undefined ? `${t("faultLoop")} ${String(faultSummary.fault_loop_detected)}` : undefined,
+                    faultSummary?.blocking_issue_count !== undefined ? `${t("blockingIssues")} ${faultSummary.blocking_issue_count}` : undefined,
+                    faultSummary?.advisory_issue_count !== undefined ? `${t("advisory")} ${faultSummary.advisory_issue_count}` : undefined,
                     faultSummary?.updated_at || undefined,
                   ]}
                   lines={[
-                    formatChecklistLine("Failed checks", faultSummary?.failed_checks),
-                    formatChecklistLine("Affected tasks", faultSummary?.affected_tasks),
+                    formatChecklistLine(t("failedChecks"), faultSummary?.failed_checks),
+                    formatChecklistLine(t("affectedTasks"), faultSummary?.affected_tasks),
                   ]}
                 />
                 <SummaryCard
-                  title="Repair Plan Draft"
+                  title={t("workspace.repairPlan")}
                   primary={firstText(repairPlanDraft?.repair_strategy, repairPlanDraft?.status, "idle")}
                   secondary={firstText(
                     repairPlanDraft?.summary,
@@ -357,47 +520,18 @@ export function WorkspacePage() {
                     repairPlanDraft?.id || undefined,
                     repairPlanDraft?.reason_class || undefined,
                     repairPlanDraft?.manual_review_required !== undefined
-                      ? `manual review ${String(repairPlanDraft.manual_review_required)}`
+                      ? `${t("manualReviewRequired")} ${String(repairPlanDraft.manual_review_required)}`
                       : undefined,
                     repairPlanDraft?.updated_at || undefined,
                   ]}
-                  lines={[formatChecklistLine("Updated tasks", repairPlanDraft?.updated_tasks)]}
+                  lines={[formatChecklistLine(t("updatedTasks"), repairPlanDraft?.updated_tasks)]}
                 />
               </div>
             </section>
 
             <section className="data-panel">
               <div className="panel-header">
-                <h3>Action Inbox</h3>
-                <span className="status-pill">{state.data.action_inbox.length}</span>
-              </div>
-              <div className="stack-list">
-                {state.data.action_inbox.map((item) => (
-                  <button
-                    key={item.item_id}
-                    className="action-card"
-                    onClick={() => handleAction(item.recommended_action, { targetId: item.target_id })}
-                  >
-                    <div className="action-card-head">
-                      <strong>{item.title}</strong>
-                      <span className={`severity-badge severity-${item.severity}`}>{formatInboxBadge(item)}</span>
-                    </div>
-                    <p>
-                      {describeInboxAction(item)} · {item.recommended_action}
-                    </p>
-                  </button>
-                ))}
-                {state.data.action_inbox.length === 0 ? (
-                  <article className="list-card">
-                    <p>No blocking actions in the inbox.</p>
-                  </article>
-                ) : null}
-              </div>
-            </section>
-
-            <section className="data-panel">
-              <div className="panel-header">
-                <h3>Recommended Actions</h3>
+                <h3>{t("workspace.recommendedActions")}</h3>
                 <span className="status-pill">{state.data.workspace_explanation.recommended_actions.length}</span>
               </div>
               <div className="stack-list">
@@ -416,7 +550,7 @@ export function WorkspacePage() {
                 ))}
                 {state.data.workspace_explanation.recommended_actions.length === 0 ? (
                   <article className="list-card">
-                    <p>No recommended actions from the current workspace summary.</p>
+                    <p>{t("workspace.noRecommendedActions")}</p>
                   </article>
                 ) : null}
               </div>
@@ -424,91 +558,7 @@ export function WorkspacePage() {
 
             <section className="data-panel">
               <div className="panel-header">
-                <h3>Active Projects</h3>
-                <span className="status-pill">{homeState.data?.active_projects.length ?? 0}</span>
-              </div>
-              {homeState.error ? <p className="error-copy">{homeState.error}</p> : null}
-              {homeState.stale ? <p className="muted-copy">Showing the last successful workspace home snapshot.</p> : null}
-              <div className="stack-list">
-                {(homeState.data?.active_projects ?? []).map((item) => (
-                  <button key={item.project_id} className="action-card" onClick={() => updateProjectId(item.project_id)}>
-                    <div className="action-card-head">
-                      <strong>{item.name}</strong>
-                      <span className="status-pill">{item.current_stage}</span>
-                    </div>
-                    <p>{item.project_category} · progress {item.progress_percent}% · {firstText(item.stage_status, item.production_status, "pending")}</p>
-                  </button>
-                ))}
-                {(homeState.data?.active_projects.length ?? 0) === 0 ? (
-                  <article className="list-card">
-                    <p>No active projects are available in the current workspace.</p>
-                  </article>
-                ) : null}
-              </div>
-            </section>
-
-            <section className="data-panel">
-              <div className="panel-header">
-                <h3>Stage Progress</h3>
-              </div>
-              <div className="stack-list">
-                {state.data.stage_progress.map((item) => (
-                  <article key={item.stage_key} className="list-card">
-                    <div className="list-card-head">
-                      <strong>{item.stage_name}</strong>
-                      <span className="status-pill">{item.status}</span>
-                    </div>
-                    <p>{item.active_item_title || "No active item"}</p>
-                  </article>
-                ))}
-                {state.data.stage_progress.length === 0 ? (
-                  <article className="list-card">
-                    <p>No stage progress has been recorded yet.</p>
-                  </article>
-                ) : null}
-              </div>
-            </section>
-
-            <section className="data-panel">
-              <div className="panel-header">
-                <h3>Live Activity</h3>
-              </div>
-              <div className="stack-list">
-                {state.data.live_activity.map((item) => (
-                  <button
-                    key={item.event_id}
-                    className="action-card"
-                    onClick={() =>
-                      navigate(
-                        item.source_task_id
-                          ? buildProjectRoute(projectId, "execution", { task: item.source_task_id })
-                          : buildProjectRoute(projectId, "execution"),
-                      )
-                    }
-                  >
-                    <div className="list-card-head">
-                      <strong>{item.title}</strong>
-                      <span className={item.requires_action ? "severity-badge severity-warning" : "status-pill"}>
-                        {item.requires_action ? "needs action" : item.event_type}
-                      </span>
-                    </div>
-                    <p>
-                      {item.source_brain} · {item.occurred_at}
-                      {item.source_task_id ? ` · task ${item.source_task_id}` : ""}
-                    </p>
-                  </button>
-                ))}
-                {state.data.live_activity.length === 0 ? (
-                  <article className="list-card">
-                    <p>No live activity is available yet.</p>
-                  </article>
-                ) : null}
-              </div>
-            </section>
-
-            <section className="data-panel">
-              <div className="panel-header">
-                <h3>Top Blockers</h3>
+                <h3>{t("workspace.topBlockers")}</h3>
               </div>
               <div className="stack-list">
                 {state.data.workspace_explanation.top_blockers.map((item) => (
@@ -518,7 +568,7 @@ export function WorkspacePage() {
                 ))}
                 {state.data.workspace_explanation.top_blockers.length === 0 ? (
                   <article className="list-card">
-                    <p>No blockers are reported in the current workspace explanation.</p>
+                    <p>{t("workspace.noBlockers")}</p>
                   </article>
                 ) : null}
               </div>
@@ -526,30 +576,222 @@ export function WorkspacePage() {
 
             <section className="data-panel">
               <div className="panel-header">
-                <h3>Explain Links</h3>
+                <h3>{t("workspace.explainLinks")}</h3>
                 <span className="status-pill">{state.data.workspace_explanation.explain_links?.length ?? 0}</span>
               </div>
               <div className="stack-list">
                 {(state.data.workspace_explanation.explain_links ?? []).map((item) => (
                   <button key={item} className="action-card" onClick={() => handleExplainLink(item, projectId, navigate)}>
                     <div className="action-card-head">
-                      <strong>{formatExplainLinkLabel(item)}</strong>
+                      <strong>{formatExplainLinkLabel(item, t)}</strong>
                       <span className="status-pill">{item}</span>
                     </div>
-                    <p>{describeExplainLink(item)}</p>
+                    <p>{describeExplainLink(item, t)}</p>
                   </button>
                 ))}
                 {(state.data.workspace_explanation.explain_links?.length ?? 0) === 0 ? (
                   <article className="list-card">
-                    <p>No explanation links are attached to the current workspace summary.</p>
+                    <p>{t("workspace.noExplainLinks")}</p>
                   </article>
                 ) : null}
               </div>
             </section>
           </div>
+
+          {/* Multi-Project Overview (collapsible) */}
+          {homeState.data ? (
+            <section className="data-panel">
+              <div
+                className="panel-header"
+                style={{ cursor: "pointer" }}
+                onClick={() => toggleSection("homeOverview")}
+              >
+                <h3>{"Multi-Project Overview"}</h3>
+                <span className="status-pill">{expandedSections.homeOverview ? "▾" : "▸"}</span>
+              </div>
+              {expandedSections.homeOverview ? (
+                <>
+                  <div className="metrics-grid" style={{ marginBottom: "14px" }}>
+                    <MetricCard label={t("workspace.totalProjects")} value={String(homeState.data.summary.total_projects)} tone="calm" />
+                    <MetricCard label={t("workspace.activeProjects")} value={String(homeState.data.summary.active_projects)} tone="calm" />
+                    <MetricCard label={t("workspace.blockedProjects")} value={String(homeState.data.summary.blocked_projects)} tone={homeState.data.summary.blocked_projects > 0 ? "warn" : "neutral"} />
+                    <MetricCard label={t("workspace.pendingActions")} value={String(homeState.data.summary.pending_actions)} tone={homeState.data.summary.pending_actions > 0 ? "warn" : "neutral"} />
+                  </div>
+
+                  <section className="data-panel" style={{ marginBottom: "14px" }}>
+                    <div className="panel-header">
+                      <h3>{t("workspace.activeProjects")}</h3>
+                      <div className="action-row">
+                        <span className="status-pill">{homeState.data.active_projects.length}</span>
+                        <button className="secondary-button" onClick={() => navigate(routes.settings)}>+ {t("settings.createProject")}</button>
+                      </div>
+                    </div>
+                    <div className="stack-list">
+                      {homeState.data.active_projects.map((item) => (
+                        <article key={item.project_id} className={`list-card${item.project_id === projectId ? " is-selected" : ""}`}>
+                          <div className="list-card-head">
+                            <strong style={{ cursor: "pointer" }} onClick={() => updateProjectId(item.project_id)}>{item.name}</strong>
+                            <div className="action-row">
+                              <span className="status-pill">{item.current_stage}</span>
+                              <span className={`status-pill${item.production_status === "pending" ? " pill-advisory" : item.production_status === "ready" ? " pill-success" : ""}`}>{item.production_status}</span>
+                            </div>
+                          </div>
+                          <p>{item.project_category} · {t("workspace.progress")} {item.progress_percent}%</p>
+                          <div className="action-row">
+                            <button className="secondary-button" onClick={() => { updateProjectId(item.project_id); navigate(routes.plan); }}>{t("nav.plan")}</button>
+                            <button className="secondary-button" onClick={() => { updateProjectId(item.project_id); navigate(routes.execution); }}>{t("nav.execution")}</button>
+                            <button className="secondary-button" onClick={() => { updateProjectId(item.project_id); navigate(routes.acceptance); }}>{t("nav.acceptance")}</button>
+                          </div>
+                        </article>
+                      ))}
+                      {homeState.data.active_projects.length === 0 ? (
+                        <article className="list-card"><p>{t("workspace.noActiveProjects")}</p></article>
+                      ) : null}
+                    </div>
+                  </section>
+
+                  {homeState.data.need_attention.length > 0 ? (
+                    <section className="data-panel" style={{ marginBottom: "14px" }}>
+                      <div className="panel-header">
+                        <h3>{t("workspace.needAttention")}</h3>
+                        <span className="status-pill pill-advisory">{homeState.data.need_attention.length}</span>
+                      </div>
+                      <div className="stack-list">
+                        {homeState.data.need_attention.map((item) => (
+                          <button key={item.item_id} className="action-card" onClick={() => { updateProjectId(item.project_id); handleAction(item.recommended_action, {}); }}>
+                            <div className="action-card-head">
+                              <strong>{item.title}</strong>
+                              <span className={`severity-badge severity-${item.severity}`}>{item.is_blocking ? t("blocking") : item.severity}</span>
+                            </div>
+                            <p>{item.project_id}</p>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
+
+                  <div className="content-grid">
+                    <section className="data-panel">
+                      <div className="panel-header">
+                        <h3>{t("workspace.releaseReadiness")}</h3>
+                      </div>
+                      <div className="stack-list">
+                        {homeState.data.release_readiness.map((item) => (
+                          <article key={item.project_id} className="list-card">
+                            <div className="list-card-head">
+                              <strong>{item.name}</strong>
+                              <span className={`status-pill${item.production_status === "ready" ? " pill-success" : ""}`}>{item.production_status}</span>
+                            </div>
+                            {item.missing_items > 0 ? <p>{item.missing_items} {t("workspace.missingItems")}</p> : null}
+                          </article>
+                        ))}
+                        {homeState.data.release_readiness.length === 0 ? (
+                          <article className="list-card"><p>{t("workspace.noReleaseItems")}</p></article>
+                        ) : null}
+                      </div>
+                    </section>
+
+                    <section className="data-panel">
+                      <div className="panel-header">
+                        <h3>{t("workspace.recentActivity")}</h3>
+                      </div>
+                      <div className="stack-list">
+                        {homeState.data.recent_activity.slice(0, expandedSections.recentActivity ? undefined : 5).map((item) => (
+                          <article key={item.event_id} className="list-card">
+                            <div className="list-card-head">
+                              <strong>{item.title}</strong>
+                              <span className={item.needs_attention ? "severity-badge severity-warning" : "status-pill"}>{item.event_type}</span>
+                            </div>
+                            <p>{item.source_brain} · {item.occurred_at}</p>
+                          </article>
+                        ))}
+                        {homeState.data.recent_activity.length === 0 ? (
+                          <article className="list-card"><p>{t("workspace.noRecentActivity")}</p></article>
+                        ) : null}
+                        {homeState.data.recent_activity.length > 5 && !expandedSections.recentActivity ? (
+                          <button className="show-more-btn" onClick={() => toggleSection("recentActivity")}>+{homeState.data.recent_activity.length - 5} more</button>
+                        ) : null}
+                      </div>
+                    </section>
+                  </div>
+                </>
+              ) : null}
+            </section>
+          ) : null}
         </section>
+      )
       ) : null}
     </QueryPanel>
+  );
+}
+
+function OnboardingPanel(props: {
+  projectName: string;
+  projectId: string;
+  currentStage: string;
+  progressPercent: number;
+  onDismiss: () => void;
+  t: (key: string, options?: Record<string, unknown>) => string;
+  navigate: ReturnType<typeof useNavigate>;
+}) {
+  const handleDismiss = () => {
+    window.localStorage.setItem(`easymvp.project.onboarded.${props.projectId}`, "true");
+    props.onDismiss();
+  };
+
+  const handleSkip = () => {
+    window.localStorage.setItem(`easymvp.project.onboarded.${props.projectId}`, "true");
+    props.onDismiss();
+  };
+
+  const planCompiled = props.currentStage !== "created" && props.progressPercent > 0;
+
+  return (
+    <section className="onboarding-panel">
+      <div className="onboarding-header">
+        <h2 className="placeholder-title">{props.t("workspace.onboardingWelcome", { name: props.projectName })}</h2>
+        <p className="muted-copy">{props.t("workspace.onboardingSubtitle")}</p>
+      </div>
+
+      <div className="onboarding-cards">
+        <article className="data-panel onboarding-card">
+          <h4>{props.t("workspace.onboardingStep1Title")}</h4>
+          <p>{props.t("workspace.onboardingStep1Desc")}</p>
+        </article>
+        <article className="data-panel onboarding-card">
+          <h4>{props.t("workspace.onboardingStep2Title")}</h4>
+          <p>{props.t("workspace.onboardingStep2Desc")}</p>
+        </article>
+        <article className="data-panel onboarding-card">
+          <h4>{props.t("workspace.onboardingStep3Title")}</h4>
+          <p>{props.t("workspace.onboardingStep3Desc")}</p>
+        </article>
+      </div>
+
+      <div className="action-row onboarding-actions">
+        <button className="primary-button" onClick={handleDismiss}>
+          {props.t("workspace.onboardingGetStarted")}
+        </button>
+        <button className="secondary-button" onClick={handleSkip}>
+          {props.t("workspace.onboardingSkip")}
+        </button>
+        {!planCompiled ? (
+          <button
+            className="secondary-button"
+            onClick={() => props.navigate(buildProjectRoute(props.projectId, "plan"))}
+          >
+            {props.t("nav.plan")}
+          </button>
+        ) : (
+          <button
+            className="secondary-button"
+            onClick={() => props.navigate(buildProjectRoute(props.projectId, "execution"))}
+          >
+            {props.t("nav.execution")}
+          </button>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -581,15 +823,15 @@ function SummaryCard(props: {
       <p>{props.secondary}</p>
       {pills.length > 0 ? (
         <div className="inline-metrics">
-          {pills.map((item) => (
-            <span key={item} className="status-pill">
+          {pills.map((item, idx) => (
+            <span key={idx} className="status-pill">
               {item}
             </span>
           ))}
         </div>
       ) : null}
-      {lines.map((line) => (
-        <p key={line} className="muted-copy">
+      {lines.map((line, idx) => (
+        <p key={idx} className="muted-copy">
           {line}
         </p>
       ))}
@@ -675,45 +917,45 @@ function handleExplainLink(linkKey: string, projectId: string, navigate: ReturnT
   }
 }
 
-function formatExplainLinkLabel(linkKey: string) {
+function formatExplainLinkLabel(linkKey: string, t: (key: string) => string) {
   switch (linkKey) {
     case "runtime":
-      return "Inspect runtime state";
+      return t("explain.runtime");
     case "task_review":
-      return "Review affected task";
+      return t("explain.taskReview");
     case "diagnostics":
-      return "Open diagnostics";
+      return t("explain.diagnostics");
     case "replay":
-      return "Inspect replay timeline";
+      return t("explain.replay");
     case "audit":
-      return "Review audit records";
+      return t("explain.audit");
     case "acceptance":
-      return "Open acceptance center";
+      return t("explain.acceptance");
     case "plan":
-      return "Open project plan";
+      return t("explain.plan");
     default:
-      return "Open workspace detail";
+      return t("explain.default");
   }
 }
 
-function describeExplainLink(linkKey: string) {
+function describeExplainLink(linkKey: string, t: (key: string) => string) {
   switch (linkKey) {
     case "runtime":
-      return "Jump to the execution board and verify the latest runtime binding, events, and replay artifacts.";
+      return t("describe.runtime");
     case "task_review":
-      return "Open task execution review when workspace explanation recommends manual follow-up.";
+      return t("describe.taskReview");
     case "diagnostics":
-      return "Check runtime and system health before retrying the current project workflow.";
+      return t("describe.diagnostics");
     case "replay":
-      return "Inspect replay artifacts and timeline entries for the most recent run.";
+      return t("describe.replay");
     case "audit":
-      return "Review persisted audit facts and release actions for this project.";
+      return t("describe.audit");
     case "acceptance":
-      return "Open acceptance commands, gate status, and issue coverage.";
+      return t("describe.acceptance");
     case "plan":
-      return "Return to the latest compiled plan and repair draft context.";
+      return t("describe.plan");
     default:
-      return "Open the project workspace view.";
+      return t("describe.default");
   }
 }
 

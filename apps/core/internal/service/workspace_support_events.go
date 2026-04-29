@@ -41,9 +41,6 @@ func streamWorkspaceProjectEvents(ctx context.Context, req *workspacev1.ProjectE
 		return gerror.New("workspace event stream request context is unavailable")
 	}
 	flusher, ok := httpReq.Response.RawWriter().(http.Flusher)
-	if !ok {
-		return gerror.New("workspace event stream flusher is unavailable")
-	}
 
 	normalized := normalizeProjectEventsStreamReq(httpReq, req)
 	if normalized.ProjectID == "" {
@@ -61,6 +58,7 @@ func streamWorkspaceProjectEvents(ctx context.Context, req *workspacev1.ProjectE
 		}
 	}
 
+	httpReq.Response.Header().Set("Content-Type", "text/event-stream")
 	httpReq.Response.RawWriter().Header().Set("Content-Type", "text/event-stream")
 	httpReq.Response.RawWriter().Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	httpReq.Response.RawWriter().Header().Set("Connection", "keep-alive")
@@ -70,7 +68,9 @@ func streamWorkspaceProjectEvents(ctx context.Context, req *workspacev1.ProjectE
 	if err := writeWorkspaceSSEControlFrame(httpReq, "retry: 3000\n\n"); err != nil {
 		return gerror.Wrap(err, "write workspace retry frame failed")
 	}
-	flusher.Flush()
+	if ok {
+		flusher.Flush()
+	}
 	if normalized.LastEventID != "" && cursor.EventID == "" {
 		if err := writeWorkspaceSSEEvent(httpReq, "", "workspace.snapshot_invalidated", map[string]any{
 			"project_id":      normalized.ProjectID,
@@ -79,7 +79,9 @@ func streamWorkspaceProjectEvents(ctx context.Context, req *workspacev1.ProjectE
 		}); err != nil {
 			return gerror.Wrap(err, "write workspace snapshot invalidated event failed")
 		}
-		flusher.Flush()
+		if ok {
+			flusher.Flush()
+		}
 	}
 
 	emitEvents := func() error {
@@ -96,7 +98,7 @@ func streamWorkspaceProjectEvents(ctx context.Context, req *workspacev1.ProjectE
 				CreatedAt: item.CreatedAt,
 			}
 		}
-		if len(events) > 0 {
+		if len(events) > 0 && ok {
 			flusher.Flush()
 		}
 		return nil
@@ -127,7 +129,9 @@ func streamWorkspaceProjectEvents(ctx context.Context, req *workspacev1.ProjectE
 			if err := writeWorkspaceSSEControlFrame(httpReq, ": keepalive\n\n"); err != nil {
 				return gerror.Wrap(err, "write workspace keepalive frame failed")
 			}
-			flusher.Flush()
+			if ok {
+				flusher.Flush()
+			}
 		}
 	}
 }
@@ -140,14 +144,14 @@ func writeWorkspaceStreamErrorEvent(httpReq *ghttp.Request, flusher http.Flusher
 	if writeErr := writeWorkspaceSSEEvent(httpReq, "", "workspace.stream_error", map[string]any{
 		"project_id": projectID,
 		"error":      err.Error(),
-	}); writeErr == nil {
+	}); writeErr == nil && flusher != nil {
 		flusher.Flush()
 	}
 }
 
 func normalizeProjectEventsStreamReq(httpReq *ghttp.Request, req *workspacev1.ProjectEventsStreamReq) normalizedProjectEventsStreamReq {
 	normalized := normalizedProjectEventsStreamReq{
-		ProjectID:   strings.TrimSpace(req.ProjectID),
+		ProjectID:   strings.TrimSpace(req.Id),
 		Limit:       req.Limit,
 		LastEventID: strings.TrimSpace(req.LastEventID),
 	}

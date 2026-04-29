@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/leef-l/easymvp/apps/core/internal/model/do"
 )
 
@@ -89,7 +90,7 @@ func seedRuntimeTask(t *testing.T, ctx context.Context, db *sql.DB, projectID st
 	t.Helper()
 
 	now := "2026-04-24T10:00:00Z"
-	tx, err := db.BeginTx(ctx, nil)
+	tx, err := g.DB().Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin runtime seed transaction failed: %v", err)
 	}

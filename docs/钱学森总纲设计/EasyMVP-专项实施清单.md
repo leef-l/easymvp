@@ -76,6 +76,8 @@
 
 ## 4.2 P0-02 固化 `CompletionVerdict` 为 completed 前最后裁决
 
+> ✅ **已实现**（2026-04-27）：`updateProjectFromAdjudication` 已明确注释为设置 `completed` 的唯一授权路径；运行时自动 adjudication 已集成；`UpdateProject` API 禁止直接修改 status。
+
 目标：
 
 - 禁止把“run 成功”直接判成“完成”
@@ -96,6 +98,8 @@
 3. 自动完成逻辑不能绕过 verdict
 
 ## 4.3 P0-03 固化 `fault -> repair_design -> reworking` 唯一路径
+
+> ✅ **已实现**（2026-04-27）：`shouldCreateRepairDraftAfterAdjudication` 已扩展为在 `Decision == "rework"` 或 `FinalStatus == "failed"` 时均触发 repair draft；函数注释明确禁止失败后直接重试。
 
 目标：
 
@@ -134,6 +138,9 @@
 ---
 
 ## 5. P1 清单
+
+> ✅ **P1-01 / P1-02 页面展示**（2026-04-27）：AcceptancePage / DiagnosticsPage / WorkspacePage 已显示 `runtime_escalation`、`missing_evidence`、`failed_checks`。
+> ✅ **P1-03 升级规则代码化**（2026-04-27）：`mapDiagnosticCategoryToEscalationType` 已把诊断分类映射到 `EscalationType` 枚举。
 
 ## 5.1 P1-01 读取侧显示 verification contract gap
 
@@ -194,6 +201,8 @@
 ---
 
 ## 6. P2 清单
+
+> ✅ **P2-01 阶段矩阵代码化**（2026-04-27）：`stage_matrix.go` 已完成。
 
 ## 6.1 P2-01 Completion / Repair / Verification 三条链的统一说明页
 

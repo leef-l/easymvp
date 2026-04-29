@@ -18,13 +18,28 @@ type PlanViewRes struct {
 }
 
 type CompilePlanReq struct {
-	g.Meta         `path:"/api/v3/projects/{id}/plan/compile" tags:"Plan" method:"post" summary:"Compile plan"`
-	ProjectID      string `json:"id" in:"path" v:"required"`
-	PlanDraftID    string `json:"plan_draft_id"`
-	ForceRecompile bool   `json:"force_recompile"`
+	g.Meta              `path:"/api/v3/projects/{id}/plan/compile" tags:"Plan" method:"post" summary:"Compile plan"`
+	ProjectID           string `json:"id" in:"path" v:"required"`
+	PlanDraftID         string `json:"plan_draft_id"`
+	ForceRecompile      bool   `json:"force_recompile"`
+	AutoRedesign        bool   `json:"auto_redesign"`
+	MaxRedesignAttempts int    `json:"max_redesign_attempts"`
 }
 
 type CompilePlanRes struct {
+	CommandID  string `json:"command_id"`
+	Accepted   bool   `json:"accepted"`
+	ResourceID string `json:"resource_id"`
+	NextAction string `json:"next_action"`
+}
+
+type RedesignPlanReq struct {
+	g.Meta   `path:"/api/v3/projects/{id}/plan/redesign" tags:"Plan" method:"post" summary:"Redesign plan draft based on review feedback"`
+	Id       string `json:"id" in:"path" v:"required"`
+	Feedback string `json:"feedback"` // optional user feedback
+}
+
+type RedesignPlanRes struct {
 	CommandID  string `json:"command_id"`
 	Accepted   bool   `json:"accepted"`
 	ResourceID string `json:"resource_id"`

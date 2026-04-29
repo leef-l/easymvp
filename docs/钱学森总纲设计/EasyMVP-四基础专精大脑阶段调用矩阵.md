@@ -36,6 +36,8 @@
 
 ## 3. 阶段主导矩阵
 
+> ✅ **已实现**（2026-04-27）：`stage_matrix.go` 已代码化，含 `StageMatrixEntry` / `StageMatrix` / `GetStageMatrixEntry` / `GetPrimaryBrainForStage`。
+
 | 工作流阶段 | 主导层 | 主导脑 | 辅助脑 | 典型触发 | 主要输出 | 升级条件 |
 |---|---|---|---|---|---|---|
 | `designing` | EasyMVP 编排层 | `easymvp-brain` | `central` | 创建项目、生成初始方案、修改草案 | `PlanDraft`、初始风险提示、初始验收要求草案 | 目标不清、范围失控、分类不明、输入冲突 |

@@ -19,6 +19,9 @@ type AcceptanceRuns struct {
 	FunctionalStatus      any //
 	ProductionStatus      any //
 	ManualReleaseRequired any //
+	BrowserRunID          any //
+	VerifierRunID         any //
+	ValidationResultsJSON any //
 	CreatedAt             any //
 	FinishedAt            any //
 }

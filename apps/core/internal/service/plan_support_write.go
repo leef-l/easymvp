@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 
 	"github.com/leef-l/easymvp/apps/core/internal/dao"
+	"github.com/leef-l/easymvp/apps/core/internal/events"
 	"github.com/leef-l/easymvp/apps/core/internal/model/braincontracts"
 	"github.com/leef-l/easymvp/apps/core/internal/model/entity"
 )
@@ -29,7 +30,7 @@ func createInitialDraftIfNeeded(ctx context.Context, projectID string) error {
 		return err
 	}
 	if project.CurrentPlanDraftId != "" {
-		draft, err := getPlanDraftForProject(ctx, db, *project)
+		draft, err := getPlanDraftForProject(ctx, *project)
 		if err == nil && draft != nil {
 			return nil
 		}
@@ -54,16 +55,7 @@ func createInitialDraftIfNeeded(ctx context.Context, projectID string) error {
 			"acceptance_profile_version": profile.AcceptanceProfileVersion,
 			"role_profile_version":       profile.RoleProfileVersion,
 		}, "{}")
-		draftTasks = mustMarshalJSONString([]map[string]any{
-			{
-				"task_key":   "project_delivery",
-				"name":       project.GoalSummary,
-				"phase":      "design",
-				"task_kind":  "planning",
-				"summary":    "Auto-generated initial draft from project goal",
-				"brain_kind": "easymvp-brain",
-			},
-		}, "[]")
+		draftTasks = mustMarshalJSONString(buildInitialDraftTasks(project), "[]")
 	)
 
 	tx, err := db.BeginTx(ctx, nil)
@@ -112,6 +104,9 @@ func compilePlanForProject(ctx context.Context, req CompilePlanCommand) (string,
 	if err != nil {
 		return "", err
 	}
+	if err = validateProjectStatusTransition(project.Status, []string{"created", "planning", "plan_draft", "plan_review", "review", "compiled"}); err != nil {
+		return "", err
+	}
 	profile, err := getProjectProfileByProjectID(ctx, db, req.ProjectID)
 	if err != nil {
 		return "", err
@@ -127,19 +122,40 @@ func compilePlanForProject(ctx context.Context, req CompilePlanCommand) (string,
 		return "", gerror.New("plan draft id does not match current draft")
 	}
 
-	review := aggregate.Review
-	reviewCompileAllowed := false
-	if review != nil {
-		reviewCompileAllowed = planReviewCompileAllowed(review)
-	}
-	if review == nil || !reviewCompileAllowed || req.ForceRecompile {
-		review, err = runPlanReview(ctx, project, profile, aggregate.Draft)
-		if err != nil {
-			return "", err
+	maxAttempts := 0
+	if req.AutoRedesign {
+		maxAttempts = req.MaxRedesignAttempts
+		if maxAttempts <= 0 {
+			maxAttempts = 3
 		}
 	}
-	if !planReviewCompileAllowed(review) {
-		return "", gerror.New("plan review does not allow compile")
+
+	review := aggregate.Review
+	for attempt := 0; attempt <= maxAttempts; attempt++ {
+		reviewCompileAllowed := false
+		if review != nil {
+			reviewCompileAllowed = planReviewCompileAllowed(review)
+		}
+		if review == nil || !reviewCompileAllowed || req.ForceRecompile {
+			review, err = runPlanReview(ctx, project, profile, aggregate.Draft)
+			if err != nil {
+				return "", err
+			}
+		}
+		if planReviewCompileAllowed(review) {
+			break
+		}
+		if attempt >= maxAttempts {
+			return "", newPlanReviewCompileBlockedError(review)
+		}
+		feedback := buildAutoRedesignFeedback(review)
+		newDraft, redesignErr := redesignPlanDraft(ctx, req.ProjectID, review, feedback)
+		if redesignErr != nil {
+			return "", gerror.Wrapf(redesignErr, "auto redesign failed at attempt %d", attempt+1)
+		}
+		aggregate.Draft = newDraft
+		review = nil
+		req.ForceRecompile = true
 	}
 
 	if aggregate.Compiled != nil && aggregate.Compiled.PlanReviewResultId == review.Id && !req.ForceRecompile {
@@ -154,6 +170,81 @@ func compilePlanForProject(ctx context.Context, req CompilePlanCommand) (string,
 		return compiledPlanID, gerror.Wrapf(err, "compiled plan %s created but acceptance profiles refresh failed", compiledPlanID)
 	}
 	return compiledPlanID, nil
+}
+
+// buildInitialDraftTasks generates a sensible task breakdown based on project category.
+// This ensures the plan review sees enough detail to approve compilation.
+func buildInitialDraftTasks(project *entity.Projects) []map[string]any {
+	category := strings.ToLower(strings.TrimSpace(project.ProjectCategory))
+	switch category {
+	case "webapp", "web", "frontend":
+		return []map[string]any{
+			{"task_key": "project_setup", "name": "Project Setup", "phase": "setup", "task_kind": "implementation", "summary": "Initialize project scaffold with build tools, dependencies, and folder structure", "brain_kind": "code"},
+			{"task_key": "core_logic", "name": "Implement Core Logic", "phase": "execute", "task_kind": "implementation", "summary": "Build the core business logic, data models, and state management", "brain_kind": "code"},
+			{"task_key": "ui_components", "name": "Build UI Components", "phase": "execute", "task_kind": "implementation", "summary": "Create React/Vue components, pages, and layout structure", "brain_kind": "code"},
+			{"task_key": "interactivity", "name": "Add Interactivity", "phase": "execute", "task_kind": "implementation", "summary": "Wire up event handlers, user input, and dynamic behavior", "brain_kind": "code"},
+			{"task_key": "testing", "name": "Testing", "phase": "verify", "task_kind": "verification", "summary": "Write unit tests, integration tests, and verify functionality", "brain_kind": "verifier"},
+			{"task_key": "polish_build", "name": "Polish & Build", "phase": "deploy", "task_kind": "implementation", "summary": "Optimize assets, configure build, and produce production bundle", "brain_kind": "code"},
+		}
+	case "backend", "api", "service":
+		return []map[string]any{
+			{"task_key": "project_setup", "name": "Project Setup", "phase": "setup", "task_kind": "implementation", "summary": "Initialize service scaffold, routing, and middleware", "brain_kind": "code"},
+			{"task_key": "data_model", "name": "Data Model & Storage", "phase": "execute", "task_kind": "implementation", "summary": "Design schema, migrations, and repository layer", "brain_kind": "code"},
+			{"task_key": "api_endpoints", "name": "API Endpoints", "phase": "execute", "task_kind": "implementation", "summary": "Implement REST/GRPC handlers, validation, and auth", "brain_kind": "code"},
+			{"task_key": "business_logic", "name": "Business Logic", "phase": "execute", "task_kind": "implementation", "summary": "Build services, workflows, and domain logic", "brain_kind": "code"},
+			{"task_key": "testing", "name": "Testing", "phase": "verify", "task_kind": "verification", "summary": "Unit tests, API tests, and load testing", "brain_kind": "verifier"},
+			{"task_key": "deployment", "name": "Deployment Config", "phase": "deploy", "task_kind": "implementation", "summary": "Docker, CI/CD, and environment configuration", "brain_kind": "code"},
+		}
+	case "mobile", "app":
+		return []map[string]any{
+			{"task_key": "project_setup", "name": "Project Setup", "phase": "setup", "task_kind": "implementation", "summary": "Initialize mobile project with framework and dependencies", "brain_kind": "code"},
+			{"task_key": "screens", "name": "Build Screens", "phase": "execute", "task_kind": "implementation", "summary": "Create UI screens, navigation, and layout", "brain_kind": "code"},
+			{"task_key": "state_mgmt", "name": "State Management", "phase": "execute", "task_kind": "implementation", "summary": "Implement data flow, API integration, and caching", "brain_kind": "code"},
+			{"task_key": "features", "name": "Core Features", "phase": "execute", "task_kind": "implementation", "summary": "Build primary user-facing features and interactions", "brain_kind": "code"},
+			{"task_key": "testing", "name": "Testing", "phase": "verify", "task_kind": "verification", "summary": "Unit tests, widget tests, and integration tests", "brain_kind": "verifier"},
+			{"task_key": "build_release", "name": "Build & Release", "phase": "deploy", "task_kind": "implementation", "summary": "Configure signing, build variants, and release pipeline", "brain_kind": "code"},
+		}
+	case "game":
+		return []map[string]any{
+			{"task_key": "project_setup", "name": "Project Setup", "phase": "setup", "task_kind": "implementation", "summary": "Initialize React + TypeScript project with Vite, configure build tools and testing framework", "brain_kind": "code"},
+			{"task_key": "game_logic", "name": "Implement Game Logic", "phase": "execute", "task_kind": "implementation", "summary": "Build game engine with movement, collision detection, food spawning, scoring, and game state management", "brain_kind": "code"},
+			{"task_key": "ui_components", "name": "Build UI Components", "phase": "execute", "task_kind": "implementation", "summary": "Create React components: GameBoard, ScoreDisplay, GameOverOverlay, and responsive layout", "brain_kind": "code"},
+			{"task_key": "interactivity", "name": "Add Interactivity", "phase": "execute", "task_kind": "implementation", "summary": "Keyboard/touch handlers, game loop with requestAnimationFrame, start/pause/restart controls", "brain_kind": "code"},
+			{"task_key": "testing", "name": "Testing & Verification", "phase": "verify", "task_kind": "verification", "summary": "Write unit tests for game logic and integration tests for UI components", "brain_kind": "verifier"},
+			{"task_key": "polish_build", "name": "Polish & Build", "phase": "deploy", "task_kind": "implementation", "summary": "Optimize assets, configure production build, and verify bundle output", "brain_kind": "code"},
+		}
+	default:
+		return []map[string]any{
+			{"task_key": "project_setup", "name": "Project Setup", "phase": "setup", "task_kind": "implementation", "summary": "Initialize project structure and dependencies", "brain_kind": "code"},
+			{"task_key": "core_implementation", "name": "Core Implementation", "phase": "execute", "task_kind": "implementation", "summary": "Build the primary features and logic", "brain_kind": "code"},
+			{"task_key": "testing", "name": "Testing & Verification", "phase": "verify", "task_kind": "verification", "summary": "Write tests and verify correctness", "brain_kind": "verifier"},
+			{"task_key": "deployment", "name": "Deployment & Polish", "phase": "deploy", "task_kind": "implementation", "summary": "Final build, optimization, and delivery", "brain_kind": "code"},
+		}
+	}
+}
+
+func buildAutoRedesignFeedback(review *entity.WorkflowPlanReviewResults) string {
+	if review == nil {
+		return "请根据审核意见自动优化方案。"
+	}
+	parts := []string{"方案审核未通过，请根据以下问题自动调整："}
+	if review.BlockingIssueCount > 0 {
+		parts = append(parts, fmt.Sprintf("- 存在 %d 个阻塞性问题", review.BlockingIssueCount))
+	}
+	if review.AdvisoryIssueCount > 0 {
+		parts = append(parts, fmt.Sprintf("- 存在 %d 个建议性问题", review.AdvisoryIssueCount))
+	}
+	hints := parseStringArrayJSON(review.SplitSuggestionsJson)
+	if len(hints) > 0 {
+		parts = append(parts, "- 重写建议：")
+		for _, h := range hints {
+			if strings.TrimSpace(h) != "" {
+				parts = append(parts, "  "+strings.TrimSpace(h))
+			}
+		}
+	}
+	parts = append(parts, "请自动修复上述问题并生成优化后的方案。")
+	return strings.Join(parts, "\n")
 }
 
 func refreshAcceptanceProfilesAfterCompile(
@@ -193,6 +284,20 @@ func runPlanReview(
 		return nil, err
 	}
 
+	db, closeFn, err := openProjectDatabase(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer closeFn()
+
+	// Auto-increment review_version to avoid UNIQUE constraint collisions on retry.
+	maxVersion := 0
+	_ = db.QueryRowContext(ctx, `SELECT COALESCE(MAX(review_version),0) FROM `+dao.WorkflowPlanReviewResults.Table()+` WHERE plan_draft_id = ?`, draft.Id).Scan(&maxVersion)
+	reviewVersion := result.ReviewVersion
+	if reviewVersion <= maxVersion {
+		reviewVersion = maxVersion + 1
+	}
+
 	var (
 		now        = nowText()
 		issuesJSON = mustMarshalJSONString(map[string]any{
@@ -205,7 +310,7 @@ func runPlanReview(
 			Id:                      result.ReviewResultID,
 			ProjectId:               project.Id,
 			PlanDraftId:             draft.Id,
-			ReviewVersion:           result.ReviewVersion,
+			ReviewVersion:           reviewVersion,
 			ReviewRunId:             strings.TrimSpace(envelope.TraceID),
 			Decision:                result.Decision,
 			BlockingIssueCount:      len(result.BlockingIssues),
@@ -218,12 +323,6 @@ func runPlanReview(
 		}
 	)
 
-	db, closeFn, err := openProjectDatabase(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer closeFn()
-
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, gerror.Wrap(err, "begin plan review transaction failed")
@@ -235,6 +334,20 @@ func runPlanReview(
 	if err = tx.Commit(); err != nil {
 		return nil, gerror.Wrap(err, "commit plan review transaction failed")
 	}
+
+	// Publish event so task scheduler can auto-compile and auto-execute.
+	if planReviewCompileAllowed(&row) {
+		events.Publish(ctx, &events.WorkflowEvent{
+			EventType: events.PlanReviewApproved,
+			ProjectID: project.Id,
+			Payload: map[string]interface{}{
+				"review_id":   row.Id,
+				"draft_id":    draft.Id,
+				"compile_allowed": true,
+			},
+		})
+	}
+
 	return &row, nil
 }
 
@@ -293,6 +406,10 @@ func runPlanCompile(
 	if err != nil {
 		return "", gerror.Wrap(err, "begin plan compile transaction failed")
 	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM `+dao.WorkflowCompiledPlans.Table()+` WHERE id = ?`, result.CompiledPlanID); err != nil {
+		_ = tx.Rollback()
+		return "", gerror.Wrap(err, "delete old compiled plan failed")
+	}
 	if err = deleteCompiledTasksByPlanID(ctx, tx, result.CompiledPlanID); err != nil {
 		_ = tx.Rollback()
 		return "", err
@@ -314,6 +431,10 @@ func runPlanCompile(
 	if err = updateProjectCurrentCompiledPlan(ctx, tx, project.Id, result.CompiledPlanID); err != nil {
 		_ = tx.Rollback()
 		return "", err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE `+dao.Projects.Table()+` SET status = ?, updated_at = ? WHERE id = ?`, "compiled", nowText(), project.Id); err != nil {
+		_ = tx.Rollback()
+		return "", gerror.Wrap(err, "update project status to compiled failed")
 	}
 	if err = tx.Commit(); err != nil {
 		return "", gerror.Wrap(err, "commit plan compile transaction failed")
@@ -722,8 +843,10 @@ func buildRoleContextPayload(profile *entity.ProjectProfiles) map[string]any {
 
 func buildCompiledTaskRows(compiledPlanID string, items []braincontracts.CompiledTaskItem, now string) []entity.WorkflowCompiledTasks {
 	rows := make([]entity.WorkflowCompiledTasks, 0, len(items))
-	for index, item := range items {
-		taskKey := buildCompiledTaskKey(index+1, item.Name)
+	for _, item := range items {
+		// Use the compiled_task_id as the stable task key so that
+		// fallback-generated depends_on_task_keys match exactly.
+		taskKey := item.CompiledTaskID
 		rows = append(rows, entity.WorkflowCompiledTasks{
 			Id:                       item.CompiledTaskID,
 			CompiledPlanId:           compiledPlanID,
@@ -739,7 +862,7 @@ func buildCompiledTaskRows(compiledPlanID string, items []braincontracts.Compile
 			DeliveryContractJson:     string(item.DeliveryContract),
 			VerificationContractJson: string(item.VerificationContract),
 			ManualReviewRequired:     boolToInt(planManualReviewRequired(item.RiskLevel)),
-			DependsOnTaskKeysJson:    "[]",
+			DependsOnTaskKeysJson:    mustMarshalJSONString(item.DependsOnTaskKeys, "[]"),
 			Status:                   "planned",
 			CreatedAt:                now,
 			UpdatedAt:                now,
@@ -789,6 +912,13 @@ func planReviewCompileAllowed(review *entity.WorkflowPlanReviewResults) bool {
 	default:
 		return strings.EqualFold(anyToString(typed), "true")
 	}
+}
+
+func newPlanReviewCompileBlockedError(review *entity.WorkflowPlanReviewResults) error {
+	if review == nil {
+		return gerror.New("plan review does not allow compile: no review result available")
+	}
+	return gerror.Newf("plan review does not allow compile: review_id=%s blocking_issue_count=%d advisory_issue_count=%d hint=Use 'Redesign Plan' to resolve blocking issues before compiling", review.Id, review.BlockingIssueCount, review.AdvisoryIssueCount)
 }
 
 func planManualReviewRequired(riskLevel string) bool {

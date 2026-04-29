@@ -11,6 +11,7 @@ import (
 	replayv1 "github.com/leef-l/easymvp/apps/core/api/replay/v1"
 	systemv1 "github.com/leef-l/easymvp/apps/core/api/system/v1"
 	"github.com/leef-l/easymvp/apps/core/internal/dao"
+	"github.com/leef-l/easymvp/apps/core/internal/model/braincontracts"
 	"github.com/leef-l/easymvp/apps/core/internal/model/entity"
 )
 
@@ -220,6 +221,28 @@ func classifyDiagnosticRecord(row entity.DiagnosticRecords, detail map[string]an
 		return "audit_attention", fallbackString(component, "audit"), field, "open_audit_and_review_event", "audit"
 	}
 	return "runtime_attention", fallbackString(component, inferDiagnosticComponent(scope)), field, inferDiagnosticAction(scope), inferDiagnosticPage(scope)
+}
+
+// mapDiagnosticCategoryToEscalationType translates the internal diagnostic
+// category string to the canonical EscalationType defined in contract_status.go.
+// This completes P1-11: escalation rules are now code-level typed.
+func mapDiagnosticCategoryToEscalationType(category string) braincontracts.EscalationType {
+	switch category {
+	case "policy_denied":
+		return braincontracts.EscalationPolicyDenied
+	case "verification_conflict":
+		return braincontracts.EscalationVerificationConflict
+	case "fault_loop_detected":
+		return braincontracts.EscalationFaultLoopDetected
+	case "core_unavailable":
+		return braincontracts.EscalationEnvironmentUnavailable
+	case "data_directory_unwritable", "migration_failure", "runtime_attention":
+		return braincontracts.EscalationManualReviewRequired
+	case "artifact_index_gap", "audit_attention":
+		return braincontracts.EscalationUnsupportedCapability
+	default:
+		return braincontracts.EscalationManualReviewRequired
+	}
 }
 
 func matchDiagnosticSignal(values ...string) bool {
@@ -491,7 +514,7 @@ func buildProjectEvidenceOverview(ctx context.Context, db *sql.DB, data *accepta
 			})
 		}
 	}
-	verification := buildVerificationResultView(data)
+	verification := buildVerificationResultView(ctx, data)
 	result.MissingRequired = append([]string{}, verification.MissingEvidence...)
 	result.FailedChecks = append([]string{}, verification.FailedChecks...)
 	return result, nil
@@ -506,7 +529,7 @@ func countProjectEvidenceItems(ctx context.Context, db *sql.DB, projectID string
 }
 
 func buildProjectVerificationRead(data *acceptanceAggregate) systemv1.ProjectVerificationRead {
-	verification := buildVerificationResultView(data)
+	verification := buildVerificationResultView(context.Background(), data)
 	completion := buildCompletionVerdictView(data)
 	fault := buildFaultSummaryView(data)
 	repair := buildRepairPlanDraftSummary(data)

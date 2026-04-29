@@ -2,7 +2,7 @@ const PROJECT_ID_KEY = "easymvp.desktop.projectId";
 const CORE_BASE_URL_KEY = "easymvp.desktop.coreBaseUrl";
 
 const DEFAULT_PROJECT_ID = "project-demo";
-const DEFAULT_CORE_BASE_URL = "http://127.0.0.1:8000";
+const DEFAULT_CORE_BASE_URL = "";
 const DEFAULT_RUNTIME_PLATFORM = "unknown";
 const DEFAULT_RUNTIME_VERSION = "dev";
 const DEFAULT_LAUNCH_MODE = "unknown";
@@ -161,19 +161,21 @@ function getDesktopRuntimeSeed(): DesktopRuntimeInfo {
 
 export function getStoredProjectId() {
   if (typeof window === "undefined") {
-    return DEFAULT_PROJECT_ID;
+    return "";
   }
-  return (
-    window.localStorage.getItem(PROJECT_ID_KEY)?.trim() || DEFAULT_PROJECT_ID
-  );
+  return window.localStorage.getItem(PROJECT_ID_KEY)?.trim() ?? "";
 }
 
 export function setStoredProjectId(projectId: string) {
   if (typeof window === "undefined") {
     return;
   }
-  const normalized = projectId.trim() || DEFAULT_PROJECT_ID;
-  window.localStorage.setItem(PROJECT_ID_KEY, normalized);
+  const normalized = projectId.trim();
+  if (normalized === "") {
+    window.localStorage.removeItem(PROJECT_ID_KEY);
+  } else {
+    window.localStorage.setItem(PROJECT_ID_KEY, normalized);
+  }
 }
 
 export function getStoredCoreBaseUrl() {

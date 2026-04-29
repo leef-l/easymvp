@@ -1,0 +1,177 @@
+func executeRun(ctx context.Context, entry *runEntry, mgr *runManager, runtime *cliRuntime, providerSession providerSession, req createRunRequest, runRec *persistedRunRecord, cfg *brainConfig, mode permissionMode) {
+	// 复用 runEntry 中创建的 TaskExecution 状态机实例
+	te := entry.taskExec
+	_ = te.Transition(kernel.StateRunning)
+
+	// 控制论：任务完成时统计（cancelled 不计入完成）
+	defer func() {
+		if entry.status() != "cancelled" {
+			mgr.completedCount.Add(1)
+		}
+	}()
+
+	env := newExecutionEnvironment(runRec.Workdir, mode, cfg, nil, false)
+	_ = applyFilePolicy(env, req.FilePolicy)
+
+	// 使用全局 BrainPool 创建轻量 Orchestrator（共享 sidecar 进程）。
+	var orch *kernel.Orchestrator
+	if req.Brain == "central" && !wantsMockProvider("", req.ModelConfig) && mgr.pool != nil {
+		llmProxy := &kernel.LLMProxy{
+			ProviderFactory: func(kind agent.Kind) llm.Provider {
+				session, err := openConfiguredProvider(cfg, string(kind), req.ModelConfig, "", "", "", "")
+				if err != nil {
+					return nil
+				}
+				return session.Provider
+			},
+		}
+		orch = kernel.NewOrchestratorWithPool(mgr.pool, &kernel.ProcessRunner{BinResolver: defaultBinResolver()}, llmProxy, defaultBinResolver(), kernel.OrchestratorConfig{},
+			kernel.WithSemanticApprover(&kernel.DefaultSemanticApprover{}),
+			kernel.WithCapabilityMatcher(mgr.capMatcher),
+			kernel.WithLearningEngine(mgr.learner),
+			kernel.WithContextEngine(mgr.ctxEngine),
+		)
+		installHumanTakeoverBridge(orch)
+	}
+
+	runReg := buildManagedRegistry(cfg, env, req.Brain, func(reg tool.Registry) {
+		registerDelegateToolForEnvironment(reg, orch, env)
+		registerSpecialistBridgeTools(reg, orch)
+	})
+	systemPrompt := buildSystemPrompt(mode, env.Sandbox)
+	if orch != nil {
+		systemPrompt += buildOrchestratorPrompt(orch, runReg)
+	}
+
+	// background 模式：不限 timeout（清除 caller 设的 deadline）
+	if te.Mode == kernel.ModeBackground && req.timeoutDuration == 0 {
+		req.timeoutDuration = 0
+	}
+
+	var batchPlanner loop.ToolBatchPlanner
+	if mgr.leaseManager != nil {
+		batchPlanner = newBatchPlannerAdapter(mgr.leaseManager)
+	}
+
+	execOnce := func() (outcome *managedRunOutcome, err error) {
+		return executeManagedRun(ctx, managedRunExecution{
+			Runtime:       runtime,
+			Record:        runRec,
+			Registry:      runReg,
+			Provider:      providerSession.Provider,
+			ProviderName:  providerSession.Name,
+			ProviderModel: providerSession.Model,
+			BrainID:       req.Brain,
+			Prompt:        req.Prompt,
+			MaxTurns:      req.MaxTurns,
+			MaxDuration:   req.timeoutDuration,
+			Stream:        req.Stream,
+			SystemPrompt:  systemPrompt,
+			EventBus:      mgr.eventBus,
+			BatchPlanner:  batchPlanner,
+			MessageCompressor: func(compCtx context.Context, msgs []llm.Message, budget int) ([]llm.Message, error) {
+				if mgr.ctxEngine == nil {
+					return msgs, nil
+				}
+				return mgr.ctxEngine.Compress(compCtx, msgs, budget)
+			},
+			TokenBudget: 100000,
+		})
+	}
+
+	for {
+		outcome, err := execOnce()
+
+		if err != nil {
+			errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
+			if ctx.Err() != nil || entry.status() == "cancelled" {
+				_ = te.Transition(kernel.StateCanceled)
+				entry.finish("cancelled", errJSON)
+				mgr.runs.Store(entry.ID, entry)
+				return
+			}
+			_ = te.Transition(kernel.StateFailed)
+
+			// restart 策略：失败后自动重启
+			if te.ShouldRestart() {
+				te.IncrementRestart()
+				_ = te.Transition(kernel.StateRestarting)
+				_ = te.Transition(kernel.StatePending)
+				_ = te.Transition(kernel.StateRunning)
+				fmt.Fprintf(os.Stderr, "serve: execution %s restarting (attempt %d)\n", entry.ID, te.RestartCount)
+				continue
+			}
+			entry.finish("failed", errJSON)
+			mgr.runs.Store(entry.ID, entry)
+			return
+		}
+
+		// daemon 模式：执行完一轮后立即重新执行，直到被 cancel/stop
+		if te.Lifecycle == kernel.LifecycleDaemon {
+			// 先回到 pending/running 状态准备下一轮
+			_ = te.Transition(kernel.StateCompleted)
+			te.IncrementRestart()
+			entry.finish("running", outcome.SummaryJSON)
+			mgr.runs.Store(entry.ID, entry)
+			fmt.Fprintf(os.Stderr, "serve: daemon execution %s completed round %d, restarting\n", entry.ID, te.RestartCount)
+
+			// 检查 context 是否已取消
+			select {
+			case <-ctx.Done():
+				entry.finish("completed", outcome.SummaryJSON)
+				mgr.runs.Store(entry.ID, entry)
+				return
+			default:
+			}
+
+			// 重置状态机以开始下一轮
+			_ = te.Transition(kernel.StateRestarting)
+			_ = te.Transition(kernel.StatePending)
+			_ = te.Transition(kernel.StateRunning)
+			continue
+		}
+
+		// watch 模式：执行完后等待指定间隔再重新执行
+		if te.Lifecycle == kernel.LifecycleWatch {
+			_ = te.Transition(kernel.StateCompleted)
+			te.IncrementRestart()
+			interval := req.watchIntervalDuration
+			if interval <= 0 {
+				interval = 60 * time.Second
+			}
+			entry.finish("waiting", outcome.SummaryJSON)
+			entry.mu.Lock()
+			entry.Status = "waiting"
+			entry.mu.Unlock()
+			mgr.runs.Store(entry.ID, entry)
+			fmt.Fprintf(os.Stderr, "serve: watch execution %s completed round %d, next in %s\n", entry.ID, te.RestartCount, interval)
+
+			// 等待间隔或 context 取消
+			timer := time.NewTimer(interval)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				entry.finish("completed", outcome.SummaryJSON)
+				mgr.runs.Store(entry.ID, entry)
+				return
+			case <-timer.C:
+			}
+
+			// 重置状态机以开始下一轮
+			_ = te.Transition(kernel.StateRestarting)
+			_ = te.Transition(kernel.StatePending)
+			_ = te.Transition(kernel.StateRunning)
+			entry.mu.Lock()
+			entry.Status = "running"
+			entry.mu.Unlock()
+			mgr.runs.Store(entry.ID, entry)
+			continue
+		}
+
+		// oneshot：正常完成后退出
+		_ = te.Transition(kernel.StateCompleted)
+		entry.finish(outcome.FinalStatus, outcome.SummaryJSON)
+		mgr.runs.Store(entry.ID, entry)
+		return
+	}
+}

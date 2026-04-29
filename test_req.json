@@ -1,0 +1,1 @@
+{"conversationID": 318056726337163264, "content": "开发一个贪吃蛇小游戏，使用 React CLI 前端 + GoFrame 后端。\n\n需求：\n1. 前端使用 React + Canvas 实现游戏界面\n2. 后端使用 GoFrame 提供 WebSocket 服务实现多人对战\n3. 包含计分、排行榜、游戏控制等功能\n\n请给出详细的技术方案和任务拆分"}

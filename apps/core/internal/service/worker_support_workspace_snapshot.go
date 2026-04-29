@@ -21,9 +21,17 @@ type workspaceSnapshotRefreshWorker struct {
 }
 
 func newWorkspaceSnapshotRefreshWorker() backgroundWorker {
+	cfgInterval := g.Cfg().MustGet(context.Background(), "easymvp.workers.workspaceSnapshotInterval", "15s").Duration()
+	if cfgInterval <= 0 {
+		cfgInterval = 15 * time.Second
+	}
+	batchSize := g.Cfg().MustGet(context.Background(), "easymvp.workers.workspaceSnapshotBatchSize", 8).Int()
+	if batchSize <= 0 {
+		batchSize = 8
+	}
 	return &workspaceSnapshotRefreshWorker{
-		interval:  15 * time.Second,
-		batchSize: 8,
+		interval:  cfgInterval,
+		batchSize: batchSize,
 	}
 }
 
@@ -204,7 +212,6 @@ func loadWorkspaceHomeSnapshot(ctx context.Context, key string) (*workspacev1.Ho
 }
 
 func isSnapshotFresh(generatedAt string) bool {
-	generatedAt = generatedAt
 	if generatedAt == "" {
 		return false
 	}

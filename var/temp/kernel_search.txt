@@ -1,0 +1,300 @@
+// Package kernel is the top-level assembly point for the Brain SDK.
+//
+// A Kernel holds references to all stores, registries, providers, and exporters
+// that the Brain runtime needs. User code constructs a Kernel via NewKernel
+// with functional options, then hands it to the Runner/CLI layer.
+---
+//
+// A Kernel holds references to all stores, registries, providers, and exporters
+// that the Brain runtime needs. User code constructs a Kernel via NewKernel
+// with functional options, then hands it to the Runner/CLI layer.
+//
+// See 02-BrainKernel设计.md §12 (Kernel assembly) for the constitutional
+// definition. Sub-specs referenced by each field are noted in the field docs.
+---
+// with functional options, then hands it to the Runner/CLI layer.
+//
+// See 02-BrainKernel设计.md §12 (Kernel assembly) for the constitutional
+// definition. Sub-specs referenced by each field are noted in the field docs.
+package kernel
+
+import (
+---
+
+import (
+	"github.com/leef-l/brain/sdk/observability"
+	"github.com/leef-l/brain/sdk/persistence"
+	"github.com/leef-l/brain/sdk/security"
+	"github.com/leef-l/brain/sdk/tool"
+)
+---
+import (
+	"github.com/leef-l/brain/sdk/observability"
+	"github.com/leef-l/brain/sdk/persistence"
+	"github.com/leef-l/brain/sdk/security"
+	"github.com/leef-l/brain/sdk/tool"
+)
+
+---
+	"github.com/leef-l/brain/sdk/observability"
+	"github.com/leef-l/brain/sdk/persistence"
+	"github.com/leef-l/brain/sdk/security"
+	"github.com/leef-l/brain/sdk/tool"
+)
+
+// Kernel is the top-level Brain runtime handle.
+---
+	"github.com/leef-l/brain/sdk/persistence"
+	"github.com/leef-l/brain/sdk/security"
+	"github.com/leef-l/brain/sdk/tool"
+)
+
+// Kernel is the top-level Brain runtime handle.
+//
+---
+)
+
+// Kernel is the top-level Brain runtime handle.
+//
+// All fields are interfaces defined by the sibling sub-packages so that the
+// Kernel has zero coupling to any particular implementation (SQLite vs MySQL,
+// OTel vs stdout, etc.). A skeleton Kernel can be constructed with only nil
+---
+// fields — components must nil-check before dispatching work to them.
+//
+// Defined in 02-BrainKernel设计.md §12.1.
+type Kernel struct {
+	// PlanStore persists BrainPlan + deltas. See 26-持久化与恢复.md §3.
+	PlanStore persistence.PlanStore
+
+---
+// Defined in 02-BrainKernel设计.md §12.1.
+type Kernel struct {
+	// PlanStore persists BrainPlan + deltas. See 26-持久化与恢复.md §3.
+	PlanStore persistence.PlanStore
+
+	// ArtifactStore is the CAS-backed artifact store. See 26 §4.
+	ArtifactStore persistence.ArtifactStore
+---
+	RunCheckpoint persistence.RunCheckpointStore
+
+	// UsageLedger records token/cost usage per brain (26 §6).
+	UsageLedger persistence.UsageLedger
+
+	// Resume coordinates cross-tier resume semantics (26 §7).
+	Resume persistence.ResumeCoordinator
+---
+	LearningStore persistence.LearningStore
+
+	// SharedMessageStore persists cross-brain context transfers (E-7).
+	SharedMessageStore persistence.SharedMessageStore
+
+	// TaskScheduler 是任务级调度引擎 (B-2)。
+	TaskScheduler TaskScheduler
+---
+	TaskScheduler TaskScheduler
+
+	// ToolRegistry is the tool catalog used by brain sidecars (02 §6).
+	ToolRegistry tool.Registry
+
+	// Vault holds secrets and issues short-lived leases (23-安全模型.md §5).
+	Vault security.Vault
+---
+	Logs observability.LogExporter
+
+	// Orchestrator manages specialist brain delegation. When nil, the
+	// system operates in single-brain mode (Central does everything).
+	Orchestrator interface{}
+
+	// LLMProxy handles reverse RPC LLM calls from specialist sidecars.
+---
+
+	// Orchestrator manages specialist brain delegation. When nil, the
+	// system operates in single-brain mode (Central does everything).
+	Orchestrator interface{}
+
+	// LLMProxy handles reverse RPC LLM calls from specialist sidecars.
+	// When nil, no reverse LLM proxying is available.
+---
+	// Orchestrator manages specialist brain delegation. When nil, the
+	// system operates in single-brain mode (Central does everything).
+	Orchestrator interface{}
+
+	// LLMProxy handles reverse RPC LLM calls from specialist sidecars.
+	// When nil, no reverse LLM proxying is available.
+	LLMProxy interface{}
+---
+	LLMProxy interface{}
+
+	// OrchestratorCfg is the configuration for the Orchestrator when it is
+	// created via NewOrchestratorWithConfig. It holds brain registrations
+	// for hot-pluggable sidecar management. When empty, the Orchestrator
+	// falls back to probing built-in kinds.
+	OrchestratorCfg *OrchestratorConfig
+---
+
+	// OrchestratorCfg is the configuration for the Orchestrator when it is
+	// created via NewOrchestratorWithConfig. It holds brain registrations
+	// for hot-pluggable sidecar management. When empty, the Orchestrator
+	// falls back to probing built-in kinds.
+	OrchestratorCfg *OrchestratorConfig
+
+---
+	// OrchestratorCfg is the configuration for the Orchestrator when it is
+	// created via NewOrchestratorWithConfig. It holds brain registrations
+	// for hot-pluggable sidecar management. When empty, the Orchestrator
+	// falls back to probing built-in kinds.
+	OrchestratorCfg *OrchestratorConfig
+
+	// BrainPool 是可选的共享进程池。当注入后，Orchestrator 可通过
+---
+	// created via NewOrchestratorWithConfig. It holds brain registrations
+	// for hot-pluggable sidecar management. When empty, the Orchestrator
+	// falls back to probing built-in kinds.
+	OrchestratorCfg *OrchestratorConfig
+
+	// BrainPool 是可选的共享进程池。当注入后，Orchestrator 可通过
+	// NewOrchestratorWithPool 使用该 pool，让多个 Run 共享 sidecar。
+---
+	// for hot-pluggable sidecar management. When empty, the Orchestrator
+	// falls back to probing built-in kinds.
+	OrchestratorCfg *OrchestratorConfig
+
+	// BrainPool 是可选的共享进程池。当注入后，Orchestrator 可通过
+	// NewOrchestratorWithPool 使用该 pool，让多个 Run 共享 sidecar。
+	BrainPool BrainPool
+---
+	OrchestratorCfg *OrchestratorConfig
+
+	// BrainPool 是可选的共享进程池。当注入后，Orchestrator 可通过
+	// NewOrchestratorWithPool 使用该 pool，让多个 Run 共享 sidecar。
+	BrainPool BrainPool
+}
+
+---
+
+	// BrainPool 是可选的共享进程池。当注入后，Orchestrator 可通过
+	// NewOrchestratorWithPool 使用该 pool，让多个 Run 共享 sidecar。
+	BrainPool BrainPool
+}
+
+// Option configures a Kernel during construction. Options compose functionally
+---
+	// BrainPool 是可选的共享进程池。当注入后，Orchestrator 可通过
+	// NewOrchestratorWithPool 使用该 pool，让多个 Run 共享 sidecar。
+	BrainPool BrainPool
+}
+
+// Option configures a Kernel during construction. Options compose functionally
+// so user code can write `kernel.NewKernel(kernel.WithPlanStore(s), ...)`.
+---
+}
+
+// Option configures a Kernel during construction. Options compose functionally
+// so user code can write `kernel.NewKernel(kernel.WithPlanStore(s), ...)`.
+//
+// See 02-BrainKernel设计.md §12.2.
+type Option func(*Kernel)
+---
+// so user code can write `kernel.NewKernel(kernel.WithPlanStore(s), ...)`.
+//
+// See 02-BrainKernel设计.md §12.2.
+type Option func(*Kernel)
+
+// NewKernel constructs a Kernel by applying the provided options in order.
+// The returned Kernel is immediately usable; nil fields mean the corresponding
+---
+// capability is disabled.
+//
+// See 02-BrainKernel设计.md §12.2.
+func NewKernel(opts ...Option) *Kernel {
+	k := &Kernel{}
+	for _, opt := range opts {
+		if opt != nil {
+---
+}
+
+// WithOrchestrator installs the specialist brain orchestrator.
+func WithOrchestrator(o interface{}) Option {
+	return func(k *Kernel) { k.Orchestrator = o }
+}
+
+---
+
+// WithOrchestrator installs the specialist brain orchestrator.
+func WithOrchestrator(o interface{}) Option {
+	return func(k *Kernel) { k.Orchestrator = o }
+}
+
+// WithLLMProxy installs the reverse-RPC LLM proxy for sidecars.
+---
+// WithOrchestrator installs the specialist brain orchestrator.
+func WithOrchestrator(o interface{}) Option {
+	return func(k *Kernel) { k.Orchestrator = o }
+}
+
+// WithLLMProxy installs the reverse-RPC LLM proxy for sidecars.
+func WithLLMProxy(p interface{}) Option {
+---
+}
+
+// WithBrainPool 注入共享进程池。当设置后，可通过 NewOrchestratorWithPool
+// 创建使用该 pool 的 Orchestrator，实现多 Run 共享 sidecar。
+func WithBrainPool(p BrainPool) Option {
+	return func(k *Kernel) { k.BrainPool = p }
+}
+---
+
+// WithBrainPool 注入共享进程池。当设置后，可通过 NewOrchestratorWithPool
+// 创建使用该 pool 的 Orchestrator，实现多 Run 共享 sidecar。
+func WithBrainPool(p BrainPool) Option {
+	return func(k *Kernel) { k.BrainPool = p }
+}
+
+---
+// WithBrainPool 注入共享进程池。当设置后，可通过 NewOrchestratorWithPool
+// 创建使用该 pool 的 Orchestrator，实现多 Run 共享 sidecar。
+func WithBrainPool(p BrainPool) Option {
+	return func(k *Kernel) { k.BrainPool = p }
+}
+
+// WithOrchestratorConfig installs an OrchestratorConfig for configuration-
+---
+// 创建使用该 pool 的 Orchestrator，实现多 Run 共享 sidecar。
+func WithBrainPool(p BrainPool) Option {
+	return func(k *Kernel) { k.BrainPool = p }
+}
+
+// WithOrchestratorConfig installs an OrchestratorConfig for configuration-
+// driven brain registration. When the Orchestrator is subsequently created
+---
+}
+
+// WithOrchestratorConfig installs an OrchestratorConfig for configuration-
+// driven brain registration. When the Orchestrator is subsequently created
+// via NewOrchestratorWithConfig, it will use this config to determine which
+// brains to probe instead of the built-in kind list.
+func WithOrchestratorConfig(cfg OrchestratorConfig) Option {
+---
+
+// WithOrchestratorConfig installs an OrchestratorConfig for configuration-
+// driven brain registration. When the Orchestrator is subsequently created
+// via NewOrchestratorWithConfig, it will use this config to determine which
+// brains to probe instead of the built-in kind list.
+func WithOrchestratorConfig(cfg OrchestratorConfig) Option {
+	return func(k *Kernel) { k.OrchestratorCfg = &cfg }
+---
+// WithOrchestratorConfig installs an OrchestratorConfig for configuration-
+// driven brain registration. When the Orchestrator is subsequently created
+// via NewOrchestratorWithConfig, it will use this config to determine which
+// brains to probe instead of the built-in kind list.
+func WithOrchestratorConfig(cfg OrchestratorConfig) Option {
+	return func(k *Kernel) { k.OrchestratorCfg = &cfg }
+}
+---
+// driven brain registration. When the Orchestrator is subsequently created
+// via NewOrchestratorWithConfig, it will use this config to determine which
+// brains to probe instead of the built-in kind list.
+func WithOrchestratorConfig(cfg OrchestratorConfig) Option {
+	return func(k *Kernel) { k.OrchestratorCfg = &cfg }
+}

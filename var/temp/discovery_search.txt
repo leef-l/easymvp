@@ -1,0 +1,300 @@
+	"time"
+
+	"github.com/leef-l/brain/sdk/agent"
+)
+
+// RemoteEndpoint 描述一个远程 brain 服务端点。
+type RemoteEndpoint struct {
+---
+)
+
+// RemoteEndpoint 描述一个远程 brain 服务端点。
+type RemoteEndpoint struct {
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+	Weight int    `json:"weight,omitempty"`
+---
+
+// RemoteEndpoint 描述一个远程 brain 服务端点。
+type RemoteEndpoint struct {
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+	Weight int    `json:"weight,omitempty"`
+}
+---
+}
+
+func (e RemoteEndpoint) Address() string {
+	return fmt.Sprintf("%s:%d", e.Host, e.Port)
+}
+
+// ServiceDiscovery 定义服务发现接口。
+---
+}
+
+// ServiceDiscovery 定义服务发现接口。
+// 实现可以是 DNS SRV、Consul、etcd、静态列表等。
+type ServiceDiscovery interface {
+	Resolve(ctx context.Context, serviceName string) ([]RemoteEndpoint, error)
+}
+---
+// ServiceDiscovery 定义服务发现接口。
+// 实现可以是 DNS SRV、Consul、etcd、静态列表等。
+type ServiceDiscovery interface {
+	Resolve(ctx context.Context, serviceName string) ([]RemoteEndpoint, error)
+}
+
+// DNSDiscovery 基于 DNS SRV 记录的服务发现。
+---
+// 实现可以是 DNS SRV、Consul、etcd、静态列表等。
+type ServiceDiscovery interface {
+	Resolve(ctx context.Context, serviceName string) ([]RemoteEndpoint, error)
+}
+
+// DNSDiscovery 基于 DNS SRV 记录的服务发现。
+// 查询格式：_brain-{kind}._tcp.{domain}
+---
+}
+
+// DNSDiscovery 基于 DNS SRV 记录的服务发现。
+// 查询格式：_brain-{kind}._tcp.{domain}
+type DNSDiscovery struct {
+	Domain   string
+	resolver *net.Resolver
+---
+
+// DNSDiscovery 基于 DNS SRV 记录的服务发现。
+// 查询格式：_brain-{kind}._tcp.{domain}
+type DNSDiscovery struct {
+	Domain   string
+	resolver *net.Resolver
+}
+---
+// DNSDiscovery 基于 DNS SRV 记录的服务发现。
+// 查询格式：_brain-{kind}._tcp.{domain}
+type DNSDiscovery struct {
+	Domain   string
+	resolver *net.Resolver
+}
+
+---
+}
+
+func NewDNSDiscovery(domain string) *DNSDiscovery {
+	return &DNSDiscovery{
+		Domain:   domain,
+		resolver: net.DefaultResolver,
+	}
+---
+
+func NewDNSDiscovery(domain string) *DNSDiscovery {
+	return &DNSDiscovery{
+		Domain:   domain,
+		resolver: net.DefaultResolver,
+	}
+}
+---
+}
+
+func (d *DNSDiscovery) Resolve(ctx context.Context, serviceName string) ([]RemoteEndpoint, error) {
+	srvName := fmt.Sprintf("_brain-%s._tcp.%s", serviceName, d.Domain)
+	_, addrs, err := d.resolver.LookupSRV(ctx, "", "", srvName)
+	if err != nil {
+		return nil, fmt.Errorf("dns discovery: lookup %s: %w", srvName, err)
+---
+
+func (d *DNSDiscovery) Resolve(ctx context.Context, serviceName string) ([]RemoteEndpoint, error) {
+	srvName := fmt.Sprintf("_brain-%s._tcp.%s", serviceName, d.Domain)
+	_, addrs, err := d.resolver.LookupSRV(ctx, "", "", srvName)
+	if err != nil {
+		return nil, fmt.Errorf("dns discovery: lookup %s: %w", srvName, err)
+	}
+---
+	_, addrs, err := d.resolver.LookupSRV(ctx, "", "", srvName)
+	if err != nil {
+		return nil, fmt.Errorf("dns discovery: lookup %s: %w", srvName, err)
+	}
+	endpoints := make([]RemoteEndpoint, 0, len(addrs))
+	for _, addr := range addrs {
+		endpoints = append(endpoints, RemoteEndpoint{
+---
+		return nil, fmt.Errorf("dns discovery: lookup %s: %w", srvName, err)
+	}
+	endpoints := make([]RemoteEndpoint, 0, len(addrs))
+	for _, addr := range addrs {
+		endpoints = append(endpoints, RemoteEndpoint{
+			Host:   addr.Target,
+			Port:   int(addr.Port),
+---
+	endpoints := make([]RemoteEndpoint, 0, len(addrs))
+	for _, addr := range addrs {
+		endpoints = append(endpoints, RemoteEndpoint{
+			Host:   addr.Target,
+			Port:   int(addr.Port),
+			Weight: int(addr.Weight),
+		})
+---
+		})
+	}
+	return endpoints, nil
+}
+
+// StaticDiscovery 静态端点列表，用于测试和简单部署。
+type StaticDiscovery struct {
+---
+}
+
+// StaticDiscovery 静态端点列表，用于测试和简单部署。
+type StaticDiscovery struct {
+	endpoints map[string][]RemoteEndpoint
+}
+
+---
+
+// StaticDiscovery 静态端点列表，用于测试和简单部署。
+type StaticDiscovery struct {
+	endpoints map[string][]RemoteEndpoint
+}
+
+func NewStaticDiscovery(m map[string][]RemoteEndpoint) *StaticDiscovery {
+---
+// StaticDiscovery 静态端点列表，用于测试和简单部署。
+type StaticDiscovery struct {
+	endpoints map[string][]RemoteEndpoint
+}
+
+func NewStaticDiscovery(m map[string][]RemoteEndpoint) *StaticDiscovery {
+	return &StaticDiscovery{endpoints: m}
+---
+}
+
+func NewStaticDiscovery(m map[string][]RemoteEndpoint) *StaticDiscovery {
+	return &StaticDiscovery{endpoints: m}
+}
+
+func (s *StaticDiscovery) Resolve(_ context.Context, serviceName string) ([]RemoteEndpoint, error) {
+---
+
+func NewStaticDiscovery(m map[string][]RemoteEndpoint) *StaticDiscovery {
+	return &StaticDiscovery{endpoints: m}
+}
+
+func (s *StaticDiscovery) Resolve(_ context.Context, serviceName string) ([]RemoteEndpoint, error) {
+	eps, ok := s.endpoints[serviceName]
+---
+}
+
+func (s *StaticDiscovery) Resolve(_ context.Context, serviceName string) ([]RemoteEndpoint, error) {
+	eps, ok := s.endpoints[serviceName]
+	if !ok || len(eps) == 0 {
+		return nil, fmt.Errorf("static discovery: no endpoints for %q", serviceName)
+	}
+---
+
+func (s *StaticDiscovery) Resolve(_ context.Context, serviceName string) ([]RemoteEndpoint, error) {
+	eps, ok := s.endpoints[serviceName]
+	if !ok || len(eps) == 0 {
+		return nil, fmt.Errorf("static discovery: no endpoints for %q", serviceName)
+	}
+	return eps, nil
+---
+	eps, ok := s.endpoints[serviceName]
+	if !ok || len(eps) == 0 {
+		return nil, fmt.Errorf("static discovery: no endpoints for %q", serviceName)
+	}
+	return eps, nil
+}
+
+---
+}
+
+// DiscoverableBrainPool 在 RemoteBrainPool 之上增加服务发现和熔断能力。
+type DiscoverableBrainPool struct {
+	discovery ServiceDiscovery
+	scheme    string
+	apiKey    string
+---
+
+// DiscoverableBrainPool 在 RemoteBrainPool 之上增加服务发现和熔断能力。
+type DiscoverableBrainPool struct {
+	discovery ServiceDiscovery
+	scheme    string
+	apiKey    string
+	timeout   time.Duration
+---
+// DiscoverableBrainPool 在 RemoteBrainPool 之上增加服务发现和熔断能力。
+type DiscoverableBrainPool struct {
+	discovery ServiceDiscovery
+	scheme    string
+	apiKey    string
+	timeout   time.Duration
+
+---
+
+	mu       sync.Mutex
+	pools    map[agent.Kind]*RemoteBrainPool
+	breakers map[agent.Kind]*CircuitBreaker
+}
+
+// NewDiscoverableBrainPool 创建支持服务发现的远程 BrainPool。
+---
+	mu       sync.Mutex
+	pools    map[agent.Kind]*RemoteBrainPool
+	breakers map[agent.Kind]*CircuitBreaker
+}
+
+// NewDiscoverableBrainPool 创建支持服务发现的远程 BrainPool。
+func NewDiscoverableBrainPool(discovery ServiceDiscovery, scheme, apiKey string, timeout time.Duration) *DiscoverableBrainPool {
+---
+}
+
+// NewDiscoverableBrainPool 创建支持服务发现的远程 BrainPool。
+func NewDiscoverableBrainPool(discovery ServiceDiscovery, scheme, apiKey string, timeout time.Duration) *DiscoverableBrainPool {
+	if scheme == "" {
+		scheme = "http"
+	}
+---
+
+// NewDiscoverableBrainPool 创建支持服务发现的远程 BrainPool。
+func NewDiscoverableBrainPool(discovery ServiceDiscovery, scheme, apiKey string, timeout time.Duration) *DiscoverableBrainPool {
+	if scheme == "" {
+		scheme = "http"
+	}
+	if timeout <= 0 {
+---
+		timeout = 30 * time.Second
+	}
+	return &DiscoverableBrainPool{
+		discovery: discovery,
+		scheme:    scheme,
+		apiKey:    apiKey,
+		timeout:   timeout,
+---
+	}
+	return &DiscoverableBrainPool{
+		discovery: discovery,
+		scheme:    scheme,
+		apiKey:    apiKey,
+		timeout:   timeout,
+		pools:     make(map[agent.Kind]*RemoteBrainPool),
+---
+		apiKey:    apiKey,
+		timeout:   timeout,
+		pools:     make(map[agent.Kind]*RemoteBrainPool),
+		breakers:  make(map[agent.Kind]*CircuitBreaker),
+	}
+}
+
+---
+		timeout:   timeout,
+		pools:     make(map[agent.Kind]*RemoteBrainPool),
+		breakers:  make(map[agent.Kind]*CircuitBreaker),
+	}
+}
+
+func (p *DiscoverableBrainPool) GetBrain(ctx context.Context, kind agent.Kind) (agent.Agent, error) {
+---
+}
+
+func (p *DiscoverableBrainPool) GetBrain(ctx context.Context, kind agent.Kind) (agent.Agent, error) {
+	p.mu.Lock()

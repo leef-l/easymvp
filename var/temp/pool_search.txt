@@ -1,0 +1,300 @@
+// Package kernel — BrainPool 接口与 ProcessBrainPool 实现。
+//
+// BrainPool 将进程池管理从 Orchestrator 中抽离，使多个 Run 可以共享一个
+// 全局 pool。这是 v3 架构过渡的第一步。
+//
+---
+// Package kernel — BrainPool 接口与 ProcessBrainPool 实现。
+//
+// BrainPool 将进程池管理从 Orchestrator 中抽离，使多个 Run 可以共享一个
+// 全局 pool。这是 v3 架构过渡的第一步。
+//
+// 设计参考：35-BrainPool实现设计.md
+package kernel
+---
+//
+// BrainPool 将进程池管理从 Orchestrator 中抽离，使多个 Run 可以共享一个
+// 全局 pool。这是 v3 架构过渡的第一步。
+//
+// 设计参考：35-BrainPool实现设计.md
+package kernel
+
+---
+// 全局 pool。这是 v3 架构过渡的第一步。
+//
+// 设计参考：35-BrainPool实现设计.md
+package kernel
+
+import (
+	"context"
+---
+	"time"
+
+	"github.com/leef-l/brain/sdk/agent"
+)
+
+// BrainPool 定义了进程池的核心接口。
+// 多个 Run / Orchestrator 可以共享同一个 BrainPool 实例。
+---
+)
+
+// BrainPool 定义了进程池的核心接口。
+// 多个 Run / Orchestrator 可以共享同一个 BrainPool 实例。
+type BrainPool interface {
+	// GetBrain 返回一个正在运行的 sidecar agent，如果不存在则启动。
+	// 内部包含 nil-placeholder 并发控制、健康检查和崩溃重启逻辑。
+---
+
+// BrainPool 定义了进程池的核心接口。
+// 多个 Run / Orchestrator 可以共享同一个 BrainPool 实例。
+type BrainPool interface {
+	// GetBrain 返回一个正在运行的 sidecar agent，如果不存在则启动。
+	// 内部包含 nil-placeholder 并发控制、健康检查和崩溃重启逻辑。
+	GetBrain(ctx context.Context, kind agent.Kind) (agent.Agent, error)
+---
+// BrainPool 定义了进程池的核心接口。
+// 多个 Run / Orchestrator 可以共享同一个 BrainPool 实例。
+type BrainPool interface {
+	// GetBrain 返回一个正在运行的 sidecar agent，如果不存在则启动。
+	// 内部包含 nil-placeholder 并发控制、健康检查和崩溃重启逻辑。
+	GetBrain(ctx context.Context, kind agent.Kind) (agent.Agent, error)
+
+---
+// 多个 Run / Orchestrator 可以共享同一个 BrainPool 实例。
+type BrainPool interface {
+	// GetBrain 返回一个正在运行的 sidecar agent，如果不存在则启动。
+	// 内部包含 nil-placeholder 并发控制、健康检查和崩溃重启逻辑。
+	GetBrain(ctx context.Context, kind agent.Kind) (agent.Agent, error)
+
+	// Status 返回所有已知 brain 的状态快照。
+---
+	// GetBrain 返回一个正在运行的 sidecar agent，如果不存在则启动。
+	// 内部包含 nil-placeholder 并发控制、健康检查和崩溃重启逻辑。
+	GetBrain(ctx context.Context, kind agent.Kind) (agent.Agent, error)
+
+	// Status 返回所有已知 brain 的状态快照。
+	Status() map[agent.Kind]BrainStatus
+
+---
+	GetBrain(ctx context.Context, kind agent.Kind) (agent.Agent, error)
+
+	// Status 返回所有已知 brain 的状态快照。
+	Status() map[agent.Kind]BrainStatus
+
+	// AutoStart 启动所有标记为 AutoStart=true 的 brain sidecar。
+	AutoStart(ctx context.Context)
+---
+
+	// Status 返回所有已知 brain 的状态快照。
+	Status() map[agent.Kind]BrainStatus
+
+	// AutoStart 启动所有标记为 AutoStart=true 的 brain sidecar。
+	AutoStart(ctx context.Context)
+
+---
+	Status() map[agent.Kind]BrainStatus
+
+	// AutoStart 启动所有标记为 AutoStart=true 的 brain sidecar。
+	AutoStart(ctx context.Context)
+
+	// Shutdown 优雅关停所有运行中的 sidecar。
+	Shutdown(ctx context.Context) error
+---
+}
+
+type brainPoolCatalog interface {
+	AvailableKinds() []agent.Kind
+}
+
+type brainPoolRegistrationCatalog interface {
+---
+
+type brainPoolCatalog interface {
+	AvailableKinds() []agent.Kind
+}
+
+type brainPoolRegistrationCatalog interface {
+	Registrations() []BrainRegistration
+---
+}
+
+type brainPoolRegistrationCatalog interface {
+	Registrations() []BrainRegistration
+}
+
+// ProcessBrainPool 基于进程的 BrainPool 实现。
+---
+
+type brainPoolRegistrationCatalog interface {
+	Registrations() []BrainRegistration
+}
+
+// ProcessBrainPool 基于进程的 BrainPool 实现。
+// 逻辑从 orchestrator.go 的 getOrStartSidecar / waitForSidecar / removeSidecar /
+---
+}
+
+// ProcessBrainPool 基于进程的 BrainPool 实现。
+// 逻辑从 orchestrator.go 的 getOrStartSidecar / waitForSidecar / removeSidecar /
+// AutoStartBrains / ListBrains / Shutdown 中提取而来。
+type BrainEvent struct {
+	Kind   agent.Kind
+---
+
+// ProcessBrainPool 基于进程的 BrainPool 实现。
+// 逻辑从 orchestrator.go 的 getOrStartSidecar / waitForSidecar / removeSidecar /
+// AutoStartBrains / ListBrains / Shutdown 中提取而来。
+type BrainEvent struct {
+	Kind   agent.Kind
+	Action string // "start" | "stop" | "restart"
+---
+// ProcessBrainPool 基于进程的 BrainPool 实现。
+// 逻辑从 orchestrator.go 的 getOrStartSidecar / waitForSidecar / removeSidecar /
+// AutoStartBrains / ListBrains / Shutdown 中提取而来。
+type BrainEvent struct {
+	Kind   agent.Kind
+	Action string // "start" | "stop" | "restart"
+	Agent  agent.Agent
+---
+// 逻辑从 orchestrator.go 的 getOrStartSidecar / waitForSidecar / removeSidecar /
+// AutoStartBrains / ListBrains / Shutdown 中提取而来。
+type BrainEvent struct {
+	Kind   agent.Kind
+	Action string // "start" | "stop" | "restart"
+	Agent  agent.Agent
+	Error  error
+---
+// AutoStartBrains / ListBrains / Shutdown 中提取而来。
+type BrainEvent struct {
+	Kind   agent.Kind
+	Action string // "start" | "stop" | "restart"
+	Agent  agent.Agent
+	Error  error
+	Time   time.Time
+---
+}
+
+type ProcessBrainPool struct {
+	runner      BrainRunner
+	binResolver func(kind agent.Kind) (string, error)
+
+	// available 记录哪些 sidecar 二进制文件在磁盘上可用。
+---
+
+type ProcessBrainPool struct {
+	runner      BrainRunner
+	binResolver func(kind agent.Kind) (string, error)
+
+	// available 记录哪些 sidecar 二进制文件在磁盘上可用。
+	available map[agent.Kind]bool
+---
+type ProcessBrainPool struct {
+	runner      BrainRunner
+	binResolver func(kind agent.Kind) (string, error)
+
+	// available 记录哪些 sidecar 二进制文件在磁盘上可用。
+	available map[agent.Kind]bool
+
+---
+
+	// available 记录哪些 sidecar 二进制文件在磁盘上可用。
+	available map[agent.Kind]bool
+
+	// registrations 存储配置驱动的 brain 注册信息。
+	registrations map[agent.Kind]*BrainRegistration
+
+---
+	available map[agent.Kind]bool
+
+	// registrations 存储配置驱动的 brain 注册信息。
+	registrations map[agent.Kind]*BrainRegistration
+
+	mu     sync.Mutex
+	active map[agent.Kind]agent.Agent // 运行中的 sidecar 池（可复用）
+---
+
+	// registrations 存储配置驱动的 brain 注册信息。
+	registrations map[agent.Kind]*BrainRegistration
+
+	mu     sync.Mutex
+	active map[agent.Kind]agent.Agent // 运行中的 sidecar 池（可复用）
+
+---
+
+	mu     sync.Mutex
+	active map[agent.Kind]agent.Agent // 运行中的 sidecar 池（可复用）
+
+	// notifyCh 接收 sidecar 生命周期事件（可选，外部可订阅）。
+	notifyCh chan<- BrainEvent
+
+---
+
+	// notifyCh 接收 sidecar 生命周期事件（可选，外部可订阅）。
+	notifyCh chan<- BrainEvent
+
+	// warmKinds 是需要在后台预热的 brain 种类。
+	warmKinds []agent.Kind
+}
+---
+	notifyCh chan<- BrainEvent
+
+	// warmKinds 是需要在后台预热的 brain 种类。
+	warmKinds []agent.Kind
+}
+
+// NewProcessBrainPool 创建一个基于进程的 BrainPool。
+---
+
+	// warmKinds 是需要在后台预热的 brain 种类。
+	warmKinds []agent.Kind
+}
+
+// NewProcessBrainPool 创建一个基于进程的 BrainPool。
+// 它会探测文件系统上的可用 sidecar 二进制文件，记录哪些 kind 可以被启动。
+---
+}
+
+// NewProcessBrainPool 创建一个基于进程的 BrainPool。
+// 它会探测文件系统上的可用 sidecar 二进制文件，记录哪些 kind 可以被启动。
+func NewProcessBrainPool(runner BrainRunner, binResolver func(agent.Kind) (string, error), cfg OrchestratorConfig) *ProcessBrainPool {
+	p := &ProcessBrainPool{
+		runner:        runner,
+---
+
+// NewProcessBrainPool 创建一个基于进程的 BrainPool。
+// 它会探测文件系统上的可用 sidecar 二进制文件，记录哪些 kind 可以被启动。
+func NewProcessBrainPool(runner BrainRunner, binResolver func(agent.Kind) (string, error), cfg OrchestratorConfig) *ProcessBrainPool {
+	p := &ProcessBrainPool{
+		runner:        runner,
+		binResolver:   binResolver,
+---
+// NewProcessBrainPool 创建一个基于进程的 BrainPool。
+// 它会探测文件系统上的可用 sidecar 二进制文件，记录哪些 kind 可以被启动。
+func NewProcessBrainPool(runner BrainRunner, binResolver func(agent.Kind) (string, error), cfg OrchestratorConfig) *ProcessBrainPool {
+	p := &ProcessBrainPool{
+		runner:        runner,
+		binResolver:   binResolver,
+		available:     make(map[agent.Kind]bool),
+---
+// 它会探测文件系统上的可用 sidecar 二进制文件，记录哪些 kind 可以被启动。
+func NewProcessBrainPool(runner BrainRunner, binResolver func(agent.Kind) (string, error), cfg OrchestratorConfig) *ProcessBrainPool {
+	p := &ProcessBrainPool{
+		runner:        runner,
+		binResolver:   binResolver,
+		available:     make(map[agent.Kind]bool),
+		registrations: make(map[agent.Kind]*BrainRegistration),
+---
+		runner:        runner,
+		binResolver:   binResolver,
+		available:     make(map[agent.Kind]bool),
+		registrations: make(map[agent.Kind]*BrainRegistration),
+		active:        make(map[agent.Kind]agent.Agent),
+	}
+
+---
+		binResolver:   binResolver,
+		available:     make(map[agent.Kind]bool),
+		registrations: make(map[agent.Kind]*BrainRegistration),
+		active:        make(map[agent.Kind]agent.Agent),
+	}
+

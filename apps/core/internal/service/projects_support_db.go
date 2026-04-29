@@ -10,13 +10,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
 	"github.com/leef-l/easymvp/apps/core/internal/dao"
 	"github.com/leef-l/easymvp/apps/core/internal/model/do"
+	"github.com/leef-l/easymvp/apps/core/internal/repo"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/gogf/gf/contrib/drivers/sqlite/v2"
 )
 
 type normalizedCreateProjectCommand struct {
@@ -149,80 +151,16 @@ func openProjectDatabase(ctx context.Context) (*sql.DB, func(), error) {
 	return db, closeFn, nil
 }
 
-func insertProjectRow(ctx context.Context, tx *sql.Tx, row *do.Projects) error {
-	result, err := tx.ExecContext(
-		ctx,
-		`INSERT INTO `+dao.Projects.Table()+` (
-id, name, project_category, goal_summary, status, production_status, workspace_root, repo_root, current_plan_draft_id, current_compiled_plan_id, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		row.Id,
-		row.Name,
-		row.ProjectCategory,
-		row.GoalSummary,
-		row.Status,
-		row.ProductionStatus,
-		row.WorkspaceRoot,
-		nullIfEmpty(row.RepoRoot),
-		nullIfEmpty(row.CurrentPlanDraftId),
-		nullIfEmpty(row.CurrentCompiledPlanId),
-		row.CreatedAt,
-		row.UpdatedAt,
-	)
-	if err != nil {
-		return gerror.Wrap(err, "insert project failed")
-	}
-	if affected, _ := result.RowsAffected(); affected != 1 {
-		return gerror.New("insert project affected unexpected rows")
-	}
-	return nil
+func insertProjectRow(ctx context.Context, tx gdb.TX, row *do.Projects) error {
+	return repo.InsertProjectRow(ctx, tx, row)
 }
 
-func insertProjectProfileRow(ctx context.Context, tx *sql.Tx, row *do.ProjectProfiles) error {
-	result, err := tx.ExecContext(
-		ctx,
-		`INSERT INTO `+dao.ProjectProfiles.Table()+` (
-id, project_id, category_profile_version, acceptance_profile_version, role_profile_version, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		row.Id,
-		row.ProjectId,
-		row.CategoryProfileVersion,
-		row.AcceptanceProfileVersion,
-		nullIfEmpty(row.RoleProfileVersion),
-		row.CreatedAt,
-		row.UpdatedAt,
-	)
-	if err != nil {
-		return gerror.Wrap(err, "insert project profile failed")
-	}
-	if affected, _ := result.RowsAffected(); affected != 1 {
-		return gerror.New("insert project profile affected unexpected rows")
-	}
-	return nil
+func insertProjectProfileRow(ctx context.Context, tx gdb.TX, row *do.ProjectProfiles) error {
+	return repo.InsertProjectProfileRow(ctx, tx, row)
 }
 
-func insertProjectWorkspaceRow(ctx context.Context, tx *sql.Tx, row *do.ProjectWorkspaces) error {
-	result, err := tx.ExecContext(
-		ctx,
-		`INSERT INTO `+dao.ProjectWorkspaces.Table()+` (
-id, project_id, workspace_root, evidence_root, runs_root, replay_root, diagnostics_root, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		row.Id,
-		row.ProjectId,
-		row.WorkspaceRoot,
-		row.EvidenceRoot,
-		row.RunsRoot,
-		row.ReplayRoot,
-		row.DiagnosticsRoot,
-		row.CreatedAt,
-		row.UpdatedAt,
-	)
-	if err != nil {
-		return gerror.Wrap(err, "insert project workspace failed")
-	}
-	if affected, _ := result.RowsAffected(); affected != 1 {
-		return gerror.New("insert project workspace affected unexpected rows")
-	}
-	return nil
+func insertProjectWorkspaceRow(ctx context.Context, tx gdb.TX, row *do.ProjectWorkspaces) error {
+	return repo.InsertProjectWorkspaceRow(ctx, tx, row)
 }
 
 func ensureProjectWorkspaceDirs(ctx context.Context, projectID string, row *do.ProjectWorkspaces) error {
@@ -331,4 +269,62 @@ func asString(value any) string {
 	default:
 		return ""
 	}
+}
+
+func updateProjectRow(ctx context.Context, projectID string, updates map[string]any) error {
+	return repo.UpdateProjectRow(ctx, projectID, updates)
+}
+
+func updateProjectStatus(ctx context.Context, projectID string, status string) error {
+	return repo.UpdateProjectStatus(ctx, projectID, status)
+}
+
+func updateProjectStatusTx(ctx context.Context, tx gdb.TX, projectID string, status string) error {
+	return repo.UpdateProjectStatusTx(ctx, tx, projectID, status)
+}
+
+func validateProjectStatusTransition(currentStatus string, allowedStatuses []string) error {
+	for _, s := range allowedStatuses {
+		if currentStatus == s {
+			return nil
+		}
+	}
+	return gerror.Newf("project status '%s' does not allow this operation; allowed: %v", currentStatus, allowedStatuses)
+}
+
+func deleteProjectByID(ctx context.Context, projectID string) error {
+	return repo.DeleteProjectByID(ctx, projectID)
+}
+
+func insertAuditLog(ctx context.Context, projectID, eventType, actorKind, summary string, payload map[string]any) error {
+	return repo.InsertAuditLog(ctx, projectID, eventType, actorKind, summary, payload)
+}
+
+func insertAuditLogTx(ctx context.Context, tx gdb.TX, projectID, eventType, actorKind, summary string, payload map[string]any) error {
+	return repo.InsertAuditLogTx(ctx, tx, projectID, eventType, actorKind, summary, payload)
+}
+
+func insertAuditLogSqlTx(ctx context.Context, tx *sql.Tx, projectID, eventType, actorKind, summary string, payload map[string]any) error {
+	payloadJSON := ""
+	if payload != nil {
+		payloadJSON = mustMarshalJSONString(payload, "{}")
+	}
+	result, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO `+dao.AuditLogs.Table()+` (id, project_id, event_type, actor_kind, summary, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		newResourceID("audit"),
+		projectID,
+		eventType,
+		actorKind,
+		summary,
+		nullIfEmpty(payloadJSON),
+		nowText(),
+	)
+	if err != nil {
+		return gerror.Wrap(err, "insert audit log failed")
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return gerror.New("insert audit log affected unexpected rows")
+	}
+	return nil
 }

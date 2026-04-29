@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { apiGet } from "@/shared/lib/api";
 import {
@@ -22,21 +23,42 @@ import type {
 import { QueryPanel } from "@/shared/ui/QueryPanel";
 
 export function DiagnosticsPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { projectId, routes, buildRoute } = useProjectState();
+
+  if (!projectId) {
+    return (
+      <section className="placeholder-page">
+        <div className="empty-state-panel">
+          <h4>{t("diagnostics.noProjectTitle")}</h4>
+          <p>{t("diagnostics.noProjectDescription")}</p>
+          <div className="action-row">
+            <button className="primary-button" onClick={() => navigate("/projects")}>
+              {t("diagnostics.goToProjects")}
+            </button>
+            <button className="secondary-button" onClick={() => navigate("/settings")}>
+              {t("settings.createProject")}
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
   const [exportBusy, setExportBusy] = useState(false);
   const [exportError, setExportError] = useState("");
   const [exportMessage, setExportMessage] = useState("");
   const [actionBusy, setActionBusy] = useState("");
   const [actionError, setActionError] = useState("");
   const [actionMessage, setActionMessage] = useState("");
+  const [retryTick, setRetryTick] = useState(0);
   const systemState = useQuery(
     () => apiGet<SystemHealthView>("/api/v3/system/healthz"),
-    [],
+    [retryTick],
   );
   const runtimeState = useQuery(
     () => apiGet<RuntimeHealthView>("/api/v3/runtime/healthz"),
-    [],
+    [retryTick],
   );
   const desktopRuntimeState = useQuery(() => getDesktopRuntimeInfo(), []);
   const desktopDiagnosis = desktopRuntimeState.data
@@ -70,7 +92,7 @@ export function DiagnosticsPage() {
       !diagnosticsState.data ||
       !desktopRuntimeState.data
     ) {
-      setExportError("Diagnostics are not ready to export yet");
+      setExportError(t("diagnostics.exportNotReady"));
       setExportMessage("");
       return;
     }
@@ -145,7 +167,7 @@ export function DiagnosticsPage() {
   ) {
     switch (actionID) {
       case "retry-health-probe":
-        window.location.reload();
+        setRetryTick((v) => v + 1);
         return Promise.resolve();
       case "start-managed-core":
         return runAction(actionID, () => startManagedCore());
@@ -166,7 +188,7 @@ export function DiagnosticsPage() {
           showDesktopItemInFolder(options?.dataDirectory || ""),
         );
       default:
-        setActionError(`Unsupported recovery action: ${actionID}`);
+        setActionError(t("diagnostics.unsupportedAction", { actionID }));
         return Promise.resolve();
     }
   }
@@ -177,23 +199,22 @@ export function DiagnosticsPage() {
         systemState.loading || runtimeState.loading || diagnosticsState.loading
       }
       error={systemState.error || runtimeState.error || diagnosticsState.error}
-      title="Diagnostics"
-      onRetry={() => window.location.reload()}
-      secondaryActionLabel="Open Settings"
-      onSecondaryAction={() => window.location.assign(routes.settings)}
-      recoveryMessage="Diagnostics aggregates system health, runtime state, recovery signals, and exportable evidence from one entry point."
+      title={t("diagnostics.title")}
+      onRetry={() => setRetryTick((v) => v + 1)}
+      secondaryActionLabel={t("diagnostics.openSettings")}
+      onSecondaryAction={() => navigate(routes.settings)}
+      recoveryMessage={t("diagnostics.recovery")}
     >
       {systemState.data && runtimeState.data && diagnosticsState.data ? (
         <section className="dashboard-page">
           <div className="dashboard-intro">
             <div>
-              <p className="placeholder-section">Diagnostics</p>
+              <p className="placeholder-section">{t("diagnostics.title")}</p>
               <h3 className="placeholder-title">
-                Recovery and health entry point
+                {t("diagnostics.subtitle")}
               </h3>
               <p className="placeholder-description">
-                Use this page when a workbench page is stale, a runtime action
-                fails, or local core connectivity needs verification.
+                {t("diagnostics.description")}
               </p>
             </div>
             <div className="summary-stack">
@@ -202,7 +223,7 @@ export function DiagnosticsPage() {
                 disabled={exportBusy}
                 onClick={() => void handleExport()}
               >
-                {exportBusy ? "Exporting..." : "Export Diagnostics"}
+                {exportBusy ? t("diagnostics.exporting") : t("diagnostics.exportButton")}
               </button>
               <span className="status-pill">
                 system {systemState.data.status}
@@ -228,7 +249,7 @@ export function DiagnosticsPage() {
           <div className="content-grid">
             <section className="data-panel">
               <div className="panel-header">
-                <h3>System Health</h3>
+                <h3>{t("diagnostics.systemHealth")}</h3>
               </div>
               <div className="stack-list">
                 <article className="list-card">
@@ -246,12 +267,12 @@ export function DiagnosticsPage() {
 
             <section className="data-panel">
               <div className="panel-header">
-                <h3>Runtime Health</h3>
+                <h3>{t("diagnostics.runtimeHealth")}</h3>
               </div>
               <div className="stack-list">
                 <article className="list-card">
                   <div className="list-card-head">
-                    <strong>brain-v3 runtime</strong>
+                    <strong>{t("diagnostics.brainRuntime")}</strong>
                     <span className="status-pill">
                       {runtimeState.data.status}
                     </span>
@@ -264,28 +285,28 @@ export function DiagnosticsPage() {
             {desktopRuntimeState.data ? (
               <section className="data-panel">
                 <div className="panel-header">
-                  <h3>Desktop Runtime</h3>
+                  <h3>{t("diagnostics.desktopRuntime")}</h3>
                   <span className="status-pill">
                     {desktopRuntimeState.data.source}
                   </span>
                 </div>
                 <div className="runtime-grid">
                   <div className="runtime-field">
-                    <span>Launch mode</span>
+                    <span>{t("diagnostics.launchMode")}</span>
                     <strong>{desktopRuntimeState.data.launchMode}</strong>
                   </div>
                   <div className="runtime-field">
-                    <span>Packaged</span>
+                    <span>{t("diagnostics.packaged")}</span>
                     <strong>
                       {desktopRuntimeState.data.packaged ? "yes" : "no"}
                     </strong>
                   </div>
                   <div className="runtime-field">
-                    <span>Platform</span>
+                    <span>{t("diagnostics.platform")}</span>
                     <strong>{desktopRuntimeState.data.platform}</strong>
                   </div>
                   <div className="runtime-field">
-                    <span>Version</span>
+                    <span>{t("diagnostics.version")}</span>
                     <strong>{desktopRuntimeState.data.version}</strong>
                   </div>
                   <div className="runtime-field runtime-field-wide">

@@ -16,7 +16,7 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "strict": true,
-    "types": ["node"]
+    "types": ["node", "vitest/globals", "@testing-library/jest-dom"]
   },
   "include": ["src/renderer", "src/preload", "src/shared", "vite.config.ts"]
 }
