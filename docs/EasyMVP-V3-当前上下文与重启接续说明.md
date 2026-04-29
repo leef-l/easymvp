@@ -20,7 +20,7 @@ EasyMVP V3 当前正式定位为：
 1. 文档主线和 `domain-brain` 主链路已经完成
 2. `apps/core` 与 `apps/desktop` 已完成本轮列出的主链路、恢复诊断、replay/evidence 聚合、runtime 幂等与 desktop packaged smoke 证明链收口
 3. V3 当前剩余不再是已知代码功能待办，而是发布前的 CI / 高配机全量验证和真实 `brain-v3` / `easymvp-brain` 端到端冒烟
-4. 最新状态以 [EasyMVP-V3-AgentTeam状态板](./EasyMVP-V3-AgentTeam状态板.md) 为准
+4. 最新状态以代码实现和 GitHub Actions CI 状态为准
 
 ## 2. 当前已确定的核心技术路线
 
