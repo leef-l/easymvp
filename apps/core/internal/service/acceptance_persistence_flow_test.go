@@ -159,6 +159,32 @@ func (s *completionAdjudicationBrainStub) ValidateArchitectChatEnvelope(ctx cont
 	return nil
 }
 
+func (s *completionAdjudicationBrainStub) CallSolutionDesign(ctx context.Context, input braincontracts.SolutionDesignInput) (*braincontracts.BrainContractEnvelope, *braincontracts.SolutionDesignResult, error) {
+	_ = ctx
+	_ = input
+	return nil, nil, nil
+}
+
+func (s *completionAdjudicationBrainStub) ValidateSolutionDesignEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.SolutionDesignResult) error {
+	_ = ctx
+	_ = envelope
+	_ = result
+	return nil
+}
+
+func (s *completionAdjudicationBrainStub) CallRequirementAnalysis(ctx context.Context, input braincontracts.RequirementAnalysisInput) (*braincontracts.BrainContractEnvelope, *braincontracts.RequirementAnalysisResult, error) {
+	_ = ctx
+	_ = input
+	return nil, nil, nil
+}
+
+func (s *completionAdjudicationBrainStub) ValidateRequirementAnalysisEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.RequirementAnalysisResult) error {
+	_ = ctx
+	_ = envelope
+	_ = result
+	return nil
+}
+
 func (s *repairDraftPlanStub) CreateInitialDraft(ctx context.Context, projectID string) error {
 	_ = ctx
 	s.lastProject = projectID

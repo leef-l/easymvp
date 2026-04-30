@@ -7,6 +7,7 @@ import { useQuery } from "@/shared/lib/query";
 import type {
   AcceptanceView,
   CommandResponse,
+  MultiLayerAcceptanceView,
   PlanView,
   ProjectDiagnosticsView,
 } from "@/shared/lib/types";
@@ -52,6 +53,10 @@ export function AcceptancePage() {
   );
   const diagnosticsState = useQuery(
     () => apiGet<ProjectDiagnosticsView>(`/api/v3/projects/${encodeURIComponent(projectId)}/diagnostic-records?limit=20`),
+    [projectId, refreshTick],
+  );
+  const multiLayerState = useQuery(
+    () => apiGet<MultiLayerAcceptanceView>(`/api/v3/projects/${encodeURIComponent(projectId)}/acceptance-layers`),
     [projectId, refreshTick],
   );
 
@@ -644,6 +649,97 @@ export function AcceptancePage() {
               )}
             </section>
           </div>
+
+          {/* 2b. Multi-Layer Acceptance Standards */}
+          {multiLayerState.data ? (
+            <div className="acceptance-middle">
+              <section className="data-panel">
+                <div className="panel-header">
+                  <h3>Multi-Layer Acceptance</h3>
+                  <span className="status-pill">{multiLayerState.data.layers.length} layers</span>
+                </div>
+                {multiLayerState.data.layers.length > 0 ? (
+                  <div className="stack-list">
+                    {multiLayerState.data.layers.map((layer) => (
+                      <article key={layer.layer} className="list-card">
+                        <div className="list-card-head">
+                          <strong style={{ textTransform: "uppercase" }}>{layer.layer}</strong>
+                          <span className={`status-pill ${layer.status === "passed" ? "pill-success" : layer.status === "failed" ? "pill-danger" : "pill-advisory"}`}>
+                            {layer.status}
+                          </span>
+                        </div>
+                        <div className="inline-metrics">
+                          <span className="status-pill">passed {layer.passed_count}</span>
+                          <span className="status-pill">failed {layer.failed_count}</span>
+                          <span className="status-pill">missing {layer.missing_count}</span>
+                          <span className="status-pill">total {layer.total_count}</span>
+                        </div>
+                        {layer.details ? <p className="muted-copy">{layer.details}</p> : null}
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="muted-copy">No acceptance layer results available.</p>
+                )}
+              </section>
+
+              <section className="data-panel">
+                <div className="panel-header">
+                  <h3>Contract Gaps</h3>
+                  <span className="status-pill">{multiLayerState.data.contract_gaps.length}</span>
+                </div>
+                {multiLayerState.data.contract_gaps.length > 0 ? (
+                  <div className="stack-list">
+                    {multiLayerState.data.contract_gaps.map((gap) => (
+                      <article key={gap.check_name} className="list-card">
+                        <div className="list-card-head">
+                          <strong>{gap.check_name}</strong>
+                          <span className={`status-pill ${gap.actual_status === "passed" ? "pill-success" : gap.actual_status === "failed" ? "pill-danger" : "pill-advisory"}`}>
+                            {gap.actual_status}
+                          </span>
+                        </div>
+                        <p>
+                          {gap.required ? "required" : "optional"}
+                          {gap.description ? ` · ${gap.description}` : ""}
+                        </p>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="muted-copy">No contract gaps detected.</p>
+                )}
+
+                {multiLayerState.data.repair_loop_progress ? (
+                  <>
+                    <div className="panel-header" style={{ marginTop: 16 }}>
+                      <h3>Repair Loop Progress</h3>
+                    </div>
+                    <div className="inline-metrics">
+                      <span className="status-pill">
+                        completed {multiLayerState.data.repair_loop_progress.completed_repairs}/{multiLayerState.data.repair_loop_progress.total_repairs}
+                      </span>
+                      <span className="status-pill">
+                        in progress {multiLayerState.data.repair_loop_progress.in_progress_repairs}
+                      </span>
+                      <span className="status-pill">
+                        failed {multiLayerState.data.repair_loop_progress.failed_repairs}
+                      </span>
+                    </div>
+                    {multiLayerState.data.repair_loop_progress.current_step ? (
+                      <p className="muted-copy">
+                        Current step: {multiLayerState.data.repair_loop_progress.current_step}
+                      </p>
+                    ) : null}
+                    {multiLayerState.data.repair_loop_progress.updated_at ? (
+                      <p className="muted-copy">
+                        Updated: {multiLayerState.data.repair_loop_progress.updated_at}
+                      </p>
+                    ) : null}
+                  </>
+                ) : null}
+              </section>
+            </div>
+          ) : null}
 
           {/* 3. Bottom Release Gate */}
           <section className="data-panel acceptance-gate">

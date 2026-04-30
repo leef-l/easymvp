@@ -21,6 +21,7 @@ type AcceptanceViewRes struct {
 	RuntimeEscalation  RuntimeEscalationView  `json:"runtime_escalation"`
 	FaultSummary       FaultSummaryView       `json:"fault_summary"`
 	RepairPlanDraft    RepairPlanDraftSummary `json:"repair_plan_draft"`
+	ContractGap        ContractGapView        `json:"contract_gap"`
 }
 
 type StartAcceptanceReq struct {

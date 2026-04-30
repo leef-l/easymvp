@@ -177,5 +177,6 @@ func (s *sAcceptance) GetAcceptanceView(ctx context.Context, projectID string) (
 		RuntimeEscalation:  data.RuntimeEscalation,
 		FaultSummary:       data.FaultSummary,
 		RepairPlanDraft:    data.RepairPlanDraft,
+		ContractGap:        data.ContractGap,
 	}, nil
 }

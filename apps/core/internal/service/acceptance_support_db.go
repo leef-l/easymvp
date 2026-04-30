@@ -3,12 +3,15 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 
 	acceptancev1 "github.com/leef-l/easymvp/apps/core/api/acceptance/v1"
+	"github.com/leef-l/easymvp/apps/core/internal/model/braincontracts"
 	"github.com/leef-l/easymvp/apps/core/internal/model/entity"
 	"github.com/leef-l/easymvp/apps/core/internal/repo"
 )
@@ -32,6 +35,7 @@ type acceptanceViewData struct {
 	RuntimeEscalation  acceptancev1.RuntimeEscalationView
 	FaultSummary       acceptancev1.FaultSummaryView
 	RepairPlanDraft    acceptancev1.RepairPlanDraftSummary
+	ContractGap        acceptancev1.ContractGapView
 }
 
 type acceptanceAggregate struct {
@@ -52,6 +56,9 @@ type acceptanceAggregate struct {
 	ChannelAvailable       bool
 	EnvironmentAvailable   bool
 	ChannelUnavailableReason string
+	// C-02: CompiledTaskContract carries the typed verification contract from the
+	// compiled task when a specific task_id is associated with the acceptance run.
+	CompiledTaskContract *braincontracts.VerificationContract
 }
 
 func loadAcceptanceViewData(ctx context.Context, projectID string) (*acceptanceViewData, error) {
@@ -66,6 +73,7 @@ func loadAcceptanceViewData(ctx context.Context, projectID string) (*acceptanceV
 		return nil, err
 	}
 
+	verificationResult := buildVerificationResultView(ctx, aggregate)
 	return &acceptanceViewData{
 		Overview:           buildAcceptanceOverview(aggregate),
 		AcceptanceRun:      buildAcceptanceRunView(aggregate),
@@ -73,11 +81,12 @@ func loadAcceptanceViewData(ctx context.Context, projectID string) (*acceptanceV
 		Issues:             buildAcceptanceIssues(aggregate),
 		EvidenceCards:      buildAcceptanceEvidenceCards(aggregate),
 		ReleaseGate:        buildAcceptanceReleaseGate(aggregate),
-		VerificationResult: buildVerificationResultView(ctx, aggregate),
+		VerificationResult: verificationResult,
 		CompletionVerdict:  buildCompletionVerdictView(aggregate),
 		RuntimeEscalation:  buildRuntimeEscalationView(aggregate),
 		FaultSummary:       buildFaultSummaryView(aggregate),
 		RepairPlanDraft:    buildRepairPlanDraftSummary(aggregate),
+		ContractGap:        buildContractGapView(verificationResult),
 	}, nil
 }
 
@@ -155,6 +164,11 @@ func loadAcceptanceAggregate(ctx context.Context, db *sql.DB, projectID string) 
 		return nil, err
 	}
 
+	// C-02: Load verification contract from the compiled task when the
+	// acceptance run references a specific task_id. This allows the
+	// accepting flow to route checks according to the contract.
+	aggregate.CompiledTaskContract = loadCompiledTaskVerificationContract(ctx, db, aggregate)
+
 	return aggregate, nil
 }
 
@@ -202,6 +216,48 @@ func loadAcceptanceAggregateByRunID(ctx context.Context, db *sql.DB, projectID s
 		return nil, err
 	}
 	return aggregate, nil
+}
+
+// loadCompiledTaskVerificationContract attempts to load and parse the
+// verification_contract_json from the CompiledTask associated with the
+// latest acceptance run's task_id. Returns nil when no contract is found
+// or parsing fails (non-fatal). C-02: enables accepting flow to route
+// verification based on the task-level contract.
+func loadCompiledTaskVerificationContract(ctx context.Context, db *sql.DB, aggregate *acceptanceAggregate) *braincontracts.VerificationContract {
+	if aggregate == nil || aggregate.LatestAcceptanceRun == nil {
+		return nil
+	}
+	taskID := strings.TrimSpace(aggregate.LatestAcceptanceRun.TaskId)
+	if taskID == "" {
+		return nil
+	}
+
+	// Try to resolve the compiled task by looking up domain_task → source_compiled_task_id.
+	domainTask, err := getDomainTaskByID(ctx, db, taskID)
+	if err != nil {
+		g.Log().Debugf(ctx, "[loadCompiledTaskVerificationContract] getDomainTaskByID(%s) failed: %v", taskID, err)
+	}
+	compiledTaskID := taskID
+	if domainTask != nil && strings.TrimSpace(domainTask.SourceCompiledTaskId) != "" {
+		compiledTaskID = strings.TrimSpace(domainTask.SourceCompiledTaskId)
+	}
+
+	compiledTask, err := getCompiledTaskByID(ctx, db, compiledTaskID)
+	if err != nil || compiledTask == nil {
+		return nil
+	}
+
+	raw := strings.TrimSpace(compiledTask.VerificationContractJson)
+	if raw == "" || raw == "{}" || raw == "null" {
+		return nil
+	}
+
+	vc, err := braincontracts.ParseVerificationContract(json.RawMessage(raw))
+	if err != nil {
+		g.Log().Debugf(ctx, "[loadCompiledTaskVerificationContract] parse verification contract failed for task %s: %v", compiledTaskID, err)
+		return nil
+	}
+	return vc
 }
 
 func loadPersistedCompletionVerdict(
@@ -336,6 +392,12 @@ func buildVerificationResultView(ctx context.Context, data *acceptanceAggregate)
 		requiredEvidence = parseStringArrayJSON(data.ProductionProfile.RequiredEvidenceJSON)
 	}
 
+	// C-02: Merge requirements from the compiled task's verification_contract_json
+	// so that the accepting flow honours the task-level contract.
+	requiredChecks, requiredEvidence = mergeCompiledTaskContractRequirements(
+		requiredChecks, requiredEvidence, data.CompiledTaskContract,
+	)
+
 	failedChecks := make([]string, 0, len(data.Issues))
 	for _, issue := range data.Issues {
 		label := firstNonEmpty(strings.TrimSpace(issue.IssueKind), strings.TrimSpace(issue.Summary), issue.Id)
@@ -379,9 +441,15 @@ func buildVerificationResultView(ctx context.Context, data *acceptanceAggregate)
 		}
 	}
 
+	// C-02: Use the compiled task contract's preferred_channel when available.
+	preferredChannel := deriveVerificationCurrentChannel(manualReviewRequired)
+	if data.CompiledTaskContract != nil && strings.TrimSpace(data.CompiledTaskContract.PreferredChannel) != "" {
+		preferredChannel = strings.TrimSpace(data.CompiledTaskContract.PreferredChannel)
+	}
+
 	return acceptancev1.VerificationResultView{
 		Status:           status,
-		PreferredChannel: deriveVerificationCurrentChannel(manualReviewRequired),
+		PreferredChannel: preferredChannel,
 		RequiredChecks:   requiredChecks,
 		RequiredEvidence: requiredEvidence,
 		MissingEvidence:  missingEvidence,
@@ -405,6 +473,52 @@ func buildVerificationResultView(ctx context.Context, data *acceptanceAggregate)
 		ChannelAvailable:     data.ChannelAvailable,
 		EnvironmentAvailable: data.EnvironmentAvailable,
 	}
+}
+
+// mergeCompiledTaskContractRequirements merges check/evidence items from the
+// compiled task's verification contract into the profile-derived lists.
+// Duplicates are suppressed. C-02: ensures the accepting flow honours
+// task-level required_checks.
+func mergeCompiledTaskContractRequirements(
+	checks []string,
+	evidence []string,
+	contract *braincontracts.VerificationContract,
+) ([]string, []string) {
+	if contract == nil {
+		return checks, evidence
+	}
+
+	existing := make(map[string]bool, len(checks))
+	for _, c := range checks {
+		existing[strings.ToLower(strings.TrimSpace(c))] = true
+	}
+	for _, item := range contract.RequiredChecks {
+		key := strings.TrimSpace(item.CheckID)
+		if key == "" {
+			key = strings.TrimSpace(item.Kind)
+		}
+		if key != "" && !existing[strings.ToLower(key)] {
+			checks = append(checks, key)
+			existing[strings.ToLower(key)] = true
+		}
+	}
+
+	existingEvidence := make(map[string]bool, len(evidence))
+	for _, e := range evidence {
+		existingEvidence[strings.ToLower(strings.TrimSpace(e))] = true
+	}
+	for _, item := range contract.RequiredEvidence {
+		key := strings.TrimSpace(item.EvidenceID)
+		if key == "" {
+			key = strings.TrimSpace(item.Kind)
+		}
+		if key != "" && !existingEvidence[strings.ToLower(key)] {
+			evidence = append(evidence, key)
+			existingEvidence[strings.ToLower(key)] = true
+		}
+	}
+
+	return checks, evidence
 }
 
 func profileVersionForVerification(

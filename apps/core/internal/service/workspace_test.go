@@ -36,6 +36,12 @@ func (s *workspaceTestProjectsStub) DeleteProject(ctx context.Context, projectID
 	return nil, nil
 }
 
+func (s *workspaceTestProjectsStub) ProjectProgressStream(ctx context.Context, req *projectsv1.ProjectProgressStreamReq) error {
+	_ = ctx
+	_ = req
+	return nil
+}
+
 func TestWorkspaceGetProjectWorkspaceViewDelegatesToProjects(t *testing.T) {
 	t.Parallel()
 

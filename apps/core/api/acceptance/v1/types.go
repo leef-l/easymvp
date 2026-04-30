@@ -167,3 +167,25 @@ type RepairPlanDraftSummary struct {
 	ManualReviewRequired bool     `json:"manual_review_required"`
 	UpdatedAt            string   `json:"updated_at,omitempty"`
 }
+
+// ContractGapView summarises the delta between verification_contract_json
+// required_checks / required_evidence and actual verification results.
+// C-03: enables the front-end to render a clear contract gap dashboard.
+type ContractGapView struct {
+	// HasGap is true when at least one blocker or missing item exists.
+	HasGap          bool                   `json:"has_gap"`
+	BlockerChecks   []ContractGapItem      `json:"blocker_checks,omitempty"`
+	WarningChecks   []ContractGapItem      `json:"warning_checks,omitempty"`
+	MissingEvidence []ContractGapItem      `json:"missing_evidence,omitempty"`
+	Summary         string                 `json:"summary,omitempty"`
+}
+
+// ContractGapItem is a single gap entry (a required check or evidence that
+// is not yet satisfied).
+type ContractGapItem struct {
+	Key      string `json:"key"`
+	Label    string `json:"label"`
+	Severity string `json:"severity"` // blocker | warning | missing
+	Status   string `json:"status"`   // failed | skipped | not_run | missing
+	Detail   string `json:"detail,omitempty"`
+}

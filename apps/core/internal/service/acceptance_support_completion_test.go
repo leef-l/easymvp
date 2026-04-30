@@ -141,6 +141,32 @@ func (s *workspaceExplanationBrainStub) ValidateArchitectChatEnvelope(ctx contex
 	return nil
 }
 
+func (s *workspaceExplanationBrainStub) CallSolutionDesign(ctx context.Context, input braincontracts.SolutionDesignInput) (*braincontracts.BrainContractEnvelope, *braincontracts.SolutionDesignResult, error) {
+	_ = ctx
+	_ = input
+	return nil, nil, nil
+}
+
+func (s *workspaceExplanationBrainStub) ValidateSolutionDesignEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.SolutionDesignResult) error {
+	_ = ctx
+	_ = envelope
+	_ = result
+	return nil
+}
+
+func (s *workspaceExplanationBrainStub) CallRequirementAnalysis(ctx context.Context, input braincontracts.RequirementAnalysisInput) (*braincontracts.BrainContractEnvelope, *braincontracts.RequirementAnalysisResult, error) {
+	_ = ctx
+	_ = input
+	return nil, nil, nil
+}
+
+func (s *workspaceExplanationBrainStub) ValidateRequirementAnalysisEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.RequirementAnalysisResult) error {
+	_ = ctx
+	_ = envelope
+	_ = result
+	return nil
+}
+
 func TestDeriveAcceptanceRunStatusFromAdjudication(t *testing.T) {
 	t.Parallel()
 
