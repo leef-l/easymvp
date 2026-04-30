@@ -88,8 +88,12 @@ func (eb *EventBus) Publish(ctx context.Context, evt *WorkflowEvent) {
 		evt.Status = "pending"
 	}
 
-	// Persist to DB (best-effort, do not block publish on DB errors).
-	go eb.persistEvent(ctx, evt)
+	// Persist synchronously: a single INSERT against SQLite is sub-millisecond
+	// and keeping it on the caller's goroutine ensures the write completes
+	// before the caller (e.g. a test) tears down the database handle. The
+	// previous fire-and-forget goroutine raced against test cleanup and could
+	// reopen a stale sqlite file after migrations had been torn down.
+	eb.persistEvent(ctx, evt)
 
 	// Emit to in-memory subscribers.
 	select {
@@ -104,14 +108,14 @@ func (eb *EventBus) Publish(ctx context.Context, evt *WorkflowEvent) {
 func (eb *EventBus) persistEvent(ctx context.Context, evt *WorkflowEvent) {
 	payloadJSON, _ := json.Marshal(evt.Payload)
 	_, err := g.DB().Exec(ctx,
-		`INSERT INTO workflow_events (id, project_id, event_type, payload_json, status, retry_count, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO workflow_events (id, project_id, event_type, payload_json, status, retry_count, error_message, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		   status=excluded.status,
 		   retry_count=excluded.retry_count,
 		   error_message=excluded.error_message`,
 		evt.ID, evt.ProjectID, string(evt.EventType), string(payloadJSON),
-		evt.Status, evt.RetryCount, evt.CreatedAt.Format(time.RFC3339),
+		evt.Status, evt.RetryCount, evt.ErrorMsg, evt.CreatedAt.Format(time.RFC3339),
 	)
 	if err != nil {
 		g.Log().Warningf(ctx, "[eventbus] persist event %s failed: %v", evt.ID, err)
