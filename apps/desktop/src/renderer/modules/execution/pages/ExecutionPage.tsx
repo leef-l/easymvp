@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { apiDelete, apiGet, apiPost } from "@/shared/lib/api";
+import { apiDelete, apiGet, apiPost, getCoreBaseUrl } from "@/shared/lib/api";
 import { useProjectState } from "@/shared/lib/project";
 import { useQuery } from "@/shared/lib/query";
 import type {
   AcceptanceView,
   CommandResponse,
   ExecutionView,
+  PlanView,
+  ProgressStreamEvent,
   ProjectDiagnosticsView,
   StartRunResponse,
   SyncRunResponse,
@@ -38,6 +40,59 @@ export function ExecutionPage() {
   const [mutationBusy, setMutationBusy] = useState("");
   const [mutationError, setMutationError] = useState("");
   const [mutationMessage, setMutationMessage] = useState("");
+  const [sseProgress, setSseProgress] = useState<ProgressStreamEvent[]>([]);
+  const [sseConnected, setSseConnected] = useState(false);
+  const [sseEnabled, setSseEnabled] = useState(false);
+  const [notifications, setNotifications] = useState<Array<{ id: string; message: string; type: string; timestamp: string }>>([]);
+  const sseRef = useRef<EventSource | null>(null);
+
+  // SSE Progress Stream
+  const connectSSE = useCallback(() => {
+    if (sseRef.current) {
+      sseRef.current.close();
+    }
+    if (!projectId || !sseEnabled) return;
+    const url = `${getCoreBaseUrl()}/api/v3/projects/${encodeURIComponent(projectId)}/progress-stream`;
+    const source = new EventSource(url);
+    sseRef.current = source;
+
+    source.onopen = () => setSseConnected(true);
+    source.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as ProgressStreamEvent;
+        setSseProgress((prev) => {
+          const next = [...prev, data].slice(-50);
+          return next;
+        });
+        if (data.event_type === "adjustment" || data.event_type === "reschedule" || data.event_type === "notification") {
+          setNotifications((prev) => [
+            ...prev,
+            {
+              id: `${Date.now()}-${Math.random()}`,
+              message: data.message || `${data.event_type}: ${data.status || ""}`,
+              type: data.event_type,
+              timestamp: data.timestamp || new Date().toISOString(),
+            },
+          ].slice(-20));
+        }
+      } catch {
+        // ignore parse errors
+      }
+    };
+    source.onerror = () => {
+      setSseConnected(false);
+      source.close();
+      sseRef.current = null;
+    };
+  }, [projectId, sseEnabled]);
+
+  useEffect(() => {
+    connectSSE();
+    return () => {
+      sseRef.current?.close();
+      sseRef.current = null;
+    };
+  }, [connectSSE]);
 
   useEffect(() => {
     if (!autoRefresh) return;
@@ -92,6 +147,29 @@ export function ExecutionPage() {
     () => apiGet<AcceptanceView>(`/api/v3/projects/${encodeURIComponent(projectId)}/acceptance-view`),
     [projectId, refreshTick],
   );
+  const planState = useQuery(
+    () => apiGet<PlanView>(`/api/v3/projects/${encodeURIComponent(projectId)}/plan-view`),
+    [projectId, refreshTick],
+  );
+
+  // Group tasks by layer/phase for topology view
+  const topologyLayers = useMemo(() => {
+    const tasks = planState.data?.task_projection ?? [];
+    const layers = new Map<string, typeof tasks>();
+    for (const task of tasks) {
+      const layerKey = task.phase || "default";
+      if (!layers.has(layerKey)) layers.set(layerKey, []);
+      layers.get(layerKey)!.push(task);
+    }
+    return [...layers.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [planState.data?.task_projection]);
+
+  // Compute overall SSE progress
+  const overallProgress = useMemo(() => {
+    if (sseProgress.length === 0) return null;
+    const latest = sseProgress[sseProgress.length - 1];
+    return latest.progress_percent ?? null;
+  }, [sseProgress]);
 
   const filteredBindings = useMemo(
     () =>
@@ -247,6 +325,122 @@ export function ExecutionPage() {
               <MetricCard label={t("execution.replayItems")} value={`${state.data.replay_timeline?.length ?? 0}`} />
               <MetricCard label={t("execution.logSegments")} value={`${state.data.log_segments?.length ?? 0}`} />
             </div>
+
+            {/* SSE Real-Time Progress */}
+            <section className="data-panel">
+              <div className="panel-header">
+                <h3>{t("execution.realtimeProgress")}</h3>
+                <div className="action-row">
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={sseEnabled}
+                      onChange={(e) => setSseEnabled(e.target.checked)}
+                    />
+                    <span>{t("execution.enableSSE")}</span>
+                  </label>
+                  <span className={`status-pill ${sseConnected ? "pill-success" : ""}`}>
+                    {sseConnected ? t("execution.sseConnected") : t("execution.sseDisconnected")}
+                  </span>
+                </div>
+              </div>
+              {overallProgress !== null ? (
+                <div style={{ padding: "12px 16px" }}>
+                  <div className="project-progress-bar" style={{ height: 12 }}>
+                    <div
+                      className="project-progress-fill"
+                      style={{ width: `${Math.min(100, overallProgress)}%`, transition: "width 0.3s ease" }}
+                    />
+                  </div>
+                  <p className="muted-copy" style={{ marginTop: 4 }}>
+                    {overallProgress}% {t("execution.progressComplete")}
+                  </p>
+                </div>
+              ) : (
+                <p className="muted-copy" style={{ padding: "12px 16px" }}>
+                  {sseEnabled ? t("execution.waitingForProgress") : t("execution.enableSSEHint")}
+                </p>
+              )}
+            </section>
+
+            {/* Topology Layer Visualization */}
+            {topologyLayers.length > 0 ? (
+              <section className="data-panel">
+                <div className="panel-header">
+                  <h3>{t("execution.topologyView")}</h3>
+                  <span className="status-pill">{planState.data?.task_projection.length || 0} {t("execution.tasks")}</span>
+                </div>
+                <div style={{ padding: "12px 16px" }}>
+                  {topologyLayers.map(([layerName, tasks]) => (
+                    <div key={layerName} style={{ marginBottom: 16 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                        <span className="status-pill pill-advisory">{layerName}</span>
+                        <span className="muted-copy">{tasks.length} {t("execution.tasks")}</span>
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        {tasks.map((task) => (
+                          <div
+                            key={task.task_id}
+                            className={`list-card ${task.status === "completed" ? "" : task.status === "running" ? "is-selected" : ""}`}
+                            style={{ flex: "0 0 auto", minWidth: 180, maxWidth: 280, cursor: "pointer" }}
+                            onClick={() => {
+                              if (task.mapped_domain_task_id) {
+                                setStartTaskId(task.mapped_domain_task_id);
+                              }
+                            }}
+                          >
+                            <div className="list-card-head">
+                              <strong style={{ fontSize: 12 }}>{task.task_name}</strong>
+                              <span className={`status-pill ${task.status === "completed" ? "pill-success" : task.status === "running" ? "pill-advisory" : task.status === "failed" ? "pill-blocking" : ""}`} style={{ fontSize: 10 }}>
+                                {task.status}
+                              </span>
+                            </div>
+                            <p className="muted-copy" style={{ fontSize: 11 }}>
+                              {task.brain_kind} · {task.risk_level}
+                            </p>
+                            {task.affected_resources && task.affected_resources.length > 0 ? (
+                              <p className="muted-copy" style={{ fontSize: 10 }}>
+                                {task.affected_resources.slice(0, 3).join(", ")}
+                              </p>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {/* Dynamic Adjustment Notifications */}
+            {notifications.length > 0 ? (
+              <section className="data-panel">
+                <div className="panel-header">
+                  <h3>{t("execution.notifications")}</h3>
+                  <div className="action-row">
+                    <span className="status-pill">{notifications.length}</span>
+                    <button
+                      className="secondary-button"
+                      style={{ fontSize: 11, padding: "4px 8px" }}
+                      onClick={() => setNotifications([])}
+                    >
+                      {t("execution.clearNotifications")}
+                    </button>
+                  </div>
+                </div>
+                <div className="stack-list">
+                  {notifications.slice().reverse().map((n) => (
+                    <article key={n.id} className="list-card">
+                      <div className="list-card-head">
+                        <strong>{n.message}</strong>
+                        <span className="status-pill">{n.type}</span>
+                      </div>
+                      <p className="muted-copy">{n.timestamp}</p>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ) : null}
 
             <section className="data-panel">
               <div className="panel-header">
