@@ -1,6 +1,6 @@
 # EasyMVP V3 当前上下文与重启接续说明
 
-> 更新时间：2026-04-24
+> 更新时间：2026-04-29
 > 目标：在需要重启 Codex 或切换会话时，保留当前 V3 设计上下文、关键决策和下一步执行入口，避免重新对齐成本。
 
 ## 1. 当前项目定位
@@ -19,8 +19,11 @@ EasyMVP V3 当前正式定位为：
 
 1. 文档主线和 `domain-brain` 主链路已经完成
 2. `apps/core` 与 `apps/desktop` 已完成本轮列出的主链路、恢复诊断、replay/evidence 聚合、runtime 幂等与 desktop packaged smoke 证明链收口
-3. V3 当前剩余不再是已知代码功能待办，而是发布前的 CI / 高配机全量验证和真实 `brain-v3` / `easymvp-brain` 端到端冒烟
-4. 最新状态以代码实现和 GitHub Actions CI 状态为准
+3. **MACCS 七阶段闭环已全部落地**：需求分析 -> 方案设计 -> 设计审核 -> 任务执行 -> 多层验收 -> 交付管理 -> 项目复盘，后端服务层与前端 API 层均已实现
+4. MACCS 闭环端到端集成测试已编写（`maccs_integration_test.go`），覆盖完整生命周期数据层验证
+5. 拓扑排序调度器和多层验收标准的纯逻辑单元测试已补充
+6. V3 当前剩余不再是已知代码功能待办，而是发布前的端到端冒烟测试和真实 `brain-v3` / `easymvp-brain` 集成验证
+7. 最新状态以代码实现和 GitHub Actions CI 状态为准
 
 ## 2. 当前已确定的核心技术路线
 
@@ -108,16 +111,39 @@ EasyMVP V3 当前正式定位为：
 
 ## 7. 重启后的直接下一步
 
-重启后，不需要重新讨论架构方向。
+重启后，不需要重新讨论架构方向。MACCS 七阶段闭环已全部实现，当前进入端到端冒烟测试阶段。
 
 建议直接进入：
 
-1. 使用 `goframe-v2` skill
-2. 先查看 [EasyMVP-V3-AgentTeam状态板](./EasyMVP-V3-AgentTeam状态板.md) 的验证口径
-3. 在 CI 或高配机运行全量 `go test ./...`
+1. 在 CI 或高配机运行 `cd apps/core && go test ./internal/service/...`，确认所有单元测试和集成测试通过
+2. 在 CI 或高配机运行全量 `go build ./...` 和 `go vet ./...`
+3. 用真实 `brain-v3` / `easymvp-brain` 服务做一次端到端人工冒烟，覆盖完整 MACCS 七阶段流程
 4. 在 CI 或高配机运行 `cd apps/desktop && pnpm run package:dir && pnpm run verify:package`
-5. 用真实 `brain-v3` / `easymvp-brain` 服务做一次端到端人工冒烟
-6. 若升级或迁移数据，先运行 `scripts/easymvp-backup-snapshot.sh snapshot <label>` 生成升级前快照
+5. 若升级或迁移数据，先运行 `scripts/easymvp-backup-snapshot.sh snapshot <label>` 生成升级前快照
+
+### 7.1 MACCS 七阶段 API 端点概要
+
+| 阶段 | 端点路径 | 方法 | 说明 |
+|------|---------|------|------|
+| 需求分析 | `/api/v3/requirements/analyze` | POST | 提交原始需求，Brain 生成结构化需求文档 |
+| 需求确认 | `/api/v3/requirements/confirm` | POST | 用户确认需求文档 |
+| 需求查询 | `/api/v3/requirements/get` | GET | 查询需求详情 |
+| 方案设计 | `/api/v3/designs/generate` | POST | 基于需求生成技术方案 |
+| 方案确认 | `/api/v3/designs/confirm` | POST | 用户确认方案 |
+| 方案拒绝 | `/api/v3/designs/reject` | POST | 用户拒绝方案（可重新生成） |
+| 设计审核 | `/api/v3/reviews/start` | POST | 启动单轮设计审核 |
+| 审核循环 | `/api/v3/reviews/run-loop` | POST | 自动审核-修复循环 |
+| 审核列表 | `/api/v3/reviews/list` | GET | 查询审核记录 |
+| 审核介入 | `/api/v3/reviews/intervene` | POST | 人工覆盖/中止/重启审核 |
+| 交付准备 | `/api/v3/deliveries/prepare` | POST | 准备交付物 |
+| 交付验收 | `/api/v3/deliveries/accept` | POST | 验收通过 |
+| 交付拒绝 | `/api/v3/deliveries/reject` | POST | 验收拒绝 |
+| 交付查询 | `/api/v3/deliveries/get` | GET | 查询交付详情 |
+| 项目复盘 | `/api/v3/retrospectives/generate` | POST | 生成项目复盘报告 |
+| 复盘查询 | `/api/v3/retrospectives/get` | GET | 查询复盘报告 |
+| 验收启动 | `/api/v3/acceptance/start` | POST | 启动多层验收 |
+| 验收视图 | `/api/v3/acceptance/view` | GET | 查看验收状态 |
+| 手动放行 | `/api/v3/acceptance/manual-release` | POST | 人工手动放行 |
 
 ## 8. 重启后的建议指令
 
@@ -125,12 +151,11 @@ EasyMVP V3 当前正式定位为：
 
 ```text
 继续 EasyMVP V3，按 docs/EasyMVP-V3-当前上下文与重启接续说明.md 执行，
-使用 goframe-v2 skill，
-不要在低配服务器跑重型构建，
-先在 CI 或高配机做全量 Go/desktop package/verify-package 验证，
-再接真实 brain-v3/easymvp-brain 做端到端冒烟。
+MACCS 七阶段闭环已全部实现，
+先在 CI 或高配机做全量 go test/go build 验证，
+再接真实 brain-v3/easymvp-brain 做七阶段端到端冒烟。
 ```
 
 ## 9. 一句话总结
 
-即使重启会话，仓库里的 V3 文档和这份接续说明仍然保留，所以不会丢设计结论；当前已知代码实现项已收口，恢复后优先做发布级验证而不是继续找功能缺口。
+即使重启会话，仓库里的 V3 文档和这份接续说明仍然保留，所以不会丢设计结论；MACCS 七阶段闭环（需求 -> 方案 -> 审核 -> 执行 -> 验收 -> 交付 -> 复盘）已全部实现并有集成测试覆盖，恢复后优先做端到端冒烟测试。
