@@ -35,6 +35,7 @@ type ListProjectDiagnosticsRes struct {
 	ArtifactContexts []ProjectArtifactDiagnosticContext `json:"artifact_contexts,omitempty"`
 	EvidenceOverview ProjectEvidenceOverview            `json:"evidence_overview"`
 	VerificationRead ProjectVerificationRead            `json:"verification_read"`
+	EscalationRead   ProjectEscalationRead              `json:"escalation_read"`
 	RefreshHint      string                             `json:"refresh_hint"`
 }
 
@@ -110,4 +111,16 @@ type ProjectVerificationRead struct {
 	FailedChecks             []string `json:"failed_checks,omitempty"`
 	RequiredChecks           []string `json:"required_checks,omitempty"`
 	RequiredEvidence         []string `json:"required_evidence,omitempty"`
+}
+
+// ProjectEscalationRead provides a condensed escalation snapshot for the
+// diagnostics view. C-04: ensures escalation reason, source brain, and
+// suggested action are visible without needing to open the acceptance view.
+type ProjectEscalationRead struct {
+	Status           string `json:"status"`                      // none | escalated
+	EscalationType   string `json:"escalation_type,omitempty"`   // reason_class
+	SourceBrain      string `json:"source_brain,omitempty"`
+	Severity         string `json:"severity,omitempty"`
+	SuggestedAction  string `json:"suggested_action,omitempty"`
+	Summary          string `json:"summary,omitempty"`
 }

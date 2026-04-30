@@ -26,6 +26,8 @@ type IEasyMVPBrain interface {
 	CallRepairDesign(ctx context.Context, input braincontracts.RepairDesignInput) (*braincontracts.BrainContractEnvelope, *braincontracts.RepairDesignResult, error)
 	CallWorkspaceExplanation(ctx context.Context, input braincontracts.WorkspaceExplanationInput) (*braincontracts.BrainContractEnvelope, *braincontracts.WorkspaceExplanationResult, error)
 	CallArchitectChat(ctx context.Context, input braincontracts.ArchitectChatInput) (*braincontracts.BrainContractEnvelope, *braincontracts.ArchitectChatResult, error)
+	CallSolutionDesign(ctx context.Context, input braincontracts.SolutionDesignInput) (*braincontracts.BrainContractEnvelope, *braincontracts.SolutionDesignResult, error)
+	CallRequirementAnalysis(ctx context.Context, input braincontracts.RequirementAnalysisInput) (*braincontracts.BrainContractEnvelope, *braincontracts.RequirementAnalysisResult, error)
 	ExecuteContractStream(ctx context.Context, cmd EasyMVPBrainExecuteCommand) (<-chan EasyMVPBrainStreamEvent, error)
 	ValidateEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope) error
 	ValidatePlanReviewEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.PlanReviewResult) error
@@ -36,6 +38,8 @@ type IEasyMVPBrain interface {
 	ValidateRepairDesignEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.RepairDesignResult) error
 	ValidateWorkspaceExplanationEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.WorkspaceExplanationResult) error
 	ValidateArchitectChatEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.ArchitectChatResult) error
+	ValidateSolutionDesignEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.SolutionDesignResult) error
+	ValidateRequirementAnalysisEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.RequirementAnalysisResult) error
 }
 
 var localEasyMVPBrain IEasyMVPBrain = (*sEasyMVPBrain)(nil)
@@ -79,6 +83,14 @@ func (s *sEasyMVPBrain) CallWorkspaceExplanation(ctx context.Context, input brai
 
 func (s *sEasyMVPBrain) CallArchitectChat(ctx context.Context, input braincontracts.ArchitectChatInput) (*braincontracts.BrainContractEnvelope, *braincontracts.ArchitectChatResult, error) {
 	return executeTypedContract(ctx, s, "architect_chat", input, s.ValidateArchitectChatEnvelope)
+}
+
+func (s *sEasyMVPBrain) CallSolutionDesign(ctx context.Context, input braincontracts.SolutionDesignInput) (*braincontracts.BrainContractEnvelope, *braincontracts.SolutionDesignResult, error) {
+	return executeTypedContract(ctx, s, "solution_design", input, s.ValidateSolutionDesignEnvelope)
+}
+
+func (s *sEasyMVPBrain) CallRequirementAnalysis(ctx context.Context, input braincontracts.RequirementAnalysisInput) (*braincontracts.BrainContractEnvelope, *braincontracts.RequirementAnalysisResult, error) {
+	return executeTypedContract(ctx, s, "requirement_analysis", input, s.ValidateRequirementAnalysisEnvelope)
 }
 
 func (s *sEasyMVPBrain) ExecuteContractStream(ctx context.Context, cmd EasyMVPBrainExecuteCommand) (<-chan EasyMVPBrainStreamEvent, error) {
@@ -265,6 +277,32 @@ func (s *sEasyMVPBrain) ValidateArchitectChatEnvelope(ctx context.Context, envel
 	}
 	if strings.TrimSpace(result.Reply) == "" {
 		return wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "architect chat reply is required", nil)
+	}
+	return nil
+}
+
+func (s *sEasyMVPBrain) ValidateSolutionDesignEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.SolutionDesignResult) error {
+	if err := s.validateTypedEnvelope(ctx, envelope, "solution_design"); err != nil {
+		return err
+	}
+	if result == nil {
+		return wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "solution design result is required", nil)
+	}
+	if strings.TrimSpace(result.Architecture) == "" {
+		return wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "solution design architecture is required", nil)
+	}
+	return nil
+}
+
+func (s *sEasyMVPBrain) ValidateRequirementAnalysisEnvelope(ctx context.Context, envelope *braincontracts.BrainContractEnvelope, result *braincontracts.RequirementAnalysisResult) error {
+	if err := s.validateTypedEnvelope(ctx, envelope, "requirement_analysis"); err != nil {
+		return err
+	}
+	if result == nil {
+		return wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "requirement analysis result is required", nil)
+	}
+	if strings.TrimSpace(result.Summary) == "" {
+		return wrapEasyMVPBrainError(easyMVPBrainErrorCodeContractInvalid, "requirement analysis summary is required", nil)
 	}
 	return nil
 }

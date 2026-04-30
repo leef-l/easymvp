@@ -24,6 +24,7 @@ type StartBrainRunCommand struct {
 	Prompt         string
 	Workdir        string
 	MaxTurns       int
+	Timeout        string
 	Provider       string
 	PermissionMode string // 任务级权限: restricted/default/accept-edits/auto/bypass-permissions
 }
@@ -267,6 +268,19 @@ func (s *sRuntime) StartRunCommand(ctx context.Context, req StartBrainRunCommand
 	}); auditErr != nil {
 		g.Log().Errorf(ctx, "insert audit log failed: %v", auditErr)
 	}
+	recordSecurityAuditNoFail(ctx, SecurityAuditEvent{
+		ProjectID:   req.ProjectID,
+		EventType:   AuditEventBrainRunStart,
+		Severity:    SeverityInfo,
+		Operator:    "user:local_operator",
+		Resource:    started.BindingID,
+		Description: "Brain run started",
+		Metadata: map[string]string{
+			"task_id":    req.TaskID,
+			"brain_kind": req.BrainKind,
+			"run_id":     started.RunID,
+		},
+	})
 	bindingView, err := s.GetRunBindingView(ctx, started.BindingID)
 	if err != nil {
 		return nil, err
@@ -419,6 +433,15 @@ func (s *sRuntime) CancelRunBindingCommand(ctx context.Context, bindingID string
 	if auditErr := insertAuditLog(ctx, binding.ProjectId, "runtime.run.cancelled", "user:local_operator", "Brain run cancelled", map[string]any{"binding_id": bindingID}); auditErr != nil {
 		g.Log().Errorf(ctx, "insert audit log failed: %v", auditErr)
 	}
+	recordSecurityAuditNoFail(ctx, SecurityAuditEvent{
+		ProjectID:   binding.ProjectId,
+		EventType:   AuditEventBrainRunStop,
+		Severity:    SeverityWarning,
+		Operator:    "user:local_operator",
+		Resource:    bindingID,
+		Description: "Brain run cancelled",
+		Metadata:    map[string]string{"reason": "user_cancelled"},
+	})
 	return &runtimev1.CancelRunBindingRes{
 		CommandID:  newResourceID("cmd"),
 		Accepted:   true,

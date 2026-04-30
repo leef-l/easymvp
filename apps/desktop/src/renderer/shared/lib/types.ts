@@ -675,3 +675,214 @@ export type SystemHealthView = {
   version: string;
   timestamp: string;
 };
+
+// ── MACCS Closed-Loop Types ──
+
+export type RequirementAnalysis = {
+  id: string;
+  status: string; // draft | analyzing | confirmed
+  raw_input: string;
+  core_features?: string[];
+  non_functional_requirements?: string[];
+  tech_stack?: string[];
+  constraints?: string[];
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type SolutionDesign = {
+  id: string;
+  requirement_id: string;
+  status: string; // draft | confirmed | rejected
+  architecture_description?: string;
+  modules?: Array<{
+    module_name: string;
+    description: string;
+    responsibility: string;
+  }>;
+  data_models?: Array<{
+    model_name: string;
+    fields: string[];
+    description: string;
+  }>;
+  page_designs?: Array<{
+    page_name: string;
+    route: string;
+    description: string;
+    components: string[];
+  }>;
+  task_drafts?: Array<{
+    task_name: string;
+    description: string;
+    estimated_hours: number;
+    priority: string;
+    dependencies: string[];
+  }>;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type ReviewRound = {
+  round_number: number;
+  status: string; // running | passed | failed
+  score: number;
+  passed: boolean;
+  issues: Array<{
+    issue_id: string;
+    severity: string;
+    category: string;
+    description: string;
+    suggestion?: string;
+  }>;
+  corrections: Array<{
+    correction_id: string;
+    issue_id: string;
+    description: string;
+    applied: boolean;
+  }>;
+  started_at?: string;
+  finished_at?: string;
+};
+
+export type ReviewLoopView = {
+  id: string;
+  project_id: string;
+  status: string; // idle | running | passed | failed | human_intervened
+  current_round: number;
+  max_rounds: number;
+  rounds: ReviewRound[];
+  final_score?: number;
+  final_decision?: string;
+  human_intervention?: {
+    action: string; // override_approve | abort | restart
+    reason?: string;
+    performed_at?: string;
+  };
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type ProgressStreamEvent = {
+  event_type: string;
+  task_id?: string;
+  layer?: number;
+  status?: string;
+  progress_percent?: number;
+  message?: string;
+  timestamp?: string;
+};
+
+// ── MACCS Closed-Loop: Multi-Layer Acceptance ──
+
+export type AcceptanceLayerResult = {
+  layer: string; // unit | integration | e2e | security | performance
+  status: string; // passed | failed | missing
+  passed_count: number;
+  failed_count: number;
+  missing_count: number;
+  total_count: number;
+  details?: string;
+};
+
+export type ContractGap = {
+  check_name: string;
+  required: boolean;
+  actual_status: string; // passed | failed | missing
+  description?: string;
+};
+
+export type RepairLoopProgress = {
+  total_repairs: number;
+  completed_repairs: number;
+  in_progress_repairs: number;
+  failed_repairs: number;
+  current_step?: string;
+  started_at?: string;
+  updated_at?: string;
+};
+
+export type MultiLayerAcceptanceView = {
+  layers: AcceptanceLayerResult[];
+  contract_gaps: ContractGap[];
+  repair_loop_progress?: RepairLoopProgress;
+};
+
+// ── MACCS Closed-Loop: Delivery ──
+
+export type DeliveryArtifact = {
+  kind: string; // code | readme | architecture_doc | api_doc | deploy_guide
+  path: string;
+  status: string; // available | missing | outdated
+  description?: string;
+};
+
+export type TestLayerReport = {
+  layer: string;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  pass_rate: number;
+};
+
+export type ProjectStats = {
+  total_tasks: number;
+  completed_tasks: number;
+  total_turns: number;
+  total_tokens: number;
+  elapsed_seconds: number;
+  cost_usd?: number;
+};
+
+export type DeliveryView = {
+  id: string;
+  project_id: string;
+  status: string; // pending | accepted | rejected
+  artifacts: DeliveryArtifact[];
+  test_reports: TestLayerReport[];
+  project_stats: ProjectStats;
+  acceptance_summary?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+// ── MACCS Closed-Loop: Retrospective ──
+
+export type RetrospectivePlanVsActual = {
+  metric: string;
+  planned: string;
+  actual: string;
+  delta?: string;
+};
+
+export type RetrospectiveItem = {
+  id: string;
+  category: string; // success | failure | pattern
+  title: string;
+  description: string;
+  impact?: string;
+  tags?: string[];
+};
+
+export type RetrospectiveStats = {
+  task_completion_rate: number;
+  brain_usage: Record<string, number>;
+  total_cost_usd: number;
+  total_duration_seconds: number;
+  total_turns: number;
+  total_tokens: number;
+};
+
+export type RetrospectiveView = {
+  id: string;
+  project_id: string;
+  status: string; // draft | generated | finalized
+  plan_vs_actual: RetrospectivePlanVsActual[];
+  success_factors: RetrospectiveItem[];
+  failure_lessons: RetrospectiveItem[];
+  extracted_patterns: RetrospectiveItem[];
+  stats: RetrospectiveStats;
+  summary?: string;
+  created_at?: string;
+  updated_at?: string;
+};

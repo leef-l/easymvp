@@ -33,6 +33,7 @@ type IProjects interface {
 	UpdateProject(ctx context.Context, req UpdateProjectCommand) (res *projectsv1.UpdateProjectRes, err error)
 	DeleteProject(ctx context.Context, projectID string) (res *projectsv1.DeleteProjectRes, err error)
 	GetProjectWorkspaceView(ctx context.Context, projectID string) (res *projectsv1.ProjectWorkspaceViewRes, err error)
+	ProjectProgressStream(ctx context.Context, req *projectsv1.ProjectProgressStreamReq) error
 }
 
 var localProjects IProjects = (*sProjects)(nil)
@@ -171,6 +172,14 @@ func (s *sProjects) UpdateProject(ctx context.Context, req UpdateProjectCommand)
 	if auditErr := insertAuditLog(ctx, req.ProjectID, "project.updated", "user:local_operator", "Project updated", updates); auditErr != nil {
 		g.Log().Errorf(ctx, "insert audit log failed: %v", auditErr)
 	}
+	recordSecurityAuditNoFail(ctx, SecurityAuditEvent{
+		ProjectID:   req.ProjectID,
+		EventType:   AuditEventProjectStateChange,
+		Severity:    SeverityInfo,
+		Operator:    "user:local_operator",
+		Resource:    req.ProjectID,
+		Description: "Project updated",
+	})
 
 	return &projectsv1.UpdateProjectRes{
 		CommandID:  newResourceID("cmd"),
@@ -191,6 +200,14 @@ func (s *sProjects) DeleteProject(ctx context.Context, projectID string) (res *p
 	if auditErr := insertAuditLog(ctx, projectID, "project.deleted", "user:local_operator", "Project deleted", nil); auditErr != nil {
 		g.Log().Errorf(ctx, "insert audit log failed: %v", auditErr)
 	}
+	recordSecurityAuditNoFail(ctx, SecurityAuditEvent{
+		ProjectID:   projectID,
+		EventType:   AuditEventProjectStateChange,
+		Severity:    SeverityWarning,
+		Operator:    "user:local_operator",
+		Resource:    projectID,
+		Description: "Project deleted",
+	})
 
 	return &projectsv1.DeleteProjectRes{
 		CommandID:  newResourceID("cmd"),
@@ -236,6 +253,10 @@ func (s *sProjects) GetProjectWorkspaceView(ctx context.Context, projectID strin
 	return res, nil
 }
 
+func (s *sProjects) ProjectProgressStream(ctx context.Context, req *projectsv1.ProjectProgressStreamReq) error {
+	return StreamProjectProgress(ctx, req)
+}
+
 func createProjectRows(
 	ctx context.Context,
 	projectID string,
@@ -270,5 +291,13 @@ func createProjectRows(
 	if err = tx.Commit(); err != nil {
 		return gerror.Wrap(err, "commit project transaction failed")
 	}
+	recordSecurityAuditNoFail(ctx, SecurityAuditEvent{
+		ProjectID:   projectID,
+		EventType:   AuditEventProjectStateChange,
+		Severity:    SeverityInfo,
+		Operator:    "user:local_operator",
+		Resource:    projectID,
+		Description: "Project created",
+	})
 	return nil
 }

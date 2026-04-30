@@ -48,13 +48,23 @@ export function AppShell() {
 
       { to: routes.workspace, label: t("nav.workspace"), icon: "?" },
 
+      { to: routes.requirements, label: t("nav.requirements"), icon: "?" },
+
+      { to: routes.design, label: t("nav.design"), icon: "?" },
+
       { to: routes.architectChat, label: t("nav.architectChat"), icon: "?" },
 
       { to: routes.plan, label: t("nav.plan"), icon: "?" },
 
       { to: routes.execution, label: t("nav.execution"), icon: "?" },
 
+      { to: routes.review, label: t("nav.review"), icon: "?" },
+
       { to: routes.acceptance, label: t("nav.acceptance"), icon: "✅" },
+
+      { to: routes.delivery, label: t("nav.delivery"), icon: "?" },
+
+      { to: routes.retrospective, label: t("nav.retrospective"), icon: "?" },
 
       { to: routes.audit, label: t("nav.audit"), icon: "?" },
 

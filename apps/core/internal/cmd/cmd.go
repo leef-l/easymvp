@@ -12,10 +12,15 @@ import (
 	"github.com/leef-l/easymvp/apps/core/internal/controller/architect_chat"
 	"github.com/leef-l/easymvp/apps/core/internal/controller/audit"
 	"github.com/leef-l/easymvp/apps/core/internal/controller/decisions"
+	"github.com/leef-l/easymvp/apps/core/internal/controller/deliveries"
+	"github.com/leef-l/easymvp/apps/core/internal/controller/designs"
 	"github.com/leef-l/easymvp/apps/core/internal/controller/evidence"
 	"github.com/leef-l/easymvp/apps/core/internal/controller/plan"
 	"github.com/leef-l/easymvp/apps/core/internal/controller/projects"
 	"github.com/leef-l/easymvp/apps/core/internal/controller/replay"
+	"github.com/leef-l/easymvp/apps/core/internal/controller/requirements"
+	"github.com/leef-l/easymvp/apps/core/internal/controller/retrospectives"
+	"github.com/leef-l/easymvp/apps/core/internal/controller/reviews"
 	"github.com/leef-l/easymvp/apps/core/internal/controller/runtime"
 	"github.com/leef-l/easymvp/apps/core/internal/controller/system"
 	"github.com/leef-l/easymvp/apps/core/internal/controller/workspace"
@@ -69,10 +74,15 @@ var (
 					architect_chat.NewV1(),
 					audit.NewV1(),
 					decisions.NewV1(),
+					deliveries.NewV1(),
+					designs.NewV1(),
 					evidence.NewV1(),
 					plan.NewV1(),
 					projects.NewV1(),
 					replay.NewV1(),
+					requirements.NewV1(),
+					retrospectives.NewV1(),
+					reviews.NewV1(),
 					runtime.NewV1(),
 					system.NewV1(),
 					workspace.NewV1(),

@@ -83,6 +83,7 @@ func listProjectDiagnosticsView(ctx context.Context, projectID string, limit int
 		ArtifactContexts: artifactContexts,
 		EvidenceOverview: evidenceOverview,
 		VerificationRead: buildProjectVerificationRead(acceptanceAggregate),
+		EscalationRead:   buildProjectEscalationRead(acceptanceAggregate),
 		RefreshHint:      "refresh_project_diagnostics",
 	}, nil
 }
@@ -548,5 +549,20 @@ func buildProjectVerificationRead(data *acceptanceAggregate) systemv1.ProjectVer
 		FailedChecks:             append([]string{}, verification.FailedChecks...),
 		RequiredChecks:           append([]string{}, verification.RequiredChecks...),
 		RequiredEvidence:         append([]string{}, verification.RequiredEvidence...),
+	}
+}
+
+// buildProjectEscalationRead produces a condensed escalation snapshot
+// for the diagnostics view (C-04). It reuses the same RuntimeEscalationView
+// builder that the acceptance and workspace views consume.
+func buildProjectEscalationRead(data *acceptanceAggregate) systemv1.ProjectEscalationRead {
+	esc := buildRuntimeEscalationView(data)
+	return systemv1.ProjectEscalationRead{
+		Status:          esc.Status,
+		EscalationType:  esc.ReasonClass,
+		SourceBrain:     esc.SourceBrain,
+		Severity:        esc.Severity,
+		SuggestedAction: esc.Action,
+		Summary:         esc.Summary,
 	}
 }
